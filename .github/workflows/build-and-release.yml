@@ -1,0 +1,372 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: rustcta
+            asset_name: rustcta-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: rustcta.exe
+            asset_name: rustcta-windows-x86_64.exe
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: rustcta
+            asset_name: rustcta-linux-aarch64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+        override: true
+        profile: minimal
+
+    - name: Install cross-compilation tools (ARM64)
+      if: matrix.target == 'aarch64-unknown-linux-gnu'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+        echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-index-
+
+    - name: Cache target directory
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-${{ matrix.target }}-target-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.target }}-target-
+
+    - name: Build
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Run tests
+      if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-pc-windows-msvc'
+      run: cargo test --target ${{ matrix.target }}
+
+    - name: Prepare artifact
+      shell: bash
+      run: |
+        mkdir -p artifacts
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+        else
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+          chmod +x artifacts/${{ matrix.asset_name }}
+        fi
+        
+        # 复制配置文件
+        cp -r config artifacts/
+        
+        # 创建部署脚本
+        cat > artifacts/deploy.sh << 'EOF'
+        #!/bin/bash
+        # 自动部署脚本
+        set -e
+        
+        echo "🚀 开始部署 RustCTA 量化交易程序"
+        
+        # 创建目录
+        mkdir -p ~/rustcta/{config,log}
+        
+        # 复制文件
+        cp ${{ matrix.asset_name }} ~/rustcta/rustcta
+        cp -r config/* ~/rustcta/config/
+        
+        # 设置权限
+        chmod +x ~/rustcta/rustcta
+        
+        echo "✅ 部署完成！"
+        echo "运行命令: cd ~/rustcta && ./rustcta"
+        echo "后台运行: cd ~/rustcta && nohup ./rustcta > log/app.log 2>&1 &"
+        echo "查看日志: tail -f ~/rustcta/log/app.log"
+        EOF
+        
+        chmod +x artifacts/deploy.sh
+        
+        # 创建README
+        cat > artifacts/README.md << 'EOF'
+        # RustCTA 量化交易程序
+        
+        ## 快速部署
+        
+        ### Linux服务器部署
+        ```bash
+        # 1. 下载并解压
+        wget https://github.com/YOUR_USERNAME/rustcta/releases/latest/download/rustcta-linux-x86_64.tar.gz
+        tar -xzf rustcta-linux-x86_64.tar.gz
+        cd rustcta-linux-x86_64
+        
+        # 2. 运行部署脚本
+        ./deploy.sh
+        
+        # 3. 配置API密钥
+        nano ~/rustcta/config/api.yml
+        
+        # 4. 配置策略参数
+        nano ~/rustcta/config/strategy.yml
+        
+        # 5. 启动程序
+        cd ~/rustcta
+        ./rustcta
+        ```
+        
+        ### 后台运行
+        ```bash
+        cd ~/rustcta
+        nohup ./rustcta > log/app.log 2>&1 &
+        ```
+        
+        ### 监控
+        ```bash
+        # 查看日志
+        tail -f ~/rustcta/log/app.log
+        
+        # 查看进程
+        ps aux | grep rustcta
+        
+        # 停止程序
+        pkill rustcta
+        ```
+        
+        ## 配置说明
+        
+        ### API配置 (config/api.yml)
+        ```yaml
+        binance:
+          api_key: "your_api_key"
+          secret_key: "your_secret_key"
+          testnet: true  # 测试网络
+        ```
+        
+        ### 策略配置 (config/strategy.yml)
+        ```yaml
+        symbol: "BTCUSDT"
+        order_value: 16
+        leverage: 15
+        grid_count: 10
+        price_range: 0.02
+        ```
+        
+        ## 系统要求
+        - Linux x86_64 或 ARM64
+        - 稳定的网络连接
+        - 足够的磁盘空间用于日志
+        
+        ## 安全提醒
+        - 请妥善保管API密钥
+        - 建议先在测试网络运行
+        - 定期备份配置和日志
+        EOF
+
+    - name: Create archive
+      shell: bash
+      run: |
+        cd artifacts
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          7z a ../${{ matrix.asset_name }}.zip *
+        else
+          tar -czf ../${{ matrix.asset_name }}.tar.gz *
+        fi
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.asset_name }}
+        path: |
+          ${{ matrix.asset_name }}.tar.gz
+          ${{ matrix.asset_name }}.zip
+        if-no-files-found: ignore
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          rustcta-linux-x86_64/*.tar.gz
+          rustcta-linux-aarch64/*.tar.gz
+          rustcta-windows-x86_64/*.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-guide:
+    name: Generate Deployment Guide
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Update deployment guide
+      run: |
+        cat > DEPLOYMENT.md << 'EOF'
+        # 🚀 RustCTA 自动化部署指南
+        
+        ## 📦 最新版本下载
+        
+        访问 [Releases页面](https://github.com/${{ github.repository }}/releases/latest) 下载最新版本：
+        
+        - **Linux x86_64**: `rustcta-linux-x86_64.tar.gz`
+        - **Linux ARM64**: `rustcta-linux-aarch64.tar.gz` 
+        - **Windows**: `rustcta-windows-x86_64.zip`
+        
+        ## ⚡ 一键部署命令
+        
+        ### Linux服务器（推荐）
+        ```bash
+        # 下载并部署最新版本
+        curl -L https://github.com/${{ github.repository }}/releases/latest/download/rustcta-linux-x86_64.tar.gz | tar -xz
+        cd rustcta-linux-x86_64
+        ./deploy.sh
+        ```
+        
+        ### 手动部署
+        ```bash
+        # 1. 下载
+        wget https://github.com/${{ github.repository }}/releases/latest/download/rustcta-linux-x86_64.tar.gz
+        
+        # 2. 解压
+        tar -xzf rustcta-linux-x86_64.tar.gz
+        cd rustcta-linux-x86_64
+        
+        # 3. 部署
+        ./deploy.sh
+        
+        # 4. 配置API
+        nano ~/rustcta/config/api.yml
+        
+        # 5. 启动
+        cd ~/rustcta && ./rustcta
+        ```
+        
+        ## 🔧 配置说明
+        
+        部署后需要配置以下文件：
+        
+        ### API配置
+        ```bash
+        nano ~/rustcta/config/api.yml
+        ```
+        
+        ### 策略配置  
+        ```bash
+        nano ~/rustcta/config/strategy.yml
+        ```
+        
+        ## 🎯 运行命令
+        
+        ```bash
+        # 前台运行（测试用）
+        cd ~/rustcta && ./rustcta
+        
+        # 后台运行（生产环境）
+        cd ~/rustcta && nohup ./rustcta > log/app.log 2>&1 &
+        
+        # 查看日志
+        tail -f ~/rustcta/log/app.log
+        
+        # 停止程序
+        pkill rustcta
+        ```
+        
+        ## 📊 监控命令
+        
+        ```bash
+        # 查看进程状态
+        ps aux | grep rustcta
+        
+        # 查看实时日志
+        tail -f ~/rustcta/log/app.log
+        
+        # 查看系统资源
+        htop
+        ```
+        
+        ## 🔄 更新程序
+        
+        ```bash
+        # 停止旧版本
+        pkill rustcta
+        
+        # 下载新版本
+        cd ~
+        curl -L https://github.com/${{ github.repository }}/releases/latest/download/rustcta-linux-x86_64.tar.gz | tar -xz
+        
+        # 备份配置
+        cp ~/rustcta/config/* ~/rustcta-linux-x86_64/config/
+        
+        # 重新部署
+        cd rustcta-linux-x86_64
+        ./deploy.sh
+        
+        # 启动新版本
+        cd ~/rustcta && nohup ./rustcta > log/app.log 2>&1 &
+        ```
+        
+        ---
+        
+        **构建时间**: $(date)
+        **提交**: ${{ github.sha }}
+        **分支**: ${{ github.ref_name }}
+        EOF
+        
+    - name: Commit deployment guide
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add DEPLOYMENT.md
+        git diff --staged --quiet || git commit -m "📝 Update deployment guide [skip ci]"
+        git push || true

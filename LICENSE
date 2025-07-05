@@ -1,0 +1,54 @@
+MIT License
+
+Copyright (c) 2024 RustCTA Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+DISCLAIMER / 免责声明:
+
+This software is provided for educational and research purposes only.
+Quantitative trading involves substantial risk of loss and is not suitable
+for all investors. The authors and contributors of this software do not
+provide investment advice and are not responsible for any trading losses
+or damages that may result from the use of this software.
+
+Users should:
+1. Thoroughly test strategies in a simulated environment before live trading
+2. Only trade with funds they can afford to lose
+3. Understand the risks associated with algorithmic trading
+4. Comply with all applicable laws and regulations
+5. Secure their API keys and trading credentials
+
+By using this software, you acknowledge that you understand these risks
+and agree to use the software at your own discretion and responsibility.
+
+本软件仅供教育和研究目的使用。量化交易涉及重大损失风险，并非适合所有投资者。
+本软件的作者和贡献者不提供投资建议，对使用本软件可能导致的任何交易损失或
+损害不承担责任。
+
+用户应当:
+1. 在实盘交易前在模拟环境中充分测试策略
+2. 仅使用可承受损失的资金进行交易
+3. 了解算法交易相关的风险
+4. 遵守所有适用的法律法规
+5. 保护好API密钥和交易凭证
+
+使用本软件即表示您理解这些风险，并同意自行承担使用软件的风险和责任。

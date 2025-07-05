@@ -1,0 +1,98 @@
+strategies:
+  - name: "GridStrategy_ENA"
+    enabled: true
+    log_level: "DEBUG"
+    exchange: "binance_huyan"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "ENA/USDC:USDC"
+      spacing: 0.0006
+      order_value: 16
+      grid_levels: 10
+      leverage: 15
+      health_check_interval_seconds: 180
+      uniformity_threshold: 0.95
+
+  - name: "GridStrategy_ARB"
+    enabled: true
+    log_level: null
+    exchange: "binance_huyan"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "ARB/USDC:USDC"
+      spacing: 0.0005
+      order_value: 16
+      grid_levels: 10
+      leverage: 10
+      health_check_interval_seconds: 180
+      uniformity_threshold: 0.95
+
+  - name: "GridStrategy_BTC"
+    enabled: true
+    log_level: null
+    exchange: "binance_huyan"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "BTC/USDC:USDC"
+      spacing: 54
+      order_value: 120
+      grid_levels: 4
+      leverage: 25
+      health_check_interval_seconds: 180
+      uniformity_threshold: 0.95
+
+  - name: "GridStrategy_SOL"
+    enabled: true
+    log_level: null
+    exchange: "binance_huyan"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "SOL/USDC:USDC"
+      spacing: 0.13
+      order_value: 10
+      grid_levels: 8
+      leverage: 15
+      health_check_interval_seconds: 60
+      uniformity_threshold: 0.95
+
+  - name: "GridStrategy_DOGE"
+    enabled: true
+    log_level: null
+    exchange: "binance_huyan"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "DOGE/USDC:USDC"
+      spacing: 0.0002
+      order_value: 8
+      grid_levels: 6
+      leverage: 15
+      health_check_interval_seconds: 180
+      uniformity_threshold: 0.95
+
+  - name: "GridStrategy_ORDI"
+    enabled: true
+    log_level: null
+    exchange: "binance_huyan"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "ORDI/USDC:USDC"
+      spacing: 0.008
+      order_value: 10
+      grid_levels: 8
+      leverage: 10
+      health_check_interval_seconds: 120
+      uniformity_threshold: 0.95
+
+  - name: "GridStrategy_ORDI2"
+    enabled: true
+    log_level: null
+    exchange: "binance_hcr"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "ORDI/USDC:USDC"
+      spacing: 0.008
+      order_value: 15
+      grid_levels: 8
+      leverage: 10
+      health_check_interval_seconds: 180
+      uniformity_threshold: 0.95
