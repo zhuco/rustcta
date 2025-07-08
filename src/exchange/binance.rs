@@ -1,7 +1,9 @@
 use super::traits::Exchange;
 use crate::config::endpoints::{BinanceEndpoints, WsConnectionConfig, WsConnectionStatus};
 use crate::error::AppError;
-use crate::exchange::binance_model::{AccountInfo, ExchangeInfo, FundingRate, Kline, Order, WsEvent};
+use crate::exchange::binance_model::{
+    AccountInfo, ExchangeInfo, FundingRate, Kline, Order, WsEvent,
+};
 use crate::utils::order_id::generate_order_id;
 use crate::utils::symbol::{MarketType, Symbol};
 use crate::utils::time::{get_adjusted_timestamp, sync_time_with_server};
@@ -245,6 +247,52 @@ impl Exchange for Binance {
         })
     }
 
+    fn get_open_orders<'a>(
+        &'a self,
+        symbol: &'a Symbol,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Order>, AppError>> + Send + 'a>> {
+        Box::pin(async move {
+            let endpoint = self.endpoints.get_open_orders_endpoint(symbol.market_type); // 获取开放订单端点
+            let params = format!("symbol={}", symbol.to_binance());
+
+            // 使用send_signed_request方法处理签名和请求
+            match self
+                .send_signed_request(Method::GET, endpoint, &params)
+                .await
+            {
+                Ok(value) => {
+                    // 检查响应是否为空数组
+                    if value.is_array() && value.as_array().unwrap().is_empty() {
+                        return Ok(Vec::new());
+                    }
+
+                    // 尝试解析为订单数组
+                    match serde_json::from_value::<Vec<Order>>(value.clone()) {
+                        Ok(orders) => {
+                            println!("get_open_orders 成功获取 {} 个开放订单", orders.len());
+                            Ok(orders)
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "get_open_orders JSON解析失败: {}\n原始响应: {}",
+                                e,
+                                serde_json::to_string_pretty(&value)
+                                    .unwrap_or_else(|_| format!("{:?}", value))
+                            );
+                            // 如果解析失败，返回空列表而不是错误，避免中断策略运行
+                            Ok(Vec::new())
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("get_open_orders 请求失败: {}", e);
+                    // 请求失败时也返回空列表，避免中断策略运行
+                    Ok(Vec::new())
+                }
+            }
+        })
+    }
+
     fn get_klines<'a>(
         &'a self,
         symbol: &'a Symbol,
@@ -433,9 +481,7 @@ impl Exchange for Binance {
                 "wss" => {
                     connect_async_tls_with_config(url.clone(), None, Some(tls_connector)).await
                 }
-                "ws" => {
-                    connect_async(url.clone()).await
-                }
+                "ws" => connect_async(url.clone()).await,
                 _ => {
                     let error_msg = format!("不支持的WebSocket协议: {}", url.scheme());
                     eprintln!("❌ {}", error_msg);
@@ -444,9 +490,7 @@ impl Exchange for Binance {
             };
 
             let (ws_stream, _response) = match connection_result {
-                Ok(result) => {
-                    result
-                }
+                Ok(result) => result,
                 Err(e) => {
                     let error_msg = format!("WebSocket连接失败: {} - URL: {}", e, ws_url);
                     eprintln!("❌ {}", error_msg);
@@ -632,20 +676,50 @@ impl Binance {
         let response_text = response.text().await?;
 
         if status.is_success() {
-            let response_json: Value = serde_json::from_str(&response_text)?;
-            Ok(response_json)
+            // 检查响应是否为空
+            if response_text.trim().is_empty() {
+                eprintln!("send_signed_request 收到空响应，URL: {}", url);
+                return Ok(Value::Array(vec![]));
+            }
+
+            match serde_json::from_str(&response_text) {
+                Ok(response_json) => Ok(response_json),
+                Err(e) => {
+                    eprintln!(
+                        "send_signed_request JSON解析失败: {}\n原始响应: {}\nURL: {}",
+                        e, response_text, url
+                    );
+                    // 如果JSON解析失败，返回空数组而不是错误
+                    Ok(Value::Array(vec![]))
+                }
+            }
         } else {
-            let error_json: Value = serde_json::from_str(&response_text)?;
-            let code = error_json
-                .get("code")
-                .and_then(|c| c.as_i64())
-                .unwrap_or(-1);
-            let msg = error_json
-                .get("msg")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Unknown error")
-                .to_string();
-            Err(AppError::BinanceError { code, msg })
+            // 尝试解析错误响应
+            match serde_json::from_str::<Value>(&response_text) {
+                Ok(error_json) => {
+                    let code = error_json
+                        .get("code")
+                        .and_then(|c| c.as_i64())
+                        .unwrap_or(-1);
+                    let msg = error_json
+                        .get("msg")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("Unknown error")
+                        .to_string();
+                    Err(AppError::BinanceError { code, msg })
+                }
+                Err(_) => {
+                    // 如果错误响应也无法解析为JSON，使用原始响应文本
+                    eprintln!(
+                        "send_signed_request 请求失败，状态码: {}，响应: {}，URL: {}",
+                        status, response_text, url
+                    );
+                    Err(AppError::BinanceError {
+                        code: status.as_u16() as i64,
+                        msg: format!("HTTP {}: {}", status, response_text),
+                    })
+                }
+            }
         }
     }
 
@@ -666,7 +740,9 @@ impl Binance {
 
     /// 获取所有永续合约的资金费率
     pub async fn get_funding_rates(&self) -> Result<Vec<FundingRate>, AppError> {
-        let endpoint = self.endpoints.get_funding_rate_endpoint(MarketType::UsdFutures);
+        let endpoint = self
+            .endpoints
+            .get_funding_rate_endpoint(MarketType::UsdFutures);
         let url = format!(
             "{}{}",
             self.endpoints.get_base_url(MarketType::UsdFutures),
@@ -689,7 +765,9 @@ impl Binance {
 
     /// 获取单个交易对的资金费率
     pub async fn get_funding_rate(&self, symbol: &str) -> Result<FundingRate, AppError> {
-        let endpoint = self.endpoints.get_funding_rate_endpoint(MarketType::UsdFutures);
+        let endpoint = self
+            .endpoints
+            .get_funding_rate_endpoint(MarketType::UsdFutures);
         let url = format!(
             "{}{}?symbol={}",
             self.endpoints.get_base_url(MarketType::UsdFutures),

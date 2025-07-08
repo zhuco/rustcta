@@ -13,9 +13,9 @@ use exchange::binance::Binance;
 use exchange::traits::Exchange;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use strategy::avellaneda_stoikov::{AvellanedaStoikovConfig, AvellanedaStoikovStrategy};
+use strategy::funding_rate::{FundingRateConfig, FundingRateStrategy};
 use strategy::grid::GridStrategy;
-use strategy::funding_rate::{FundingRateStrategy, FundingRateConfig};
-use strategy::avellaneda_stoikov::{AvellanedaStoikovStrategy, AvellanedaStoikovConfig};
 use tokio::signal;
 
 // 全局关闭标志
@@ -30,14 +30,15 @@ async fn main() {
         .unwrap();
 
     let strategy_config: StrategyConfig = strategy_settings.try_deserialize().unwrap();
-    
+
     // 收集所有启用的策略名称
-    let strategy_names: Vec<String> = strategy_config.strategies
+    let strategy_names: Vec<String> = strategy_config
+        .strategies
         .iter()
         .filter(|s| s.enabled)
         .map(|s| s.name.clone())
         .collect();
-    
+
     // 初始化策略专用日志系统
     if !strategy_names.is_empty() {
         logger::init_strategy_logger(strategy_names);
@@ -99,7 +100,9 @@ async fn main() {
 
         strategy_info!(
             &strategy.name,
-            "启动策略: {} 交易所: {}", strategy.name, strategy.exchange
+            "启动策略: {} 交易所: {}",
+            strategy.name,
+            strategy.exchange
         );
 
         // 创建交易所实例
@@ -135,19 +138,29 @@ async fn main() {
 
             let mut funding_strategy = FundingRateStrategy::new(funding_config, binance_arc);
             let strategy_name = strategy.name.clone();
-            
+
             tokio::spawn(async move {
                 strategy_info!(&strategy_name, "启动资金费率策略: {}", strategy_name);
                 if let Err(e) = funding_strategy.run().await {
-                    strategy_error!(&strategy_name, "❌ 资金费率策略 {} 运行失败: {}", strategy_name, e);
+                    strategy_error!(
+                        &strategy_name,
+                        "❌ 资金费率策略 {} 运行失败: {}",
+                        strategy_name,
+                        e
+                    );
                     strategy_error!(&strategy_name, "策略 {} 已停止运行", strategy_name);
                     SHUTDOWN.store(true, Ordering::SeqCst);
                 }
             });
         } else if strategy.class_path.contains("avellaneda_stoikov_strategy") {
             // Avellaneda-Stoikov做市策略
-            let symbol_str = strategy.params.symbol.as_ref().unwrap_or(&"ETHUSDC".to_string()).clone();
-            
+            let symbol_str = strategy
+                .params
+                .symbol
+                .as_ref()
+                .unwrap_or(&"ETHUSDC".to_string())
+                .clone();
+
             let as_config = AvellanedaStoikovConfig {
                 name: strategy.name.clone(),
                 enabled: strategy.enabled,
@@ -166,19 +179,33 @@ async fn main() {
 
             let strategy_name = strategy.name.clone();
             let binance_clone = binance_arc.clone();
-            
+
             tokio::spawn(async move {
-                strategy_info!(&strategy_name, "启动Avellaneda-Stoikov做市策略: {}", strategy_name);
+                strategy_info!(
+                    &strategy_name,
+                    "启动Avellaneda-Stoikov做市策略: {}",
+                    strategy_name
+                );
                 match AvellanedaStoikovStrategy::new(as_config, binance_clone).await {
                     Ok(mut as_strategy) => {
                         if let Err(e) = as_strategy.run().await {
-                            strategy_error!(&strategy_name, "❌ Avellaneda-Stoikov策略 {} 运行失败: {}", strategy_name, e);
+                            strategy_error!(
+                                &strategy_name,
+                                "❌ Avellaneda-Stoikov策略 {} 运行失败: {}",
+                                strategy_name,
+                                e
+                            );
                             strategy_error!(&strategy_name, "策略 {} 已停止运行", strategy_name);
                             SHUTDOWN.store(true, Ordering::SeqCst);
                         }
                     }
                     Err(e) => {
-                        strategy_error!(&strategy_name, "❌ Avellaneda-Stoikov策略 {} 初始化失败: {}", strategy_name, e);
+                        strategy_error!(
+                            &strategy_name,
+                            "❌ Avellaneda-Stoikov策略 {} 初始化失败: {}",
+                            strategy_name,
+                            e
+                        );
                         SHUTDOWN.store(true, Ordering::SeqCst);
                     }
                 }
@@ -193,7 +220,7 @@ async fn main() {
                     continue;
                 }
             };
-            
+
             // 转换新配置格式到旧格式以兼容现有代码
             let symbol_parts: Vec<&str> = symbol_str.split('/').collect();
             let (base, quote) = if symbol_parts.len() >= 2 {
@@ -202,14 +229,10 @@ async fn main() {
             } else {
                 // 如果格式不是 BASE/QUOTE，尝试解析为 BASEUSDC 格式
                 if symbol_str.ends_with("USDC") {
-                    let base = symbol_str
-                        .strip_suffix("USDC")
-                        .unwrap_or(&symbol_str);
+                    let base = symbol_str.strip_suffix("USDC").unwrap_or(&symbol_str);
                     (base.to_string(), "USDC".to_string())
                 } else if symbol_str.ends_with("USDT") {
-                    let base = symbol_str
-                        .strip_suffix("USDT")
-                        .unwrap_or(&symbol_str);
+                    let base = symbol_str.strip_suffix("USDT").unwrap_or(&symbol_str);
                     (base.to_string(), "USDT".to_string())
                 } else {
                     (symbol_str.clone(), "USDC".to_string())
@@ -241,7 +264,12 @@ async fn main() {
             tokio::spawn(async move {
                 strategy_info!(&strategy_name, "启动网格策略: {}", strategy_name);
                 if let Err(e) = grid_strategy.run(exchange_clone).await {
-                    strategy_error!(&strategy_name, "❌ 网格策略 {} 运行失败: {}", strategy_name, e);
+                    strategy_error!(
+                        &strategy_name,
+                        "❌ 网格策略 {} 运行失败: {}",
+                        strategy_name,
+                        e
+                    );
                     strategy_error!(&strategy_name, "策略 {} 已停止运行", strategy_name);
                     // 设置全局关闭标志，停止所有策略
                     SHUTDOWN.store(true, Ordering::SeqCst);
@@ -286,18 +314,15 @@ async fn main() {
                 if let Some(symbol_str) = &strategy.params.symbol {
                     let symbol_parts: Vec<&str> = symbol_str.split('/').collect();
                     let (base, quote) = if symbol_parts.len() >= 2 {
-                        let quote_part = symbol_parts[1].split(':').next().unwrap_or(symbol_parts[1]);
+                        let quote_part =
+                            symbol_parts[1].split(':').next().unwrap_or(symbol_parts[1]);
                         (symbol_parts[0].to_string(), quote_part.to_string())
                     } else {
                         if symbol_str.ends_with("USDC") {
-                            let base = symbol_str
-                                .strip_suffix("USDC")
-                                .unwrap_or(symbol_str);
+                            let base = symbol_str.strip_suffix("USDC").unwrap_or(symbol_str);
                             (base.to_string(), "USDC".to_string())
                         } else if symbol_str.ends_with("USDT") {
-                            let base = symbol_str
-                                .strip_suffix("USDT")
-                                .unwrap_or(symbol_str);
+                            let base = symbol_str.strip_suffix("USDT").unwrap_or(symbol_str);
                             (base.to_string(), "USDT".to_string())
                         } else {
                             (symbol_str.clone(), "USDC".to_string())

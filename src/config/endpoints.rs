@@ -59,6 +59,14 @@ impl BinanceEndpoints {
         }
     }
 
+    /// 获取开放订单端点
+    pub fn get_open_orders_endpoint(&self, market_type: MarketType) -> &'static str {
+        match market_type {
+            MarketType::UsdFutures => "/fapi/v1/openOrders",
+            MarketType::Spot => "/api/v3/openOrders",
+        }
+    }
+
     /// 获取取消所有订单端点
     pub fn get_cancel_all_orders_endpoint(&self, market_type: MarketType) -> &'static str {
         match market_type {

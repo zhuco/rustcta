@@ -84,8 +84,6 @@ docker rm temp-container
 ```bash
 # 方法1：使用项目自带的 Dockerfile
 docker build -t rustcta-builder .
-
-# 从容器中提取编译好的可执行文件
 docker create --name temp-container rustcta-builder
 docker cp temp-container:/app/target/x86_64-unknown-linux-gnu/release/rustcta ./rustcta-linux
 docker rm temp-container

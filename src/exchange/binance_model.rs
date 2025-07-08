@@ -112,6 +112,13 @@ pub struct Order {
     pub close_position: bool,
     pub price_protect: bool,
     pub reduce_only: bool,
+    // 新增字段以匹配币安API响应
+    #[serde(default)]
+    pub price_match: Option<String>,
+    #[serde(default)]
+    pub self_trade_prevention_mode: Option<String>,
+    #[serde(default)]
+    pub good_till_date: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,7 +1,7 @@
 use log::LevelFilter;
-use log4rs::append::file::FileAppender;
 use log4rs::append::console::ConsoleAppender;
-use log4rs::config::{Appender, Config, Root, Logger};
+use log4rs::append::file::FileAppender;
+use log4rs::config::{Appender, Config, Logger, Root};
 use log4rs::encode::pattern::PatternEncoder;
 use std::collections::HashMap;
 
@@ -29,7 +29,7 @@ pub fn init_logger() {
             Root::builder()
                 .appender("console")
                 .appender("main_logfile")
-                .build(LevelFilter::Info)
+                .build(LevelFilter::Info),
         )
         .unwrap();
 
@@ -67,16 +67,15 @@ pub fn init_strategy_logger(strategy_names: Vec<String>) {
             .unwrap();
 
         let appender_name = format!("{}_logfile", strategy_name);
-        config_builder = config_builder.appender(
-            Appender::builder().build(&appender_name, Box::new(strategy_logfile))
-        );
+        config_builder = config_builder
+            .appender(Appender::builder().build(&appender_name, Box::new(strategy_logfile)));
 
         // 为策略创建专用logger
         config_builder = config_builder.logger(
             Logger::builder()
                 .appender(&appender_name)
                 .appender("console")
-                .build(strategy_name, LevelFilter::Info)
+                .build(strategy_name, LevelFilter::Info),
         );
     }
 
@@ -85,7 +84,7 @@ pub fn init_strategy_logger(strategy_names: Vec<String>) {
             Root::builder()
                 .appender("console")
                 .appender("main_logfile")
-                .build(LevelFilter::Info)
+                .build(LevelFilter::Info),
         )
         .unwrap();
 

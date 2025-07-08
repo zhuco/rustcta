@@ -41,6 +41,10 @@ pub trait Exchange: Send + Sync {
         &'a self,
         symbol: &'a Symbol,
     ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + 'a>>;
+    fn get_open_orders<'a>(
+        &'a self,
+        symbol: &'a Symbol,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Order>, AppError>> + Send + 'a>>;
     fn get_klines<'a>(
         &'a self,
         symbol: &'a Symbol,
