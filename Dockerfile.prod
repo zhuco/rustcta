@@ -1,0 +1,48 @@
+# 生产环境 Dockerfile
+# 用于部署已编译好的 Linux 可执行文件
+
+FROM ubuntu:22.04
+
+# 设置非交互模式
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# 创建应用用户（安全最佳实践）
+RUN useradd -r -s /bin/false -m rustcta
+
+# 创建应用目录
+WORKDIR /app
+
+# 复制可执行文件
+COPY rustcta-linux /app/rustcta
+RUN chmod +x /app/rustcta
+
+# 创建配置和日志目录
+RUN mkdir -p /app/config /app/log
+
+# 设置目录权限
+RUN chown -R rustcta:rustcta /app
+
+# 切换到应用用户
+USER rustcta
+
+# 设置环境变量
+ENV RUST_LOG=info
+ENV TZ=Asia/Shanghai
+
+# 暴露端口（如果应用需要）
+# EXPOSE 8080
+
+# 健康检查（如果应用支持）
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+#   CMD curl -f http://localhost:8080/health || exit 1
+
+# 运行应用
+CMD ["/app/rustcta"]

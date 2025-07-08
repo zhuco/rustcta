@@ -1,7 +1,7 @@
 use super::traits::Exchange;
 use crate::config::endpoints::{BinanceEndpoints, WsConnectionConfig, WsConnectionStatus};
 use crate::error::AppError;
-use crate::exchange::binance_model::{AccountInfo, ExchangeInfo, Kline, Order, WsEvent};
+use crate::exchange::binance_model::{AccountInfo, ExchangeInfo, FundingRate, Kline, Order, WsEvent};
 use crate::utils::order_id::generate_order_id;
 use crate::utils::symbol::{MarketType, Symbol};
 use crate::utils::time::{get_adjusted_timestamp, sync_time_with_server};
@@ -411,53 +411,14 @@ impl Exchange for Binance {
             let listen_key_val = self.get_listen_key(market_type).await?;
             *self.listen_key.lock().await = Some(listen_key_val.clone());
             let listen_key = listen_key_val;
-
             let ws_url = self.endpoints.get_ws_url(market_type, &listen_key);
-
-            // 打印详细的连接参数以便调试
-            println!("=== WebSocket 连接参数 ===");
-            println!("市场类型: {:?}", market_type);
-            println!("WebSocket URL: {}", ws_url);
-            println!("Listen Key: {}", listen_key);
-            println!(
-                "API Key: {}...{}",
-                &self.api_key[..8],
-                &self.api_key[self.api_key.len() - 8..]
-            );
-            println!("订阅的数据流类型: 用户数据流 (User Data Stream)");
-            match market_type {
-                MarketType::UsdFutures => {
-                    println!("期货用户数据流事件类型:");
-                    println!("  - ORDER_TRADE_UPDATE: 订单/交易更新事件 (仅处理此类型)");
-                    println!("  - ACCOUNT_UPDATE: 账户更新事件 (忽略)");
-                    println!("  - MARGIN_CALL: 追加保证金事件 (忽略)");
-                    println!("  - ACCOUNT_CONFIG_UPDATE: 账户配置更新事件 (忽略)");
-                }
-                MarketType::Spot => {
-                    println!("现货用户数据流事件类型:");
-                    println!("  - executionReport: 订单执行报告 (仅处理此类型)");
-                    println!("  - outboundAccountPosition: 账户余额更新 (忽略)");
-                    println!("  - balanceUpdate: 余额更新 (忽略)");
-                }
-            }
-            println!("=========================");
-
             *self.ws_status.lock().await = WsConnectionStatus::Connecting;
-            println!("正在解析WebSocket URL...");
             let url = Url::parse(&ws_url).map_err(|e| {
                 let error_msg = format!("URL解析失败: {} - URL: {}", e, ws_url);
                 eprintln!("❌ {}", error_msg);
                 AppError::Other(error_msg)
             })?;
-            println!(
-                "✅ URL解析成功: scheme={}, host={:?}, port={:?}",
-                url.scheme(),
-                url.host_str(),
-                url.port()
-            );
-
             // 配置TLS连接器以解决TLS错误
-            println!("正在配置TLS连接器...");
             let connector = TlsConnector::builder()
                 .danger_accept_invalid_certs(false)
                 .danger_accept_invalid_hostnames(false)
@@ -467,18 +428,12 @@ impl Exchange for Binance {
                     eprintln!("❌ {}", error_msg);
                     AppError::Other(error_msg)
                 })?;
-            println!("✅ TLS连接器配置成功");
-
             let tls_connector = Connector::NativeTls(connector);
-
-            println!("正在建立WebSocket连接...");
             let connection_result = match url.scheme() {
                 "wss" => {
-                    println!("使用WSS (安全WebSocket) 连接");
                     connect_async_tls_with_config(url.clone(), None, Some(tls_connector)).await
                 }
                 "ws" => {
-                    println!("使用WS (普通WebSocket) 连接");
                     connect_async(url.clone()).await
                 }
                 _ => {
@@ -490,7 +445,6 @@ impl Exchange for Binance {
 
             let (ws_stream, _response) = match connection_result {
                 Ok(result) => {
-                    println!("✅ WebSocket连接建立成功");
                     result
                 }
                 Err(e) => {
@@ -511,7 +465,6 @@ impl Exchange for Binance {
             };
 
             *self.ws_status.lock().await = WsConnectionStatus::Connected;
-            println!("🎉 WebSocket 成功连接到: {}", ws_url);
             let (mut write, mut read) = ws_stream.split();
 
             // Keep-alive task
@@ -709,6 +662,53 @@ impl Binance {
     pub async fn sync_time(&self, market_type: MarketType) -> Result<(), AppError> {
         let get_server_time_fn = || async { self.get_server_time(market_type).await };
         sync_time_with_server(get_server_time_fn).await
+    }
+
+    /// 获取所有永续合约的资金费率
+    pub async fn get_funding_rates(&self) -> Result<Vec<FundingRate>, AppError> {
+        let endpoint = self.endpoints.get_funding_rate_endpoint(MarketType::UsdFutures);
+        let url = format!(
+            "{}{}",
+            self.endpoints.get_base_url(MarketType::UsdFutures),
+            endpoint
+        );
+        let response = self.client.get(&url).send().await?;
+        let status = response.status();
+        let response_text = response.text().await?;
+
+        if status.is_success() {
+            let funding_rates: Vec<FundingRate> = serde_json::from_str(&response_text)?;
+            Ok(funding_rates)
+        } else {
+            Err(AppError::Other(format!(
+                "获取资金费率失败: {}",
+                response_text
+            )))
+        }
+    }
+
+    /// 获取单个交易对的资金费率
+    pub async fn get_funding_rate(&self, symbol: &str) -> Result<FundingRate, AppError> {
+        let endpoint = self.endpoints.get_funding_rate_endpoint(MarketType::UsdFutures);
+        let url = format!(
+            "{}{}?symbol={}",
+            self.endpoints.get_base_url(MarketType::UsdFutures),
+            endpoint,
+            symbol
+        );
+        let response = self.client.get(&url).send().await?;
+        let status = response.status();
+        let response_text = response.text().await?;
+
+        if status.is_success() {
+            let funding_rate: FundingRate = serde_json::from_str(&response_text)?;
+            Ok(funding_rate)
+        } else {
+            Err(AppError::Other(format!(
+                "获取{}资金费率失败: {}",
+                symbol, response_text
+            )))
+        }
     }
 
     // ... More REST and WebSocket methods to be added here

@@ -426,3 +426,30 @@ pub struct WsKline {
     #[serde(rename = "B")]
     pub ignore: String,
 }
+
+/// 资金费率信息
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FundingRate {
+    pub symbol: String,
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
+    pub mark_price: f64,
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
+    pub index_price: f64,
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
+    pub estimated_settle_price: f64,
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
+    pub last_funding_rate: f64,
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
+    pub interest_rate: f64,
+    pub next_funding_time: i64,
+    pub time: i64,
+}
+
+fn deserialize_string_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    s.parse::<f64>().map_err(serde::de::Error::custom)
+}

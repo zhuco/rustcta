@@ -13,6 +13,20 @@ strategies:
       health_check_interval_seconds: 180
       uniformity_threshold: 0.95
 
+  - name: "GridStrategy_ENA1"
+    enabled: true
+    log_level: "DEBUG"
+    exchange: "binance_hcr"
+    class_path: "strategies.grid_strategy.GridStrategy"
+    params:
+      symbol: "ENA/USDC:USDC"
+      spacing: 0.0004
+      order_value: 5.5
+      grid_levels: 10
+      leverage: 15
+      health_check_interval_seconds: 180
+      uniformity_threshold: 0.95
+
   - name: "GridStrategy_ARB"
     enabled: false
     log_level: null

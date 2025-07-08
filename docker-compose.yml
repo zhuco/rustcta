@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  rustcta:
+    build: .
+    container_name: rustcta
+    restart: unless-stopped
+    volumes:
+      # 配置文件挂载（只读）
+      - ./config:/app/config:ro
+      # 日志文件挂载
+      - ./log:/app/log
+    environment:
+      # 设置日志级别
+      - RUST_LOG=info
+      # 设置时区（可选）
+      - TZ=Asia/Shanghai
+    # 如果需要暴露端口，取消注释下面的行
+    # ports:
+    #   - "8080:8080"
+    networks:
+      - rustcta-network
+    # 健康检查（可选）
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 40s
+
+networks:
+  rustcta-network:
+    driver: bridge
+
+# 如果需要持久化日志数据，可以使用命名卷
+# volumes:
+#   log-data:
+#     driver: local

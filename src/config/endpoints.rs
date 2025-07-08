@@ -106,6 +106,22 @@ impl BinanceEndpoints {
             MarketType::Spot => "/api/v3/time",
         }
     }
+
+    /// 获取资金费率端点
+    pub fn get_funding_rate_endpoint(&self, market_type: MarketType) -> &'static str {
+        match market_type {
+            MarketType::UsdFutures => "/fapi/v1/premiumIndex",
+            MarketType::Spot => "/api/v3/ticker/24hr", // 现货没有资金费率，使用24小时统计
+        }
+    }
+
+    /// 获取标记价格端点
+    pub fn get_mark_price_endpoint(&self, market_type: MarketType) -> &'static str {
+        match market_type {
+            MarketType::UsdFutures => "/fapi/v1/premiumIndex",
+            MarketType::Spot => "/api/v3/ticker/price", // 现货使用普通价格
+        }
+    }
 }
 
 /// WebSocket连接状态
