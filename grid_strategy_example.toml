@@ -1,0 +1,76 @@
+# 网格策略配置示例
+# 展示如何使用新添加的价格边界控制和全局止损功能
+
+[api.binance.accounts.main]
+api_key = "your_api_key_here"
+secret_key = "your_secret_key_here"
+enabled = true
+
+[[strategies]]
+name = "BTC网格策略"
+class_path = "grid_strategy"
+exchange = "main"
+enabled = true
+
+[strategies.params]
+symbol = "BTCUSDT"
+spacing = 100.0                    # 网格间距：100 USDT
+grid_levels = 20                   # 网格层数：20层
+order_value = 50.0                 # 每个订单价值：50 USDT
+health_check_interval_seconds = 300 # 健康检查间隔：5分钟
+uniformity_threshold = 0.95        # 均匀性阈值：95%
+
+# 新增功能：价格边界控制
+max_price = 45000.0                # 最高价：45000 USDT
+min_price = 35000.0                # 最低价：35000 USDT
+close_positions_on_boundary = true  # 触及边界时平仓
+
+# 新增功能：全局止损
+max_loss_usd = 500.0               # 最大亏损：500 USDT
+close_positions_on_stop_loss = true # 触发止损时平仓
+
+[[strategies]]
+name = "ETH网格策略"
+class_path = "grid_strategy"
+exchange = "main"
+enabled = true
+
+[strategies.params]
+symbol = "ETHUSDT"
+spacing = 20.0                     # 网格间距：20 USDT
+grid_levels = 15                   # 网格层数：15层
+order_value = 30.0                 # 每个订单价值：30 USDT
+health_check_interval_seconds = 180 # 健康检查间隔：3分钟
+uniformity_threshold = 0.90        # 均匀性阈值：90%
+
+# 价格边界控制
+max_price = 2500.0                 # 最高价：2500 USDT
+min_price = 1800.0                 # 最低价：1800 USDT
+close_positions_on_boundary = false # 触及边界时不平仓，只停止策略
+
+# 全局止损
+max_loss_usd = 300.0               # 最大亏损：300 USDT
+close_positions_on_stop_loss = false # 触发止损时不平仓，只停止策略
+
+# 功能说明：
+# 1. max_price/min_price: 设置网格策略的价格边界
+#    - 当价格触及这些边界时，策略会停止运行
+#    - 可以防止在极端市场条件下继续交易
+#
+# 2. close_positions_on_boundary: 触及价格边界时的行为
+#    - true: 停止策略并平掉所有持仓
+#    - false: 只停止策略，保留持仓
+#
+# 3. max_loss_usd: 全局止损阈值
+#    - 当账户累计亏损超过此值时触发止损
+#    - 基于已实现盈亏计算
+#
+# 4. close_positions_on_stop_loss: 触发全局止损时的行为
+#    - true: 停止策略并平掉所有持仓
+#    - false: 只停止策略，保留持仓
+#
+# 注意事项：
+# - 价格边界检查在每次健康检查时进行
+# - 全局止损基于策略运行期间的累计已实现盈亏
+# - 平仓操作会尝试以市价单平掉所有持仓
+# - 建议在测试环境中先验证配置的正确性

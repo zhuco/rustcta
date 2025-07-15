@@ -127,11 +127,7 @@ impl Exchange for Binance {
             let order = match serde_json::from_value::<Order>(value.clone()) {
                 Ok(order) => order,
                 Err(e) => {
-                    eprintln!(
-                        "place_order JSON解析失败，原始响应: {}",
-                        serde_json::to_string_pretty(&value)
-                            .unwrap_or_else(|_| format!("{:?}", value))
-                    );
+                    eprintln!("place_order JSON解析失败: {}", e);
                     return Err(AppError::SerdeJson(e));
                 }
             };
@@ -209,11 +205,7 @@ impl Exchange for Binance {
                         match serde_json::from_value::<Order>(order_value.clone()) {
                             Ok(order) => result_orders.push(order),
                             Err(e) => {
-                                eprintln!(
-                                    "批量下单JSON解析失败，原始响应: {}",
-                                    serde_json::to_string_pretty(&order_value)
-                                        .unwrap_or_else(|_| format!("{:?}", order_value))
-                                );
+                                eprintln!("批量下单JSON解析失败: {}", e);
                                 return Err(AppError::SerdeJson(e));
                             }
                         }
@@ -221,11 +213,7 @@ impl Exchange for Binance {
                     Ok(result_orders)
                 }
                 _ => {
-                    eprintln!(
-                        "批量下单响应格式错误: {}",
-                        serde_json::to_string_pretty(&value)
-                            .unwrap_or_else(|_| format!("{:?}", value))
-                    );
+                    eprintln!("批量下单响应格式错误，期望数组格式");
                     Err(AppError::Other("批量下单响应格式错误".to_string()))
                 }
             }
@@ -273,12 +261,7 @@ impl Exchange for Binance {
                             Ok(orders)
                         }
                         Err(e) => {
-                            eprintln!(
-                                "get_open_orders JSON解析失败: {}\n原始响应: {}",
-                                e,
-                                serde_json::to_string_pretty(&value)
-                                    .unwrap_or_else(|_| format!("{:?}", value))
-                            );
+                            eprintln!("get_open_orders JSON解析失败: {}", e);
                             // 如果解析失败，返回空列表而不是错误，避免中断策略运行
                             Ok(Vec::new())
                         }
@@ -373,11 +356,7 @@ impl Exchange for Binance {
             match serde_json::from_value::<ExchangeInfo>(value.clone()) {
                 Ok(info) => Ok(info),
                 Err(e) => {
-                    eprintln!(
-                        "JSON解析失败，原始响应: {}",
-                        serde_json::to_string_pretty(&value)
-                            .unwrap_or_else(|_| format!("{:?}", value))
-                    );
+                    eprintln!("get_exchange_info JSON解析失败: {}", e);
                     Err(AppError::SerdeJson(e))
                 }
             }
@@ -398,11 +377,7 @@ impl Exchange for Binance {
             let order = match serde_json::from_value::<Order>(value.clone()) {
                 Ok(order) => order,
                 Err(e) => {
-                    eprintln!(
-                        "get_order JSON解析失败，原始响应: {}",
-                        serde_json::to_string_pretty(&value)
-                            .unwrap_or_else(|_| format!("{:?}", value))
-                    );
+                    eprintln!("get_order JSON解析失败: {}", e);
                     return Err(AppError::SerdeJson(e));
                 }
             };
@@ -424,11 +399,7 @@ impl Exchange for Binance {
             let order = match serde_json::from_value::<Order>(value.clone()) {
                 Ok(order) => order,
                 Err(e) => {
-                    eprintln!(
-                        "cancel_order JSON解析失败，原始响应: {}",
-                        serde_json::to_string_pretty(&value)
-                            .unwrap_or_else(|_| format!("{:?}", value))
-                    );
+                    eprintln!("cancel_order JSON解析失败: {}", e);
                     return Err(AppError::SerdeJson(e));
                 }
             };
@@ -492,17 +463,8 @@ impl Exchange for Binance {
             let (ws_stream, _response) = match connection_result {
                 Ok(result) => result,
                 Err(e) => {
-                    let error_msg = format!("WebSocket连接失败: {} - URL: {}", e, ws_url);
+                    let error_msg = format!("WebSocket连接失败: {}", e);
                     eprintln!("❌ {}", error_msg);
-                    eprintln!("连接失败详情:");
-                    eprintln!("  - 错误类型: {}", std::any::type_name_of_val(&e));
-                    eprintln!("  - 错误信息: {}", e);
-                    eprintln!("  - 建议检查:");
-                    eprintln!("    1. 网络连接是否正常");
-                    eprintln!("    2. API Key是否有效");
-                    eprintln!("    3. Listen Key是否已过期");
-                    eprintln!("    4. 防火墙是否阻止连接");
-                    eprintln!("    5. 币安服务器是否可访问");
                     *self.ws_status.lock().await = WsConnectionStatus::Error(error_msg.clone());
                     return Err(AppError::Other(error_msg));
                 }
@@ -525,8 +487,8 @@ impl Exchange for Binance {
                             Ok(event) => {
                                 // 只处理订单交易更新事件
                                 match &event {
-                                    WsEvent::OrderTradeUpdate { .. } => {
-                                        // println!("收到订单交易更新事件: {:?}", event);
+                                    WsEvent::OrderTradeUpdate { order, .. } => {
+                                        // 移除接口层的日志打印，由策略层统一处理
                                         on_message(event).await;
                                     }
                                     _ => {
@@ -536,13 +498,7 @@ impl Exchange for Binance {
                                 }
                             }
                             Err(e) => {
-                                println!("WebSocket消息解析失败: {} - 原始消息: {}", e, text);
-                                // 尝试解析为通用JSON以查看结构
-                                if let Ok(json_value) =
-                                    serde_json::from_str::<serde_json::Value>(&text)
-                                {
-                                    println!("消息JSON结构: {:#}", json_value);
-                                }
+                                println!("WebSocket消息解析失败: {}", e);
                             }
                         }
                     }
@@ -566,6 +522,33 @@ impl Exchange for Binance {
             }
 
             Ok(())
+        })
+    }
+
+    fn set_leverage<'a>(
+        &'a self,
+        symbol: &'a Symbol,
+        leverage: i32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + 'a>> {
+        Box::pin(async move {
+            // 只有期货市场支持设置杠杆
+            if symbol.market_type != MarketType::UsdFutures {
+                return Err(AppError::Other("现货市场不支持设置杠杆".to_string()));
+            }
+
+            let params = format!("symbol={}&leverage={}", symbol.to_binance(), leverage);
+            let endpoint = "/fapi/v1/leverage";
+            
+            match self.send_signed_request(Method::POST, endpoint, &params).await {
+                Ok(_) => {
+                    println!("成功设置{}杠杆为{}倍", symbol.to_binance(), leverage);
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("设置杠杆失败: {:?}", e);
+                    Err(e)
+                }
+            }
         })
     }
 }
@@ -678,17 +661,14 @@ impl Binance {
         if status.is_success() {
             // 检查响应是否为空
             if response_text.trim().is_empty() {
-                eprintln!("send_signed_request 收到空响应，URL: {}", url);
+                eprintln!("send_signed_request 收到空响应");
                 return Ok(Value::Array(vec![]));
             }
 
             match serde_json::from_str(&response_text) {
                 Ok(response_json) => Ok(response_json),
                 Err(e) => {
-                    eprintln!(
-                        "send_signed_request JSON解析失败: {}\n原始响应: {}\nURL: {}",
-                        e, response_text, url
-                    );
+                    eprintln!("send_signed_request JSON解析失败: {}", e);
                     // 如果JSON解析失败，返回空数组而不是错误
                     Ok(Value::Array(vec![]))
                 }
@@ -710,10 +690,7 @@ impl Binance {
                 }
                 Err(_) => {
                     // 如果错误响应也无法解析为JSON，使用原始响应文本
-                    eprintln!(
-                        "send_signed_request 请求失败，状态码: {}，响应: {}，URL: {}",
-                        status, response_text, url
-                    );
+                    eprintln!("send_signed_request 请求失败，状态码: {}", status);
                     Err(AppError::BinanceError {
                         code: status.as_u16() as i64,
                         msg: format!("HTTP {}: {}", status, response_text),
@@ -788,6 +765,8 @@ impl Binance {
             )))
         }
     }
+
+
 
     // ... More REST and WebSocket methods to be added here
 }

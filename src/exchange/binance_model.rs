@@ -35,6 +35,7 @@ pub struct AccountInfo {
     pub total_position_initial_margin: String,
     pub total_open_order_initial_margin: String,
     pub total_cross_wallet_balance: String,
+    #[serde(rename = "totalCrossUnPnl")]
     pub total_cross_unpnl: String,
     pub available_balance: String,
     pub max_withdraw_amount: String,

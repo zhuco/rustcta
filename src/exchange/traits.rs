@@ -66,4 +66,11 @@ pub trait Exchange: Send + Sync {
         market_type: MarketType,
         on_message: OnMessageCallback,
     ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + 'a>>;
+    
+    /// 设置杠杆倍数
+    fn set_leverage<'a>(
+        &'a self,
+        symbol: &'a Symbol,
+        leverage: i32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + 'a>>;
 }

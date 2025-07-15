@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude config set language zh-CN)",
+      "Bash(claude config set --global language zh-CN)",
+      "Bash(cargo check:*)",
+      "Bash(rustc:*)",
+      "Bash(curl:*)",
+      "Bash(chmod:*)",
+      "Bash(./rustup-init.sh -y)",
+      "Bash(sudo apt:*)",
+      "Bash(cargo build:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": []
+  }
+}

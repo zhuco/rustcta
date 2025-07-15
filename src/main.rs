@@ -13,9 +13,10 @@ use exchange::binance::Binance;
 use exchange::traits::Exchange;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use strategy::avellaneda_stoikov::{AvellanedaStoikovConfig, AvellanedaStoikovStrategy};
+
 use strategy::funding_rate::{FundingRateConfig, FundingRateStrategy};
 use strategy::grid::GridStrategy;
+use strategy::multi_timeframe_long::{MultiTimeframeLongConfig, MultiTimeframeLongStrategy};
 use tokio::signal;
 
 // 全局关闭标志
@@ -140,7 +141,6 @@ async fn main() {
             let strategy_name = strategy.name.clone();
 
             tokio::spawn(async move {
-                strategy_info!(&strategy_name, "启动资金费率策略: {}", strategy_name);
                 if let Err(e) = funding_strategy.run().await {
                     strategy_error!(
                         &strategy_name,
@@ -152,118 +152,150 @@ async fn main() {
                     SHUTDOWN.store(true, Ordering::SeqCst);
                 }
             });
-        } else if strategy.class_path.contains("avellaneda_stoikov_strategy") {
-            // Avellaneda-Stoikov做市策略
+        } else if strategy.class_path.contains("MultiTimeframeLongStrategy") {
+            // 多时间框架做多策略
             let symbol_str = strategy
                 .params
                 .symbol
                 .as_ref()
-                .unwrap_or(&"ETHUSDC".to_string())
+                .unwrap_or(&"BTCUSDT".to_string())
                 .clone();
 
-            let as_config = AvellanedaStoikovConfig {
+            let mtl_config = MultiTimeframeLongConfig {
                 name: strategy.name.clone(),
                 enabled: strategy.enabled,
                 symbol: symbol_str,
-                order_amount_usdt: strategy.params.order_amount_usdt.unwrap_or(10.0),
+                position_size_usdt: strategy.params.position_size_usdt.unwrap_or(100.0),
                 max_position_usdt: strategy.params.max_position_usdt.unwrap_or(500.0),
-                risk_aversion: strategy.params.risk_aversion.unwrap_or(0.1),
-                market_impact: strategy.params.market_impact.unwrap_or(0.01),
-                order_arrival_rate: strategy.params.order_arrival_rate.unwrap_or(1.0),
-                volatility_window: strategy.params.volatility_window.unwrap_or(300),
-                refresh_interval_ms: strategy.params.refresh_interval_ms.unwrap_or(1000),
-                max_hold_time_seconds: strategy.params.max_hold_time_seconds.unwrap_or(300),
-                stop_loss_percentage: strategy.params.stop_loss_percentage.unwrap_or(0.1),
-                min_spread_bps: strategy.params.min_spread_bps.unwrap_or(5.0),
+                rsi_period: strategy.params.rsi_period.unwrap_or(14),
+                rsi_oversold: strategy.params.rsi_oversold.unwrap_or(30.0),
+                rsi_overbought: strategy.params.rsi_overbought.unwrap_or(70.0),
+                bb_period: strategy.params.bb_period.unwrap_or(20),
+                bb_std_dev: strategy.params.bb_std_dev.unwrap_or(2.0),
+                primary_timeframe: strategy
+                    .params
+                    .primary_timeframe
+                    .as_ref()
+                    .unwrap_or(&"5m".to_string())
+                    .clone(),
+                secondary_timeframe: strategy
+                    .params
+                    .secondary_timeframe
+                    .as_ref()
+                    .unwrap_or(&"15m".to_string())
+                    .clone(),
+                tertiary_timeframe: strategy
+                    .params
+                    .tertiary_timeframe
+                    .as_ref()
+                    .unwrap_or(&"1h".to_string())
+                    .clone(),
+                stop_loss_percentage: strategy.params.stop_loss_percentage.unwrap_or(2.0),
+                take_profit_percentage: strategy.params.take_profit_percentage.unwrap_or(4.0),
+                max_hold_time_minutes: strategy.params.max_hold_time_minutes.unwrap_or(240),
+                min_volume_usdt: strategy.params.min_volume_usdt.unwrap_or(100000.0),
+                trend_confirmation_bars: strategy.params.trend_confirmation_bars.unwrap_or(3),
+                check_interval_seconds: strategy.params.check_interval_seconds.unwrap_or(30),
+                order_offset_pct: strategy.params.order_offset_pct.unwrap_or(0.001),
+                order_timeout_minutes: strategy.params.order_timeout_minutes.unwrap_or(10),
+                allow_multiple_orders: strategy.params.allow_multiple_orders.unwrap_or(false),
             };
 
+            let mut mtl_strategy = MultiTimeframeLongStrategy::new(mtl_config, binance.clone());
             let strategy_name = strategy.name.clone();
-            let binance_clone = binance_arc.clone();
 
             tokio::spawn(async move {
-                strategy_info!(
-                    &strategy_name,
-                    "启动Avellaneda-Stoikov做市策略: {}",
-                    strategy_name
-                );
-                match AvellanedaStoikovStrategy::new(as_config, binance_clone).await {
-                    Ok(mut as_strategy) => {
-                        if let Err(e) = as_strategy.run().await {
-                            strategy_error!(
-                                &strategy_name,
-                                "❌ Avellaneda-Stoikov策略 {} 运行失败: {}",
-                                strategy_name,
-                                e
-                            );
-                            strategy_error!(&strategy_name, "策略 {} 已停止运行", strategy_name);
-                            SHUTDOWN.store(true, Ordering::SeqCst);
-                        }
-                    }
-                    Err(e) => {
-                        strategy_error!(
-                            &strategy_name,
-                            "❌ Avellaneda-Stoikov策略 {} 初始化失败: {}",
-                            strategy_name,
-                            e
-                        );
-                        SHUTDOWN.store(true, Ordering::SeqCst);
-                    }
+                if let Err(e) = mtl_strategy.run().await {
+                    strategy_error!(
+                        &strategy_name,
+                        "❌ 多时间框架做多策略 {} 运行失败: {}",
+                        strategy_name,
+                        e
+                    );
+                    strategy_error!(&strategy_name, "策略 {} 已停止运行", strategy_name);
+                    SHUTDOWN.store(true, Ordering::SeqCst);
                 }
             });
-        } else {
-            // 网格策略（默认）
-            // 检查是否有symbol参数
-            let symbol_str = match &strategy.params.symbol {
-                Some(s) => s.clone(),
-                None => {
-                    println!("网格策略 {} 缺少symbol参数，跳过", strategy.name);
-                    continue;
-                }
-            };
+        } else if strategy.class_path.contains("grid_strategy") {
+            // 网格策略
+            let symbol_str = strategy
+                .params
+                .symbol
+                .as_ref()
+                .unwrap_or(&"BTCUSDT".to_string())
+                .clone();
 
-            // 转换新配置格式到旧格式以兼容现有代码
-            let symbol_parts: Vec<&str> = symbol_str.split('/').collect();
-            let (base, quote) = if symbol_parts.len() >= 2 {
-                let quote_part = symbol_parts[1].split(':').next().unwrap_or(symbol_parts[1]);
-                (symbol_parts[0].to_string(), quote_part.to_string())
-            } else {
-                // 如果格式不是 BASE/QUOTE，尝试解析为 BASEUSDC 格式
-                if symbol_str.ends_with("USDC") {
-                    let base = symbol_str.strip_suffix("USDC").unwrap_or(&symbol_str);
-                    (base.to_string(), "USDC".to_string())
-                } else if symbol_str.ends_with("USDT") {
-                    let base = symbol_str.strip_suffix("USDT").unwrap_or(&symbol_str);
-                    (base.to_string(), "USDT".to_string())
+            // 解析symbol字符串
+            let symbol = if symbol_str.contains('/') && symbol_str.contains(':') {
+                // 处理 "PNUT/USDC:USDC" 格式
+                let parts: Vec<&str> = symbol_str.split('/').collect();
+                if parts.len() == 2 {
+                    let base = parts[0];
+                    let quote_part: Vec<&str> = parts[1].split(':').collect();
+                    if quote_part.len() == 2 && quote_part[0] == quote_part[1] {
+                        let quote = quote_part[0];
+                        crate::utils::symbol::Symbol::new(base, quote, crate::utils::symbol::MarketType::UsdFutures)
+                    } else {
+                        // 回退到简单解析
+                        crate::utils::symbol::Symbol::new(
+                            &symbol_str.split('/').next().unwrap_or(&symbol_str),
+                            &symbol_str.split('/').nth(1).unwrap_or("USDT"),
+                            crate::utils::symbol::MarketType::UsdFutures,
+                        )
+                    }
                 } else {
-                    (symbol_str.clone(), "USDC".to_string())
+                    // 回退到简单解析
+                    crate::utils::symbol::Symbol::new(
+                        &symbol_str.split('/').next().unwrap_or(&symbol_str),
+                        "USDT",
+                        crate::utils::symbol::MarketType::UsdFutures,
+                    )
                 }
+            } else {
+                // 处理简单格式如 "PNUTUSDT"
+                crate::utils::symbol::Symbol::new(
+                    &symbol_str.split('/').next().unwrap_or(&symbol_str),
+                    &symbol_str.split('/').nth(1).unwrap_or("USDT"),
+                    crate::utils::symbol::MarketType::UsdFutures,
+                )
             };
 
-            let grid_config = config::strategy_config::GridConfig {
-                symbol: utils::symbol::Symbol::new(
-                    &base,
-                    &quote,
-                    utils::symbol::MarketType::UsdFutures, // 默认使用期货市场
-                ),
-                grid_spacing: strategy.params.spacing.unwrap_or(0.001),
-                grid_ratio: None,
-                grid_num: strategy.params.grid_levels.unwrap_or(10) * 2, // 转换为总网格数
+            let grid_config = crate::config::strategy_config::GridConfig {
+                symbol,
+                grid_spacing: strategy.params.spacing.unwrap_or(10.0),
+                grid_ratio: None, // 假设这里只处理算术网格
+                grid_num: strategy.params.grid_levels.unwrap_or(10),
                 order_value: strategy.params.order_value.unwrap_or(10.0),
+                leverage: strategy.params.leverage,
                 health_check_interval_seconds: strategy.params.health_check_interval_seconds,
                 uniformity_threshold: strategy.params.uniformity_threshold,
+                max_price: strategy.params.max_price,
+                min_price: strategy.params.min_price,
+                close_positions_on_boundary: Some(
+                    strategy.params.close_positions_on_boundary.unwrap_or(false),
+                ),
+                max_loss_usd: strategy.params.max_loss_usd,
+                close_positions_on_stop_loss: Some(
+                    strategy
+                        .params
+                        .close_positions_on_stop_loss
+                        .unwrap_or(false),
+                ),
+                take_profit_usd: strategy.params.take_profit_usd,
+                close_positions_on_take_profit: Some(
+                    strategy.params.close_positions_on_take_profit.unwrap_or(true),
+                ),
             };
 
-            let grid_strategy_config = config::strategy_config::GridStrategyConfig {
+            let grid_strategy_config = crate::config::strategy_config::GridStrategyConfig {
                 grid_configs: vec![grid_config],
             };
 
-            let mut grid_strategy = GridStrategy::new(grid_strategy_config);
-
-            let exchange_clone = binance.clone();
+            let mut grid_strategy = GridStrategy::new(grid_strategy_config, strategy.name.clone());
             let strategy_name = strategy.name.clone();
+
             tokio::spawn(async move {
-                strategy_info!(&strategy_name, "启动网格策略: {}", strategy_name);
-                if let Err(e) = grid_strategy.run(exchange_clone).await {
+                if let Err(e) = grid_strategy.run(binance.clone()).await {
                     strategy_error!(
                         &strategy_name,
                         "❌ 网格策略 {} 运行失败: {}",
@@ -271,32 +303,20 @@ async fn main() {
                         e
                     );
                     strategy_error!(&strategy_name, "策略 {} 已停止运行", strategy_name);
-                    // 设置全局关闭标志，停止所有策略
                     SHUTDOWN.store(true, Ordering::SeqCst);
                 }
             });
+        } else {
+            strategy_warn!(
+                &strategy.name,
+                "未知策略类型: {}，跳过",
+                strategy.class_path
+            );
         }
     }
 
-    // 存储所有交易所实例以便清理
-    let mut exchanges: Vec<Arc<dyn Exchange>> = Vec::new();
-
-    // 收集所有创建的交易所实例
-    for strategy in &strategy_config.strategies {
-        if !strategy.enabled {
-            continue;
-        }
-
-        if let Some(account_config) = api_config.binance.accounts.get(&strategy.exchange) {
-            if account_config.enabled.unwrap_or(true) {
-                let exchange: Arc<dyn Exchange> = Arc::new(Binance::new(
-                    account_config.api_key.clone(),
-                    account_config.secret_key.clone(),
-                ));
-                exchanges.push(exchange);
-            }
-        }
-    }
+    // 注意：交易所实例已在上面的策略启动循环中创建
+    // 清理时会创建临时实例来取消订单
 
     // 主循环，定期检查关闭信号
     loop {
@@ -338,31 +358,42 @@ async fn main() {
                 }
             }
 
-            // 只使用第一个交易所实例取消订单，避免重复
-            if let Some(exchange) = exchanges.first() {
-                for symbol_str in unique_symbols {
-                    let symbol_parts: Vec<&str> = symbol_str.split("USDC").collect();
-                    let (base, quote) = if symbol_parts.len() >= 2 {
-                        (symbol_parts[0].to_string(), "USDC".to_string())
-                    } else {
-                        let symbol_parts: Vec<&str> = symbol_str.split("USDT").collect();
-                        if symbol_parts.len() >= 2 {
-                            (symbol_parts[0].to_string(), "USDT".to_string())
-                        } else {
-                            continue;
+            // 创建临时交易所实例用于清理订单
+            if let Some(first_strategy) = strategy_config.strategies.iter().find(|s| s.enabled) {
+                if let Some(account_config) =
+                    api_config.binance.accounts.get(&first_strategy.exchange)
+                {
+                    if account_config.enabled.unwrap_or(true) {
+                        let cleanup_exchange: Arc<dyn Exchange> = Arc::new(Binance::new(
+                            account_config.api_key.clone(),
+                            account_config.secret_key.clone(),
+                        ));
+
+                        for symbol_str in unique_symbols {
+                            let symbol_parts: Vec<&str> = symbol_str.split("USDC").collect();
+                            let (base, quote) = if symbol_parts.len() >= 2 {
+                                (symbol_parts[0].to_string(), "USDC".to_string())
+                            } else {
+                                let symbol_parts: Vec<&str> = symbol_str.split("USDT").collect();
+                                if symbol_parts.len() >= 2 {
+                                    (symbol_parts[0].to_string(), "USDT".to_string())
+                                } else {
+                                    continue;
+                                }
+                            };
+
+                            let symbol = utils::symbol::Symbol::new(
+                                &base,
+                                &quote,
+                                utils::symbol::MarketType::UsdFutures,
+                            );
+
+                            if let Err(e) = cleanup_exchange.cancel_all_orders(&symbol).await {
+                                eprintln!("取消{}订单失败: {}", symbol.to_binance(), e);
+                            } else {
+                                println!("已取消{}的所有订单", symbol.to_binance());
+                            }
                         }
-                    };
-
-                    let symbol = utils::symbol::Symbol::new(
-                        &base,
-                        &quote,
-                        utils::symbol::MarketType::UsdFutures,
-                    );
-
-                    if let Err(e) = exchange.cancel_all_orders(&symbol).await {
-                        eprintln!("取消{}订单失败: {}", symbol.to_binance(), e);
-                    } else {
-                        println!("已取消{}的所有订单", symbol.to_binance());
                     }
                 }
             }

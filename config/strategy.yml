@@ -1,115 +1,20 @@
 strategies:
-  - name: "GridStrategy_ENA"
-    enabled: false
-    log_level: "DEBUG"
-    exchange: "binance_huyan"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "ENA/USDC:USDC"
-      spacing: 0.0006
-      order_value: 16
-      grid_levels: 10
-      leverage: 15
-      health_check_interval_seconds: 180
-      uniformity_threshold: 0.95
-
-  - name: "GridStrategy_ARB"
-    enabled: false
+  - name: "GridStrategy_PNUT"
+    enabled: true
     log_level: null
     exchange: "binance_huyan"
     class_path: "strategies.grid_strategy.GridStrategy"
     params:
-      symbol: "ARB/USDC:USDC"
-      spacing: 0.0005
-      order_value: 16
+      symbol: "PNUT/USDC:USDC"
+      spacing: 0.0003
+      order_value: 6
       grid_levels: 10
       leverage: 10
       health_check_interval_seconds: 180
       uniformity_threshold: 0.95
-
-  - name: "GridStrategy_BTC"
-    enabled: false
-    log_level: null
-    exchange: "binance_huyan"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "BTC/USDC:USDC"
-      spacing: 54
-      order_value: 120
-      grid_levels: 4
-      leverage: 25
-      health_check_interval_seconds: 180
-      uniformity_threshold: 0.95
-
-  - name: "GridStrategy_SOL"
-    enabled: false
-    log_level: null
-    exchange: "binance_huyan"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "SOL/USDC:USDC"
-      spacing: 0.13
-      order_value: 10
-      grid_levels: 8
-      leverage: 15
-      health_check_interval_seconds: 60
-      uniformity_threshold: 0.95
-
-  - name: "GridStrategy_DOGE"
-    enabled: false
-    log_level: null
-    exchange: "binance_huyan"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "DOGE/USDC:USDC"
-      spacing: 0.0002
-      order_value: 8
-      grid_levels: 6
-      leverage: 15
-      health_check_interval_seconds: 180
-      uniformity_threshold: 0.95
-
-  - name: "GridStrategy_ORDI"
-    enabled: false
-    log_level: null
-    exchange: "binance_huyan"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "ORDI/USDC:USDC"
-      spacing: 0.008
-      order_value: 10
-      grid_levels: 8
-      leverage: 10
-      health_check_interval_seconds: 120
-      uniformity_threshold: 0.95
-
-  - name: "GridStrategy_BNB"
-    enabled: false
-    log_level: null
-    exchange: "binance_huyan"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "BNB/USDC:USDC"
-      spacing: 0.2
-      order_value: 20
-      grid_levels: 5
-      leverage: 10
-      health_check_interval_seconds: 120
-      uniformity_threshold: 0.95
-
-  - name: "GridStrategy_ORDI2"
-    enabled: false
-    log_level: null
-    exchange: "binance_hcr"
-    class_path: "strategies.grid_strategy.GridStrategy"
-    params:
-      symbol: "ORDI/USDC:USDC"
-      spacing: 0.008
-      order_value: 15
-      grid_levels: 8
-      leverage: 10
-      health_check_interval_seconds: 180
-      uniformity_threshold: 0.95
+      max_price: 0.32
+      min_price: 0.25
+      close_positions_on_boundary: true
 
   - name: "FundingRateStrategy_HCR"
     enabled: true
@@ -118,25 +23,7 @@ strategies:
     class_path: "strategies.funding_rate_strategy.FundingRateStrategy"
     params:
       position_size_usd: 100.0
-      rate_threshold: 0.0001
+      rate_threshold: 0.0003
       open_offset_ms: 1000
-      close_offset_ms: 20
+      close_offset_ms: 50
       check_interval_seconds: 3480
-
-  - name: "AvellanedaStoikovStrategy_ETH"
-    enabled: true
-    log_level: "INFO"
-    exchange: "binance_huyan"
-    class_path: "strategies.avellaneda_stoikov_strategy.AvellanedaStoikovStrategy"
-    params:
-      symbol: "ETHUSDC"
-      order_amount_usdt: 10.0
-      max_position_usdt: 500.0
-      risk_aversion: 0.1                # 风险厌恶系数，控制价差宽度，值越大价差越宽
-      market_impact: 0.01               # 市场冲击系数，反映订单对价格的影响
-      order_arrival_rate: 1.0           # 订单到达率，影响最优价差计算
-      volatility_window: 300            # 波动率计算窗口(秒)，用于估算市场波动率
-      refresh_interval_ms: 60000         # 订单刷新间隔(毫秒)，控制重新计算和下单频率
-      max_hold_time_seconds: 300        # 最大持仓时间(秒)，超时强制平仓
-      stop_loss_percentage: 0.1         # 止损百分比，亏损超过此比例时触发止损
-      min_spread_bps: 5.0               # 最小价差(基点)，确保价差不会过小，1基点=0.01%

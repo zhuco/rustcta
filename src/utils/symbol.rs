@@ -62,8 +62,24 @@ impl<'de> Visitor<'de> for SymbolVisitor {
     where
         E: de::Error,
     {
-        // 解析交易对字符串，例如 "BTCUSDC" -> base: "BTC", quote: "USDC"
-        // 这里假设所有的交易对都是USDC结尾的期货合约
+        // 支持多种格式：
+        // 1. "OMNI/USDT:USDT" -> base: "OMNI", quote: "USDT"
+        // 2. "OMNIUSDT" -> base: "OMNI", quote: "USDT"
+
+        // 首先尝试解析 "BASE/QUOTE:QUOTE" 格式
+        if value.contains('/') && value.contains(':') {
+            let parts: Vec<&str> = value.split('/').collect();
+            if parts.len() == 2 {
+                let base = parts[0];
+                let quote_part: Vec<&str> = parts[1].split(':').collect();
+                if quote_part.len() == 2 && quote_part[0] == quote_part[1] {
+                    let quote = quote_part[0];
+                    return Ok(Symbol::new(base, quote, MarketType::UsdFutures));
+                }
+            }
+        }
+
+        // 然后尝试解析简单格式 "BASEUSDC" 或 "BASEUSDT"
         if let Some(base) = value.strip_suffix("USDC") {
             Ok(Symbol::new(base, "USDC", MarketType::UsdFutures))
         } else if let Some(base) = value.strip_suffix("USDT") {
