@@ -1,0 +1,266 @@
+strategy:
+  name: range_grid_memes
+  version: 1.0.0
+  enabled: true
+  strategy_type: range_grid
+  market_type: futures
+execution:
+  startup_cancel_all: true
+  shutdown_cancel_all: true
+  thread_per_symbol: true
+  evaluation_interval_secs: 300
+  cooldown_secs: 600
+precision_management:
+  auto_fetch: true
+  write_back: true
+  lock_path: config/range_grid.yml.lock
+  backup_suffix: .bak
+indicators:
+  lower_timeframe:
+    timeframe: 5m
+    bollinger:
+      length: 20
+      k: 2.0
+    rsi:
+      length: 14
+      overbought: 70
+      oversold: 30
+    atr:
+      length: 14
+      stop_multiplier: 2.5
+      trail_multiplier: 1.5
+  higher_timeframe:
+    timeframe: 15m
+    adx_length: 14
+    adx_threshold: 20
+    bbw_window: 400
+    bbw_quantile: 0.35
+    slope_threshold: 0.1
+    choppiness:
+      enabled: false
+      threshold: 60
+schedule:
+  timezone: Asia/Shanghai
+  sessions:
+  - start: 00:00
+    end: 23:55
+risk_control:
+  max_leverage: 3
+  max_drawdown: 0.05
+  daily_loss_limit: 600
+  position_limit_per_symbol: 500
+  max_unrealized_loss_per_symbol: 150
+notifications:
+  wecom:
+    webhook_url: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=7a3658cc-f9b0-4070-b922-5eba67c63431
+    mentioned_list: []
+    mentioned_mobile_list: []
+symbols:
+- config_id: BONK-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: 1000BONK/USDC
+  precision:
+    price_digits: 6
+    amount_digits: 0
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: PEPE-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: 1000PEPE/USDC
+  precision:
+    price_digits: 7
+    amount_digits: 0
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: SHIB-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: 1000SHIB/USDC
+  precision:
+    price_digits: 6
+    amount_digits: 0
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: ADA-USDC
+  enabled: false
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: ADA/USDC
+  precision:
+    price_digits: 4
+    amount_digits: 1
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: ARB-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: ARB/USDC
+  precision:
+    price_digits: 4
+    amount_digits: 1
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: AVAX-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: AVAX/USDC
+  precision:
+    price_digits: 3
+    amount_digits: 2
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: ETHFI-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: ETHFI/USDC
+  precision:
+    price_digits: 4
+    amount_digits: 1
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true
+- config_id: TIA-USDC
+  enabled: true
+  account:
+    id: binance_main
+    exchange: binance
+    env_prefix: BINANCE_0
+  symbol: TIA/USDC
+  precision:
+    price_digits: 4
+    amount_digits: 0
+  grid:
+    grid_spacing_pct: 0.15
+    levels_per_side: 2
+    base_order_notional: 6.0
+    max_position_notional: 400
+  regime_filters:
+    min_liquidity_usd: 300000
+    require_conditions: 1
+    adx_max: 25
+    bbw_quantile: 0.4
+    slope_threshold: 0.15
+  order:
+    post_only: true
+    tif: GTC
+  market_exit:
+    use_market_order: true

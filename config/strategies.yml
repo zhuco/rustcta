@@ -1,0 +1,106 @@
+# 策略启动配置
+# 控制哪些策略在启动时运行
+version: "1.0"
+
+# 策略组定义
+strategy_groups:
+  # 泊松做市策略组
+  poisson_mm:
+    name: "泊松做市策略"
+    enabled: true
+    startup_delay_secs: 0  # 启动延迟（秒）
+    strategies:
+      - name: "SUI泊松做市"
+        config_file: "config/poisson_mm_sui.yml"
+        enabled: true
+        account: "binance_main"
+        
+      - name: "ARB泊松做市"
+        config_file: "config/poisson_mm_arb.yml"
+        enabled: true
+        account: "binance_hcr"
+        
+      - name: "DOGE泊松做市"
+        config_file: "config/poisson_mm_doge.yml"
+        enabled: true
+        account: "binance_hcr"
+        
+  # 趋势网格策略组
+  trend_grid:
+    name: "趋势网格策略"
+    enabled: true
+    startup_delay_secs: 5  # 延迟5秒启动
+    strategies:
+      - name: "ENA趋势网格"
+        config_file: "config/trend_grid_ena.yml"
+        enabled: true
+        account: "binance_main"
+        
+  # 跟单策略组
+  copy_trading:
+    name: "跟单策略"
+    enabled: true  # 启用
+    startup_delay_secs: 10
+    strategies:
+      - name: "简单跟单策略"
+        config_file: "config/copy_trading_simple.yml"
+        enabled: true
+        lead_account: "binance_main"
+        follow_account: "binance_hcr"
+  
+  # AS策略组 (自动化剥头皮)
+  as_strategies:
+    name: "AS自动化剥头皮策略"
+    enabled: true
+    startup_delay_secs: 15  # 延迟15秒启动
+    strategies:
+      - name: "ORDI剥头皮策略"
+        config_file: "config/as_ordi.yml"
+        enabled: true
+        account: "binance_hcr"
+  
+  # 马丁格尔策略组
+  martin_strategies:
+    name: "马丁格尔趋势策略"
+    enabled: true
+    startup_delay_secs: 20  # 延迟20秒启动
+    strategies:
+      - name: "LINKUSDC马丁策略"
+        config_file: "config/martin_link.yml"
+        enabled: true
+        account: "binance_hcr"
+        description: "LINK多时间框架趋势马丁策略"
+        
+      - name: "SUIUSDC马丁策略"
+        config_file: "config/martin_sui.yml"
+        enabled: true
+        account: "binance_hcr"
+        description: "SUI多时间框架趋势马丁策略"
+        
+      - name: "XRPUSDC马丁策略"
+        config_file: "config/martin_xrp.yml"
+        enabled: true
+        account: "binance_hcr"
+        description: "XRP多时间框架趋势马丁策略"
+
+# 启动设置
+startup_settings:
+  # 策略间启动间隔（毫秒）
+  strategy_interval_ms: 500
+  
+  # 最大并发启动数（0表示不限制）
+  max_concurrent_startup: 3
+  
+  # 启动失败是否继续
+  continue_on_failure: true
+  
+  # 启动前检查账户连接
+  verify_accounts: false
+  
+# 启动优先级（数字越小优先级越高）
+startup_priority:
+  1: ["poisson_mm"]         # 首先启动泊松做市
+  2: ["trend_grid"]         # 然后启动趋势网格
+  3: ["martin_strategies"]  # 然后启动马丁策略
+  4: ["as_strategies"]      # 然后启动AS策略
+  5: ["copy_trading"]       # 最后启动跟单策略

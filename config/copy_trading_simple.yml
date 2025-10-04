@@ -1,0 +1,79 @@
+# 简单跟单策略配置
+# 从主账户跟单到其他账户
+
+name: "Simple Copy Trading"
+enabled: true
+
+# 信号源配置 - 使用Bitmart作为信号源
+signal_source:
+  exchange: "bitmart"
+  account_id: "bitmart_main"
+  env_prefix: "BITMART"
+  # 要跟踪的交易对，空则跟踪所有
+  symbols: 
+  # 订阅类型: user_trades（成交）, positions（持仓变化）
+  subscription_type: "user_trades"
+
+# 跟单目标交易所
+target_exchanges:
+  # Binance带单员账户 - 跟单到币安2账户
+  - exchange: "binance"
+    account_id: "binance_daidan"
+    env_prefix: "BINANCE_2"
+    enabled: true
+    position_multiplier: 1.0  # 1.0表示100%仓位跟单
+    fixed_amount_usdt: 20.0  # 固定每单20 USDT
+    
+  # Binance HCR账户 - 备用跟单账户
+  - exchange: "binance"
+    account_id: "binance_hcr"
+    env_prefix: "BINANCE_3"
+    enabled: false
+    position_multiplier: 0.5
+
+# 风险管理
+risk_management:
+  position_size_percent: 2.0  # 每笔交易使用3%的保证金
+  max_positions: 50  # 最大同时持仓数
+  max_loss_per_trade: 150.0  # 单笔最大损失（USDT）
+  daily_max_loss: 200.0  # 每日最大损失（USDT）
+  hedge_mode: true  # 使用双向持仓模式
+
+# 执行配置
+execution:
+  order_type: "market"  # market/limit
+  slippage_tolerance: 0.003  # 0.3%滑点容忍度
+  skip_missing_symbols: true  # 找不到交易对时跳过
+  max_retries: 3  # 下单失败重试次数
+  delay_ms: 200  # 执行延迟（毫秒）
+
+# 过滤器
+filters:
+  # 最小交易额（USDT）
+  min_trade_value: 10.0
+  # 最大交易额（USDT）
+  max_trade_value: 5000.0
+  # 排除的交易对
+  excluded_symbols: []
+  # 只跟单这些交易对（如果设置）
+  included_symbols: 
+    - "ENA/USDC"
+    - "SUI/USDC"
+    - "ARB/USDC"
+    - "DOGE/USDC"
+
+# 通知配置
+notifications:
+  enabled: false
+  webhook_url: ""
+  notify_on_open: true
+  notify_on_close: true
+  notify_on_error: true
+
+# 日志配置
+logging:
+  level: "info"
+  file: "./logs/copy_trading_simple.log"
+  console: true
+  show_pnl: true
+  show_positions: true

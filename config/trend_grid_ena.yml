@@ -1,0 +1,86 @@
+# ENA/USDC 趋势网格策略配置
+# 注意：此配置使用 TrendGridV2 策略实现 (src/strategies/trend_grid_v2.rs)
+# 最后修改：2025-01-04 - 优化预计算逻辑，只缓存最近买卖单各一个
+strategy:
+  name: "ENA Trend Grid Strategy"
+  version: "2.0.0"
+  enabled: true
+  strategy_type: "TrendGrid"  # 实际对应 trend_grid_v2.rs 实现
+  market_type: "Futures"
+
+# 交易配置
+trading_configs:
+  - config_id: "ena_usdc_trend_grid"
+    enabled: true
+    account:
+      id: "binance_main"
+      exchange: "binance"
+      env_prefix: "BINANCE_0"        # 使用 BINANCE_0_API_KEY
+    symbol: "ENA/USDC"
+    grid:
+      spacing: 0.0008                 # 网格间距 0.1% (适合波动较大的币种)
+      spacing_type: "arithmetic"     # 等差网格
+      order_amount: 6             # 每单金额 10 USDC
+      orders_per_side: 2            # 每边15个订单
+      max_position: 500.0            # 最大持仓 500 USDC
+    trend_config:
+      ma_fast: 12                   # 快速均线周期
+      ma_slow: 26                   # 慢速均线周期
+      rsi_period: 14                # RSI周期
+      rsi_overbought: 75.0          # RSI超买线
+      rsi_oversold: 25.0            # RSI超卖线
+      timeframe: "5m"               # K线时间框架
+      show_trend_info: true         # 显示趋势信息
+
+# 趋势调整配置（动态调整订单金额）
+trend_adjustment:
+  strong_bull_buy_multiplier: 1    # 强上涨时买单倍数
+  bull_buy_multiplier: 1          # 弱上涨时买单倍数
+  bear_sell_multiplier: 1          # 弱下跌时卖单倍数
+  strong_bear_sell_multiplier: 1   # 强下跌时卖单倍数
+
+# 批量下单设置
+batch_settings:
+  binance_batch_size: 5
+  okx_batch_size: 10
+  hyperliquid_batch_size: 20
+  default_batch_size: 5
+
+# 网格管理
+grid_management:
+  check_interval: 30                # 检查间隔（秒）
+  rebalance_threshold: 0.015        # 重平衡阈值 1.5%
+  cancel_and_replace: true          # 取消并替换订单
+  show_grid_status: true            # 显示网格状态
+
+# WebSocket配置
+websocket:
+  subscribe_order_updates: true     # 订阅订单更新
+  subscribe_trade_updates: true     # 订阅成交更新
+  subscribe_ticker: true            # 订阅行情
+  reconnect_on_disconnect: true     # 断线重连
+  heartbeat_interval: 30            # 心跳间隔（秒）
+  log_all_trades: true              # 记录所有成交
+
+# 风险控制
+risk_control:
+  max_leverage: 2                   # 最大杠杆
+  max_drawdown: 0.15                # 最大回撤 15%
+  daily_loss_limit: 50.0            # 日亏损限制 50 USDC
+  position_limit_per_symbol: 500.0  # 单交易对持仓限制
+
+# 执行配置
+execution:
+  startup_cancel_all: true          # 启动时取消所有订单
+  shutdown_cancel_all: true         # 停止时取消所有订单
+  thread_per_config: true           # 每个配置独立线程
+  startup_delay: 3                  # 启动延迟（秒）
+
+# 日志配置
+logging:
+  level: "info"                     # 日志级别
+  file: "logs/trend_grid_ena.log"   # 日志文件
+  console: true                     # 控制台输出
+  show_pnl: true                    # 显示盈亏
+  show_position: true               # 显示持仓
+  show_trend_changes: true          # 显示趋势变化

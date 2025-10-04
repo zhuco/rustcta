@@ -1,0 +1,35 @@
+# 全局配置文件
+
+# Webhook配置
+webhook:
+  # 企业微信机器人webhook地址
+  wechat_work: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=62dbc232-b8b7-4979-a378-d206085966bf"
+  # 是否启用
+  enabled: true
+  # 错误级别推送阈值 (debug, info, warning, error, critical)
+  min_level: "error"
+  # 推送间隔限制（秒）- 避免频繁推送
+  rate_limit_seconds: 60
+
+# 全局限流配置
+rate_limiting:
+  binance:
+    # API请求限制 (每分钟)
+    requests_per_minute: 1200
+    # 订单限制 (每秒)
+    orders_per_second: 10
+    # 权重限制 (每分钟)
+    weight_per_minute: 6000
+    # 自适应降速
+    adaptive_slowdown: true
+    # 降速恢复时间（秒）
+    recovery_time_seconds: 30
+    
+# 缓存配置
+cache:
+  # 订单缓存时间（秒）
+  orders_ttl: 30
+  # 余额缓存时间（秒）
+  balance_ttl: 10
+  # 仓位缓存时间（秒）
+  positions_ttl: 5

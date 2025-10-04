@@ -1,0 +1,46 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Logs
+logs/
+*.log
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+backup/
+
+# Sensitive information
+*.key
+*.pem
+*.cert
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Git
+.git/

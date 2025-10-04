@@ -1,0 +1,34 @@
+# AVAX/USDC 泊松做市策略配置
+# 免手续费优化版 - 永续合约
+
+name: "POISSON_AVAX_USDC"
+enabled: true
+version: "1.0.0"
+
+account:
+  account_id: "binance_main"
+  exchange: "binance"
+
+trading:
+  symbol: "AVAX/USDC"
+  order_size_usdc: 6.0       # 每单金6 USDC
+  max_inventory: 345.0        # 最大库存345 USDC - 提升15% (与NEAR一致)
+  min_spread_bp: 5.0          # 0.05% (与NEAR一致)
+  max_spread_bp: 12.0         # 0.12% (与NEAR一致)
+  refresh_interval_secs: 10   # 10秒刷新 (与NEAR一致)
+  price_precision: 3
+  quantity_precision: 2
+
+poisson:
+  observation_window_secs: 360    # 6分钟观察窗口 (与NEAR一致)
+  min_samples: 45                 # 最小样本数 (与NEAR一致)
+  smoothing_alpha: 0.2            # 平滑系数 (与NEAR一致)
+  depth_levels: 8                 # 深度级别 (保持不变)
+  confidence_interval: 0.95
+  initial_lambda: 8.0             # 初始到达率 (与NEAR一致)
+
+risk:
+  max_unrealized_loss: 10.0
+  max_daily_loss: 30.0
+  inventory_skew_limit: 0.7      # 库存偏斜限制 (与NEAR一致)
+  stop_loss_pct: 0.007           # 0.7% 止损 (与NEAR一致)

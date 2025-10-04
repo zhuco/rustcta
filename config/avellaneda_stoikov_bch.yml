@@ -1,0 +1,240 @@
+# Avellaneda-Stoikov 策略配置 - BCH/USDC
+# 根据60天历史数据优化（最大日波动10%）
+
+# 策略基本信息
+strategy:
+  name: "AS_BCH"
+  version: "1.0.0"
+  type: "avellaneda_stoikov"
+  description: "BCH/USDC Avellaneda-Stoikov做市策略"
+  enabled: true
+  log_level: "INFO"
+
+# 账户配置
+account:
+  account_id: "binance_hcr"
+  exchange: "binance"
+
+# 交易配置
+trading:
+  # 交易对（免手续费）
+  symbol: "BCH/USDC"
+  
+  # 市场类型
+  market_type: "futures"
+  
+  # 每单金额 (用户指定7 USDC)
+  order_size_usdc: 7.0
+  
+  # 最大库存（BCH当前约$430，限制2个BCH约$860）
+  max_inventory: 2.0  # 2个BCH
+  
+  # 价差配置（10%日波动属于中等波动）
+  min_spread_bp: 15.0   # 最小10基点
+  max_spread_bp: 100.0  # 最大100基点
+  
+  # 订单刷新间隔
+  refresh_interval_secs: 3
+  
+  # 价格和数量精度
+  price_precision: 2      # BCH价格精度
+  quantity_precision: 3   # 数量精度
+  
+  # 订单配置
+  order_config:
+    post_only: true       # 只做maker
+    time_in_force: "GTX"  # Post-only
+    reduce_only: false
+
+# Avellaneda-Stoikov 核心参数
+as_params:
+  # 风险厌恶系数（中等波动用中等风险）
+  risk_aversion: 0.8
+  
+  # 订单执行强度
+  order_book_intensity: 1.5
+  
+  # 时间窗口（45分钟滚动窗口）
+  time_horizon_seconds: 2700  # 45分钟
+  
+  # 波动率计算
+  volatility:
+    # 使用15个价格点
+    lookback_periods: 15
+    # 每20秒更新一次
+    update_interval: 20
+    # 指数衰减因子
+    decay_factor: 0.93
+  
+  # 库存偏斜调整
+  inventory_skew:
+    enabled: true
+    # 偏斜强度（中等）
+    skew_factor: 0.45
+    # 目标保持中性仓位
+    target_inventory_ratio: 0.0
+  
+  # 价差动态调整
+  spread_adjustment:
+    # 成交量影响
+    volume_factor: 0.18
+    # 深度影响
+    depth_factor: 0.12
+    # 买卖压力影响
+    pressure_factor: 0.22
+
+# 市场数据配置
+market_data:
+  # 订单簿深度
+  orderbook_levels: 15
+  
+  # 成交缓存
+  trades_buffer_size: 600
+  
+  # K线配置
+  kline:
+    interval: "1m"
+    history_size: 60  # 60根1分钟K线
+
+# 风险管理
+risk:
+  # 最大未实现亏损 (USDC)
+  max_unrealized_loss: 70.0  # 10笔订单金额
+  
+  # 最大日亏损 (USDC)
+  max_daily_loss: 150.0
+  
+  # 库存风险
+  inventory_risk:
+    # 最大持仓价值
+    max_position_value: 860.0  # 约2个BCH
+    # 库存不平衡警告（60%）
+    imbalance_threshold: 0.6
+  
+  # 止损配置
+  stop_loss:
+    enabled: true
+    # 止损2.5%
+    stop_loss_pct: 2.5
+    # 冷却5分钟
+    cooldown_seconds: 300
+  
+  # 波动率限制（适应10%日波动）
+  volatility_limits:
+    # 最大150%年化波动率
+    max_volatility: 150.0
+    # 最小25%年化波动率
+    min_volatility: 25.0
+  
+  # 紧急停止
+  emergency_stop:
+    # 连续6次亏损
+    consecutive_losses: 6
+    # 最大回撤4%
+    max_drawdown_pct: 4.0
+
+# 性能优化
+performance:
+  # 订单合并
+  order_aggregation:
+    enabled: true
+    min_price_diff_bp: 3.0
+  
+  # 智能取消（价格偏离时取消）
+  smart_cancellation:
+    enabled: true
+    price_drift_threshold_bp: 12.0
+  
+  # 部分成交
+  partial_fill:
+    min_fill_ratio: 0.15
+    immediate_replace: true
+
+# 数据源配置
+data_sources:
+  # WebSocket
+  websocket:
+    enabled: true
+    streams:
+      - "depth"      # 订单簿
+      - "trade"      # 成交
+      - "kline_1m"   # 1分钟K线
+      - "account"    # 账户更新
+    reconnect_interval: 5
+  
+  # REST API
+  rest_api:
+    enabled: true
+    refresh_interval: 30
+    endpoints:
+      - "balance"
+      - "positions"
+      - "orders"
+
+# 监控配置
+monitoring:
+  # 指标
+  metrics:
+    enabled: true
+    export_interval: 60
+    
+  # 健康检查
+  health_check:
+    enabled: true
+    interval: 30
+    
+  # 交易日志
+  trade_logging:
+    enabled: true
+    log_fills: true
+    log_quotes: false  # 减少日志量
+    log_cancellations: true
+    
+  # 告警
+  alerts:
+    enabled: true
+    channels:
+      - "log"
+    thresholds:
+      inventory_imbalance: 0.7
+      loss_limit: 0.8
+      low_liquidity: 40
+
+# BCH特殊配置（中等波动币种）
+market_specific:
+  # 波动管理
+  volatility_handling:
+    # 根据波动调整策略
+    adaptive_spread: true
+    # 波动率乘数
+    volatility_multiplier:
+      low: 1.0     # <5%日波动
+      medium: 1.3  # 5-8%日波动
+      high: 1.8    # >8%日波动
+  
+  # 流动性检测
+  liquidity_check:
+    enabled: true
+    # 最小订单簿深度（USD）
+    min_depth_usd: 5000
+    # 深度不足时扩大价差
+    low_liquidity_spread_multiplier: 1.5
+
+# 永续合约特殊配置
+perpetual:
+  # 资金费率
+  funding_rate:
+    consider_funding: false
+    threshold_pct: 0.05
+    
+  # 维护时间
+  maintenance:
+    stop_before: 0
+    resume_after: 0
+
+# 开发调试
+debug:
+  enabled: false
+  verbose_logging: false
+  dry_run: false  # 实盘运行
+  save_market_data: false

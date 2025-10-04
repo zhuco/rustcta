@@ -1,0 +1,99 @@
+# 统一账户配置文件
+# 所有账户的集中管理
+version: "1.0"
+
+# 账户定义
+accounts:
+  # ===== Binance 账户组 =====
+  binance_main:
+    name: binance_main
+    exchange: binance
+    type: futures
+    description: "主账户 - hubinyan"
+    env_prefix: BINANCE_0        # 使用 BINANCE_0_API_KEY 和 BINANCE_0_SECRET_KEY
+    enabled: true
+    settings:
+      max_positions: 10
+      max_orders_per_symbol: 20
+      leverage: 10
+  
+  binance_daidan:
+    name: binance_daidan
+    exchange: binance
+    type: futures  
+    description: "带单员帐户"
+    env_prefix: BINANCE_2      # 使用 BINANCE_2_API_KEY 和 BINANCE_2_SECRET_KEY
+    enabled: true
+    settings:
+      max_positions: 5
+      max_orders_per_symbol: 10
+      leverage: 5
+      
+  binance_hcr:
+    name: binance_hcr
+    exchange: binance
+    type: futures
+    description: "胡超然帐户"  
+    env_prefix: BINANCE_3      # 使用 BINANCE_3_API_KEY 和 BINANCE_3_SECRET_KEY
+    enabled: true
+    settings:
+      max_positions: 5
+      max_orders_per_symbol: 10
+      leverage: 5
+
+  # ===== 其他交易所 =====
+  bitmart_main:
+    name: bitmart_main
+    exchange: bitmart
+    type: futures
+    description: "BitMart主账户"
+    env_prefix: BITMART
+    enabled: true
+    settings:
+      max_positions: 10
+      max_orders_per_symbol: 20
+      
+  htx_main:
+    name: htx_main
+    exchange: htx
+    type: spot
+    description: "HTX主账户"
+    env_prefix: HTX
+    enabled: false
+    settings:
+      max_positions: 10
+      max_orders_per_symbol: 20
+  
+  # ===== HyperLiquid 账户 =====
+  hyperliquid_main:
+    name: hyperliquid_main
+    exchange: hyperliquid
+    type: futures
+    description: "HyperLiquid主账户 - 永续合约"
+    env_prefix: HYPERLIQUID
+    enabled: true
+    settings:
+      max_positions: 10
+      max_orders_per_symbol: 20
+      leverage: 10
+
+# 账户分组（可选）
+groups:
+  production:
+    - binance_main
+    - binance_daidan
+    - binance_hcr
+    - hyperliquid_main
+    
+  testing:
+    - bitmart_main
+    
+  disabled:
+    - htx_main
+
+# 默认设置
+defaults:
+  max_positions: 10
+  max_orders_per_symbol: 20
+  leverage: 10
+  recv_window: 5000  # 时间窗口，解决时间戳问题

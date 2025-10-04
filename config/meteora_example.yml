@@ -1,0 +1,176 @@
+# Meteora DLMM策略配置模板
+# 用于在Solana DEX上进行做市交易
+
+# 交易所配置
+exchange:
+  type: meteora
+  # RPC节点（建议使用付费节点以获得更好的性能）
+  rpc_url: "https://api.mainnet-beta.solana.com"
+  # 备选RPC节点
+  backup_rpc:
+    - "https://solana-api.projectserum.com"
+    - "https://rpc.ankr.com/solana"
+  
+  # API配置
+  jupiter_api: "https://quote-api.jup.ag/v6"
+  meteora_api: "https://dlmm-api.meteora.ag"
+  birdeye_api_key: ""  # 可选，用于获取更好的价格数据
+
+# 策略配置
+strategy:
+  type: meteora_dlmm
+  
+  # 交易对（支持的对）
+  pairs:
+    - symbol: "SOL/USDC"
+      enabled: true
+      base_amount: 1.0      # SOL数量
+      quote_amount: 100.0   # USDC数量
+      
+    - symbol: "RAY/USDC"
+      enabled: false
+      base_amount: 10.0
+      quote_amount: 50.0
+      
+    - symbol: "BONK/USDC"
+      enabled: false
+      base_amount: 1000000.0
+      quote_amount: 20.0
+  
+  # 做市参数
+  market_making:
+    # 价格范围策略
+    price_range_strategy: "dynamic"  # static, dynamic, adaptive
+    
+    # 静态价格范围（百分比）
+    static_range:
+      lower_percent: -2.0  # 当前价格-2%
+      upper_percent: 2.0   # 当前价格+2%
+    
+    # 动态价格范围（基于波动率）
+    dynamic_range:
+      volatility_window: "1h"  # 1h, 4h, 24h
+      range_multiplier: 2.0    # 范围 = 波动率 * multiplier
+      min_range: 1.0           # 最小范围%
+      max_range: 5.0           # 最大范围%
+    
+    # bin配置（Meteora特有）
+    bin_config:
+      bin_step: 10           # 基点（10 = 0.1%）
+      bin_count: 20          # bin数量
+      distribution: "uniform" # uniform, normal, custom
+    
+    # 再平衡策略
+    rebalance:
+      enabled: true
+      check_interval: 300     # 检查间隔（秒）
+      threshold: 0.5         # 价格偏离阈值%
+      min_time_between: 600  # 最小再平衡间隔（秒）
+  
+  # 交易执行
+  execution:
+    # 滑点设置
+    slippage_bps: 50        # 基点（50 = 0.5%）
+    max_slippage_bps: 100   # 最大滑点
+    
+    # 优先费（加速交易）
+    priority_fee_lamports: 5000
+    max_priority_fee: 50000
+    
+    # 重试设置
+    max_retries: 3
+    retry_delay_ms: 1000
+    
+    # MEV保护
+    use_jito_bundles: false  # 使用Jito Bundle防止MEV
+    jito_tip_lamports: 10000
+  
+# 风险管理
+risk:
+  # 仓位限制
+  max_position_size_usd: 1000.0
+  max_position_per_pair: 500.0
+  
+  # 止损设置
+  stop_loss_percent: 5.0       # 止损百分比
+  trailing_stop: false         # 移动止损
+  trailing_stop_distance: 2.0  # 移动止损距离%
+  
+  # 库存管理
+  inventory_target: 0.5        # 目标库存比例（0.5 = 50:50）
+  inventory_skew_limit: 0.7    # 最大偏离（0.7 = 30:70）
+  auto_hedge: false             # 自动对冲
+  
+  # 无常损失保护
+  max_il_percent: 3.0          # 最大无常损失%
+  il_check_interval: 300       # 检查间隔（秒）
+  
+  # 每日限制
+  daily_loss_limit_usd: 50.0
+  daily_volume_limit_usd: 10000.0
+
+# 数据源配置
+data:
+  # 价格源
+  price_source: "jupiter"  # jupiter, birdeye, coingecko
+  price_update_interval: 10  # 秒
+  
+  # 链上数据
+  use_websocket: true
+  ws_endpoint: "wss://api.mainnet-beta.solana.com"
+  
+  # 历史数据
+  fetch_history: true
+  history_days: 7
+
+# 监控和通知
+monitoring:
+  # 日志级别
+  log_level: "INFO"  # DEBUG, INFO, WARN, ERROR
+  
+  # 性能监控
+  track_performance: true
+  performance_interval: 3600  # 报告间隔（秒）
+  
+  # 通知设置
+  notifications:
+    enabled: true
+    channels:
+      - type: "webhook"
+        url: "${WEBHOOK_URL}"
+        events:
+          - "trade_executed"
+          - "rebalance"
+          - "stop_loss"
+          - "error"
+    
+    thresholds:
+      profit_alert: 10.0      # 盈利提醒USD
+      loss_alert: 5.0         # 亏损提醒USD
+      volume_alert: 1000.0    # 交易量提醒USD
+
+# 高级设置
+advanced:
+  # 并发控制
+  max_concurrent_orders: 5
+  order_queue_size: 100
+  
+  # 缓存设置
+  cache_ttl: 60              # 缓存过期时间（秒）
+  max_cache_size: 1000       # 最大缓存条目
+  
+  # 性能优化
+  use_memory_pool: true
+  batch_transactions: true
+  optimize_gas: true
+  
+  # 调试选项
+  dry_run: false             # 模拟运行（不执行真实交易）
+  save_raw_data: false       # 保存原始数据
+  debug_mode: false          # 调试模式
+
+# 环境变量（在.env文件中设置）
+# SOLANA_PRIVATE_KEY=你的Base58格式私钥
+# WEBHOOK_URL=你的webhook地址
+# BIRDEYE_API_KEY=Birdeye API密钥（可选）
+# JITO_API_KEY=Jito API密钥（可选）

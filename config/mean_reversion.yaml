@@ -1,0 +1,185 @@
+strategy:
+  name: "oscillation_mean_reversion"
+  version: "1.0.0"
+  enabled: true
+  log_level: "INFO"
+  description: "Mean-reversion strategy for oscillating markets"
+
+account:
+  account_id: "binance_main"
+  market_type: "Futures"
+  allow_short: false
+
+data:
+  scan_interval_secs: 300
+  websocket:
+    url_override: null
+    ping_interval_secs: 20
+    reconnect:
+      initial_delay_ms: 1000
+      max_delay_ms: 60000
+      multiplier: 1.8
+    subscriptions:
+      kline_1m: true
+      kline_5m: true
+      kline_15m: true
+      partial_book_depth: 5
+  rest:
+    min_klines_15m: 450
+    history_batch_size: 500
+    max_retries: 6
+    backoff:
+      base_delay_ms: 500
+      max_delay_ms: 30000
+      multiplier: 2.0
+    heartbeat_secs: 30
+  validation:
+    enable_missing_bar_freeze: true
+    enable_sequence_check: true
+    max_gap_minutes: 45
+
+symbols:
+  - symbol: "ORDI/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "ARB/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "TIA/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "DOGE/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "WIF/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "ADA/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 2.5
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "BOME/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "ETHFI/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "IP/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "PNUT/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "PENGU/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+
+indicators:
+  bollinger:
+    period: 20
+    std_dev: 2.0
+    entry_band_pct_long: 0.1
+    entry_band_pct_short: 0.9
+    entry_z_long: -1.2
+    entry_z_short: 1.2
+  rsi:
+    period: 14
+    long_threshold: 25
+    short_threshold: 75
+  atr:
+    period: 14
+    initial_stop_k: 1.4
+    trailing_stop_k: 1.1
+  adx:
+    period: 14
+    threshold: 20
+  bbw:
+    lookback: 400
+    percentile: 0.35
+  slope:
+    lookback: 5
+    threshold: 0.15
+  choppiness:
+    enabled: true
+    lookback: 14
+    threshold: 62
+  volume:
+    lookback_minutes: 10
+    min_quote_volume: 60000
+
+execution:
+  post_only: true
+  base_improve: 0.002
+  alpha_atr: 1.5
+  beta_sigma: 1.0
+  ttl_secs: 58
+  cancel_rate_limit_per_min: 20
+  relist_delay_ms: 800
+  max_relist_attempts: 3
+
+risk:
+  enable: true
+  max_positions: 10
+  max_positions_per_symbol: 1
+  max_net_exposure: 1000
+  per_trade_notional: 10.0
+  per_trade_risk: 10.0
+  time_stop_bars: 12
+  daily_drawdown: 0.03
+  freeze_on_gap: true
+
+liquidity:
+  min_recent_quote_volume: 0
+  volume_window_minutes: 10
+  depth_multiplier: 3.0
+  top_levels: 3
+  spread_factor_limit: 0.004
+  maker_fee_threshold: 1.0
+
+cache:
+  max_1m_bars: 720
+  max_5m_bars: 720
+  max_15m_bars: 480

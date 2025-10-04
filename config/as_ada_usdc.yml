@@ -1,0 +1,96 @@
+# ADA/USDC 自动剥头皮策略配置
+# 免手续费优化版 - 永续合约
+
+strategy:
+  name: "AS_ADA_USDC"
+  version: "1.0.0"
+  type: "automated_scalping"
+  description: "ADA/USDC永续合约自动剥头皮策略 - 平稳网格交易(2倍杠杆)"
+  enabled: true
+
+account:
+  account_id: "binance_main"
+  exchange: "binance"
+
+trading:
+  symbol: "ADA/USDC"
+  market_type: "futures"
+  order_size_usdc: 6.0
+  max_inventory: 200.0  # 调整为200 USDC
+  min_spread_bp: 25.0  # 0.25% 最小价差 - 捉漏级别
+  max_spread_bp: 50.0  # 0.50% 最大价差 - 捉漏级别
+  refresh_interval_secs: 30  # 30秒刷新，给订单更多时间
+  price_precision: 4
+  quantity_precision: 0
+  order_config:
+    post_only: true
+    time_in_force: "GTC"
+    reduce_only: false
+
+as_params:
+  scalping_frequency:
+    min_interval_ms: 30000  # 30秒最小间隔
+    max_orders_per_minute: 4
+  microstructure:
+    orderbook_depth_levels: 10
+    bid_ask_imbalance_threshold: 0.3
+    volume_spike_multiplier: 2.0
+  spread_adjustment:
+    volatility_multiplier: 1.6
+    inventory_penalty_rate: 0.001
+    market_impact_factor: 0.0001
+  order_management:
+    max_open_orders_per_side: 1
+    order_lifetime_seconds: 60  # 订单生命周期60秒
+    partial_fill_threshold: 0.5
+
+risk:
+  max_unrealized_loss: 5.0
+  max_daily_loss: 20.0
+  inventory_skew_limit: 0.7
+  stop_loss_pct: 0.007     # 0.7%
+  max_position_hours: 1
+  emergency_stop:
+    max_drawdown_pct: 0.05
+    consecutive_losses: 5
+    volatility_threshold: 0.02
+
+indicators:
+  ema:
+    fast_period: 9
+    slow_period: 21
+  rsi:
+    period: 14
+    overbought: 70.0
+    oversold: 30.0
+  vwap:
+    period: 20
+  atr:
+    period: 14
+
+data_sources:
+  websocket:
+    enabled: true
+    streams: ["trade", "depth", "ticker"]
+    reconnect_interval: 5
+  rest_api:
+    enabled: true
+    refresh_interval: 60
+    endpoints: ["ticker/24hr", "depth"]
+
+logging:
+  level: "info"
+  enable_trade_log: true
+  enable_performance_log: false
+
+monitoring:
+  alerts:
+    enabled: false
+    webhook_url: ""
+    email_alerts: false
+  health_check:
+    enabled: true
+    check_interval: 60
+  performance:
+    enable_metrics: true
+    metrics_interval: 60

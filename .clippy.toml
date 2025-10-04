@@ -1,0 +1,23 @@
+# 禁止使用 unwrap 和 expect
+disallowed-methods = [
+    { path = "Option::unwrap", reason = "use ? operator or handle error properly" },
+    { path = "Result::unwrap", reason = "use ? operator or handle error properly" },
+    { path = "Result::expect", reason = "use ? operator with context" },
+]
+
+# 严格的 lint 规则
+warn = [
+    "clippy::all",
+    "clippy::pedantic",
+    "clippy::nursery",
+    "clippy::cargo",
+]
+
+# 禁止的模式
+deny = [
+    "clippy::unwrap_used",
+    "clippy::expect_used",
+    "clippy::panic",
+    "clippy::unimplemented",
+    "clippy::todo",
+]

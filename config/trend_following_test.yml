@@ -1,0 +1,139 @@
+# 趋势跟踪策略实盘测试配置
+# 选择小额交易对进行测试
+
+name: "Trend Following Test"
+account_id: "binance_hcr"
+symbols:
+  - "XLM/USDC"    # 恒星币 ~0.35 USDC
+  - "DOGE/USDC"   # 狗狗币 ~0.21 USDC  
+  - "SEI/USDC"    # SEI ~0.28 USDC
+max_positions: 3
+max_daily_trades: 6
+min_account_balance: 100.0
+min_risk_reward_ratio: 2.0
+min_signal_confidence: 65.0
+max_holding_hours: 12
+pyramid_enabled: false
+pyramid_levels: []
+
+strategy:
+  name: "Trend Following Test"
+  version: "1.0.0"
+  enabled: true
+  
+# 交易配置 - 选择价格适中的币种
+trading_config:
+  account_id: "binance_hcr"
+  symbols:
+    - "XLM/USDC"    # 恒星币 ~0.35 USDC
+    - "DOGE/USDC"   # 狗狗币 ~0.21 USDC  
+    - "SEI/USDC"    # SEI ~0.28 USDC
+  max_positions: 3
+  max_daily_trades: 6
+  min_account_balance: 100.0      # 降低最小余额要求
+  min_risk_reward_ratio: 2.0
+  min_signal_confidence: 65.0     # 提高信号要求
+  max_holding_hours: 12            # 缩短持仓时间
+  pyramid_enabled: false           # 测试阶段关闭金字塔加仓
+  pyramid_levels: []
+
+# 保守的风控配置
+risk_config:
+  max_risk_per_trade: 0.005        # 单笔风险0.5%（更保守）
+  max_daily_loss: 0.02              # 日最大亏损2%
+  max_drawdown: 0.10                # 最大回撤10%
+  max_consecutive_losses: 3
+  max_total_exposure: 0.3           # 总仓位上限30%
+  max_single_exposure: 0.1          # 单币种仓位上限10%
+  max_correlated_exposure: 0.15     # 相关币种15%
+  max_leverage: 1.0                 # 不使用杠杆
+  max_slippage: 0.003               # 滑点0.3%
+  emergency_stop_loss: 0.05         # 紧急停止5%
+
+# 指标配置
+indicator_config:
+  primary_timeframe: "1h"          # 主时间框架改为1小时
+  secondary_timeframe: "30m"       # 次要30分钟
+  trigger_timeframe: "5m"          # 触发5分钟
+  fast_ema: 12
+  slow_ema: 26
+  atr_period: 14
+  adx_period: 14
+  adx_threshold: 25.0
+  rsi_period: 14
+  rsi_overbought: 70.0
+  rsi_oversold: 30.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+
+# 信号配置
+signal_config:
+  breakout_lookback: 20
+  breakout_confirmation_bars: 2
+  pullback_ratio: 0.382
+  pullback_min_trend_strength: 35.0
+  momentum_threshold: 0.015
+  momentum_lookback: 10
+  pattern_min_bars: 5
+  pattern_confidence: 65.0
+  volume_multiplier: 1.3
+  volume_lookback: 20
+  signal_expiry: 180               # 信号3分钟过期
+
+# 仓位配置
+position_config:
+  base_risk_ratio: 0.005           # 基础风险0.5%
+  kelly_fraction: 0.2              # 1/5 Kelly（更保守）
+  pyramid_enabled: false
+  pyramid_levels: []
+  trend_factor_enabled: true
+  volatility_factor_enabled: true
+  time_factor_enabled: false       # 关闭时间因子
+  max_holding_hours: 12
+
+# 止损止盈配置
+stop_config:
+  initial_stop_type: "ATR"
+  atr_multiplier: 1.5              # 更紧的止损
+  fixed_stop_percent: 0.015        # 固定止损1.5%
+  trailing_stop_enabled: true
+  trailing_activation: 0.5         # 0.5R激活追踪
+  trailing_distance: 0.3           # 追踪距离0.3R
+  trailing_step: 0.2
+  time_stop_hours: 12              # 12小时时间止损
+  breakeven_enabled: true
+  breakeven_trigger: 0.3           # 0.3R触发保本
+  partial_targets:                 # 部分止盈
+    - target_r: 0.5                # 0.5R
+      close_ratio: 0.3             # 平30%
+    - target_r: 1.0                # 1R
+      close_ratio: 0.3             # 平30%
+    - target_r: 1.5                # 1.5R  
+      close_ratio: 0.2             # 平20%
+
+# 执行配置
+execution:
+  order_type: "limit"
+  time_in_force: "GTC"
+  post_only: false
+  reduce_only: false
+  retry_times: 2
+  retry_delay: 500
+
+# 监控配置
+monitoring:
+  performance_report_interval: 600  # 10分钟报告
+  risk_check_interval: 30          # 30秒风险检查
+  heartbeat_interval: 10
+  alert_webhook: ""
+  
+# 日志配置
+logging:
+  level: "DEBUG"                   # 调试级别
+  file: "logs/trend_following_test.log"
+  console: true
+  rotate_size: "50MB"
+  rotate_days: 3

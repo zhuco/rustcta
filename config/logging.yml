@@ -1,0 +1,125 @@
+# RustCTA 统一日志配置
+# 所有策略和组件的日志配置都在此处管理
+
+# 日志系统配置
+logging:
+  # 日志根目录
+  root_dir: "logs"
+  
+  # 日志级别 (DEBUG, INFO, WARN, ERROR)
+  default_level: "INFO"
+  
+  # 日志文件大小限制 (MB)
+  max_file_size_mb: 10
+  
+  # 日志保留天数
+  retention_days: 30
+  
+  # 是否同时输出到控制台
+  console_output: true
+  
+  # 日志格式
+  format: "[{timestamp}] [{level}] [{module}] {message}"
+
+# 日志目录结构
+directories:
+  strategies: "logs/strategies"     # 所有策略日志
+  manager: "logs/manager"           # 管理器日志
+  system: "logs/system"            # 系统日志
+  api: "logs/api"                  # API接口日志
+  database: "logs/database"        # 数据库日志
+  backtest: "logs/backtest"        # 回测日志
+
+# 日志文件命名规范
+naming_patterns:
+  # 策略日志: {策略名}_{日期}.log
+  strategy: "{name}_{date}.log"
+  
+  # 轮转日志: {策略名}_{日期}_{序号}.log
+  rotated: "{name}_{date}_{seq}.log"
+  
+  # 系统日志: system_{日期}.log
+  system: "system_{date}.log"
+  
+  # API日志: api_{日期}.log
+  api: "api_{date}.log"
+
+# 各策略的特殊配置（如果需要覆盖默认值）
+strategy_overrides:
+  # 高频策略可能需要更大的日志文件
+  poisson_sui:
+    max_file_size_mb: 20
+    level: "INFO"
+  
+  poisson_arb:
+    max_file_size_mb: 20
+    level: "INFO"
+  
+  poisson_doge:
+    max_file_size_mb: 20
+    level: "INFO"
+  
+  # 马丁策略需要详细日志
+  martin_link:
+    level: "DEBUG"
+    max_file_size_mb: 15
+  
+  martin_xrp:
+    level: "DEBUG"
+    max_file_size_mb: 15
+  
+  # 趋势网格策略
+  trend_grid_ena:
+    level: "INFO"
+    max_file_size_mb: 10
+  
+  # AS策略
+  as_ordi:
+    level: "INFO"
+    max_file_size_mb: 10
+  
+  # 跟单策略
+  copy_trading_simple:
+    level: "INFO"
+    max_file_size_mb: 10
+
+# 日志清理策略
+cleanup:
+  # 是否启用自动清理
+  enabled: true
+  
+  # 清理间隔（小时）
+  interval_hours: 24
+  
+  # 清理规则
+  rules:
+    # 删除超过保留天数的日志
+    - type: "age"
+      days: 30
+    
+    # 当磁盘使用率超过阈值时删除最旧的日志
+    - type: "disk_usage"
+      threshold_percent: 80
+      
+    # 压缩超过7天的日志
+    - type: "compress"
+      days: 7
+      format: "gzip"
+
+# 日志监控和告警
+monitoring:
+  # 是否启用监控
+  enabled: true
+  
+  # 错误日志告警阈值（每分钟）
+  error_threshold_per_minute: 10
+  
+  # 日志文件大小告警阈值 (MB)
+  file_size_alert_mb: 50
+  
+  # 告警通知方式
+  notifications:
+    - type: "file"
+      path: "logs/alerts.log"
+    # - type: "webhook"
+    #   url: "https://your-webhook-url"

@@ -1,0 +1,96 @@
+# DOGE/USDC 自动剥头皮策略配置
+# 免手续费优化版 - 永续合约
+
+strategy:
+  name: "AS_DOGE_USDC"
+  version: "1.0.0"
+  type: "automated_scalping"
+  description: "DOGE/USDC永续合约自动剥头皮策略 - 高波动快速交易(2倍杠杆)"
+  enabled: false
+
+account:
+  account_id: "binance_main"
+  exchange: "binance"
+
+trading:
+  symbol: "DOGE/USDC"
+  market_type: "futures"
+  order_size_usdc: 6.0
+  max_inventory: 200.0  # 调整为200 USDC
+  min_spread_bp: 10.0  # 0.10% 最小价差
+  max_spread_bp: 25.0  # 0.25% 最大价差
+  refresh_interval_secs: 8
+  price_precision: 5
+  quantity_precision: 0
+  order_config:
+    post_only: true
+    time_in_force: "GTC"
+    reduce_only: false
+
+as_params:
+  scalping_frequency:
+    min_interval_ms: 8000   # 8秒最小间隔
+    max_orders_per_minute: 7
+  microstructure:
+    orderbook_depth_levels: 10
+    bid_ask_imbalance_threshold: 0.35
+    volume_spike_multiplier: 2.5
+  spread_adjustment:
+    volatility_multiplier: 2.0
+    inventory_penalty_rate: 0.0015
+    market_impact_factor: 0.00015
+  order_management:
+    max_open_orders_per_side: 2
+    order_lifetime_seconds: 25
+    partial_fill_threshold: 0.4
+
+risk:
+  max_unrealized_loss: 5.0
+  max_daily_loss: 20.0
+  inventory_skew_limit: 0.75
+  stop_loss_pct: 0.01      # 1%
+  max_position_hours: 1
+  emergency_stop:
+    max_drawdown_pct: 0.05
+    consecutive_losses: 5
+    volatility_threshold: 0.025
+
+indicators:
+  ema:
+    fast_period: 7
+    slow_period: 20
+  rsi:
+    period: 14
+    overbought: 75.0
+    oversold: 25.0
+  vwap:
+    period: 20
+  atr:
+    period: 14
+
+data_sources:
+  websocket:
+    enabled: true
+    streams: ["trade", "depth", "ticker"]
+    reconnect_interval: 5
+  rest_api:
+    enabled: true
+    refresh_interval: 60
+    endpoints: ["ticker/24hr", "depth"]
+
+logging:
+  level: "info"
+  enable_trade_log: true
+  enable_performance_log: false
+
+monitoring:
+  alerts:
+    enabled: false
+    webhook_url: ""
+    email_alerts: false
+  health_check:
+    enabled: true
+    check_interval: 60
+  performance:
+    enable_metrics: true
+    metrics_interval: 60

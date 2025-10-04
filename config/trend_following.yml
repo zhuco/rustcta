@@ -1,0 +1,128 @@
+# 专业级日内趋势跟踪策略配置
+# 警告：此策略涉及高风险，可能导致本金损失
+
+strategy:
+  name: "Professional Trend Following Strategy"
+  version: "1.0.0"
+  enabled: true
+  
+# 交易配置
+trading_config:
+  account_id: "binance_hcr"
+  symbols:
+    - "BTC/USDC"
+    - "ETH/USDC" 
+    - "SOL/USDC"
+  max_positions: 3
+  max_daily_trades: 10
+  min_account_balance: 1000.0
+  min_risk_reward_ratio: 2.0
+  min_signal_confidence: 60.0
+
+# 风控配置（严格）
+risk_config:
+  max_risk_per_trade: 0.01          # 单笔最大风险 1%
+  max_daily_loss: 0.03              # 日最大亏损 3%
+  max_drawdown: 0.15                # 最大回撤 15%
+  max_consecutive_losses: 3         # 连续亏损次数限制
+  max_total_exposure: 0.5           # 总仓位上限 50%
+  max_single_exposure: 0.1          # 单币种仓位上限 10%
+  max_correlated_exposure: 0.2      # 相关币种组合上限 20%
+  max_leverage: 3.0                 # 最大杠杆 3倍
+  max_slippage: 0.002               # 最大滑点 0.2%
+  emergency_stop_loss: 0.1          # 紧急停止阈值 10%
+
+# 指标配置
+indicator_config:
+  primary_timeframe: "4h"           # 主要时间框架
+  secondary_timeframe: "1h"         # 次要时间框架
+  trigger_timeframe: "15m"          # 触发时间框架
+  fast_ema: 20                      # 快速EMA
+  slow_ema: 50                      # 慢速EMA
+  atr_period: 14                    # ATR周期
+  adx_period: 14                    # ADX周期
+  adx_threshold: 25.0               # ADX趋势阈值
+  rsi_period: 14                    # RSI周期
+  rsi_overbought: 70.0              # RSI超买
+  rsi_oversold: 30.0                # RSI超卖
+  macd_fast: 12                    # MACD快线
+  macd_slow: 26                    # MACD慢线
+  macd_signal: 9                   # MACD信号线
+  bb_period: 20                    # 布林带周期
+  bb_std: 2.0                      # 布林带标准差
+
+# 信号配置
+signal_config:
+  breakout_lookback: 20             # 突破回望期
+  breakout_confirmation_bars: 2     # 突破确认K线数
+  pullback_ratio: 0.382             # 回调比例（斐波那契）
+  pullback_min_trend_strength: 40.0 # 回调最小趋势强度
+  momentum_threshold: 0.02          # 动量阈值
+  momentum_lookback: 10             # 动量回望期
+  pattern_min_bars: 5               # 形态最小K线数
+  pattern_confidence: 70.0          # 形态置信度
+  volume_multiplier: 1.5            # 成交量倍数
+  volume_lookback: 20               # 成交量回望期
+  signal_expiry: 300                # 信号过期时间（秒）
+
+# 仓位配置
+position_config:
+  base_risk_ratio: 0.01             # 基础风险比例 1%
+  kelly_fraction: 0.25              # Kelly系数（1/4 Kelly）
+  pyramid_enabled: true             # 启用金字塔加仓
+  pyramid_levels:
+    - trigger_profit: 0.5           # 0.5R触发
+      size_ratio: 0.3               # 加仓30%
+    - trigger_profit: 1.0           # 1R触发
+      size_ratio: 0.3               # 加仓30%
+    - trigger_profit: 2.0           # 2R触发
+      size_ratio: 0.2               # 加仓20%
+  trend_factor_enabled: true        # 启用趋势因子
+  volatility_factor_enabled: true   # 启用波动率因子
+  time_factor_enabled: true         # 启用时间因子
+  max_holding_hours: 24             # 最大持仓时间（小时）
+
+# 止损止盈配置
+stop_config:
+  initial_stop_type: "ATR"          # 初始止损类型
+  atr_multiplier: 2.0               # ATR倍数
+  fixed_stop_percent: 0.02          # 固定止损百分比
+  trailing_stop_enabled: true       # 启用追踪止损
+  trailing_activation: 1.0          # 追踪激活（R倍数）
+  trailing_distance: 0.5            # 追踪距离（R倍数）
+  trailing_step: 0.5                # 追踪步进
+  time_stop_hours: 24               # 时间止损（小时）
+  breakeven_enabled: true           # 启用保本止损
+  breakeven_trigger: 0.5            # 保本触发（R倍数）
+  partial_targets:                  # 部分止盈目标
+    - target_r: 1.0                 # 1R目标
+      close_ratio: 0.3              # 平仓30%
+    - target_r: 2.0                 # 2R目标
+      close_ratio: 0.3              # 平仓30%
+    - target_r: 3.0                 # 3R目标
+      close_ratio: 0.2              # 平仓20%
+    # 剩余20%让利润奔跑
+
+# 执行配置
+execution:
+  order_type: "limit"               # 订单类型
+  time_in_force: "GTC"              # 订单有效期
+  post_only: false                  # 只做Maker
+  reduce_only: false                # 只减仓
+  retry_times: 3                    # 重试次数
+  retry_delay: 1000                 # 重试延迟（毫秒）
+
+# 监控配置
+monitoring:
+  performance_report_interval: 3600  # 性能报告间隔（秒）
+  risk_check_interval: 30           # 风险检查间隔（秒）
+  heartbeat_interval: 10            # 心跳间隔（秒）
+  alert_webhook: ""                 # 告警Webhook地址
+  
+# 日志配置
+logging:
+  level: "info"                     # 日志级别
+  file: "logs/trend_following.log"  # 日志文件
+  console: true                     # 控制台输出
+  rotate_size: "100MB"              # 轮转大小
+  rotate_days: 7                    # 保留天数

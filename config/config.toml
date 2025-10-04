@@ -1,0 +1,115 @@
+# RustCTA 主配置文件
+
+[system]
+# 系统名称
+name = "RustCTA Trading System"
+# 版本
+version = "2.0.0"
+# 环境: development, staging, production
+environment = "development"
+# 日志级别: trace, debug, info, warn, error
+log_level = "info"
+# 日志文件路径
+log_file = "logs/rustcta.log"
+# 最大日志文件大小 (MB)
+max_log_size = 100
+# 保留日志文件数量
+log_backups = 10
+
+[trading]
+# 默认杠杆
+default_leverage = 1
+# 最大持仓大小 (USDT)
+max_position_size = 1000.0
+# 风险百分比
+risk_percentage = 0.02
+# 最大同时运行策略数
+max_concurrent_strategies = 20
+# 策略心跳间隔 (秒)
+strategy_heartbeat_interval = 60
+# 启用止损
+enable_stop_loss = true
+# 默认止损百分比
+default_stop_loss = 0.05
+
+[exchanges]
+# 启用的交易所列表
+enabled = ["binance", "okx", "hyperliquid"]
+# 默认交易所
+default = "binance"
+# API请求超时 (秒)
+request_timeout = 30
+# 重试次数
+max_retries = 3
+# 速率限制 (每分钟请求数)
+rate_limit = 1200
+
+[database]
+# 连接池大小
+pool_size = 10
+# 连接超时 (秒)
+connection_timeout = 30
+# 查询超时 (秒)
+query_timeout = 30
+# 启用查询日志
+enable_query_log = false
+# 批量插入大小
+batch_insert_size = 100
+
+[monitoring]
+# Grafana URL
+grafana_url = "http://localhost:3000"
+# Grafana 用户名
+grafana_user = "admin"
+# Grafana 密码
+grafana_password = "abc20155"
+# 指标收集间隔 (秒)
+metrics_interval = 60
+# 启用性能监控
+enable_performance_monitoring = true
+
+[websocket]
+# WebSocket 重连间隔 (秒)
+reconnect_interval = 5
+# 最大重连次数
+max_reconnect_attempts = 10
+# 心跳间隔 (秒)
+heartbeat_interval = 30
+# 订阅超时 (秒)
+subscribe_timeout = 10
+
+[strategies]
+# 策略配置目录
+config_dir = "config/strategies"
+# 启用策略热重载
+enable_hot_reload = true
+# 策略配置检查间隔 (秒)
+config_check_interval = 60
+
+[security]
+# 启用API密钥加密
+encrypt_api_keys = false
+# 启用请求签名验证
+verify_signatures = true
+# IP白名单 (留空表示不限制)
+ip_whitelist = []
+
+[performance]
+# 启用性能分析
+enable_profiling = false
+# CPU亲和性 (指定CPU核心)
+cpu_affinity = []
+# 最大内存使用 (MB, 0表示不限制)
+max_memory = 0
+# 启用内存池
+enable_memory_pool = true
+
+[backup]
+# 启用自动备份
+enable_auto_backup = false
+# 备份目录
+backup_dir = "backups"
+# 备份间隔 (小时)
+backup_interval = 24
+# 保留备份数
+max_backups = 7

@@ -1,0 +1,34 @@
+# DOGE/USDC 泊松做市策略配置
+# 免手续费优化版 - 永续合约
+
+name: "POISSON_DOGE_USDC"
+enabled: true
+version: "1.0.0"
+
+account:
+  account_id: "binance_main"
+  exchange: "binance"
+
+trading:
+  symbol: "DOGE/USDC"
+  order_size_usdc: 6.0       # 每单金6 USDC
+  max_inventory: 345.0        # 最大库存345 USDC - 提升15%         # 最大库存300 USDT价值
+  min_spread_bp: 8.0           # 0.08% 最小价差
+  max_spread_bp: 20.0          # 0.20% 最大价差
+  refresh_interval_secs: 8    # 加快到8秒，提高交易频率
+  price_precision: 5
+  quantity_precision: 0
+
+poisson:
+  observation_window_secs: 240    # 4分钟观察窗口
+  min_samples: 40
+  smoothing_alpha: 0.18
+  depth_levels: 10
+  confidence_interval: 0.95
+  initial_lambda: 12.0             # 初始到达率
+
+risk:
+  max_unrealized_loss: 10.0       # 10 USDC
+  max_daily_loss: 30.0             # 30 USDC
+  inventory_skew_limit: 0.65
+  stop_loss_pct: 0.008             # 0.8% 止损
