@@ -1,0 +1,54 @@
+# 对冲网格策略配置 - DCR/USDT 现货
+# 底仓约 50 USDT，单笔挂单约 10 USDT，固定价差 0.06 USDT（等差间距）
+
+strategy:
+  name: "HEDGED_GRID_DCR_SPOT"
+  version: "1.0.0"
+  enabled: true
+  strategy_type: "HedgedGrid"
+  market_type: "Spot"
+
+base_account:
+  account_id: "binance_main"
+  market_type: "Spot"
+
+symbols:
+  - config_id: "dcr_usdt_spot"
+    symbol: "DCR/USDT"
+    direction: "long"
+    target_position: 0.5            # ≈ 50 USDT 底仓（按 19.21 报价取整）
+    min_inventory_ratio: 0.2        # 按底仓比例的库存下限（保持动态护栏）
+    min_inventory_quote: 10.0       # 按报价货币计价的绝对库存底线（用于极端价格）
+    position_limit: 10.0
+    position_limit_quote: 220.0
+    enabled: true
+    grid:
+      spacing: 0.06                  # 固定 0.06 USDT 等差价差
+      spacing_mode: absolute         # 使用绝对价差（等差模式）
+      order_size: 0.32               # ≈ 10 USDT 单笔下单量（按 19.21 报价取整）
+      levels_per_side: 5             # 每侧 5 层网格（共 10 个挂单）
+      refresh_interval_secs: 60
+    precision:
+      price_step: 0.01
+      amount_step: 0.01
+      min_notional: 5.0
+      price_digits: 2
+      amount_digits: 2
+
+risk_control:
+  max_leverage: 1.0
+  max_drawdown_pct: 0.15
+  max_daily_loss: 30.0
+  emergency_stop_trigger: 0.2
+
+execution:
+  startup_cancel_all: true
+  shutdown_cancel_all: true
+  rebalance_interval_secs: 45
+  taker_reset_delay_secs: 3
+  process_per_symbol: false
+
+logging:
+  level: "info"
+  file: "logs/strategies/hedged_grid_dcr_spot.log"
+  console: true
