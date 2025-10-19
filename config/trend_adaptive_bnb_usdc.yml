@@ -1,0 +1,50 @@
+strategy:
+  name: "trend_adaptive_bnb_perp"
+  account_id: "binance_hcr"
+  log_level: "INFO"
+
+trading:
+  symbol: "BNB/USDT"
+  market_type: "futures"
+  base_order_size: 0.01             # ≈ 5-6 USDT notionally
+  max_inventory: 1.0
+  base_spread_bps: 7.0
+  min_spread_bps: 3.0
+  max_spread_bps: 45.0
+  skew_bps: 15.0
+  reference_volatility: 1.5
+  volatility_spread_k: 2.2
+  inventory_bias_max: 0.6
+
+signal:
+  fast_ema_period: 8
+  slow_ema_period: 34
+  ofi_window: 40
+  volatility_window: 150
+  trend_threshold: 0.3
+  signal_floor: 0.08
+  ema_weight: 0.5
+  momentum_weight: 0.35
+  ofi_weight: 0.15
+  volatility_cutoff: 5.0
+  signal_cooldown_ms: 1000
+
+risk:
+  inventory_soft_limit: 0.7
+  inventory_hard_limit: 1.0
+  max_daily_drawdown_pct: 4.0
+  max_daily_loss_abs: 40.0
+  signal_floor: 0.08
+  downgrade_cooldown_secs: 45
+  stop_cooldown_secs: 600
+
+execution:
+  queue_threshold: 0.35
+  max_time_in_queue_ms: 20000
+  maker_offset_ticks: 1
+  max_requote_per_minute: 24
+  zero_fee_mode: true
+  tick_interval_ms: 400
+  order_check_interval_ms: 1200
+  listen_key_keepalive_secs: 1500
+  inventory_sync_secs: 180
