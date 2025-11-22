@@ -1,0 +1,76 @@
+# SOL/USDC Hyperliquid 趋势网格策略
+strategy:
+  name: "SOL Hyperliquid Trend Grid"
+  version: "2.0.0"
+  enabled: true
+  strategy_type: "TrendGrid"
+  market_type: "Futures"
+
+trading_configs:
+  - config_id: "sol_hl_trend_grid"
+    enabled: true
+    account:
+      id: "hyperliquid_main"
+      exchange: "hyperliquid"
+      env_prefix: "HYPERLIQUID"
+    symbol: "SOL/USDC"
+    grid:
+      spacing: 0.005                 # 0.5% 等比网格
+      spacing_type: "geometric"
+      order_amount: 11.0             # 每单 11 USDC 名义
+      orders_per_side: 2
+      max_position: 220.0            # 最大持仓名义(保护保证金)
+    trend_config:
+      ma_fast: 12
+      ma_slow: 26
+      rsi_period: 14
+      rsi_overbought: 70.0
+      rsi_oversold: 30.0
+      timeframe: "5m"
+      show_trend_info: true
+
+trend_adjustment:
+  strong_bull_buy_multiplier: 1.2
+  bull_buy_multiplier: 1.1
+  bear_sell_multiplier: 1.0
+  strong_bear_sell_multiplier: 1.1
+
+batch_settings:
+  binance_batch_size: 5
+  okx_batch_size: 10
+  hyperliquid_batch_size: 5
+  default_batch_size: 5
+
+grid_management:
+  check_interval: 60
+  rebalance_threshold: 0.02
+  cancel_and_replace: true
+  show_grid_status: true
+
+websocket:
+  subscribe_order_updates: false
+  subscribe_trade_updates: true
+  subscribe_ticker: true
+  reconnect_on_disconnect: true
+  heartbeat_interval: 30
+  log_all_trades: false
+
+risk_control:
+  max_leverage: 3
+  max_drawdown: 0.1
+  daily_loss_limit: 40.0
+  position_limit_per_symbol: 220.0
+
+execution:
+  startup_cancel_all: true
+  shutdown_cancel_all: true
+  thread_per_config: true
+  startup_delay: 3
+
+logging:
+  level: "info"
+  file: "logs/trend_grid_sol_hl.log"
+  console: true
+  show_pnl: true
+  show_position: true
+  show_trend_changes: true
