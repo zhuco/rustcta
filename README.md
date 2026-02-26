@@ -1,100 +1,117 @@
 # RustCTA
 
-RustCTA 是一个以 Rust 编写的多交易所 CTA 交易框架，涵盖趋势网格、泊松做市、均值回归、拷贝交易等多种策略模块，并提供统一的账户、风险、日志与通知基础设施，帮助快速构建和部署量化策略。
+RustCTA 是一个以 Rust 编写的多交易所 CTA 交易框架，提供统一交易接口、账户管理、风险控制、日志告警与多策略运行能力。
 
-## 功能亮点
-- **多交易所接入**：内置 Binance、Bitmart、OKX、Hyperliquid 等接入实现，统一订单、行情与时间同步接口。
-- **策略组件丰富**：包含趋势网格（含 V2 版本）、区间网格、泊松做市、均值回归、Avellaneda-Stoikov、自动化剥头皮、趋势跟随与拷贝交易等策略。
-- **账户与风险控制**：`AccountManager` 统一管理账户与 API 密钥，`GlobalRiskManager`、趋势风控模块提供敞口、杠杆与事件监控。
-- **稳定的基础设施**：Tokio 异步运行时、统一日志/Webhook 通知、时间同步、符号与精度管理、ClickHouse 数据写入等工具模块。
-- **可观测性完善**：策略日志分级落地于 `logs/`，支持 Webhook 告警，`market-analyzer`、`supervisor` 等辅助进程便于运营维护。
+## 版本信息
+- 当前版本：`0.3.2`
+- 发布日期：`2026-02-26`
+- 上一版本：`0.3.1`
+
+## 本次更新（v0.3.2）
+1. 版本号从 `0.3.1` 升级到 `0.3.2`。
+2. 重新整理 `README.md`，补齐“支持的交易所功能”和“内置量化策略”清单。
+3. 文档内容与当前代码入口对齐，明确“已实现”与“预留未启用”边界。
+
+## 支持的交易所与功能
+
+### 已实现并可在运行时创建的交易所适配器
+`AccountManager` 当前可直接创建以下交易所实例：
+- `binance`
+- `okx`
+- `bitmart`
+- `hyperliquid`
+
+### 交易所能力矩阵（按当前代码状态）
+| 交易所 | 现货 | 合约/永续 | REST 交易能力 | WebSocket 行情 | 私有用户流 | 说明 |
+|---|---|---|---|---|---|---|
+| Binance | 支持 | 支持 | 支持（下单/撤单/查询/批量） | 支持 | 支持（ListenKey + keepalive） | 当前最完整接入 |
+| OKX | 支持 | 支持（SWAP） | 支持 | 支持 | 未在统一接口中启用 | 可用于多策略行情与交易 |
+| Bitmart | 支持 | 支持 | 支持 | 支持 | 未在统一接口中启用 | 部分接口按现货/合约分域名处理 |
+| Hyperliquid | 不支持 | 支持（永续） | 支持（永续交易） | 支持 | 不适用（无 ListenKey 模型） | 当前实现为单向持仓模型 |
+
+### 预留但当前未启用的交易所
+以下名称在配置/符号转换中有预留，但交易所模块在 `src/exchanges/mod.rs` 中处于注释禁用状态：
+- `bybit`
+- `htx`
+- `meteora`（DEX，待修复）
+
+## 内置量化策略（CLI 可启动）
+主程序通过 `--strategy` 选择策略，当前支持以下入口：
+
+| CLI 参数 | 策略模块 | 类型 | 说明 |
+|---|---|---|---|
+| `trend_intraday` | `strategies/trend` | 日内趋势 | 趋势判定 + 风控 + 执行引擎 |
+| `trend_grid` | `strategies/trend_grid_v2` | 趋势网格 | 趋势导向网格（V2 实现） |
+| `hedged_grid` | `strategies/hedged_grid` | 对冲网格 | 多标的/单标的对冲网格运行 |
+| `solusdc_hedged_grid` | `strategies/solusdc_hedged_grid` | 专项对冲网格 | SOLUSDC 场景化滚动网格 |
+| `range_grid` | `strategies/range_grid` | 区间网格 | 震荡区间网格与风险阈值控制 |
+| `mean_reversion` | `strategies/mean_reversion` | 均值回归 | 因子/偏离度驱动的回归交易 |
+| `poisson` | `strategies/poisson_market_maker` | 做市 | 泊松分布建模的做市策略 |
+| `as` | `strategies/automated_scalping` | 高频剥头皮 | 自动化剥头皮执行策略 |
+| `copy_trading` | `strategies/copy_trading` | 跟单 | 主账户信号到子账户复制 |
+| `avellaneda_stoikov` | `strategies/avellaneda_stoikov` | 做市 | Avellaneda-Stoikov 模型 |
+| `market_making` | `strategies/market_making` | 做市 | 专业做市引擎 |
+| `grid_scale` | `strategies/grid_scale` | 网格增强 | 分层/扩展型网格策略 |
+| `orderflow` | `strategies/orderflow` | 订单流 | 基于订单流行为的交易策略 |
 
 ## 快速开始
 
 ### 环境准备
-- Rust 1.75+（建议使用 `rustup` 安装稳定版）
+- Rust `1.75+`
 - `cargo`、`git`
-- 交易所 API Key 通过环境变量注入（参考 `config/accounts.yml` 中的 `api_key_env` 前缀）
+- 交易所 API Key 通过环境变量注入（参考 `config/accounts.yml` 的 `api_key_env`）
 
-### 获取代码
+### 拉取与构建
 ```bash
 git clone https://github.com/zhuco/rustcta.git
 cd rustcta
-cp .env.example .env   # 如存在，填入交易所密钥；否则自行创建
-```
+cp .env.example .env
 
-### 构建与校验
-```bash
-cargo check                         # 语义/依赖检查
-cargo fmt                           # 代码格式化
+cargo check
+cargo fmt
 cargo clippy --all-targets --all-features
-cargo test --all-features           # 单元/集成测试（若存在）
+cargo test --all-features
 ```
 
-### 运行策略
-开发环境可直接运行二进制，需指定策略与配置：
-
+### 启动策略
 ```bash
 cargo run -- --strategy trend_grid --config config/trend_grid_ena.yml
 ```
 
-生产环境建议使用 Release 构建并后台运行：
-
+Release 模式：
 ```bash
 cargo build --release
 nohup target/release/rustcta --strategy poisson --config config/poisson_near_usdc.yml \
   > logs/poisson_near.out 2>&1 &
 ```
 
-如需一次性拉起多策略，建议结合 supervisor/systemd 或自研编排脚本。
-
-## 配置说明
-- `config/config.yaml`：交易所 REST/WebSocket 入口等全局配置。
-- `config/accounts.yml`：账户清单，`api_key_env` 字段对应 `.env` 中的密钥前缀（例如 `BINANCE_0_API_KEY`、`BINANCE_0_API_SECRET`）。
-- `config/logging.yml`：日志模块与等级配置。
-- `config/global.yml`：Webhook、通知等全局参数。
-- `config/*.yml`：策略专属配置（网格参数、风控阈值、交易对等）。
+## 关键配置文件
+- `config/config.yaml`：交易所端点与全局基础配置。
+- `config/accounts.yml`：账户与 `api_key_env` 映射。
+- `config/global.yml`：Webhook/通知相关参数。
+- `config/logging.yml`：日志等级与输出策略。
+- `config/*.yml`：各策略独立参数文件。
 - `config/strategies.yml`：多策略编排示例。
 
-修改配置后建议使用 `cargo check` 或 `scripts/validate_config.sh`（如存在）校验结构。
-
-## 策略目录速览
-- `trend_grid` / `trend_grid_v2`：传统与增强版趋势网格策略，支持自适应价差与挂单重建。
-- `range_grid`：区间震荡网格，聚焦带宽范围内的双向套利。
-- `poisson_market_maker`：泊松分布建模的流动性做市策略（NEAR/USDC、DOGE/USDC 等配置）。
-- `mean_reversion`：基于因子与波动判断的均值回归组合策略。
-- `avellaneda_stoikov`：经典 Avellaneda-Stoikov 做市模型实现。
-- `automated_scalping`：高频剥头皮策略雏形。
-- `copy_trading`：监听主账户信号并在子账户复刻下单。
-
-## 代码结构
-```
+## 项目结构
+```text
 src/
-  core/           # 配置、错误、风险管理及基础类型
-  exchanges/      # 交易所接入与请求签名
-  cta/            # AccountManager 等账户服务
-  strategies/     # 各策略实现与公共依赖
-  utils/          # 日志、时间同步、通知、指标计算等工具
-config/           # 全局与策略配置
-logs/             # 运行时输出与策略日志（按日期/策略划分）
+  core/           # 基础类型、错误、风控、通信抽象
+  exchanges/      # Binance/OKX/Bitmart/Hyperliquid 实现
+  cta/            # 账户管理与策略运行期组件
+  strategies/     # 各量化策略与公共组件
+  utils/          # 日志、时间同步、符号转换、通知工具
+config/           # 配置模板
+docs/             # 设计与策略文档
+tests/            # 集成测试
+logs/             # 运行日志
 ```
 
-`src/main.rs` 提供统一 CLI，必须通过 `--strategy` 与 `--config` 指定运行策略和参数文件。
-
-## 运行监控
-- **日志**：
-  - `logs/strategies/<name>.log`：按策略分割的结构化日志。
-  - `logs/*.out`：后台运行策略的标准输出重定向。
-- **Webhook**：`utils::webhook` 支持企业微信等告警通道。
-- **时间同步**：`utils::time_sync` 定期与交易所比对时间，避免时钟漂移导致订单失败。
-- **辅助进程**：`target/release/market-analyzer`、`supervisor` 等可选工具用于行情分析或策略编排。
-
-## 开发流程建议
-1. 新增策略时在 `src/strategies` 建立模块，并在 `src/strategies/mod.rs` 暴露接口。
-2. 结合现有 `StrategyDepsBuilder`、`AccountManager` 复用下单、风控与日志能力。
-3. 更新或新增配置样例至 `config/`，保持文档同步。
-4. PR 前执行 `cargo fmt && cargo clippy --all-targets --all-features && cargo test --all-features`。
+## 开发建议
+1. 新增策略时在 `src/strategies/` 建模块，并在 `src/strategies/mod.rs` 导出。
+2. 优先复用 `StrategyDepsBuilder`、统一风控与 `AccountManager`。
+3. 提交前执行：`cargo fmt && cargo clippy --all-targets --all-features && cargo test --all-features`。
+4. 文档与配置样例保持同步更新。
 
 ## 许可证
-
-项目基于 [MIT License](LICENSE) 发布，可自由使用与分发。
+项目基于 [MIT License](LICENSE) 发布。
