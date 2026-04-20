@@ -1,25 +1,34 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The Rust core lives under `src/`, with reusable modules grouped by domain and additional binaries in `src/bin/` (e.g., `supervisor`, `web-server`, `order_sync`). Integration fixtures and regression checks sit in `tests/`, while SQL seeds reside in `sql/` and HTTP or configuration templates are kept under `config/`, `format_schemas/`, and `preprocessed_configs/`. Automation helpers live in `scripts/` and `docs/` records feature notes.
+- Core Rust crates live in `src/`; additional binaries sit under `src/bin/` (e.g., `supervisor`, `web-server`, `order_sync`).
+- Integration and regression fixtures are in `tests/`; consult `docs/` for feature notes and design records.
+- Configuration templates reside in `config/`, `format_schemas/`, and `preprocessed_configs/`; SQL seeds go in `sql/`.
+- Automation helpers are under `scripts/`; logs and ad-hoc validation outputs belong in `logs/`.
 
 ## Build, Test, and Development Commands
-- `cargo check` – fast type and dependency verification for all targets.
-- `cargo build --release` – optimized binaries for deployment (default feature set).
-- `cargo build --features postgres-collector` – include optional collectors when Postgres is required.
-- `cargo test --all-features` – run unit and integration suites, including `tests/` fixtures.
-- `cargo fmt` / `cargo clippy --all-targets --all-features` – enforce formatting and lints before review.
-- `python check_orders.py` and `python check_ltc_orders.py` – ad-hoc data validation scripts; keep outputs under `logs/`.
-- `./scripts/*` and `start_*.sh` – review README headers inside each script before invoking in production environments.
+- `cargo check` – fast dependency and type validation for all targets.
+- `cargo build --release` – optimized binaries for deployment.
+- `cargo build --features postgres-collector` – include optional Postgres collectors.
+- `cargo test --all-features` – run unit and integration suites (including `tests/` fixtures).
+- `cargo fmt` and `cargo clippy --all-targets --all-features` – format and lint before review.
+- `python check_orders.py` / `python check_ltc_orders.py` – data sanity checks; keep outputs in `logs/`.
 
 ## Coding Style & Naming Conventions
-Follow Rust 2021 idioms: modules and files in `snake_case`, types and traits in `PascalCase`, async tasks ending with `_task`. Run `cargo fmt` prior to commits; address all warnings from `cargo clippy --all-targets --all-features`. Python utilities in `scripts/` should remain PEP 8 compliant.
+- Rust 2021 idioms: modules/files in `snake_case`, types/traits in `PascalCase`, async functions ending with `_task`.
+- Keep Python utilities PEP 8 compliant.
+- Always run `cargo fmt` before commits; fix warnings from `cargo clippy --all-targets --all-features`.
 
 ## Testing Guidelines
-Prefer focused unit tests next to the module being exercised and broaden coverage in `tests/` only when cross-component behavior matters. Name tests `mod_name::scenario_should_*` to match existing conventions. Run `cargo test --all-features` locally before pushing and use `test_queries.sh` for ClickHouse/SQL sanity checks when touching analytics pathways. Highlight significant coverage gaps in the pull request.
+- Favor focused unit tests colocated with modules; use `tests/` for cross-component behavior.
+- Name tests `mod_name::scenario_should_*` to match existing convention.
+- Run `cargo test --all-features` locally before pushing; use `test_queries.sh` when touching ClickHouse/SQL analytics paths.
 
 ## Commit & Pull Request Guidelines
-Commit history mixes Conventional Commits (`chore:`, `feat:`) with bilingual summaries—stick to the English prefix plus optional localized detail. Write descriptive bodies outlining rationale, data sources, and follow-up TODOs. Pull requests must include: a concise goals summary, validation steps (`cargo test`, script runs), linked issues or tickets, and screenshots or log excerpts for dashboard or trading-impacting changes. Flag breaking configuration updates in the title using `[BREAKING]`.
+- Follow mixed history style: Conventional Commit prefixes (`chore:`, `feat:`) with optional bilingual summaries.
+- Commit bodies should note rationale, data sources, and TODO follow-ups.
+- Pull requests must include a concise goal summary, validation steps (e.g., `cargo test`), linked issues/tickets, and screenshots or logs for UI/trading-impacting changes. Flag breaking config updates with `[BREAKING]` in the title.
 
 ## Security & Configuration Tips
-Credentials live in environment variables loaded via `.env`; never commit secrets. Validate new config files with `serde_yaml`/`serde_json` loaders or `scripts/validate_config.sh` if introduced. When integrating exchanges or collectors, document required API scopes inside `docs/` and review `notify` watchers to avoid leaking PII in log messages.
+- Never commit secrets; load credentials from `.env` and document required API scopes in `docs/`.
+- Validate new configs with `serde_yaml`/`serde_json` loaders or `scripts/validate_config.sh`; review `notify` watchers to avoid PII leakage in logs.

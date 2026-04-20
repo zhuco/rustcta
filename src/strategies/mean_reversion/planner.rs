@@ -8,6 +8,7 @@ use super::utils::{ceil_to_step, round_price};
 use super::MeanReversionStrategy;
 
 use crate::core::types::{OrderSide, TradingPair};
+use crate::strategies::common::publish_trend_inputs;
 
 #[derive(Clone)]
 pub(super) struct OrderPlan {
@@ -17,8 +18,7 @@ pub(super) struct OrderPlan {
     pub limit_price: f64,
     pub stop_price: f64,
     pub trailing_distance: f64,
-    pub take_profit_primary: f64,
-    pub take_profit_secondary: f64,
+    pub take_profit: f64,
     pub improve: f64,
     pub indicators: IndicatorOutputs,
     pub liquidity: LiquiditySnapshot,
@@ -46,6 +46,8 @@ impl MeanReversionStrategy {
                 return Ok(());
             }
         };
+
+        publish_trend_inputs(symbol, &snapshot, &indicators, None);
 
         let range_score = self.evaluate_range_conditions(&indicators);
         let regime_label = if range_score >= 2 { "Range" } else { "Trend" };
@@ -99,12 +101,8 @@ impl MeanReversionStrategy {
             logging::info(
                 Some(symbol),
                 format!(
-                    "挂单计划 -> side=BUY qty={:.4} limit={:.6} stop={:.6} tp1={:.6} tp2={:.6}",
-                    plan.quantity,
-                    plan.limit_price,
-                    plan.stop_price,
-                    plan.take_profit_primary,
-                    plan.take_profit_secondary
+                    "挂单计划 -> side=BUY qty={:.4} limit={:.6} stop={:.6} tp={:.6}",
+                    plan.quantity, plan.limit_price, plan.stop_price, plan.take_profit,
                 ),
             );
             plans.push(plan);
@@ -131,12 +129,8 @@ impl MeanReversionStrategy {
                 logging::info(
                     Some(symbol),
                     format!(
-                        "挂单计划 -> side=SELL qty={:.4} limit={:.6} stop={:.6} tp1={:.6} tp2={:.6}",
-                        plan.quantity,
-                        plan.limit_price,
-                        plan.stop_price,
-                        plan.take_profit_primary,
-                        plan.take_profit_secondary
+                        "挂单计划 -> side=SELL qty={:.4} limit={:.6} stop={:.6} tp={:.6}",
+                        plan.quantity, plan.limit_price, plan.stop_price, plan.take_profit,
                     ),
                 );
                 plans.push(plan);
@@ -362,25 +356,25 @@ impl MeanReversionStrategy {
             .max(sigma_component)
             .max(0.0001);
 
-        if spread_pct > improve / 2.0 {
-            log::debug!(
-                "{} 点差 {:.5} 超过改善阈值 {:.5}",
-                symbol,
-                spread_pct,
-                improve / 2.0
-            );
+        let max_improve = spread_pct * 1.2 + base; // 允许贴近盘口，保留少量缓冲
+        let improve = improve.min(max_improve);
+
+        if improve <= 0.0 {
+            log::debug!("{} 改善值计算异常: {}", symbol, improve);
             return Ok(None);
         }
 
         let direction = if side == OrderSide::Buy { 1.0 } else { -1.0 };
-        let raw_price = if side == OrderSide::Buy {
+        let best_price = match side {
+            OrderSide::Buy => liquidity.bid_price,
+            OrderSide::Sell => liquidity.ask_price,
+        };
+        let reference_price = if best_price > 0.0 {
+            best_price * (1.0 + direction * improve * -1.0)
+        } else if side == OrderSide::Buy {
             price_ref * (1.0 - improve)
         } else {
             price_ref * (1.0 + improve)
-        };
-        let reference_price = match side {
-            OrderSide::Buy => raw_price.min(liquidity.bid_price.max(1e-6)),
-            OrderSide::Sell => raw_price.max(liquidity.ask_price.max(1e-6)),
         };
 
         let limit_price = round_price(
@@ -478,8 +472,8 @@ impl MeanReversionStrategy {
             return Ok(None);
         }
 
-        let take_profit_primary = boll.middle;
-        let take_profit_secondary = boll.middle + direction * boll.sigma * 0.75;
+        let tp_distance = (self.config.execution.take_profit_atr_k * indicators.atr).max(0.0);
+        let take_profit = limit_price + direction * tp_distance;
 
         Ok(Some(OrderPlan {
             symbol: symbol.to_string(),
@@ -488,8 +482,7 @@ impl MeanReversionStrategy {
             limit_price,
             stop_price,
             trailing_distance,
-            take_profit_primary,
-            take_profit_secondary,
+            take_profit,
             improve,
             indicators: indicators.clone(),
             liquidity: liquidity.clone(),
@@ -519,17 +512,12 @@ pub(super) fn compute_latest_bbw(
     period: usize,
     std_dev: f64,
 ) -> Option<(f64, f64, f64)> {
-    if state.fifteen_minute.len() < period {
+    if state.one_hour.len() < period {
         return None;
     }
-    let len = state.fifteen_minute.len();
+    let len = state.one_hour.len();
     let start = len - period;
-    let closes: Vec<f64> = state
-        .fifteen_minute
-        .iter()
-        .skip(start)
-        .map(|k| k.close)
-        .collect();
+    let closes: Vec<f64> = state.one_hour.iter().skip(start).map(|k| k.close).collect();
     let (upper, middle, lower) =
         crate::utils::indicators::functions::bollinger_bands(&closes, period, std_dev)?;
     let sigma = (upper - middle) / std_dev.max(1e-9);

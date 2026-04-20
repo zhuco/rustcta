@@ -1,0 +1,23 @@
+# ETH/USDC 趋势分析自动报告配置
+symbol: "ETHUSDC"
+display_symbol: "ETH/USDC"
+base_url: "https://api.binance.com"
+poll_interval_secs: 60
+intervals:
+  - label: "5分钟"
+    interval: "5m"
+    limit: 200
+  - label: "15分钟"
+    interval: "15m"
+    limit: 200
+  - label: "1小时"
+    interval: "1h"
+    limit: 240
+  - label: "4小时"
+    interval: "4h"
+    limit: 240
+webhook:
+  wechat_work: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=62dbc232-b8b7-4979-a378-d206085966bf"
+  enabled: true
+  min_level: "info"
+  rate_limit_seconds: 55

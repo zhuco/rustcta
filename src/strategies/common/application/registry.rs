@@ -7,12 +7,16 @@ use serde_yaml::Value;
 use super::{
     build_unified_risk_evaluator, Strategy, StrategyContext, StrategyDepsBuilder, StrategyInstance,
 };
+use crate::strategies::common::StrategyRiskLimits;
 use crate::strategies::mean_reversion::{MeanReversionConfig, MeanReversionStrategy};
 use crate::strategies::poisson_market_maker::{PoissonMMConfig, PoissonMarketMaker};
 use crate::strategies::range_grid::{
     application as range_application, RangeGridConfig, RangeGridStrategy,
 };
-use crate::strategies::trend_grid::{application, TrendGridConfigV2, TrendGridStrategyV2};
+use crate::strategies::sideways_martingale::{
+    SidewaysMartingaleConfig, SidewaysMartingaleStrategy,
+};
+use crate::strategies::trend_grid_v2::{TrendGridConfigV2, TrendGridStrategyV2};
 
 /// 策略工厂函数签名
 pub type StrategyFactoryFn =
@@ -61,6 +65,7 @@ impl Default for StrategyRegistry {
         registry.register("range_grid", range_grid_factory());
         registry.register("poisson", poisson_factory());
         registry.register("mean_reversion", mean_reversion_factory());
+        registry.register("sideways_martingale", sideways_martingale_factory());
         registry
     }
 }
@@ -91,7 +96,7 @@ fn trend_grid_factory(
 {
     |config_value, ctx| {
         let config: TrendGridConfigV2 = serde_yaml::from_value(config_value.clone())?;
-        let risk_limits = application::risk::build_limits_from_config(&config);
+        let risk_limits = trend_grid_risk_limits(&config);
         let risk_evaluator = build_unified_risk_evaluator(
             config.strategy.name.clone(),
             ctx.global_risk.clone(),
@@ -104,6 +109,19 @@ fn trend_grid_factory(
 
         let strategy = TrendGridStrategyV2::create(config, deps)?;
         Ok(Box::new(strategy))
+    }
+}
+
+fn trend_grid_risk_limits(config: &TrendGridConfigV2) -> StrategyRiskLimits {
+    StrategyRiskLimits {
+        warning_scale_factor: Some(0.85),
+        danger_scale_factor: Some(0.6),
+        stop_loss_pct: Some(config.risk_control.max_drawdown),
+        max_inventory_notional: Some(config.risk_control.position_limit_per_symbol),
+        max_daily_loss: Some(config.risk_control.daily_loss_limit),
+        max_consecutive_losses: None,
+        inventory_skew_limit: None,
+        max_unrealized_loss: None,
     }
 }
 
@@ -144,6 +162,26 @@ fn mean_reversion_factory(
         let deps = builder.build()?;
 
         let strategy = MeanReversionStrategy::create(config, deps)?;
+        Ok(Box::new(strategy))
+    }
+}
+
+fn sideways_martingale_factory(
+) -> impl Fn(&Value, &StrategyContext) -> Result<Box<dyn StrategyInstance>> + Send + Sync + 'static
+{
+    |config_value, ctx| {
+        let config: SidewaysMartingaleConfig = serde_yaml::from_value(config_value.clone())?;
+        let risk_evaluator = build_unified_risk_evaluator(
+            config.strategy.name.clone(),
+            ctx.global_risk.clone(),
+            None,
+        );
+
+        let mut builder = StrategyDepsBuilder::from_context(ctx);
+        builder = builder.with_risk_evaluator(risk_evaluator);
+        let deps = builder.build()?;
+
+        let strategy = SidewaysMartingaleStrategy::create(config, deps)?;
         Ok(Box::new(strategy))
     }
 }

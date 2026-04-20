@@ -1,0 +1,136 @@
+# Avellaneda-Stoikov 策略配置 - DCR/USDT 现货
+# 资金规模 30 USDT，每单最小 5 USDT，价差限制 1%
+
+# 策略基本信息
+strategy:
+  name: "AS_DCR_SPOT"
+  version: "1.0.0"
+  type: "avellaneda_stoikov"
+  description: "Binance DCR/USDT 现货 Avellaneda-Stoikov 做市策略"
+  enabled: true
+  log_level: "INFO"
+
+# 账户配置（使用默认现货账户）
+account:
+  account_id: "binance_main"
+  exchange: "binance"
+  api_key_env: null
+
+# 交易配置
+trading:
+  symbol: "DCR/USDT"
+  market_type: "spot"
+  order_size_usdc: 5.0
+  max_inventory: 7.8           # 最大持仓约 7.8 DCR (~150 USDT)
+  min_spread_bp: 50.0          # 最小 0.50% 价差
+  max_spread_bp: 150.0         # 最大 1.50% 价差（双边不超过 3%）
+  refresh_interval_secs: 6
+  price_precision: 2
+  quantity_precision: 3
+  order_config:
+    post_only: true
+    time_in_force: "GTC"
+    reduce_only: false
+
+# Avellaneda-Stoikov 核心参数（高风险厌恶以控制库存）
+as_params:
+  risk_aversion: 1.2
+  order_book_intensity: 1.8
+  time_horizon_seconds: 900    # 15 分钟风险视窗
+  volatility:
+    lookback_periods: 20
+    update_interval: 20
+    decay_factor: 0.92
+  inventory_skew:
+    enabled: true
+    skew_factor: 0.65
+    target_inventory_ratio: 0.0
+  spread_adjustment:
+    volume_factor: 0.12
+    depth_factor: 0.1
+    pressure_factor: 0.18
+
+# 市场数据配置
+market_data:
+  orderbook_levels: 10
+  trades_buffer_size: 240
+  kline:
+    interval: "1m"
+    history_size: 60
+
+# 风险管理（紧缩限额以保护小资金）
+risk:
+  max_unrealized_loss: 4.0
+  max_daily_loss: 8.0
+  inventory_risk:
+    max_position_value: 150.0
+    imbalance_threshold: 0.8
+  stop_loss:
+    enabled: true
+    stop_loss_pct: 1.0
+    cooldown_seconds: 180
+  volatility_limits:
+    max_volatility: 300.0
+    min_volatility: 20.0
+  emergency_stop:
+    consecutive_losses: 3
+    max_drawdown_pct: 3.0
+
+# 性能与订单管理
+performance:
+  order_aggregation:
+    enabled: false
+    min_price_diff_bp: 5.0
+  smart_cancellation:
+    enabled: true
+    price_drift_threshold_bp: 15.0
+  partial_fill:
+    min_fill_ratio: 0.25
+    immediate_replace: true
+
+# 数据源配置
+data_sources:
+  websocket:
+    enabled: true
+    streams:
+      - "depth"
+      - "trade"
+      - "account"
+    reconnect_interval: 5
+  rest_api:
+    enabled: true
+    refresh_interval: 45
+    endpoints:
+      - "balance"
+      - "orders"
+      - "trades"
+
+# 监控配置
+monitoring:
+  metrics:
+    enabled: true
+    export_interval: 60
+  health_check:
+    enabled: true
+    interval: 45
+  trade_logging:
+    enabled: true
+    log_fills: true
+    log_quotes: true
+    log_cancellations: true
+  alerts:
+    enabled: false
+    channels: []
+    thresholds:
+      inventory_imbalance: 0.5
+      loss_limit: 0.7
+      low_liquidity: 20
+
+# 永续合约配置在现货模式下保持默认关闭
+perpetual:
+  funding_rate:
+    consider_funding: false
+    threshold_pct: 0.0
+  maintenance:
+    stop_before: 0
+    resume_after: 0

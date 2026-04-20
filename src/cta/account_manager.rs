@@ -40,14 +40,27 @@ impl AccountInfo {}
 pub struct AccountManager {
     accounts: HashMap<String, Arc<AccountInfo>>,
     exchange_config: Config,
+    offline_mode: bool,
 }
 
 impl AccountManager {
     /// 创建账户管理器
     pub fn new(exchange_config: Config) -> Self {
+        let offline_mode = std::env::var("RUSTCTA_OFFLINE")
+            .map(|val| {
+                let normalized = val.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+            })
+            .unwrap_or(false);
+
+        if offline_mode {
+            log::warn!("⚠️ AccountManager: 检测到离线模式，交易所请求将使用 MockExchange 并跳过真实网络访问");
+        }
+
         Self {
             accounts: HashMap::new(),
             exchange_config,
+            offline_mode,
         }
     }
 
@@ -55,6 +68,31 @@ impl AccountManager {
     pub async fn add_account(&mut self, account_config: AccountConfig) -> Result<()> {
         if !account_config.enabled {
             log::info!("账户 {} 未启用，跳过", account_config.id);
+            return Ok(());
+        }
+
+        if self.offline_mode {
+            let exchange: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new(
+                &account_config.exchange,
+            ));
+
+            let account_info = Arc::new(AccountInfo {
+                id: account_config.id.clone(),
+                exchange_name: account_config.exchange.clone(),
+                exchange: Arc::new(exchange),
+                config: account_config.clone(),
+                balance: Arc::new(RwLock::new(Vec::new())),
+                positions: Arc::new(RwLock::new(Vec::new())),
+                open_orders: Arc::new(RwLock::new(HashMap::new())),
+            });
+
+            self.accounts
+                .insert(account_config.id.clone(), account_info);
+            log::info!(
+                "✅ 离线模式: 已使用 MockExchange 添加账户 {} ({})",
+                account_config.id,
+                account_config.exchange
+            );
             return Ok(());
         }
 
@@ -71,6 +109,10 @@ impl AccountManager {
             }
             "okx" => Box::new(OkxExchange::new(self.exchange_config.clone(), api_keys)),
             "bitmart" => Box::new(BitmartExchange::new(self.exchange_config.clone(), api_keys)),
+            "hyperliquid" => Box::new(HyperliquidExchange::new(
+                self.exchange_config.clone(),
+                api_keys,
+            )),
             _ => {
                 return Err(ExchangeError::UnsupportedExchange(
                     account_config.exchange.clone(),
@@ -151,6 +193,11 @@ impl AccountManager {
             .filter(|acc| acc.exchange_name == exchange)
             .cloned()
             .collect()
+    }
+
+    /// 当前是否处于离线模式
+    pub fn is_offline(&self) -> bool {
+        self.offline_mode
     }
 
     /// 更新账户数据

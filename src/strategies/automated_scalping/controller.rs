@@ -1046,6 +1046,7 @@ impl AutomatedScalpingStrategy {
             bids,
             asks,
             timestamp: Utc::now(),
+            info: serde_json::Value::Null,
         }))
     }
 

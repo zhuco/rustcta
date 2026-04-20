@@ -69,6 +69,8 @@ pub struct OrderBook {
     pub bids: Vec<[f64; 2]>,
     pub asks: Vec<[f64; 2]>,
     pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub info: serde_json::Value,
 }
 
 /// 增强的订单簿（带订单数量）
@@ -93,7 +95,7 @@ pub struct OrderBookLevel {
 // ============= 订单相关 =============
 
 /// 订单方向
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OrderSide {
     Buy,
     Sell,

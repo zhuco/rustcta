@@ -1,0 +1,86 @@
+# 多标的趋势网格批量配置（基于统一参数）
+# 账号: binance_hcr / BINANCE_3，几何间距 0.2%，每单 6U，双边各 2 单，max_position 300
+strategy:
+  name: "Multi Trend Grid Strategy"
+  version: "2.0.0"
+  enabled: true
+  strategy_type: "TrendGrid"  # 对应 trend_grid_v2.rs
+  market_type: "Futures"
+
+# 交易配置（仅 SOL/USDC）
+trading_configs:
+  - config_id: "sol_usdc_trend_grid"
+    enabled: true
+    account:
+      id: "binance_hcr"
+      exchange: "binance"
+      env_prefix: "BINANCE_3"
+    symbol: "SOL/USDC"
+    grid:
+      spacing: 0.001   # 0.1%
+      spacing_type: "geometric"
+      order_amount: 8
+      orders_per_side: 5
+      max_position: 300.0
+    trend_config:
+      ma_fast: 12
+      ma_slow: 26
+      rsi_period: 14
+      rsi_overbought: 75.0
+      rsi_oversold: 25.0
+      timeframe: "5m"
+      show_trend_info: true
+
+# 趋势调整配置（统一参数）
+trend_adjustment:
+  strong_bull_buy_multiplier: 1.2
+  bull_buy_multiplier: 1.1
+  bear_sell_multiplier: 1.0
+  strong_bear_sell_multiplier: 1.0
+  enable_trend_market_orders: false
+
+# 批量下单设置
+batch_settings:
+  binance_batch_size: 5
+  okx_batch_size: 10
+  hyperliquid_batch_size: 20
+  default_batch_size: 5
+
+# 网格管理
+grid_management:
+  check_interval: 30
+  rebalance_threshold: 0.015
+  cancel_and_replace: true
+  show_grid_status: true
+
+# WebSocket配置
+websocket:
+  subscribe_order_updates: true
+  subscribe_trade_updates: true
+  subscribe_ticker: true
+  reconnect_on_disconnect: true
+  heartbeat_interval: 30
+  log_all_trades: true
+
+# 风险控制
+risk_control:
+  max_leverage: 2
+  max_drawdown: 0.15
+  daily_loss_limit: 50.0
+  position_limit_per_symbol: 500.0
+
+# 执行配置
+execution:
+  startup_cancel_all: true
+  shutdown_cancel_all: true
+  thread_per_config: true
+  startup_delay: 3
+
+# 日志配置
+logging:
+  level: "info"
+  file: "logs/trend_grid_multi.log"
+  console: true
+  show_pnl: true
+  show_position: true
+  show_trend_changes: true

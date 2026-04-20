@@ -5,9 +5,11 @@ use crate::core::{
     types::*,
     websocket::{BaseWebSocketClient, WebSocketClient},
 };
+use crate::strategies::poisson_market_maker::state::OrderIntent;
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -256,31 +258,58 @@ impl PoissonMarketMaker {
                                     .unwrap_or(false);
 
                                 let mut local_pos = self.local_position.write().await;
-
-                                if ps == "BOTH" {
-                                    if reduce_only {
-                                        if *local_pos > 0.0 {
-                                            *local_pos -= qty;
-                                            state.inventory -= qty;
+                                let ps_upper = ps.to_ascii_uppercase();
+                                match ps_upper.as_str() {
+                                    "LONG" => {
+                                        if side == "BUY" && !reduce_only {
+                                            state.long_inventory += qty;
                                         } else {
-                                            *local_pos += qty;
-                                            state.inventory += qty;
+                                            state.long_inventory =
+                                                (state.long_inventory - qty).max(0.0);
                                         }
-                                    } else if side == "BUY" {
-                                        *local_pos += qty;
-                                        state.inventory += qty;
-                                    } else {
-                                        *local_pos -= qty;
-                                        state.inventory -= qty;
+                                    }
+                                    "SHORT" => {
+                                        if side == "SELL" && !reduce_only {
+                                            state.short_inventory += qty;
+                                        } else {
+                                            state.short_inventory =
+                                                (state.short_inventory - qty).max(0.0);
+                                        }
+                                    }
+                                    _ => {
+                                        if reduce_only {
+                                            if *local_pos > 0.0 {
+                                                *local_pos -= qty;
+                                            } else {
+                                                *local_pos += qty;
+                                            }
+                                        } else if side == "BUY" {
+                                            *local_pos += qty;
+                                        } else {
+                                            *local_pos -= qty;
+                                        }
+
+                                        if *local_pos >= 0.0 {
+                                            state.long_inventory = (*local_pos).max(0.0);
+                                            state.short_inventory = 0.0;
+                                        } else {
+                                            state.long_inventory = 0.0;
+                                            state.short_inventory = (*local_pos).abs();
+                                        }
                                     }
                                 }
 
+                                state.inventory = state.long_inventory - state.short_inventory;
+                                *local_pos = state.inventory;
+
                                 log::debug!(
-                                    "📦 更新本地持仓: {} {} (side: {}, ps: {}, reduce: {})",
-                                    *local_pos,
+                                    "📦 更新本地持仓: 净={} 多头={} 空头={} [{}] (side: {}, ps: {}, reduce: {})",
+                                    state.inventory,
+                                    state.long_inventory,
+                                    state.short_inventory,
                                     self.config.trading.symbol,
                                     side,
-                                    ps,
+                                    ps_upper,
                                     reduce_only
                                 );
 
@@ -293,54 +322,32 @@ impl PoissonMarketMaker {
                         }
 
                         let mut is_buy_filled = false;
+                        let mut is_sell_filled = false;
+                        let mut removed_orders: Vec<(OrderIntent, Order)> = Vec::new();
+                        let mut seen_ids = HashSet::new();
+
                         if let Some(client_id) = client_order_id.as_ref() {
-                            if let Some(exchange_id) =
-                                state.buy_client_to_exchange.remove(client_id)
-                            {
-                                state.buy_exchange_to_client.remove(&exchange_id);
-                                if let Some(order) = state.active_buy_orders.remove(&exchange_id) {
-                                    cache_invalidate_ids.push(order.id.clone());
-                                    is_buy_filled = true;
-                                }
-                            }
-                        }
-                        if !is_buy_filled {
-                            if let Some(exchange_id) = exchange_order_id.as_ref() {
-                                if let Some(order) = state.active_buy_orders.remove(exchange_id) {
-                                    cache_invalidate_ids.push(order.id.clone());
-                                    if let Some(client_id) =
-                                        state.buy_exchange_to_client.remove(exchange_id)
-                                    {
-                                        state.buy_client_to_exchange.remove(&client_id);
-                                    }
-                                    is_buy_filled = true;
+                            if let Some((intent, order)) = state.detach_order_by_client(client_id) {
+                                if seen_ids.insert(order.id.clone()) {
+                                    removed_orders.push((intent, order));
                                 }
                             }
                         }
 
-                        let mut is_sell_filled = false;
-                        if let Some(client_id) = client_order_id.as_ref() {
-                            if let Some(exchange_id) =
-                                state.sell_client_to_exchange.remove(client_id)
+                        if let Some(exchange_id) = exchange_order_id.as_ref() {
+                            if let Some((intent, order)) = state.detach_order_by_exchange(exchange_id)
                             {
-                                state.sell_exchange_to_client.remove(&exchange_id);
-                                if let Some(order) = state.active_sell_orders.remove(&exchange_id) {
-                                    cache_invalidate_ids.push(order.id.clone());
-                                    is_sell_filled = true;
+                                if seen_ids.insert(order.id.clone()) {
+                                    removed_orders.push((intent, order));
                                 }
                             }
                         }
-                        if !is_sell_filled {
-                            if let Some(exchange_id) = exchange_order_id.as_ref() {
-                                if let Some(order) = state.active_sell_orders.remove(exchange_id) {
-                                    cache_invalidate_ids.push(order.id.clone());
-                                    if let Some(client_id) =
-                                        state.sell_exchange_to_client.remove(exchange_id)
-                                    {
-                                        state.sell_client_to_exchange.remove(&client_id);
-                                    }
-                                    is_sell_filled = true;
-                                }
+
+                        for (intent, order) in removed_orders {
+                            cache_invalidate_ids.push(order.id.clone());
+                            match intent.side() {
+                                OrderSide::Buy => is_buy_filled = true,
+                                OrderSide::Sell => is_sell_filled = true,
                             }
                         }
 
@@ -382,48 +389,29 @@ impl PoissonMarketMaker {
                     "CANCELED" | "EXPIRED" | "REJECTED" => {
                         let mut state = self.state.lock().await;
 
-                        let mut removed = false;
+                        let mut removed_orders: Vec<(OrderIntent, Order)> = Vec::new();
+                        let mut seen_ids = HashSet::new();
+
                         if let Some(client_id) = client_order_id.as_ref() {
-                            if let Some(exchange_id) =
-                                state.buy_client_to_exchange.remove(client_id)
-                            {
-                                state.buy_exchange_to_client.remove(&exchange_id);
-                                if let Some(order) = state.active_buy_orders.remove(&exchange_id) {
-                                    cache_invalidate_ids.push(order.id.clone());
-                                    removed = true;
-                                }
-                            }
-                            if let Some(exchange_id) =
-                                state.sell_client_to_exchange.remove(client_id)
-                            {
-                                state.sell_exchange_to_client.remove(&exchange_id);
-                                if let Some(order) = state.active_sell_orders.remove(&exchange_id) {
-                                    cache_invalidate_ids.push(order.id.clone());
-                                    removed = true;
+                            if let Some((intent, order)) = state.detach_order_by_client(client_id) {
+                                if seen_ids.insert(order.id.clone()) {
+                                    removed_orders.push((intent, order));
                                 }
                             }
                         }
 
                         if let Some(exchange_id) = exchange_order_id.as_ref() {
-                            if let Some(order) = state.active_buy_orders.remove(exchange_id) {
-                                cache_invalidate_ids.push(order.id.clone());
-                                removed = true;
-                            }
-                            if let Some(client_id) =
-                                state.buy_exchange_to_client.remove(exchange_id)
+                            if let Some((intent, order)) = state.detach_order_by_exchange(exchange_id)
                             {
-                                state.buy_client_to_exchange.remove(&client_id);
+                                if seen_ids.insert(order.id.clone()) {
+                                    removed_orders.push((intent, order));
+                                }
                             }
+                        }
 
-                            if let Some(order) = state.active_sell_orders.remove(exchange_id) {
-                                cache_invalidate_ids.push(order.id.clone());
-                                removed = true;
-                            }
-                            if let Some(client_id) =
-                                state.sell_exchange_to_client.remove(exchange_id)
-                            {
-                                state.sell_client_to_exchange.remove(&client_id);
-                            }
+                        let removed = !removed_orders.is_empty();
+                        for (_intent, order) in removed_orders {
+                            cache_invalidate_ids.push(order.id.clone());
                         }
 
                         drop(state);

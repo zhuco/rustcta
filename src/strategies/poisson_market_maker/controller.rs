@@ -10,12 +10,13 @@
 
 use super::config::*;
 use super::state::{
-    LocalOrderBook, MMStrategyState, OrderEventType, OrderFlowEvent, PoissonParameters, SymbolInfo,
+    LocalOrderBook, MMStrategyState, OrderEventType, OrderFlowEvent, OrderIntent,
+    PoissonParameters, SymbolInfo,
 };
 
 use chrono::{DateTime, Duration, Utc};
 use crossbeam::queue::ArrayQueue;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -27,7 +28,7 @@ use crate::core::{
     types::*,
     websocket::{BaseWebSocketClient, WebSocketClient},
 };
-use crate::cta::account_manager::AccountManager;
+use crate::cta::account_manager::{AccountInfo, AccountManager};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -73,9 +74,20 @@ impl PoissonMarketMaker {
     ) -> Self {
         let state = MMStrategyState {
             inventory: 0.0,
+            long_inventory: 0.0,
+            short_inventory: 0.0,
             avg_price: 0.0,
+            long_avg_price: 0.0,
+            short_avg_price: 0.0,
             active_buy_orders: HashMap::new(),
             active_sell_orders: HashMap::new(),
+            buy_client_to_exchange: HashMap::new(),
+            buy_exchange_to_client: HashMap::new(),
+            sell_client_to_exchange: HashMap::new(),
+            sell_exchange_to_client: HashMap::new(),
+            order_slots: HashMap::new(),
+            client_to_slot: HashMap::new(),
+            exchange_to_slot: HashMap::new(),
             total_pnl: 0.0,
             daily_pnl: 0.0,
             trade_count: 0,
@@ -680,6 +692,7 @@ impl PoissonMarketMaker {
                             bids,
                             asks,
                             timestamp: Utc::now(),
+                            info: serde_json::Value::Null,
                         }));
                     }
                 }
@@ -902,7 +915,9 @@ impl PoissonMarketMaker {
             let (bid_spread, ask_spread) = self.calculate_optimal_spread().await?;
 
             // 3. 检查是否需要刷新订单（价格变化超过0.1%）
-            let should_refresh = self.should_refresh_orders(current_price).await;
+            let should_refresh = self
+                .should_refresh_orders(current_price, bid_spread, ask_spread)
+                .await;
 
             if should_refresh {
                 // 3a. 取消旧订单
@@ -940,41 +955,161 @@ impl PoissonMarketMaker {
     }
 
     /// 检查是否需要刷新订单
-    async fn should_refresh_orders(&self, current_price: f64) -> bool {
-        let state = self.state.lock().await;
+    async fn should_refresh_orders(
+        &self,
+        current_price: f64,
+        bid_spread: f64,
+        ask_spread: f64,
+    ) -> bool {
+        let (best_bid, best_ask) = {
+            let orderbook = self.orderbook.read().await;
+            if orderbook.bids.is_empty() || orderbook.asks.is_empty() {
+                return true;
+            }
+            (orderbook.bids[0].0, orderbook.asks[0].0)
+        };
 
-        // 1. 没有订单时需要挂单
-        if state.active_buy_orders.is_empty() && state.active_sell_orders.is_empty() {
+        let is_dual_mode = self.is_dual_position_mode().await;
+
+        let (inventory, long_inventory, short_inventory, buy_orders, sell_orders, slot_infos) = {
+            let state = self.state.lock().await;
+            (
+                state.inventory,
+                state.long_inventory,
+                state.short_inventory,
+                state.active_buy_orders.clone(),
+                state.active_sell_orders.clone(),
+                state.order_slots.clone(),
+            )
+        };
+
+        let tick_size = self.tick_size();
+        let inventory_cap = self.config.trading.max_inventory * 0.9;
+        let (can_buy, can_sell) = if is_dual_mode {
+            (
+                long_inventory < inventory_cap,
+                short_inventory < inventory_cap,
+            )
+        } else {
+            (inventory < inventory_cap, inventory > -inventory_cap)
+        };
+
+        let order_quantity =
+            self.round_quantity(self.config.trading.order_size_usdc / current_price);
+        if order_quantity <= 0.0 {
             return true;
         }
 
-        // 2. 检查30秒超时
+        let reduce_threshold = (order_quantity * 0.5).max(0.0001);
+        let need_close_short = short_inventory > reduce_threshold;
+        let need_close_long = long_inventory > reduce_threshold;
+        let need_open_long = can_buy;
+        let need_open_short = can_sell;
+
+        let open_long_price =
+            self.round_price_for_side(best_bid * (1.0 - bid_spread), OrderSide::Buy);
+        let open_short_price =
+            self.round_price_for_side(best_ask * (1.0 + ask_spread), OrderSide::Sell);
+
+        let close_short_base = (best_bid - tick_size).max(tick_size);
+        let close_short_price = self
+            .round_price_for_side(close_short_base, OrderSide::Buy)
+            .max(tick_size);
+
+        let close_long_base = best_ask + tick_size;
+        let close_long_price = self.round_price_for_side(close_long_base, OrderSide::Sell);
+
+        let mut required_map: HashMap<OrderIntent, (bool, f64)> = HashMap::new();
+        required_map.insert(OrderIntent::OpenLong, (need_open_long, open_long_price));
+        required_map.insert(OrderIntent::OpenShort, (need_open_short, open_short_price));
+        required_map.insert(
+            OrderIntent::CloseShort,
+            (need_close_short, close_short_price),
+        );
+        required_map.insert(OrderIntent::CloseLong, (need_close_long, close_long_price));
+
+        for (intent, (required, _)) in &required_map {
+            if *required && !slot_infos.contains_key(intent) {
+                log::debug!("槽位 {:?} 缺失，需要刷新", intent);
+                return true;
+            }
+        }
+
+        for (intent, _info) in slot_infos.iter() {
+            if !required_map
+                .get(intent)
+                .map(|(required, _)| *required)
+                .unwrap_or(false)
+            {
+                log::debug!("槽位 {:?} 已不需要，准备撤单", intent);
+                return true;
+            }
+        }
+
         let now = Utc::now();
-        for order in state.active_buy_orders.values() {
+        for (intent, (required, target_price)) in &required_map {
+            if !*required {
+                continue;
+            }
+            let info = match slot_infos.get(intent) {
+                Some(info) => info,
+                None => continue,
+            };
+
+            let maybe_order = match intent.side() {
+                OrderSide::Buy => buy_orders.get(&info.exchange_id),
+                OrderSide::Sell => sell_orders.get(&info.exchange_id),
+            };
+
+            let order = match maybe_order {
+                Some(order) => order,
+                None => {
+                    log::debug!("槽位 {:?} 未找到本地挂单", intent);
+                    return true;
+                }
+            };
+
             if now.signed_duration_since(order.timestamp).num_seconds() > 30 {
-                log::debug!("买单超过30秒未成交，需要刷新");
+                log::debug!("槽位 {:?} 挂单超过30秒未更新", intent);
+                return true;
+            }
+
+            if let Some(price) = order.price {
+                if (price - target_price).abs() >= tick_size * 0.5 {
+                    log::debug!(
+                        "槽位 {:?} 价格偏离目标 (当前 {:.5} | 目标 {:.5})",
+                        intent,
+                        price,
+                        target_price
+                    );
+                    return true;
+                }
+            } else {
+                log::debug!("槽位 {:?} 缺少价格信息", intent);
+                return true;
+            }
+
+            if (order.amount - order_quantity).abs() > 1e-9 {
+                log::debug!(
+                    "槽位 {:?} 数量与配置不一致 (当前 {:.5} | 目标 {:.5})",
+                    intent,
+                    order.amount,
+                    order_quantity
+                );
                 return true;
             }
         }
 
-        for order in state.active_sell_orders.values() {
-            if now.signed_duration_since(order.timestamp).num_seconds() > 30 {
-                log::debug!("卖单超过30秒未成交，需要刷新");
-                return true;
-            }
-        }
-
-        // 3. 检查价格变化
         let last_bid = *self.last_bid_price.read().await;
         let last_ask = *self.last_ask_price.read().await;
-
         if last_bid > 0.0 && last_ask > 0.0 {
             let mid_price = (last_bid + last_ask) / 2.0;
             let price_change_pct = ((current_price - mid_price) / mid_price).abs();
-
             if price_change_pct > 0.001 {
-                // 0.1%
-                log::debug!("价格变化 {:.3}%，需要刷新订单", price_change_pct * 100.0);
+                log::debug!(
+                    "价格变化 {:.3}% 超过阈值，刷新挂单",
+                    price_change_pct * 100.0
+                );
                 return true;
             }
         }
@@ -1055,7 +1190,6 @@ impl PoissonMarketMaker {
             return Ok(());
         }
 
-        // 获取盘口最优价格
         let (best_bid, best_ask) = {
             let orderbook = self.orderbook.read().await;
             if orderbook.bids.is_empty() || orderbook.asks.is_empty() {
@@ -1065,249 +1199,353 @@ impl PoissonMarketMaker {
             (orderbook.bids[0].0, orderbook.asks[0].0)
         };
 
-        let state = self.state.lock().await;
-
-        // 检查库存限制
-        // 永续合约可以双向开仓，不需要库存就能开空
-        let can_buy = state.inventory < self.config.trading.max_inventory * 0.9; // 多头仓位限制
-        let can_sell = state.inventory > -self.config.trading.max_inventory * 0.9; // 空头仓位限制（负库存）
-
-        // 计算订单数量（固定6 USDT）
-        let order_quantity = self.config.trading.order_size_usdc / current_price;
-        let order_quantity = self.round_quantity(order_quantity);
-
-        log::debug!(
-            "准备下单 - 价格: {:.5}, 数量: {}, 买价差: {:.2}%, 卖价差: {:.2}%",
-            current_price,
-            order_quantity,
-            bid_spread * 100.0,
-            ask_spread * 100.0
-        );
-        log::debug!(
-            "订单状态 - 买单: {}, 卖单: {}, 库存: {:.1}, can_buy: {}, can_sell: {}",
-            state.active_buy_orders.len(),
-            state.active_sell_orders.len(),
-            state.inventory,
-            can_buy,
-            can_sell
-        );
-
-        // 释放state锁，避免死锁
-        drop(state);
+        let is_dual_mode = self.is_dual_position_mode().await;
+        let (inventory, long_inventory, short_inventory, active_slots) = {
+            let state = self.state.lock().await;
+            (
+                state.inventory,
+                state.long_inventory,
+                state.short_inventory,
+                state.order_slots.len(),
+            )
+        };
 
         let account = self
             .account_manager
             .get_account(&self.config.account.account_id)
             .ok_or_else(|| ExchangeError::Other("账户不存在".to_string()))?;
 
-        // 检查订单平衡
-        let (buy_count, sell_count) = {
-            let state = self.state.lock().await;
+        let tick_size = self.tick_size();
+        let inventory_cap = self.config.trading.max_inventory * 0.9;
+        let (can_buy, can_sell) = if is_dual_mode {
             (
-                state.active_buy_orders.len(),
-                state.active_sell_orders.len(),
+                long_inventory < inventory_cap,
+                short_inventory < inventory_cap,
             )
+        } else {
+            (inventory < inventory_cap, inventory > -inventory_cap)
         };
 
-        // 维持买卖平衡，每边最多1个订单
-        // 修正：只有在订单平衡的情况下才能下新单
-        let orders_balanced = buy_count == sell_count && buy_count <= 1;
-        // 正确的订单需求判断：总是保持买卖单各一个
-        let need_buy_order = buy_count == 0; // 没有买单时需要挂
-        let need_sell_order = sell_count == 0; // 没有卖单时需要挂
+        let order_quantity =
+            self.round_quantity(self.config.trading.order_size_usdc / current_price);
+        if order_quantity <= 0.0 {
+            log::warn!("订单数量为0，跳过下单");
+            return Ok(());
+        }
 
-        // 处理订单不平衡情况
-        // 正确逻辑：如果有超过一个订单，先取消多余的
-        if buy_count > 1 || sell_count > 1 {
-            log::warn!(
-                "⚠️ 订单过多: 买单={}, 卖单={}，取消多余订单",
-                buy_count,
-                sell_count
-            );
-            if let Err(e) = self.cancel_all_orders().await {
-                log::error!("取消订单失败: {}", e);
+        let reduce_threshold = (order_quantity * 0.5).max(0.0001);
+        let need_close_short = short_inventory > reduce_threshold;
+        let need_close_long = long_inventory > reduce_threshold;
+        let need_open_long = can_buy;
+        let need_open_short = can_sell;
+
+        let open_long_price =
+            self.round_price_for_side(best_bid * (1.0 - bid_spread), OrderSide::Buy);
+        let open_short_price =
+            self.round_price_for_side(best_ask * (1.0 + ask_spread), OrderSide::Sell);
+
+        let close_short_base = (best_bid - tick_size).max(tick_size);
+        let close_short_price = self
+            .round_price_for_side(close_short_base, OrderSide::Buy)
+            .max(tick_size);
+
+        let close_long_base = best_ask + tick_size;
+        let close_long_price = self.round_price_for_side(close_long_base, OrderSide::Sell);
+
+        log::debug!(
+            "⚖️ 槽位需求 | open_long={} open_short={} close_long={} close_short={} | active_slots={}",
+            need_open_long,
+            need_open_short,
+            need_close_long,
+            need_close_short,
+            active_slots
+        );
+
+        let strategy_prefix = format!(
+            "poisson_{}",
+            self.config
+                .trading
+                .symbol
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .to_lowercase()
+        );
+
+        self.ensure_slot_order(
+            &account,
+            OrderIntent::OpenLong,
+            OrderSide::Buy,
+            open_long_price,
+            order_quantity,
+            true,
+            "GTX",
+            Some("LONG"),
+            false,
+            need_open_long,
+            tick_size,
+            is_dual_mode,
+            "BOL",
+            "开多",
+            &strategy_prefix,
+        )
+        .await?;
+
+        self.ensure_slot_order(
+            &account,
+            OrderIntent::CloseShort,
+            OrderSide::Buy,
+            close_short_price,
+            order_quantity,
+            true,
+            "GTX",
+            Some("SHORT"),
+            true,
+            need_close_short,
+            tick_size,
+            is_dual_mode,
+            "BCS",
+            "平空",
+            &strategy_prefix,
+        )
+        .await?;
+
+        self.ensure_slot_order(
+            &account,
+            OrderIntent::OpenShort,
+            OrderSide::Sell,
+            open_short_price,
+            order_quantity,
+            true,
+            "GTX",
+            Some("SHORT"),
+            false,
+            need_open_short,
+            tick_size,
+            is_dual_mode,
+            "SOS",
+            "开空",
+            &strategy_prefix,
+        )
+        .await?;
+
+        self.ensure_slot_order(
+            &account,
+            OrderIntent::CloseLong,
+            OrderSide::Sell,
+            close_long_price,
+            order_quantity,
+            true,
+            "GTX",
+            Some("LONG"),
+            true,
+            need_close_long,
+            tick_size,
+            is_dual_mode,
+            "SCL",
+            "平多",
+            &strategy_prefix,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn ensure_slot_order(
+        &self,
+        account: &Arc<AccountInfo>,
+        intent: OrderIntent,
+        side: OrderSide,
+        target_price: f64,
+        order_quantity: f64,
+        post_only: bool,
+        time_in_force: &str,
+        position_side_dual: Option<&str>,
+        reduce_only: bool,
+        required: bool,
+        tick_size: f64,
+        is_dual_mode: bool,
+        tag: &str,
+        log_label: &str,
+        strategy_prefix: &str,
+    ) -> Result<()> {
+        let symbol = self.config.trading.symbol.clone();
+
+        let (existing_info, existing_order) = {
+            let state = self.state.lock().await;
+            let info = state.order_slots.get(&intent).cloned();
+            let order = info
+                .as_ref()
+                .and_then(|slot| match side {
+                    OrderSide::Buy => state.active_buy_orders.get(&slot.exchange_id),
+                    OrderSide::Sell => state.active_sell_orders.get(&slot.exchange_id),
+                })
+                .cloned();
+            (info, order)
+        };
+
+        if !required {
+            if let Some(info) = existing_info {
+                log::info!("🗑️ 撤销{}挂单: {}", log_label, info.exchange_id);
+                match account
+                    .exchange
+                    .cancel_order(&info.exchange_id, &symbol, MarketType::Futures)
+                    .await
+                {
+                    Ok(_) => {
+                        let mut state = self.state.lock().await;
+                        if let Some((_, order)) = state.detach_order_by_exchange(&info.exchange_id)
+                        {
+                            self.order_cache.invalidate_order(&order.id).await;
+                        }
+                    }
+                    Err(err) => {
+                        if Self::is_order_missing_error(&err) {
+                            log::info!("ℹ️ {}挂单已在交易所消失: {}", log_label, info.exchange_id);
+                            {
+                                let mut state = self.state.lock().await;
+                                if let Some((_, order)) =
+                                    state.detach_order_by_exchange(&info.exchange_id)
+                                {
+                                    self.order_cache.invalidate_order(&order.id).await;
+                                }
+                            }
+                            let reason = format!("{}挂单缺失", log_label);
+                            self.resync_position_from_exchange(&reason).await;
+                        } else {
+                            log::warn!(
+                                "⚠️ 撤销{}挂单失败: {} ({})",
+                                log_label,
+                                info.exchange_id,
+                                err
+                            );
+                        }
+                    }
+                }
             }
             return Ok(());
         }
 
-        // 记录挂单状态
-        if buy_count == 1 && sell_count == 1 {
-            log::debug!("✅ 订单平衡: 买单=1, 卖单=1");
-        } else if buy_count == 0 || sell_count == 0 {
-            log::debug!("🔄 需要补充订单: 买单={}, 卖单={}", buy_count, sell_count);
+        let mut need_replace = true;
+        if let Some(order) = existing_order.as_ref() {
+            if let Some(price) = order.price {
+                if (price - target_price).abs() < tick_size * 0.5
+                    && (order.amount - order_quantity).abs() < 1e-9
+                {
+                    need_replace = false;
+                }
+            }
         }
 
-        // 下买单
-        if can_buy && need_buy_order {
-            let state = self.state.lock().await;
-            if state.active_buy_orders.is_empty() {
-                drop(state); // 释放锁
+        if !need_replace {
+            return Ok(());
+        }
 
-                // 使用盘口价格：在最佳买价基础上减去价差
-                let buy_price = best_bid * (1.0 - bid_spread);
-                let buy_price = self.round_price(buy_price);
-
-                // 记录本次下单价格
-                *self.last_bid_price.write().await = buy_price;
-
-                let base_asset = self
-                    .symbol_info
-                    .read()
-                    .await
-                    .as_ref()
-                    .map(|info| info.base_asset.clone())
-                    .unwrap_or_else(|| "TOKEN".to_string());
-
-                // 使用毫秒级时间戳日志
-                let timestamp = chrono::Utc::now();
-                log::debug!(
-                    "[{}] 📗 准备下买单: {} {} @ {:.5} {} (价差: -{:.2}%)",
-                    timestamp.format("%H:%M:%S%.3f"),
-                    order_quantity,
-                    base_asset,
-                    buy_price,
-                    self.get_quote_asset().await,
-                    bid_spread * 100.0
-                );
-
-                // 获取持仓模式参数
-                let mut buy_params = HashMap::from([
-                    ("postOnly".to_string(), "true".to_string()),
-                    ("timeInForce".to_string(), "GTX".to_string()), // GTX = Post-only
-                ]);
-
-                // 如果是双向持仓模式，添加positionSide
-                if self.is_dual_position_mode().await {
-                    buy_params.insert("positionSide".to_string(), "LONG".to_string());
-                }
-
-                // 使用标准化的订单ID生成器
-                let strategy_name = format!(
-                    "poisson_{}",
-                    self.config
-                        .trading
-                        .symbol
-                        .split('/')
-                        .next()
-                        .unwrap_or("")
-                        .to_lowercase()
-                );
-                let order_id = crate::utils::generate_order_id_with_tag(
-                    &strategy_name,
-                    &account.exchange_name,
-                    "B",
-                );
-
-                let buy_order = OrderRequest {
-                    symbol: self.config.trading.symbol.clone(),
-                    side: OrderSide::Buy,
-                    order_type: OrderType::Limit,
-                    amount: order_quantity,
-                    price: Some(buy_price),
-                    market_type: MarketType::Futures,
-                    params: Some(buy_params),
-                    client_order_id: Some(order_id),
-                    time_in_force: Some("GTX".to_string()),
-                    reduce_only: None,
-                    post_only: Some(true),
-                };
-
-                match account.exchange.create_order(buy_order).await {
-                    Ok(order) => {
-                        log::debug!("✅ 买单成功: ID={}, 状态={:?}", order.id, order.status);
-
-                        let mut state = self.state.lock().await;
-                        state.active_buy_orders.insert(order.id.clone(), order);
+        if let Some(info) = existing_info {
+            match account
+                .exchange
+                .cancel_order(&info.exchange_id, &symbol, MarketType::Futures)
+                .await
+            {
+                Ok(_) => {
+                    let mut state = self.state.lock().await;
+                    if let Some((_, order)) = state.detach_order_by_exchange(&info.exchange_id) {
+                        self.order_cache.invalidate_order(&order.id).await;
                     }
-                    Err(e) => {
-                        log::error!("❌ 买单失败: {}", e);
+                }
+                Err(err) => {
+                    if Self::is_order_missing_error(&err) {
+                        log::info!("ℹ️ {}挂单已在交易所消失: {}", log_label, info.exchange_id);
+                        {
+                            let mut state = self.state.lock().await;
+                            if let Some((_, order)) =
+                                state.detach_order_by_exchange(&info.exchange_id)
+                            {
+                                self.order_cache.invalidate_order(&order.id).await;
+                            }
+                        }
+                        let reason = format!("替换{}挂单", log_label);
+                        self.resync_position_from_exchange(&reason).await;
+                    } else {
+                        log::warn!(
+                            "⚠️ 替换{}挂单时取消失败: {} ({})",
+                            log_label,
+                            info.exchange_id,
+                            err
+                        );
                     }
                 }
             }
         }
 
-        // 下卖单
-        if can_sell && need_sell_order {
-            let state = self.state.lock().await;
-            if state.active_sell_orders.is_empty() {
-                drop(state); // 释放锁
+        let mut params = HashMap::new();
+        params.insert("timeInForce".to_string(), time_in_force.to_string());
+        if post_only {
+            params.insert("postOnly".to_string(), "true".to_string());
+        }
 
-                // 使用盘口价格：在最佳卖价基础上加上价差
-                let sell_price = best_ask * (1.0 + ask_spread);
-                let sell_price = self.round_price(sell_price);
+        if is_dual_mode {
+            if let Some(ps) = position_side_dual {
+                params.insert("positionSide".to_string(), ps.to_string());
+            }
+        } else if reduce_only {
+            params.insert("reduceOnly".to_string(), "true".to_string());
+        }
 
-                // 记录本次下单价格
-                *self.last_ask_price.write().await = sell_price;
+        let client_order_id =
+            crate::utils::generate_order_id_with_tag(strategy_prefix, &account.exchange_name, tag);
 
-                let base_asset = self
-                    .symbol_info
-                    .read()
-                    .await
-                    .as_ref()
-                    .map(|info| info.base_asset.clone())
-                    .unwrap_or_else(|| "TOKEN".to_string());
+        let order_request = OrderRequest {
+            symbol: symbol.clone(),
+            side,
+            order_type: OrderType::Limit,
+            amount: order_quantity,
+            price: Some(target_price),
+            market_type: MarketType::Futures,
+            params: Some(params),
+            client_order_id: Some(client_order_id.clone()),
+            time_in_force: Some(time_in_force.to_string()),
+            reduce_only: if !is_dual_mode && reduce_only {
+                Some(true)
+            } else {
+                None
+            },
+            post_only: Some(post_only),
+        };
 
-                log::debug!(
-                    "📕 准备下卖单: {} {} @ {:.5} {} (价差: +{:.2}%)",
-                    order_quantity,
-                    base_asset,
-                    sell_price,
-                    self.get_quote_asset().await,
-                    ask_spread * 100.0
-                );
-
-                // 获取持仓模式参数
-                let mut sell_params = HashMap::from([
-                    ("postOnly".to_string(), "true".to_string()),
-                    ("timeInForce".to_string(), "GTX".to_string()), // GTX = Post-only
-                ]);
-
-                // 如果是双向持仓模式，添加positionSide
-                if self.is_dual_position_mode().await {
-                    sell_params.insert("positionSide".to_string(), "SHORT".to_string());
+        match account.exchange.create_order(order_request).await {
+            Ok(order) => {
+                {
+                    let mut state = self.state.lock().await;
+                    state.register_order(intent, client_order_id, order.clone());
                 }
 
-                // 使用标准化的订单ID生成器
-                let strategy_name = format!(
-                    "poisson_{}",
-                    self.config
-                        .trading
-                        .symbol
-                        .split('/')
-                        .next()
-                        .unwrap_or("")
-                        .to_lowercase()
-                );
-                let order_id = crate::utils::generate_order_id_with_tag(
-                    &strategy_name,
-                    &account.exchange_name,
-                    "S",
-                );
-
-                let sell_order = OrderRequest {
-                    symbol: self.config.trading.symbol.clone(),
-                    side: OrderSide::Sell,
-                    order_type: OrderType::Limit,
-                    amount: order_quantity,
-                    price: Some(sell_price),
-                    market_type: MarketType::Futures,
-                    params: Some(sell_params),
-                    client_order_id: Some(order_id),
-                    time_in_force: Some("GTX".to_string()),
-                    reduce_only: None,
-                    post_only: Some(true),
-                };
-
-                match account.exchange.create_order(sell_order).await {
-                    Ok(order) => {
-                        log::debug!("✅ 卖单成功: ID={}, 状态={:?}", order.id, order.status);
-
-                        let mut state = self.state.lock().await;
-                        state.active_sell_orders.insert(order.id.clone(), order);
+                match intent {
+                    OrderIntent::OpenLong => {
+                        *self.last_bid_price.write().await = target_price;
                     }
-                    Err(e) => {
-                        log::error!("❌ 卖单失败: {}", e);
+                    OrderIntent::OpenShort => {
+                        *self.last_ask_price.write().await = target_price;
                     }
+                    _ => {}
+                }
+
+                log::info!(
+                    "✅ 下单成功 | {} | id={} | 价格={:.5} | 数量={:.4}",
+                    log_label,
+                    order.id,
+                    target_price,
+                    order_quantity
+                );
+            }
+            Err(err) => {
+                if Self::is_reduce_only_rejection(&err) {
+                    log::warn!("⚠️ {}挂单失败（ReduceOnly被拒绝）: {}", log_label, err);
+                    let reason = format!("{}挂单ReduceOnly被拒绝", log_label);
+                    self.resync_position_from_exchange(&reason).await;
+                } else {
+                    log::error!("❌ {}挂单失败: {}", log_label, err);
                 }
             }
         }
@@ -1322,38 +1560,101 @@ impl PoissonMarketMaker {
             return Ok(());
         }
 
-        let state = self.state.lock().await;
+        let (buy_orders, sell_orders) = {
+            let state = self.state.lock().await;
+            (
+                state.active_buy_orders.clone(),
+                state.active_sell_orders.clone(),
+            )
+        };
+
         let account = self
             .account_manager
             .get_account(&self.config.account.account_id)
             .ok_or_else(|| ExchangeError::Other("账户不存在".to_string()))?;
 
-        // 检查买单是否需要取消
-        for (order_id, order) in &state.active_buy_orders {
+        let mut buy_to_cancel = Vec::new();
+        for (order_id, order) in &buy_orders {
             if let Some(price) = order.price {
-                // 如果买单价格偏离当前价格太远，取消
                 if price < current_price * 0.995 {
-                    log::debug!("取消过期买单: {}", order_id);
-                    let _ = account
-                        .exchange
-                        .cancel_order(order_id, &self.config.trading.symbol, MarketType::Futures)
-                        .await;
+                    buy_to_cancel.push(order_id.clone());
                 }
             }
         }
 
-        // 检查卖单是否需要取消
-        for (order_id, order) in &state.active_sell_orders {
+        let mut sell_to_cancel = Vec::new();
+        for (order_id, order) in &sell_orders {
             if let Some(price) = order.price {
-                // 如果卖单价格偏离当前价格太远，取消
                 if price > current_price * 1.005 {
-                    log::debug!("取消过期卖单: {}", order_id);
-                    let _ = account
-                        .exchange
-                        .cancel_order(order_id, &self.config.trading.symbol, MarketType::Futures)
-                        .await;
+                    sell_to_cancel.push(order_id.clone());
                 }
             }
+        }
+
+        let mut need_resync = false;
+
+        for order_id in buy_to_cancel {
+            log::debug!("取消过期买单: {}", order_id);
+            match account
+                .exchange
+                .cancel_order(&order_id, &self.config.trading.symbol, MarketType::Futures)
+                .await
+            {
+                Ok(_) => {
+                    let mut state = self.state.lock().await;
+                    if let Some((_, order)) = state.detach_order_by_exchange(&order_id) {
+                        self.order_cache.invalidate_order(&order.id).await;
+                    }
+                }
+                Err(err) => {
+                    if Self::is_order_missing_error(&err) {
+                        log::debug!("买单已在交易所消失: {}", order_id);
+                        {
+                            let mut state = self.state.lock().await;
+                            if let Some((_, order)) = state.detach_order_by_exchange(&order_id) {
+                                self.order_cache.invalidate_order(&order.id).await;
+                            }
+                        }
+                        need_resync = true;
+                    } else {
+                        log::warn!("取消买单失败 ({}): {}", order_id, err);
+                    }
+                }
+            }
+        }
+
+        for order_id in sell_to_cancel {
+            log::debug!("取消过期卖单: {}", order_id);
+            match account
+                .exchange
+                .cancel_order(&order_id, &self.config.trading.symbol, MarketType::Futures)
+                .await
+            {
+                Ok(_) => {
+                    let mut state = self.state.lock().await;
+                    if let Some((_, order)) = state.detach_order_by_exchange(&order_id) {
+                        self.order_cache.invalidate_order(&order.id).await;
+                    }
+                }
+                Err(err) => {
+                    if Self::is_order_missing_error(&err) {
+                        log::debug!("卖单已在交易所消失: {}", order_id);
+                        {
+                            let mut state = self.state.lock().await;
+                            if let Some((_, order)) = state.detach_order_by_exchange(&order_id) {
+                                self.order_cache.invalidate_order(&order.id).await;
+                            }
+                        }
+                        need_resync = true;
+                    } else {
+                        log::warn!("取消卖单失败 ({}): {}", order_id, err);
+                    }
+                }
+            }
+        }
+
+        if need_resync {
+            self.resync_position_from_exchange("撤销过期挂单").await;
         }
 
         Ok(())
@@ -1372,20 +1673,44 @@ impl PoissonMarketMaker {
             .get_positions(Some(&self.config.trading.symbol))
             .await?;
 
-        let mut state = self.state.lock().await;
+        let mut long_position = 0.0;
+        let mut short_position = 0.0;
+        let mut long_avg_price = 0.0;
+        let mut short_avg_price = 0.0;
+        let mut long_pnl = 0.0;
+        let mut short_pnl = 0.0;
 
-        if let Some(position) = positions.first() {
-            // 使用amount字段，它包含了正负号
-            // 正值表示多头，负值表示空头
-            let new_inventory = position.amount;
+        for position in &positions {
+            let side = position.side.to_ascii_uppercase();
+            if side == "LONG" || position.amount > 0.0 {
+                long_position = position.amount.abs();
+                long_avg_price = position.entry_price;
+                long_pnl = position.unrealized_pnl;
+            } else if side == "SHORT" || position.amount < 0.0 {
+                short_position = position.amount.abs();
+                short_avg_price = position.entry_price;
+                short_pnl = position.unrealized_pnl;
+            }
+        }
 
-            // 同步本地持仓
-            *self.local_position.write().await = new_inventory;
-            state.inventory = new_inventory;
-            state.avg_price = position.entry_price;
+        let net_inventory = long_position - short_position;
 
-            // 更新盈亏
-            if position.unrealized_pnl != 0.0 {
+        {
+            let mut state = self.state.lock().await;
+            state.long_inventory = long_position;
+            state.short_inventory = short_position;
+            state.inventory = net_inventory;
+            state.long_avg_price = long_avg_price;
+            state.short_avg_price = short_avg_price;
+            state.avg_price = if net_inventory > 0.0 {
+                long_avg_price
+            } else if net_inventory < 0.0 {
+                short_avg_price
+            } else {
+                0.0
+            };
+
+            if long_pnl != 0.0 {
                 let base_asset = self
                     .symbol_info
                     .read()
@@ -1394,14 +1719,35 @@ impl PoissonMarketMaker {
                     .map(|info| info.base_asset.clone())
                     .unwrap_or_else(|| "TOKEN".to_string());
                 log::debug!(
-                    "持仓: {} {} @ {:.5}, 未实现盈亏: {:.2} USDC",
-                    state.inventory,
+                    "多头持仓: {:.3} {} @ {:.5}, 未实现盈亏: {:.2} USDC",
+                    state.long_inventory,
                     base_asset,
-                    state.avg_price,
-                    position.unrealized_pnl
+                    state.long_avg_price,
+                    long_pnl
+                );
+            }
+
+            if short_pnl != 0.0 {
+                let base_asset = self
+                    .symbol_info
+                    .read()
+                    .await
+                    .as_ref()
+                    .map(|info| info.base_asset.clone())
+                    .unwrap_or_else(|| "TOKEN".to_string());
+                log::debug!(
+                    "空头持仓: {:.3} {} @ {:.5}, 未实现盈亏: {:.2} USDC",
+                    state.short_inventory,
+                    base_asset,
+                    state.short_avg_price,
+                    short_pnl
                 );
             }
         }
+
+        *self.local_position.write().await = net_inventory;
+
+        let mut state = self.state.lock().await;
 
         // 更新活跃订单状态（使用缓存）
         let open_orders = self.get_cached_open_orders().await?;
@@ -1515,18 +1861,21 @@ impl PoissonMarketMaker {
     }
 
     fn build_risk_snapshot(&self, state: &MMStrategyState, current_price: f64) -> StrategySnapshot {
+        let net_inventory = state.long_inventory - state.short_inventory;
+        let gross_inventory = state.long_inventory.max(state.short_inventory);
         let mut snapshot = StrategySnapshot::new(self.config.name.clone());
-        snapshot.exposure.notional = current_price * state.inventory;
-        snapshot.exposure.net_inventory = state.inventory;
+        snapshot.exposure.notional = current_price * net_inventory;
+        snapshot.exposure.net_inventory = net_inventory;
+        snapshot.exposure.long_position = state.long_inventory;
+        snapshot.exposure.short_position = state.short_inventory;
         if self.config.trading.max_inventory > 0.0 {
             snapshot.exposure.inventory_ratio = Some(
-                (current_price * state.inventory.abs() / self.config.trading.max_inventory)
-                    .min(10.0),
+                (current_price * gross_inventory / self.config.trading.max_inventory).min(10.0),
             );
         }
 
         snapshot.performance.realized_pnl = state.total_pnl;
-        snapshot.performance.unrealized_pnl = state.inventory * (current_price - state.avg_price);
+        snapshot.performance.unrealized_pnl = net_inventory * (current_price - state.avg_price);
         snapshot.performance.daily_pnl = Some(state.daily_pnl);
         snapshot.performance.timestamp = Utc::now();
         snapshot.risk_limits = Some(self.risk_limits.clone());
@@ -1587,9 +1936,11 @@ impl PoissonMarketMaker {
         self.apply_risk_decision(decision).await?;
 
         let state = self.state.lock().await;
+        let net_inventory = state.long_inventory - state.short_inventory;
+        let gross_inventory = state.long_inventory.max(state.short_inventory);
 
         // 计算未实现盈亏
-        let unrealized_pnl = state.inventory * (current_price - state.avg_price);
+        let unrealized_pnl = net_inventory * (current_price - state.avg_price);
 
         // 检查止损
         if unrealized_pnl < -self.config.risk.max_unrealized_loss {
@@ -1613,7 +1964,7 @@ impl PoissonMarketMaker {
                 symbol,
                 unrealized_pnl,
                 self.config.risk.max_unrealized_loss,
-                state.inventory,
+                net_inventory,
                 Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
             );
             crate::utils::webhook::notify_critical("PoissonMM", &message).await;
@@ -1625,7 +1976,7 @@ impl PoissonMarketMaker {
 
         // 检查库存偏斜
         // max_inventory是USDT价值，直接计算当前库存的USDT价值
-        let current_inventory_value = state.inventory.abs() * current_price;
+        let current_inventory_value = gross_inventory * current_price;
         let inventory_ratio = current_inventory_value / self.config.trading.max_inventory;
         if inventory_ratio > self.config.risk.inventory_skew_limit {
             log::error!(
@@ -1651,7 +2002,7 @@ impl PoissonMarketMaker {
                  🔄 将平仓50%库存\n\
                  ⏰ 时间: {}",
                 symbol,
-                state.inventory,
+                net_inventory,
                 current_inventory_value,
                 inventory_ratio * 100.0,
                 self.config.risk.inventory_skew_limit * 100.0,
@@ -1664,7 +2015,7 @@ impl PoissonMarketMaker {
             self.cancel_all_orders().await?;
 
             // 使用市价单平仓50%库存
-            let position_to_close_raw = state.inventory * 0.5;
+            let position_to_close_raw = net_inventory * 0.5;
             // 应用精度处理，确保符合交易所要求
             let position_to_close = self.round_quantity(position_to_close_raw);
 
@@ -1692,7 +2043,10 @@ impl PoissonMarketMaker {
                         price: None,
                         client_order_id: Some(format!("POISSON_RISK_{}", Utc::now().timestamp())),
                         market_type: MarketType::Futures,
-                        params: None,
+                        params: Some(HashMap::from([
+                            ("reduceOnly".to_string(), "true".to_string()),
+                            ("positionSide".to_string(), "LONG".to_string()),
+                        ])),
                         time_in_force: None,
                         reduce_only: Some(true),
                         post_only: None,
@@ -1717,7 +2071,10 @@ impl PoissonMarketMaker {
                         price: None,
                         client_order_id: Some(format!("POISSON_RISK_{}", Utc::now().timestamp())),
                         market_type: MarketType::Futures,
-                        params: None,
+                        params: Some(HashMap::from([
+                            ("reduceOnly".to_string(), "true".to_string()),
+                            ("positionSide".to_string(), "SHORT".to_string()),
+                        ])),
                         time_in_force: None,
                         reduce_only: Some(true),
                         post_only: None,
@@ -1805,51 +2162,125 @@ impl PoissonMarketMaker {
             .ok_or_else(|| ExchangeError::Other("账户不存在".to_string()))?;
 
         // 使用批量取消API
-        let _ = account
+        let cancelled = account
             .exchange
             .cancel_all_orders(Some(&self.config.trading.symbol), MarketType::Futures)
             .await?;
 
-        log::info!("✅ 已取消所有订单");
+        log::info!("✅ 已取消所有订单，共 {} 个", cancelled.len());
+
+        {
+            let mut state = self.state.lock().await;
+            let cleared_buys = state.active_buy_orders.len();
+            let cleared_sells = state.active_sell_orders.len();
+            if cleared_buys > 0 || cleared_sells > 0 {
+                log::debug!(
+                    "🧹 清空本地订单记录: 买单 {} 个 / 卖单 {} 个",
+                    cleared_buys,
+                    cleared_sells
+                );
+            }
+            state.active_buy_orders.clear();
+            state.active_sell_orders.clear();
+        }
+
+        // 同步失效订单缓存，防止旧记录影响识别
+        self.order_cache
+            .invalidate_open_orders(&self.config.trading.symbol)
+            .await;
+
         Ok(())
     }
 
     /// 平掉所有持仓
     async fn close_all_positions(&self) -> Result<()> {
-        let state = self.state.lock().await;
-        if state.inventory.abs() < 0.001 {
-            return Ok(());
-        }
-
+        let is_dual_mode = self.is_dual_position_mode().await;
+        let (long_qty, short_qty, net_inventory) = {
+            let state = self.state.lock().await;
+            (state.long_inventory, state.short_inventory, state.inventory)
+        };
         let account = self
             .account_manager
             .get_account(&self.config.account.account_id)
             .ok_or_else(|| ExchangeError::Other("账户不存在".to_string()))?;
 
-        let side = if state.inventory > 0.0 {
-            OrderSide::Sell
+        if is_dual_mode {
+            let mut closed = false;
+            if long_qty > 0.0005 {
+                let amount = self.round_quantity(long_qty);
+                let close_long = OrderRequest {
+                    symbol: self.config.trading.symbol.clone(),
+                    side: OrderSide::Sell,
+                    order_type: OrderType::Market,
+                    amount,
+                    price: None,
+                    market_type: MarketType::Futures,
+                    params: Some(HashMap::from([
+                        ("reduceOnly".to_string(), "true".to_string()),
+                        ("positionSide".to_string(), "LONG".to_string()),
+                    ])),
+                    client_order_id: None,
+                    time_in_force: None,
+                    reduce_only: Some(true),
+                    post_only: None,
+                };
+                account.exchange.create_order(close_long).await?;
+                closed = true;
+            }
+            if short_qty > 0.0005 {
+                let amount = self.round_quantity(short_qty);
+                let close_short = OrderRequest {
+                    symbol: self.config.trading.symbol.clone(),
+                    side: OrderSide::Buy,
+                    order_type: OrderType::Market,
+                    amount,
+                    price: None,
+                    market_type: MarketType::Futures,
+                    params: Some(HashMap::from([
+                        ("reduceOnly".to_string(), "true".to_string()),
+                        ("positionSide".to_string(), "SHORT".to_string()),
+                    ])),
+                    client_order_id: None,
+                    time_in_force: None,
+                    reduce_only: Some(true),
+                    post_only: None,
+                };
+                account.exchange.create_order(close_short).await?;
+                closed = true;
+            }
+            if !closed {
+                return Ok(());
+            }
         } else {
-            OrderSide::Buy
-        };
+            if net_inventory.abs() < 0.001 {
+                return Ok(());
+            }
 
-        let close_order = OrderRequest {
-            symbol: self.config.trading.symbol.clone(),
-            side,
-            order_type: OrderType::Market,
-            amount: self.round_quantity(state.inventory.abs()),
-            price: None,
-            market_type: MarketType::Futures,
-            params: Some(HashMap::from([(
-                "reduceOnly".to_string(),
-                "true".to_string(),
-            )])),
-            client_order_id: None,
-            time_in_force: None,
-            reduce_only: Some(true),
-            post_only: None,
-        };
+            let side = if net_inventory > 0.0 {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
 
-        account.exchange.create_order(close_order).await?;
+            let close_order = OrderRequest {
+                symbol: self.config.trading.symbol.clone(),
+                side,
+                order_type: OrderType::Market,
+                amount: self.round_quantity(net_inventory.abs()),
+                price: None,
+                market_type: MarketType::Futures,
+                params: Some(HashMap::from([(
+                    "reduceOnly".to_string(),
+                    "true".to_string(),
+                )])),
+                client_order_id: None,
+                time_in_force: None,
+                reduce_only: Some(true),
+                post_only: None,
+            };
+
+            account.exchange.create_order(close_order).await?;
+        }
 
         log::info!("✅ 已平掉所有持仓");
         Ok(())
@@ -1877,7 +2308,13 @@ impl PoissonMarketMaker {
             .as_ref()
             .map(|info| info.base_asset.clone())
             .unwrap_or_else(|| "TOKEN".to_string());
-        log::info!("最终库存: {:.2} {}", state.inventory, base_asset);
+        log::info!(
+            "库存情况: 净仓 {:.2} {}, 多头 {:.2}, 空头 {:.2}",
+            state.inventory,
+            base_asset,
+            state.long_inventory,
+            state.short_inventory
+        );
         log::info!("泊松参数:");
         log::info!("  - λ_bid: {:.2} 订单/秒", params.lambda_bid);
         log::info!("  - λ_ask: {:.2} 订单/秒", params.lambda_ask);
@@ -1888,20 +2325,43 @@ impl PoissonMarketMaker {
         log::info!("=====================================");
     }
 
+    fn tick_size(&self) -> f64 {
+        if let Ok(guard) = self.symbol_info.try_read() {
+            if let Some(info) = guard.as_ref() {
+                if info.tick_size > 0.0 {
+                    return info.tick_size;
+                }
+            }
+        }
+
+        1.0 / 10_f64.powi(self.config.trading.price_precision as i32)
+    }
+
     /// 价格精度处理
-    fn round_price(&self, price: f64) -> f64 {
-        // 优先使用动态获取的精度，否则使用配置文件中的精度
-        let precision = if let Ok(guard) = self.symbol_info.try_read() {
+    fn price_precision(&self) -> usize {
+        if let Ok(guard) = self.symbol_info.try_read() {
             guard
                 .as_ref()
                 .map(|info| info.price_precision)
                 .unwrap_or(self.config.trading.price_precision)
         } else {
             self.config.trading.price_precision
-        };
+        }
+    }
 
+    fn round_price(&self, price: f64) -> f64 {
+        let precision = self.price_precision();
         let multiplier = 10_f64.powi(precision as i32);
         (price * multiplier).round() / multiplier
+    }
+
+    fn round_price_for_side(&self, price: f64, side: OrderSide) -> f64 {
+        let precision = self.price_precision();
+        let multiplier = 10_f64.powi(precision as i32);
+        match side {
+            OrderSide::Buy => ((price * multiplier).floor()) / multiplier,
+            OrderSide::Sell => ((price * multiplier).ceil()) / multiplier,
+        }
     }
 
     /// 数量精度处理
@@ -2168,157 +2628,222 @@ impl PoissonMarketMaker {
 
     /// 处理订单更新
     async fn handle_order_update(&self, json: &serde_json::Value) -> Result<()> {
-        // 更新订单缓存
-        if let Some(order_id) = json
-            .get("o")
-            .and_then(|o| o.get("c"))
+        let Some(order_obj) = json.get("o") else {
+            return Ok(());
+        };
+
+        let event_symbol = order_obj
+            .get("s")
             .and_then(|v| v.as_str())
-        {
-            let status = json
-                .get("o")
-                .and_then(|o| o.get("X"))
-                .and_then(|v| v.as_str());
+            .unwrap_or_default();
 
-            if let Some(status_str) = status {
-                match status_str {
-                    "FILLED" => {
-                        log::info!("🎯 收到订单成交通知: {}", order_id);
-
-                        // 订单成交，从活跃订单中移除
-                        let mut state = self.state.lock().await;
-
-                        // 更新订单缓存（减少API调用）
-                        // 注意：OrderCache没有remove_order方法，需要重新获取订单列表
-                        // 这里暂时不处理，让定期同步来更新缓存
-
-                        // 更新本地持仓（期货合约逻辑）
-                        if let Some(side) = json
-                            .get("o")
-                            .and_then(|o| o.get("S"))
-                            .and_then(|v| v.as_str())
-                        {
-                            if let Some(qty) = json
-                                .get("o")
-                                .and_then(|o| o.get("z"))
-                                .and_then(|v| v.as_str())
-                                .and_then(|s| s.parse::<f64>().ok())
-                            {
-                                // 获取成交价格
-                                let price = json
-                                    .get("o")
-                                    .and_then(|o| o.get("ap"))
-                                    .and_then(|v| v.as_str())
-                                    .and_then(|s| s.parse::<f64>().ok())
-                                    .unwrap_or(0.0);
-
-                                log::info!(
-                                    "📦 订单成交详情: {} {} @ {} x {}",
-                                    self.config.trading.symbol,
-                                    side,
-                                    price,
-                                    qty
-                                );
-
-                                // 获取position side (BOTH/LONG/SHORT) 和 reduceOnly标志
-                                let ps = json
-                                    .get("o")
-                                    .and_then(|o| o.get("ps"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("BOTH");
-                                let reduce_only = json
-                                    .get("o")
-                                    .and_then(|o| o.get("R"))
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-
-                                let mut local_pos = self.local_position.write().await;
-
-                                // 单向持仓模式（BOTH）的处理
-                                if ps == "BOTH" {
-                                    if reduce_only {
-                                        // 平仓订单：根据当前持仓方向调整
-                                        if *local_pos > 0.0 {
-                                            // 平多仓
-                                            *local_pos -= qty;
-                                            state.inventory -= qty;
-                                        } else {
-                                            // 平空仓
-                                            *local_pos += qty;
-                                            state.inventory += qty;
-                                        }
-                                    } else {
-                                        // 开仓订单
-                                        if side == "BUY" {
-                                            *local_pos += qty; // 开多或平空
-                                            state.inventory += qty;
-                                        } else {
-                                            *local_pos -= qty; // 开空或平多
-                                            state.inventory -= qty;
-                                        }
-                                    }
-                                }
-
-                                log::debug!(
-                                    "📦 更新本地持仓: {} {} (side: {}, ps: {}, reduce: {})",
-                                    *local_pos,
-                                    self.config.trading.symbol,
-                                    side,
-                                    ps,
-                                    reduce_only
-                                );
-                            }
-                        }
-
-                        // 记录成交方向
-                        let is_buy_filled = state.active_buy_orders.remove(order_id).is_some();
-                        let is_sell_filled = state.active_sell_orders.remove(order_id).is_some();
-                        state.trade_count += 1;
-                        log::info!("📦 泊松策略订单 {} 已成交", order_id);
-
-                        // 释放锁后立即补单
-                        drop(state);
-
-                        // 成交即补：立即补充成交方向的订单
-                        if is_buy_filled || is_sell_filled {
-                            log::info!(
-                                "🔄 成交即补：立即补充{}订单",
-                                if is_buy_filled { "买" } else { "卖" }
-                            );
-
-                            // 动态更新泊松参数
-                            self.update_poisson_params_on_fill().await;
-
-                            // 立即执行补单
-                            if let Err(e) = self.execute_immediate_replenishment().await {
-                                log::error!("补单失败: {}", e);
-                            }
-                        }
-                    }
-                    "CANCELED" | "EXPIRED" | "REJECTED" => {
-                        // 订单取消/过期/拒绝，从活跃订单中移除
-                        let mut state = self.state.lock().await;
-                        state.active_buy_orders.remove(order_id);
-                        state.active_sell_orders.remove(order_id);
-                        log::debug!("泊松策略订单 {} 状态: {}", order_id, status_str);
-                    }
-                    _ => {}
-                }
-
-                // 清除缓存中的该订单
-                self.order_cache.invalidate_order(order_id).await;
-            }
+        if event_symbol.is_empty() {
+            return Ok(());
         }
 
-        Ok(())
-    }
+        // Binance 期货用户流返回的符号没有斜杠，需规范化对比
+        let expected_symbol = self.config.trading.symbol.replace('/', "").to_uppercase();
 
-    /// 成交后立即补单
-    async fn execute_immediate_replenishment(&self) -> Result<()> {
-        // 获取当前价差
-        let (bid_spread, ask_spread) = self.calculate_optimal_spread().await?;
+        if event_symbol.to_uppercase() != expected_symbol {
+            return Ok(());
+        }
 
-        // 立即下新订单
-        self.place_orders(bid_spread, ask_spread).await?;
+        let exchange_order_id = order_obj.get("i").and_then(|v| match v {
+            serde_json::Value::Number(num) => Some(num.to_string()),
+            serde_json::Value::String(s) => Some(s.clone()),
+            _ => None,
+        });
+
+        let client_order_id = order_obj
+            .get("c")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let order_ref = exchange_order_id
+            .as_ref()
+            .or(client_order_id.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or("UNKNOWN");
+
+        let status = order_obj.get("X").and_then(|v| v.as_str());
+
+        if let Some(status_str) = status {
+            match status_str {
+                "FILLED" => {
+                    log::info!(
+                        "🎯 收到订单成交通知: 交易所ID={:?}, 客户端ID={:?}",
+                        exchange_order_id,
+                        client_order_id
+                    );
+
+                    let mut state = self.state.lock().await;
+
+                    if let Some(side) = order_obj.get("S").and_then(|v| v.as_str()) {
+                        if let Some(qty) = order_obj
+                            .get("z")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse::<f64>().ok())
+                        {
+                            let price = order_obj
+                                .get("ap")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0);
+
+                            log::info!(
+                                "📦 订单成交详情: {} {} @ {} x {}",
+                                self.config.trading.symbol,
+                                side,
+                                price,
+                                qty
+                            );
+
+                            let position_mode = order_obj
+                                .get("ps")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("BOTH");
+                            let reduce_only = order_obj
+                                .get("R")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+
+                            let mut local_pos = self.local_position.write().await;
+                            let ps_upper = position_mode.to_ascii_uppercase();
+                            match ps_upper.as_str() {
+                                "LONG" => {
+                                    if side == "BUY" && !reduce_only {
+                                        state.long_inventory += qty;
+                                    } else {
+                                        state.long_inventory =
+                                            (state.long_inventory - qty).max(0.0);
+                                    }
+                                }
+                                "SHORT" => {
+                                    if side == "SELL" && !reduce_only {
+                                        state.short_inventory += qty;
+                                    } else {
+                                        state.short_inventory =
+                                            (state.short_inventory - qty).max(0.0);
+                                    }
+                                }
+                                _ => {
+                                    if reduce_only {
+                                        if *local_pos > 0.0 {
+                                            *local_pos -= qty;
+                                        } else {
+                                            *local_pos += qty;
+                                        }
+                                    } else if side == "BUY" {
+                                        *local_pos += qty;
+                                    } else {
+                                        *local_pos -= qty;
+                                    }
+
+                                    if *local_pos >= 0.0 {
+                                        state.long_inventory = (*local_pos).max(0.0);
+                                        state.short_inventory = 0.0;
+                                    } else {
+                                        state.long_inventory = 0.0;
+                                        state.short_inventory = (*local_pos).abs();
+                                    }
+                                }
+                            }
+
+                            state.inventory = state.long_inventory - state.short_inventory;
+                            *local_pos = state.inventory;
+
+                            log::debug!(
+                                "📦 更新本地持仓: 净={} 多头={} 空头={} [{}] (side: {}, ps: {}, reduce: {})",
+                                state.inventory,
+                                state.long_inventory,
+                                state.short_inventory,
+                                self.config.trading.symbol,
+                                side,
+                                ps_upper,
+                                reduce_only
+                            );
+                        }
+                    }
+
+                    let mut is_buy_filled = false;
+                    let mut is_sell_filled = false;
+                    let mut intents_filled: Vec<OrderIntent> = Vec::new();
+                    let mut orders_to_invalidate: Vec<String> = Vec::new();
+
+                    if let Some(ref id) = exchange_order_id {
+                        if let Some((intent, order)) = state.detach_order_by_exchange(id) {
+                            match intent.side() {
+                                OrderSide::Buy => is_buy_filled = true,
+                                OrderSide::Sell => is_sell_filled = true,
+                            }
+                            orders_to_invalidate.push(order.id.clone());
+                            intents_filled.push(intent);
+                        }
+                    }
+
+                    if let Some(ref id) = client_order_id {
+                        if let Some((intent, order)) = state.detach_order_by_client(id) {
+                            match intent.side() {
+                                OrderSide::Buy => is_buy_filled = true,
+                                OrderSide::Sell => is_sell_filled = true,
+                            }
+                            orders_to_invalidate.push(order.id.clone());
+                            intents_filled.push(intent);
+                        }
+                    }
+
+                    state.trade_count += 1;
+
+                    log::info!(
+                        "📦 泊松策略订单 {} 已成交 (买单成交={}, 卖单成交={})",
+                        order_ref,
+                        is_buy_filled,
+                        is_sell_filled
+                    );
+
+                    drop(state);
+
+                    for order_id in orders_to_invalidate {
+                        self.order_cache.invalidate_order(&order_id).await;
+                    }
+
+                    if !intents_filled.is_empty() {
+                        self.update_poisson_params_on_fill().await;
+
+                        if let Err(e) = self.handle_filled_intents(intents_filled).await {
+                            log::error!("成交后刷新挂单失败: {}", e);
+                        } else {
+                            log::info!("🔁 成交后已按配对刷新挂单");
+                        }
+                    }
+                }
+                "CANCELED" | "EXPIRED" | "REJECTED" => {
+                    let mut state = self.state.lock().await;
+                    if let Some(ref id) = exchange_order_id {
+                        state.active_buy_orders.remove(id);
+                        state.active_sell_orders.remove(id);
+                    }
+                    if let Some(ref id) = client_order_id {
+                        state.active_buy_orders.remove(id);
+                        state.active_sell_orders.remove(id);
+                    }
+                    log::debug!(
+                        "泊松策略订单 {:?}/{:?} 状态: {}",
+                        exchange_order_id,
+                        client_order_id,
+                        status_str
+                    );
+                }
+                _ => {}
+            }
+
+            if let Some(ref id) = exchange_order_id {
+                self.order_cache.invalidate_order(id).await;
+            }
+            if let Some(ref id) = client_order_id {
+                self.order_cache.invalidate_order(id).await;
+            }
+        }
 
         Ok(())
     }
@@ -2419,6 +2944,184 @@ impl PoissonMarketMaker {
             risk_evaluator: self.risk_evaluator.clone(),
             risk_limits: self.risk_limits.clone(),
         }
+    }
+
+    async fn resync_position_from_exchange(&self, reason: &str) {
+        match self.update_position_status().await {
+            Ok(_) => {
+                *self.last_position_update.write().await = Utc::now();
+                log::debug!("🔄 已同步持仓状态 ({})", reason);
+            }
+            Err(e) => {
+                log::warn!("⚠️ 持仓同步失败 ({}): {}", reason, e);
+            }
+        }
+    }
+
+    async fn remove_local_order(&self, exchange_id: &str) {
+        let detached = {
+            let mut state = self.state.lock().await;
+            state.detach_order_by_exchange(exchange_id)
+        };
+
+        if let Some((_, order)) = detached {
+            self.order_cache.invalidate_order(&order.id).await;
+        }
+    }
+
+    async fn cancel_slot_order(&self, intent: OrderIntent, reason: &str) {
+        let slot_info = {
+            let state = self.state.lock().await;
+            state.order_slots.get(&intent).cloned()
+        };
+
+        let info = match slot_info {
+            Some(info) => info,
+            None => return,
+        };
+
+        let account = match self
+            .account_manager
+            .get_account(&self.config.account.account_id)
+        {
+            Some(acc) => acc,
+            None => return,
+        };
+
+        let symbol = self.config.trading.symbol.clone();
+        let log_label = Self::intent_log_label(&intent);
+
+        log::info!(
+            "🗑️ 撤销{}挂单: {} ({})",
+            log_label,
+            info.exchange_id,
+            reason
+        );
+
+        match account
+            .exchange
+            .cancel_order(&info.exchange_id, &symbol, MarketType::Futures)
+            .await
+        {
+            Ok(_) => {
+                self.remove_local_order(&info.exchange_id).await;
+            }
+            Err(err) => {
+                if Self::is_order_missing_error(&err) {
+                    log::info!("ℹ️ {}挂单已在交易所消失: {}", log_label, info.exchange_id);
+                    self.remove_local_order(&info.exchange_id).await;
+                    let reason = format!("{}挂单缺失", log_label);
+                    self.resync_position_from_exchange(&reason).await;
+                } else {
+                    log::warn!(
+                        "⚠️ 撤销{}挂单失败: {} ({})",
+                        log_label,
+                        info.exchange_id,
+                        err
+                    );
+                }
+            }
+        }
+    }
+
+    async fn handle_filled_intents(&self, intents: Vec<OrderIntent>) -> Result<()> {
+        if intents.is_empty() {
+            return Ok(());
+        }
+
+        let mut intents_to_cancel: HashSet<OrderIntent> = HashSet::new();
+        for intent in &intents {
+            intents_to_cancel.insert(intent.counterpart());
+        }
+
+        for intent in intents_to_cancel {
+            self.cancel_slot_order(intent, "成交触发刷新").await;
+        }
+
+        let (bid_spread, ask_spread) = self.calculate_optimal_spread().await?;
+        self.place_orders(bid_spread, ask_spread).await?;
+
+        Ok(())
+    }
+
+    fn is_order_missing_error(err: &ExchangeError) -> bool {
+        match err {
+            ExchangeError::OrderNotFound { .. } => true,
+            ExchangeError::ApiError { message, .. } => Self::matches_unknown_order_message(message),
+            ExchangeError::OrderError(message) => Self::matches_unknown_order_message(message),
+            ExchangeError::Other(message) => Self::matches_unknown_order_message(message),
+            _ => false,
+        }
+    }
+
+    fn is_reduce_only_rejection(err: &ExchangeError) -> bool {
+        match err {
+            ExchangeError::ApiError { code, message } => {
+                *code == -2022 || *code == -5022 || Self::matches_reduce_only_message(message)
+            }
+            ExchangeError::OrderError(message) => Self::matches_reduce_only_message(message),
+            ExchangeError::Other(message) => Self::matches_reduce_only_message(message),
+            _ => false,
+        }
+    }
+
+    fn matches_unknown_order_message(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        Self::unknown_order_patterns()
+            .iter()
+            .any(|pattern| lower.contains(pattern))
+    }
+
+    fn unknown_order_patterns() -> &'static [&'static str] {
+        &[
+            "unknown order",
+            "order not exist",
+            "order was not found",
+            "order does not exist",
+            "order not found",
+            "-2011",
+        ]
+    }
+
+    fn intent_log_label(intent: &OrderIntent) -> &'static str {
+        match intent {
+            OrderIntent::OpenLong => "开多",
+            OrderIntent::CloseLong => "平多",
+            OrderIntent::OpenShort => "开空",
+            OrderIntent::CloseShort => "平空",
+        }
+    }
+
+    fn intent_tag(intent: &OrderIntent) -> &'static str {
+        match intent {
+            OrderIntent::OpenLong => "BOL",
+            OrderIntent::CloseLong => "SCL",
+            OrderIntent::OpenShort => "SOS",
+            OrderIntent::CloseShort => "BCS",
+        }
+    }
+
+    fn intent_position_side(intent: &OrderIntent) -> Option<&'static str> {
+        match intent {
+            OrderIntent::OpenLong | OrderIntent::CloseLong => Some("LONG"),
+            OrderIntent::OpenShort | OrderIntent::CloseShort => Some("SHORT"),
+        }
+    }
+
+    fn matches_reduce_only_message(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        Self::reduce_only_patterns()
+            .iter()
+            .any(|pattern| lower.contains(pattern))
+    }
+
+    fn reduce_only_patterns() -> &'static [&'static str] {
+        &[
+            "reduceonly",
+            "reduce only",
+            "-2022",
+            "post only order will be rejected",
+        ]
     }
 }
 

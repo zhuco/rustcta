@@ -615,6 +615,7 @@ impl Exchange for HyperliquidExchange {
             bids: map_side(&bids),
             asks: map_side(&asks),
             timestamp: Utc::now(),
+            info: serde_json::Value::Null,
         })
     }
 

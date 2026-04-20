@@ -1,0 +1,139 @@
+# 均值回归策略配置
+strategy:
+  name: "oscillation_mean_reversion"  # 策略在系统中的唯一标识
+  version: "1.0.1"  # 配置版本号，便于变更管理
+  enabled: true  # 是否启用该策略
+  log_level: "INFO"  # 默认日志等级（TRACE/DEBUG/INFO/WARN/ERROR）
+  description: "Mean-reversion strategy for oscillating markets"  # 策略描述
+
+# 账户与交易所设置
+account:
+  account_id: "binance_hcr"  # 使用的账户ID（需在 accounts.yml 中存在）
+  market_type: "Futures"  # 市场类型：Spot/Futures
+  allow_short: true  # 是否允许做空
+  dual_position_mode: true  # Binance 双向持仓模式
+
+# 行情与数据采集参数
+data:
+  scan_interval_secs: 180  # 主循环巡检间隔（秒，提升信号响应速度）
+  websocket:
+    url_override: null  # 如需自定义行情 WebSocket 地址，填入 URL，否则使用默认
+    ping_interval_secs: 20  # WebSocket 心跳间隔（秒）
+    reconnect:
+      initial_delay_ms: 1000  # 重连初始等待（毫秒）
+      max_delay_ms: 60000  # 重连最大等待（毫秒）
+      multiplier: 1.8  # 重连指数退避系数
+    subscriptions:
+      kline_1m: true  # 订阅 1 分钟 K 线
+      kline_5m: false  # 订阅 5 分钟 K 线（15m/1h基准可关闭）
+      kline_15m: true  # 订阅 15 分钟 K 线
+      kline_1h: true  # 订阅 1 小时 K 线
+      partial_book_depth: 10  # 订阅盘口深度层数
+  rest:
+    min_klines_15m: 360  # 最少需要缓存的 15 分钟 K 线数量
+    min_klines_1h: 480  # 最少需要缓存的 1 小时 K 线数量
+    history_batch_size: 500  # 每次请求历史数据的批量大小
+    max_retries: 6  # REST 请求最大重试次数
+    backoff:
+      base_delay_ms: 500  # 重试初始等待（毫秒）
+      max_delay_ms: 30000  # 重试最大等待（毫秒）
+      multiplier: 2.0  # 重试指数退避系数
+    heartbeat_secs: 30  # REST 心跳检查间隔（秒）
+  validation:
+    enable_missing_bar_freeze: true  # 是否在缺失K线时冻结交易
+    enable_sequence_check: true  # 是否校验 WebSocket 消息序列
+    max_gap_minutes: 45  # 至多允许的K线缺口（分钟）
+
+# 交易对配置列表
+symbols:
+  # 200U 资金规模建议只保留 2 个均值回归标的，避免过度分散
+  - symbol: "DOGE/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 3.0
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+  - symbol: "ADA/USDC"
+    enabled: true
+    min_quote_volume_5m: 0
+    depth_multiplier: 2.5  # 对流动性较好的标的可降低深度系数
+    depth_levels: 3
+    enforce_spread_rule: true
+    blackout_windows: []
+
+# 指标参数配置
+indicators:
+  bollinger:
+    period: 20  # 布林带窗口长度
+    std_dev: 2.0  # 标准差倍数
+    entry_band_pct_long: 0.15  # 做多入场带宽百分比（适度放宽）
+    entry_band_pct_short: 0.85  # 做空入场带宽百分比（适度放宽）
+    entry_z_long: -1.3  # 做多触发的 Z 分数阈值
+    entry_z_short: 1.3  # 做空触发的 Z 分数阈值
+  rsi:
+    period: 14  # RSI 计算周期
+    long_threshold: 28  # 做多阈值（适度放宽）
+    short_threshold: 72  # 做空阈值（适度放宽）
+  atr:
+    period: 14  # ATR 计算周期
+    initial_stop_k: 2.2  # 初始止损倍数（提高容忍度，降低噪声止损）
+    trailing_stop_k: 1.8  # 移动止损倍数（配合更宽初始止损）
+  adx:
+    period: 14  # ADX 计算周期
+    threshold: 35  # 趋势强度阈值（降低“趋势”误判，提升震荡识别）
+  bbw:
+    lookback: 400  # 布林带宽度历史窗口
+    percentile: 0.55  # 宽度分位阈值（放宽以提升可交易窗口）
+  slope:
+    lookback: 12  # 价格斜率回看周期
+    threshold: 0.40  # 斜率绝对值阈值（减少过度过滤）
+  choppiness:
+    enabled: true  # 是否启用震荡度过滤
+    lookback: 14  # 震荡度指标回看周期
+    threshold: 60  # 震荡度阈值（更偏好盘整）
+  volume:
+    lookback_minutes: 240  # 成交量回看范围（分钟）
+    min_quote_volume: 80000  # 最低报价成交量要求
+
+# 执行与下单参数
+execution:
+  post_only: false  # 是否仅挂被动单
+  base_improve: 0.0003  # 基础价格改善（相对价差）
+  alpha_atr: 1.2  # ATR 对开仓价差的影响系数（更贴近带宽）
+  beta_sigma: 1.0  # 波动率对价差的影响系数
+  take_profit_atr_k: 2.3  # 固定 ATR 止盈倍数（使 TP/SL >= 1）
+  ttl_secs: 600  # 挂单生存时间（秒）
+  cancel_rate_limit_per_min: 20  # 每分钟最大撤单次数
+  relist_delay_ms: 1200  # 重挂单等待时间（毫秒）
+  max_relist_attempts: 3  # 重挂失败后最大尝试次数
+  lock_profit_pct: 0.004  # 浮盈达到0.4%时开始锁定利润
+  lock_buffer_pct: 0.001  # 锁盈后的回撤缓冲（0.1%）
+
+# 风险控制参数
+risk:
+  enable: true  # 是否启用风险检查
+  max_positions: 4  # 最大持仓数量（所有交易对）
+  max_positions_per_symbol: 1  # 单交易对最大持仓数量
+  max_net_exposure: 160  # 最大净敞口（USDT）
+  per_trade_notional: 18.0  # 单笔下单名义金额（USDT）
+  per_trade_risk: 4.0  # 单笔最大风险敞口（USDT）
+  time_stop_bars: 96  # 持仓最长维持的K线数量（中低频配置）
+  daily_drawdown: 0.025  # 日内最大回撤比例
+  freeze_on_gap: false  # 出现跳空时是否冻结交易
+
+# 流动性过滤
+liquidity:
+  min_recent_quote_volume: 0  # 最近成交量下限
+  volume_window_minutes: 10  # 统计成交量的时间窗口（分钟）
+  depth_multiplier: 3.0  # 深度乘数
+  top_levels: 3  # 使用的盘口档位
+  spread_factor_limit: 0.004  # 最大允许价差系数
+  maker_fee_threshold: 1.0  # 做市费率阈值（bp）
+
+# 指标与行情缓存上限
+cache:
+  max_1m_bars: 720  # 缓存的 1 分钟K线数量上限（约12小时）
+  max_5m_bars: 720  # 缓存的 5 分钟K线数量上限（约60小时）
+  max_15m_bars: 480  # 缓存的 15 分钟K线数量上限（约5天）
+  max_1h_bars: 400  # 缓存的 1 小时K线数量上限（约16天）

@@ -57,6 +57,12 @@ pub struct TrendAdjustment {
     pub bull_buy_multiplier: f64,         // 弱上涨买单倍数 (1.5)
     pub bear_sell_multiplier: f64,        // 弱下跌卖单倍数 (1.5)
     pub strong_bear_sell_multiplier: f64, // 强下跌卖单倍数 (2.0)
+    #[serde(default = "default_enable_trend_market_orders")]
+    pub enable_trend_market_orders: bool, // 是否允许趋势触发的市价单
+}
+
+fn default_enable_trend_market_orders() -> bool {
+    true
 }
 
 /// 策略配置

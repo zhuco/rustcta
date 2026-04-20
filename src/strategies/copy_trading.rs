@@ -200,6 +200,13 @@ impl CopyTradingStrategy {
         log::info!("  - 跟踪交易对: {:?}", signal_config.symbols);
         log::info!("  - 订阅类型: {}", signal_config.subscription_type);
 
+        if self.account_manager.is_offline() {
+            log::warn!(
+                "⚠️ 当前处于离线模式，跳过实时WebSocket连接。跟单策略将保持待命，不会尝试真实交易所连接。"
+            );
+            return Ok(());
+        }
+
         // 获取信号源账户
         log::debug!("🔍 获取信号源账户: {}", signal_config.account_id);
         let signal_account = self
@@ -294,6 +301,49 @@ impl CopyTradingStrategy {
                                     match result {
                                         Ok(Some(msg)) => {
                                             msg_count += 1;
+
+                                            if exchange == "bitmart" {
+                                                if let Ok(value) =
+                                                    serde_json::from_str::<serde_json::Value>(&msg)
+                                                {
+                                                    let action = value
+                                                        .get("action")
+                                                        .and_then(|v| v.as_str());
+                                                    let event = value
+                                                        .get("event")
+                                                        .and_then(|v| v.as_str());
+                                                    let is_ping = matches!(action, Some("ping"))
+                                                        || matches!(event, Some("ping"));
+                                                    if is_ping {
+                                                        let mut response =
+                                                            serde_json::json!({ "action": "pong" });
+                                                        if let Some(args) = value.get("args") {
+                                                            response["args"] = args.clone();
+                                                        }
+                                                        if let Some(ts) = value.get("ts") {
+                                                            response["ts"] = ts.clone();
+                                                        }
+                                                        match ws_client
+                                                            .send(response.to_string())
+                                                            .await
+                                                        {
+                                                            Ok(_) => {
+                                                                log::trace!(
+                                                                    "已回复 Bitmart 心跳 pong"
+                                                                );
+                                                                continue;
+                                                            }
+                                                            Err(err) => {
+                                                                log::warn!(
+                                                                    "Bitmart 心跳回复失败: {}",
+                                                                    err
+                                                                );
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
 
                                             // 只记录重要消息
                                             if msg.contains("error") || msg.contains("Error") {

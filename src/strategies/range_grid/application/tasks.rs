@@ -613,12 +613,17 @@ async fn deactivate_grid(
                     &symbol_config.account.exchange,
                     "F",
                 ));
-                request.time_in_force = Some("IOC".to_string());
+                request.time_in_force = None;
                 request.reduce_only = Some(true);
                 request.post_only = Some(false);
 
+                let mut requests = vec![request];
+                for req in requests.iter_mut() {
+                    req.time_in_force = None;
+                }
+
                 match account_manager
-                    .create_batch_orders(&symbol_config.account.id, vec![request])
+                    .create_batch_orders(&symbol_config.account.id, requests)
                     .await
                 {
                     Ok(response) => {

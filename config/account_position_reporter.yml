@@ -1,0 +1,16 @@
+account_id: "binance_hcr"
+exchange: "binance"
+env_prefix: "BINANCE_3"
+market_type: "futures"
+interval_secs: 600
+send_on_start: true
+report_title: "RustCTA 自动仓位报告"
+min_position_value_usdt: 1.0
+stablecoins:
+  - "USDT"
+  - "USDC"
+  - "BUSD"
+  - "FDUSD"
+  - "TUSD"
+  - "USDS"
+webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=671ccbfa-0392-423a-b16a-0957a87b9a2d"

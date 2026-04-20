@@ -17,8 +17,11 @@ use crate::analysis::TradeCollector;
 use crate::core::error::ExchangeError;
 use crate::cta::account_manager::AccountManager;
 use crate::strategies::common::{
-    build_unified_risk_evaluator, StrategyRiskLimits, UnifiedRiskEvaluator,
+    build_unified_risk_evaluator, RiskLevel, Strategy, StrategyDeps, StrategyInstance,
+    StrategyPosition, StrategyRiskLimits, StrategyState, StrategyStatus, UnifiedRiskEvaluator,
 };
+use anyhow::Result as AnyResult;
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -35,6 +38,41 @@ pub struct TrendGridStrategyV2 {
 }
 
 impl TrendGridStrategyV2 {
+    fn build_with_dependencies(
+        config: TrendGridConfigV2,
+        account_manager: Arc<AccountManager>,
+        risk_evaluator: Arc<dyn UnifiedRiskEvaluator>,
+        collector: Option<Arc<TradeCollector>>,
+        risk_limits: StrategyRiskLimits,
+    ) -> Self {
+        Self {
+            config,
+            account_manager,
+            config_states: Arc::new(RwLock::new(HashMap::new())),
+            running: Arc::new(RwLock::new(false)),
+            collector,
+            risk_evaluator,
+            risk_limits,
+        }
+    }
+
+    fn from_deps(config: TrendGridConfigV2, deps: StrategyDeps) -> Self {
+        let risk_limits = risk::build_limits_from_config(&config);
+        let StrategyDeps {
+            account_manager,
+            risk_evaluator,
+            trade_collector,
+        } = deps;
+
+        Self::build_with_dependencies(
+            config,
+            account_manager,
+            risk_evaluator,
+            trade_collector,
+            risk_limits,
+        )
+    }
+
     /// 创建策略实例
     pub fn new(config: TrendGridConfigV2, account_manager: Arc<AccountManager>) -> Self {
         // 创建日志目录
@@ -47,15 +85,7 @@ impl TrendGridStrategyV2 {
             Some(risk_limits.clone()),
         );
 
-        Self {
-            config,
-            account_manager,
-            config_states: Arc::new(RwLock::new(HashMap::new())),
-            running: Arc::new(RwLock::new(false)),
-            collector: None,
-            risk_evaluator,
-            risk_limits,
-        }
+        Self::build_with_dependencies(config, account_manager, risk_evaluator, None, risk_limits)
     }
 
     /// 创建策略实例（带数据收集器）
@@ -74,15 +104,13 @@ impl TrendGridStrategyV2 {
             Some(risk_limits.clone()),
         );
 
-        Self {
+        Self::build_with_dependencies(
             config,
             account_manager,
-            config_states: Arc::new(RwLock::new(HashMap::new())),
-            running: Arc::new(RwLock::new(false)),
-            collector: Some(collector),
             risk_evaluator,
+            Some(collector),
             risk_limits,
-        }
+        )
     }
 
     pub async fn evaluate_risk_for_config(&self, config_id: &str) -> Result<()> {
@@ -229,6 +257,61 @@ impl TrendGridStrategyV2 {
         }
 
         Ok(())
+    }
+
+    async fn current_status(&self) -> StrategyStatus {
+        let is_running = *self.running.read().await;
+        let mut status = StrategyStatus::new(self.config.strategy.name.clone());
+        let state = if is_running {
+            StrategyState::Running
+        } else {
+            StrategyState::Stopped
+        };
+        status = status.with_state(state);
+        status = status.with_risk_level(RiskLevel::Normal);
+
+        let positions = {
+            let states = self.config_states.read().await;
+            let mut positions = Vec::with_capacity(states.len());
+            for state in states.values() {
+                let guard = state.lock().await;
+                positions.push(StrategyPosition {
+                    symbol: guard.config.symbol.clone(),
+                    net_position: guard.net_position,
+                    notional: guard.net_position * guard.current_price,
+                });
+            }
+            positions
+        };
+
+        if !positions.is_empty() {
+            status = status.with_positions(positions);
+        }
+
+        status
+    }
+}
+
+#[async_trait]
+impl StrategyInstance for TrendGridStrategyV2 {
+    async fn start(&self) -> AnyResult<()> {
+        TrendGridStrategyV2::start(self).await.map_err(Into::into)
+    }
+
+    async fn stop(&self) -> AnyResult<()> {
+        TrendGridStrategyV2::stop(self).await.map_err(Into::into)
+    }
+
+    async fn status(&self) -> AnyResult<StrategyStatus> {
+        Ok(self.current_status().await)
+    }
+}
+
+impl Strategy for TrendGridStrategyV2 {
+    type Config = TrendGridConfigV2;
+
+    fn create(config: Self::Config, deps: StrategyDeps) -> AnyResult<Self> {
+        Ok(Self::from_deps(config, deps))
     }
 }
 

@@ -1,0 +1,59 @@
+strategy:
+  name: pro_market_maker_sol
+  log_level: INFO
+account:
+  account_id: binance_hcr
+  market_type: Futures
+precision_management:
+  enabled: true
+  write_back: true
+  config_path: config/market_making_sol.yml
+  lock_path: config/market_making_sol.lock
+  backup_suffix: .bak
+quoting:
+  refresh_interval_ms: 400
+  base_spread_bps: 12.0
+  min_spread_bps: 4.0
+  max_spread_bps: 80.0
+  vol_sensitivity: 15.0
+  depth_sensitivity: 6.0
+  trend_sensitivity: 3.0
+  mid_price_alpha: 0.3
+  min_depth_levels: 5
+  levels_per_side: 3
+  grid_step_bps: 6.0
+  level_size_decay: 0.7
+inventory:
+  max_inventory: 3.0
+  soft_limit: 2.5
+  hard_limit: 3.5
+  target_pct: 0.0
+  skew_strength: 0.15
+  size_sensitivity: 0.6
+  rebalance_threshold: 0.25
+trend:
+  ema_fast_alpha: 0.35
+  ema_slow_alpha: 0.08
+  slope_threshold: 0.4
+  cooldown_secs: 12
+risk:
+  max_inventory_notional: 500.0
+  max_loss: 300.0
+  max_drawdown: 500.0
+  vol_spike_threshold: 0.02
+  vol_widen_factor: 1.5
+  max_api_errors: 3
+hedging:
+  enabled: false
+symbols:
+- symbol: SOL/USDC
+  enabled: true
+  tick_size: 0.01
+  lot_size: 0.01
+  price_precision: 2
+  quantity_precision: 2
+  min_notional: 5.0
+  order_ttl_secs: 5
+  base_order_size: 0.05
+  min_order_size: 0.01
+  max_inventory: 3.0

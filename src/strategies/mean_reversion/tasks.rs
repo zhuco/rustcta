@@ -78,6 +78,12 @@ impl MeanReversionStrategy {
             .max_15m_bars
             .max(self.config.data.rest.min_klines_15m)
             .max(400);
+        let one_hour_limit = self
+            .config
+            .cache
+            .max_1h_bars
+            .max(self.config.data.rest.min_klines_1h)
+            .max(240);
 
         let exchange = self.account.exchange.clone();
         let mut state_guard = self.symbol_states.write().await;
@@ -119,6 +125,18 @@ impl MeanReversionStrategy {
             .await?;
         for bar in fifteen_bars {
             state.push_fifteen_minute(bar, &self.config.cache);
+        }
+
+        let one_hour_bars = exchange
+            .get_klines(
+                &exchange_symbol,
+                crate::core::types::Interval::OneHour,
+                self.market_type,
+                Some(one_hour_limit as u32),
+            )
+            .await?;
+        for bar in one_hour_bars {
+            state.push_one_hour(bar, &self.config.cache);
         }
 
         Self::rebuild_bbw_history(
@@ -181,10 +199,10 @@ impl MeanReversionStrategy {
         state.bbw_history.clear();
         state.mid_history.clear();
         state.sigma_history.clear();
-        if state.fifteen_minute.len() < period {
+        if state.one_hour.len() < period {
             return;
         }
-        let closes: Vec<f64> = state.fifteen_minute.iter().map(|k| k.close).collect();
+        let closes: Vec<f64> = state.one_hour.iter().map(|k| k.close).collect();
         for window in closes.windows(period) {
             let (upper, middle, lower) =
                 match crate::utils::indicators::functions::bollinger_bands(window, period, std_dev)
@@ -251,6 +269,9 @@ impl MeanReversionStrategy {
             }
             if subs.kline_15m {
                 streams.push(format!("{}@kline_15m", formatted));
+            }
+            if subs.kline_1h {
+                streams.push(format!("{}@kline_1h", formatted));
             }
             if let Some(depth) = subs.partial_book_depth {
                 streams.push(format!("{}@depth{}", formatted, depth));
@@ -373,6 +394,7 @@ impl MeanReversionStrategy {
             "1m" => Some(1),
             "5m" => Some(5),
             "15m" => Some(15),
+            "1h" => Some(60),
             _ => None,
         };
 
@@ -381,6 +403,7 @@ impl MeanReversionStrategy {
                 1 => state.last_one_minute_close,
                 5 => state.last_five_minute_close,
                 15 => state.last_fifteen_minute_close,
+                60 => state.last_one_hour_close,
                 _ => None,
             };
             if validation.enable_sequence_check
@@ -404,10 +427,11 @@ impl MeanReversionStrategy {
             "1m" => state.push_one_minute(incoming.kline.clone(), &self.config.cache),
             "5m" => state.push_five_minute(incoming.kline.clone(), &self.config.cache),
             "15m" => state.push_fifteen_minute(incoming.kline.clone(), &self.config.cache),
+            "1h" => state.push_one_hour(incoming.kline.clone(), &self.config.cache),
             _ => state.push_one_minute(incoming.kline.clone(), &self.config.cache),
         }
 
-        if interval == "15m" {
+        if interval == "1h" {
             if let Some((bbw, mid, sigma)) = planner::compute_latest_bbw(
                 state,
                 self.config.indicators.bollinger.period,

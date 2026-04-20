@@ -561,6 +561,7 @@ impl Exchange for BitmartExchange {
             asks,
             timestamp: DateTime::from_timestamp(orderbook.timestamp / 1000, 0)
                 .unwrap_or_else(|| Utc::now()),
+            info: serde_json::Value::Null,
         })
     }
 

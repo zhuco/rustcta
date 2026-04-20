@@ -6,7 +6,7 @@ use log::{debug, error, info, warn};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
 /// Webhook配置
@@ -229,26 +229,27 @@ _自动推送 by RustCTA_"#,
 }
 
 /// 全局通知器实例
-static mut GLOBAL_NOTIFIER: Option<Arc<WebhookNotifier>> = None;
-static INIT: std::sync::Once = std::sync::Once::new();
+static GLOBAL_NOTIFIER: OnceLock<Arc<WebhookNotifier>> = OnceLock::new();
 
 /// 初始化全局通知器
 pub fn init_global_notifier(config_path: &str) {
-    INIT.call_once(|| {
-        if let Ok(notifier) = WebhookNotifier::from_config_file(config_path) {
-            unsafe {
-                GLOBAL_NOTIFIER = Some(Arc::new(notifier));
+    match WebhookNotifier::from_config_file(config_path) {
+        Ok(notifier) => {
+            if GLOBAL_NOTIFIER.set(Arc::new(notifier)).is_ok() {
+                info!("全局Webhook通知器已初始化");
+            } else {
+                info!("全局Webhook通知器已存在，忽略重复初始化");
             }
-            info!("全局Webhook通知器已初始化");
-        } else {
+        }
+        Err(_) => {
             warn!("无法初始化Webhook通知器");
         }
-    });
+    }
 }
 
 /// 获取全局通知器
 pub fn get_global_notifier() -> Option<Arc<WebhookNotifier>> {
-    unsafe { GLOBAL_NOTIFIER.clone() }
+    GLOBAL_NOTIFIER.get().cloned()
 }
 
 /// 快捷函数：发送错误通知
@@ -258,6 +259,10 @@ pub async fn notify_error(strategy: &str, error: &str) {
             .send_error(strategy, error, MessageLevel::Error)
             .await;
     }
+}
+
+pub async fn notify_info(strategy: &str, message: &str) {
+    notify_event(strategy, "策略提示", message, MessageLevel::Info).await;
 }
 
 pub async fn notify_event(strategy: &str, title: &str, body: &str, level: MessageLevel) {

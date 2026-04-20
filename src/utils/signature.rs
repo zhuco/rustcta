@@ -12,8 +12,7 @@ pub struct SignatureHelper;
 impl SignatureHelper {
     /// Binance 签名: HMAC-SHA256(query_string)
     pub fn binance_signature(secret: &str, query_string: &str) -> String {
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(query_string.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -27,8 +26,7 @@ impl SignatureHelper {
         body: &str,
     ) -> String {
         let prehash = format!("{}{}{}{}", timestamp, method, request_path, body);
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(prehash.as_bytes());
         general_purpose::STANDARD.encode(mac.finalize().into_bytes())
     }
@@ -36,8 +34,7 @@ impl SignatureHelper {
     /// Bitmart v2 签名: HMAC-SHA256(timestamp + body)
     pub fn bitmart_signature(secret: &str, timestamp: &str, body: &str) -> String {
         let prehash = format!("{}{}", timestamp, body);
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(prehash.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -45,8 +42,7 @@ impl SignatureHelper {
     /// Bitmart v3 签名: HMAC-SHA256(timestamp#memo#body)
     pub fn bitmart_signature_v3(secret: &str, timestamp: &str, memo: &str, body: &str) -> String {
         let prehash = format!("{}#{}#{}", timestamp, memo, body);
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(prehash.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -61,8 +57,7 @@ impl SignatureHelper {
             .collect::<Vec<_>>()
             .join("&");
 
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(query.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -96,16 +91,14 @@ impl SignatureHelper {
         query_string: &str,
     ) -> String {
         let sign_string = format!("{}\n{}\n{}\n{}", method, host, path, query_string);
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(sign_string.as_bytes());
         general_purpose::STANDARD.encode(mac.finalize().into_bytes())
     }
 
     /// 通用 HMAC-SHA256 帮助方法
     pub fn hmac_sha256(secret: &str, data: &str) -> String {
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC 支持任意长度密钥");
         mac.update(data.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }

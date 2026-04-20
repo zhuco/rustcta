@@ -51,7 +51,7 @@ pub struct RiskController {
 
 /// 系统健康状态
 #[derive(Debug, Clone)]
-struct SystemHealth {
+pub struct SystemHealth {
     last_check: DateTime<Utc>,
     api_latency: f64,
     network_status: bool,
@@ -62,7 +62,7 @@ struct SystemHealth {
 
 /// 账户指标
 #[derive(Debug, Clone)]
-struct AccountMetrics {
+pub struct AccountMetrics {
     total_equity: f64,
     available_balance: f64,
     used_margin: f64,
@@ -77,7 +77,7 @@ struct AccountMetrics {
 
 /// 策略指标
 #[derive(Debug, Clone)]
-struct StrategyMetrics {
+pub struct StrategyMetrics {
     open_positions: usize,
     daily_trades: usize,
     consecutive_losses: usize,
@@ -92,7 +92,7 @@ struct StrategyMetrics {
 
 /// 订单指标
 #[derive(Debug, Clone)]
-struct OrderMetrics {
+pub struct OrderMetrics {
     pending_orders: usize,
     order_success_rate: f64,
     avg_slippage: f64,
@@ -103,7 +103,7 @@ struct OrderMetrics {
 
 /// 风险事件
 #[derive(Debug, Clone)]
-struct RiskEvent {
+pub struct RiskEvent {
     timestamp: DateTime<Utc>,
     level: RiskLevel,
     layer: String,
@@ -442,10 +442,10 @@ impl RiskController {
         }
 
         // 检查总暴露
-        let new_exposure =
-            account_metrics.total_exposure + position_size / account_metrics.total_equity;
-        if new_exposure > self.config.max_total_exposure {
-            warn!("总暴露将超限: {:.2}%", new_exposure * 100.0);
+        let total_equity = account_metrics.total_equity.max(1.0);
+        let proposed_exposure = (position_size * signal.entry_price.abs()) / total_equity;
+        if proposed_exposure > self.config.max_total_exposure {
+            warn!("总暴露将超限: {:.2}%", proposed_exposure * 100.0);
             return Ok(false);
         }
 

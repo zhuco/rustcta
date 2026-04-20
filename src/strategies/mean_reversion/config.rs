@@ -7,6 +7,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_false() -> bool {
+    false
+}
+
 fn default_allow_short() -> bool {
     true
 }
@@ -21,6 +25,10 @@ fn default_scan_interval_secs() -> u64 {
 
 fn default_min_klines_15m() -> usize {
     400
+}
+
+fn default_min_klines_1h() -> usize {
+    320
 }
 
 fn default_max_cancel_per_minute() -> u32 {
@@ -59,12 +67,24 @@ fn default_relist_delay_ms() -> u64 {
     800
 }
 
+fn default_take_profit_atr_k() -> f64 {
+    1.8
+}
+
 fn default_per_trade_notional() -> f64 {
     6.0
 }
 
 fn default_per_trade_risk() -> f64 {
     6.0
+}
+
+fn default_lock_profit_pct() -> f64 {
+    0.005
+}
+
+fn default_lock_buffer_pct() -> f64 {
+    0.001
 }
 
 fn default_time_stop_bars() -> u32 {
@@ -85,6 +105,10 @@ fn default_cache_5m() -> usize {
 
 fn default_cache_15m() -> usize {
     500
+}
+
+fn default_cache_1h() -> usize {
+    400
 }
 
 fn default_indicator_choppiness() -> Option<ChoppinessConfig> {
@@ -149,6 +173,8 @@ pub struct AccountSettings {
     pub market_type: MarketType,
     #[serde(default = "default_allow_short")]
     pub allow_short: bool,
+    #[serde(default = "default_false")]
+    pub dual_position_mode: bool,
     #[serde(default)]
     pub max_leverage: Option<u32>,
     #[serde(default)]
@@ -230,6 +256,8 @@ pub struct SubscriptionConfig {
     #[serde(default = "default_true")]
     pub kline_15m: bool,
     #[serde(default)]
+    pub kline_1h: bool,
+    #[serde(default)]
     pub partial_book_depth: Option<u32>,
 }
 
@@ -239,6 +267,7 @@ impl Default for SubscriptionConfig {
             kline_1m: true,
             kline_5m: true,
             kline_15m: true,
+            kline_1h: false,
             partial_book_depth: Some(5),
         }
     }
@@ -248,6 +277,8 @@ impl Default for SubscriptionConfig {
 pub struct RestConfig {
     #[serde(default = "default_min_klines_15m")]
     pub min_klines_15m: usize,
+    #[serde(default = "default_min_klines_1h")]
+    pub min_klines_1h: usize,
     #[serde(default = "default_history_batch")]
     pub history_batch_size: usize,
     #[serde(default = "default_history_max_retries")]
@@ -519,6 +550,8 @@ pub struct ExecutionConfig {
     pub alpha_atr: f64,
     #[serde(default = "default_beta_sigma")]
     pub beta_sigma: f64,
+    #[serde(default = "default_take_profit_atr_k")]
+    pub take_profit_atr_k: f64,
     #[serde(default = "default_ttl_secs")]
     pub ttl_secs: u64,
     #[serde(default = "default_max_cancel_per_minute")]
@@ -527,6 +560,10 @@ pub struct ExecutionConfig {
     pub relist_delay_ms: u64,
     #[serde(default)]
     pub max_relist_attempts: Option<u32>,
+    #[serde(default = "default_lock_profit_pct")]
+    pub lock_profit_pct: f64,
+    #[serde(default = "default_lock_buffer_pct")]
+    pub lock_buffer_pct: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -600,6 +637,8 @@ pub struct CacheConfig {
     pub max_5m_bars: usize,
     #[serde(default = "default_cache_15m")]
     pub max_15m_bars: usize,
+    #[serde(default = "default_cache_1h")]
+    pub max_1h_bars: usize,
 }
 
 impl Default for CacheConfig {
@@ -608,6 +647,7 @@ impl Default for CacheConfig {
             max_1m_bars: default_cache_1m(),
             max_5m_bars: default_cache_5m(),
             max_15m_bars: default_cache_15m(),
+            max_1h_bars: default_cache_1h(),
         }
     }
 }

@@ -1,7 +1,7 @@
 strategy:
   name: range_grid_memes
   version: 1.0.0
-  enabled: true
+  enabled: false
   strategy_type: range_grid
   market_type: futures
 execution:
@@ -43,7 +43,7 @@ schedule:
   timezone: Asia/Shanghai
   sessions:
   - start: 00:00
-    end: 23:55
+    end: 1435
 risk_control:
   max_leverage: 3
   max_drawdown: 0.05
@@ -57,7 +57,7 @@ notifications:
     mentioned_mobile_list: []
 symbols:
 - config_id: BONK-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance
@@ -83,7 +83,7 @@ symbols:
   market_exit:
     use_market_order: true
 - config_id: PEPE-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance
@@ -109,7 +109,7 @@ symbols:
   market_exit:
     use_market_order: true
 - config_id: SHIB-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance
@@ -161,7 +161,7 @@ symbols:
   market_exit:
     use_market_order: true
 - config_id: ARB-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance
@@ -187,7 +187,7 @@ symbols:
   market_exit:
     use_market_order: true
 - config_id: AVAX-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance
@@ -213,7 +213,7 @@ symbols:
   market_exit:
     use_market_order: true
 - config_id: ETHFI-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance
@@ -239,7 +239,7 @@ symbols:
   market_exit:
     use_market_order: true
 - config_id: TIA-USDC
-  enabled: true
+  enabled: false
   account:
     id: binance_main
     exchange: binance

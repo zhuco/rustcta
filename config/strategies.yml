@@ -7,7 +7,7 @@ strategy_groups:
   # 泊松做市策略组
   poisson_mm:
     name: "泊松做市策略"
-    enabled: true
+    enabled: false
     startup_delay_secs: 0  # 启动延迟（秒）
     strategies:
       - name: "SUI泊松做市"
@@ -28,7 +28,7 @@ strategy_groups:
   # 趋势网格策略组
   trend_grid:
     name: "趋势网格策略"
-    enabled: true
+    enabled: false
     startup_delay_secs: 5  # 延迟5秒启动
     strategies:
       - name: "ENA趋势网格"
@@ -51,7 +51,7 @@ strategy_groups:
   # AS策略组 (自动化剥头皮)
   as_strategies:
     name: "AS自动化剥头皮策略"
-    enabled: true
+    enabled: false
     startup_delay_secs: 15  # 延迟15秒启动
     strategies:
       - name: "ORDI剥头皮策略"
@@ -62,7 +62,7 @@ strategy_groups:
   # 马丁格尔策略组
   martin_strategies:
     name: "马丁格尔趋势策略"
-    enabled: true
+    enabled: false
     startup_delay_secs: 20  # 延迟20秒启动
     strategies:
       - name: "LINKUSDC马丁策略"
@@ -99,8 +99,4 @@ startup_settings:
   
 # 启动优先级（数字越小优先级越高）
 startup_priority:
-  1: ["poisson_mm"]         # 首先启动泊松做市
-  2: ["trend_grid"]         # 然后启动趋势网格
-  3: ["martin_strategies"]  # 然后启动马丁策略
-  4: ["as_strategies"]      # 然后启动AS策略
-  5: ["copy_trading"]       # 最后启动跟单策略
+  1: ["copy_trading"]

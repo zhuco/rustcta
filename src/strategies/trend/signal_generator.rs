@@ -4,9 +4,10 @@ use chrono::{DateTime, Duration, Utc};
 use log::{debug, info};
 
 use crate::core::error::ExchangeError;
-use crate::core::types::MarketType;
 use crate::core::types::OrderSide;
 use crate::cta::account_manager::AccountManager;
+use crate::strategies::common::get_trend_inputs;
+use crate::strategies::mean_reversion::indicators::IndicatorOutputs;
 use crate::strategies::trend::config::SignalConfig;
 use crate::strategies::trend::trend_analyzer::{TrendDirection, TrendSignal};
 use std::sync::Arc;
@@ -119,21 +120,23 @@ impl SignalGenerator {
 
         info!("✅ {} 满足交易条件，继续生成信号...", symbol);
 
+        let shared = get_trend_inputs(symbol)
+            .ok_or_else(|| ExchangeError::Other(format!("{} 缺少共享指标数据", symbol)))?;
+        let indicators = shared.indicators.clone();
+
         // 根据趋势方向生成信号
         let signal = match trend_signal.direction {
             TrendDirection::StrongBullish => {
-                self.generate_long_signal(symbol, trend_signal).await?
+                self.generate_long_signal(symbol, trend_signal, &indicators)?
             }
             TrendDirection::Bullish => {
-                self.generate_pullback_long_signal(symbol, trend_signal)
-                    .await?
+                self.generate_pullback_long_signal(symbol, trend_signal, &indicators)?
             }
             TrendDirection::StrongBearish => {
-                self.generate_short_signal(symbol, trend_signal).await?
+                self.generate_short_signal(symbol, trend_signal, &indicators)?
             }
             TrendDirection::Bearish => {
-                self.generate_pullback_short_signal(symbol, trend_signal)
-                    .await?
+                self.generate_pullback_short_signal(symbol, trend_signal, &indicators)?
             }
             TrendDirection::Neutral => {
                 return Ok(None);
@@ -155,29 +158,23 @@ impl SignalGenerator {
     }
 
     /// 生成做多信号（强势）
-    async fn generate_long_signal(
+    fn generate_long_signal(
         &self,
         symbol: &str,
         trend_signal: &TrendSignal,
+        indicators: &IndicatorOutputs,
     ) -> Result<Option<TradeSignal>, ExchangeError> {
-        // 获取当前市场价格
-        let current_price = self.get_market_price(symbol).await?;
-
-        // 寻找入场点
+        let current_price = indicators.last_price.max(1e-6);
         let entry_price = self.find_breakout_entry(current_price, OrderSide::Buy);
-
-        // 计算止损
-        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Buy, 0.02);
-
-        // 计算止盈目标
+        let risk_percent = (indicators.atr / current_price).clamp(0.003, 0.04);
+        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Buy, risk_percent);
         let take_profits = self.calculate_take_profits(entry_price, stop_loss, OrderSide::Buy);
 
-        // 计算风险回报比
         let risk = (entry_price - stop_loss).abs();
         let reward = take_profits
-            .first()
+            .iter()
             .map(|tp| (tp.price - entry_price).abs())
-            .unwrap_or(0.0);
+            .fold(0.0, f64::max);
         let risk_reward_ratio = if risk > 0.0 { reward / risk } else { 0.0 };
 
         Ok(Some(TradeSignal {
@@ -187,53 +184,9 @@ impl SignalGenerator {
             entry_price,
             stop_loss,
             take_profits,
-            suggested_size: 0.01, // 基础仓位
+            suggested_size: (12.0 / entry_price).max(0.0),
             risk_reward_ratio,
             confidence: trend_signal.confidence,
-            timeframe_aligned: trend_signal.timeframe_aligned,
-            has_structure_support: true, // 简化
-            expire_time: Utc::now() + Duration::seconds(self.config.signal_expiry as i64),
-            metadata: SignalMetadata {
-                trend_strength: trend_signal.strength,
-                volume_confirmed: trend_signal.volume_confirmation,
-                key_level_nearby: true,
-                pattern_name: None,
-                generated_at: Utc::now(),
-            },
-        }))
-    }
-
-    /// 生成回调做多信号
-    async fn generate_pullback_long_signal(
-        &self,
-        symbol: &str,
-        trend_signal: &TrendSignal,
-    ) -> Result<Option<TradeSignal>, ExchangeError> {
-        let current_price = self.get_market_price(symbol).await?;
-
-        // 寻找回调入场点
-        let entry_price = self.find_pullback_entry(current_price, OrderSide::Buy);
-
-        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Buy, 0.015);
-        let take_profits = self.calculate_take_profits(entry_price, stop_loss, OrderSide::Buy);
-
-        let risk = (entry_price - stop_loss).abs();
-        let reward = take_profits
-            .first()
-            .map(|tp| (tp.price - entry_price).abs())
-            .unwrap_or(0.0);
-        let risk_reward_ratio = if risk > 0.0 { reward / risk } else { 0.0 };
-
-        Ok(Some(TradeSignal {
-            symbol: symbol.to_string(),
-            signal_type: SignalType::Pullback,
-            side: OrderSide::Buy,
-            entry_price,
-            stop_loss,
-            take_profits,
-            suggested_size: 0.01,
-            risk_reward_ratio,
-            confidence: trend_signal.confidence * 0.9, // 回调信号置信度略低
             timeframe_aligned: trend_signal.timeframe_aligned,
             has_structure_support: true,
             expire_time: Utc::now() + Duration::seconds(self.config.signal_expiry as i64),
@@ -247,23 +200,67 @@ impl SignalGenerator {
         }))
     }
 
-    /// 生成做空信号
-    async fn generate_short_signal(
+    /// 生成回调做多信号
+    fn generate_pullback_long_signal(
         &self,
         symbol: &str,
         trend_signal: &TrendSignal,
+        indicators: &IndicatorOutputs,
     ) -> Result<Option<TradeSignal>, ExchangeError> {
-        let current_price = self.get_market_price(symbol).await?;
+        let current_price = indicators.last_price.max(1e-6);
+        let entry_price = self.find_pullback_entry(current_price, OrderSide::Buy);
+        let risk_percent = (indicators.atr / current_price).clamp(0.002, 0.035);
+        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Buy, risk_percent);
+        let take_profits = self.calculate_take_profits(entry_price, stop_loss, OrderSide::Buy);
 
+        let risk = (entry_price - stop_loss).abs();
+        let reward = take_profits
+            .iter()
+            .map(|tp| (tp.price - entry_price).abs())
+            .fold(0.0, f64::max);
+        let risk_reward_ratio = if risk > 0.0 { reward / risk } else { 0.0 };
+
+        Ok(Some(TradeSignal {
+            symbol: symbol.to_string(),
+            signal_type: SignalType::Pullback,
+            side: OrderSide::Buy,
+            entry_price,
+            stop_loss,
+            take_profits,
+            suggested_size: (12.0 / entry_price).max(0.0),
+            risk_reward_ratio,
+            confidence: trend_signal.confidence * 0.9,
+            timeframe_aligned: trend_signal.timeframe_aligned,
+            has_structure_support: true,
+            expire_time: Utc::now() + Duration::seconds(self.config.signal_expiry as i64),
+            metadata: SignalMetadata {
+                trend_strength: trend_signal.strength,
+                volume_confirmed: trend_signal.volume_confirmation,
+                key_level_nearby: true,
+                pattern_name: Some("回调入场".to_string()),
+                generated_at: Utc::now(),
+            },
+        }))
+    }
+
+    /// 生成做空信号
+    fn generate_short_signal(
+        &self,
+        symbol: &str,
+        trend_signal: &TrendSignal,
+        indicators: &IndicatorOutputs,
+    ) -> Result<Option<TradeSignal>, ExchangeError> {
+        let current_price = indicators.last_price.max(1e-6);
         let entry_price = self.find_breakout_entry(current_price, OrderSide::Sell);
-        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Sell, 0.02);
+        let risk_percent = (indicators.atr / current_price).clamp(0.003, 0.04);
+        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Sell, risk_percent);
         let take_profits = self.calculate_take_profits(entry_price, stop_loss, OrderSide::Sell);
 
         let risk = (stop_loss - entry_price).abs();
         let reward = take_profits
-            .first()
+            .iter()
             .map(|tp| (entry_price - tp.price).abs())
-            .unwrap_or(0.0);
+            .fold(0.0, f64::max);
         let risk_reward_ratio = if risk > 0.0 { reward / risk } else { 0.0 };
 
         Ok(Some(TradeSignal {
@@ -273,7 +270,7 @@ impl SignalGenerator {
             entry_price,
             stop_loss,
             take_profits,
-            suggested_size: 0.01,
+            suggested_size: (12.0 / entry_price).max(0.0),
             risk_reward_ratio,
             confidence: trend_signal.confidence,
             timeframe_aligned: trend_signal.timeframe_aligned,
@@ -290,22 +287,23 @@ impl SignalGenerator {
     }
 
     /// 生成回调做空信号
-    async fn generate_pullback_short_signal(
+    fn generate_pullback_short_signal(
         &self,
         symbol: &str,
         trend_signal: &TrendSignal,
+        indicators: &IndicatorOutputs,
     ) -> Result<Option<TradeSignal>, ExchangeError> {
-        let current_price = self.get_market_price(symbol).await?;
-
+        let current_price = indicators.last_price.max(1e-6);
         let entry_price = self.find_pullback_entry(current_price, OrderSide::Sell);
-        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Sell, 0.015);
+        let risk_percent = (indicators.atr / current_price).clamp(0.002, 0.035);
+        let stop_loss = self.calculate_stop_loss(entry_price, OrderSide::Sell, risk_percent);
         let take_profits = self.calculate_take_profits(entry_price, stop_loss, OrderSide::Sell);
 
         let risk = (stop_loss - entry_price).abs();
         let reward = take_profits
-            .first()
+            .iter()
             .map(|tp| (entry_price - tp.price).abs())
-            .unwrap_or(0.0);
+            .fold(0.0, f64::max);
         let risk_reward_ratio = if risk > 0.0 { reward / risk } else { 0.0 };
 
         Ok(Some(TradeSignal {
@@ -315,7 +313,7 @@ impl SignalGenerator {
             entry_price,
             stop_loss,
             take_profits,
-            suggested_size: 0.01,
+            suggested_size: (12.0 / entry_price).max(0.0),
             risk_reward_ratio,
             confidence: trend_signal.confidence * 0.9,
             timeframe_aligned: trend_signal.timeframe_aligned,
@@ -325,7 +323,7 @@ impl SignalGenerator {
                 trend_strength: trend_signal.strength,
                 volume_confirmed: trend_signal.volume_confirmation,
                 key_level_nearby: true,
-                pattern_name: None,
+                pattern_name: Some("回调入场".to_string()),
                 generated_at: Utc::now(),
             },
         }))
@@ -390,25 +388,6 @@ impl SignalGenerator {
                 },
             ],
         }
-    }
-
-    /// 获取市场价格
-    async fn get_market_price(&self, symbol: &str) -> Result<f64, ExchangeError> {
-        if let Some(account_manager) = &self.account_manager {
-            if let Some(account) = account_manager.get_account("binance_hcr") {
-                let ticker = account
-                    .exchange
-                    .get_ticker(symbol, MarketType::Spot)
-                    .await?;
-                return Ok(ticker.last);
-            }
-        }
-
-        // 如果无法获取真实价格，返回错误
-        Err(ExchangeError::ParseError(format!(
-            "无法获取 {} 的市场价格",
-            symbol
-        )))
     }
 
     /// 验证信号质量

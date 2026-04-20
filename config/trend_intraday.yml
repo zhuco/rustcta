@@ -1,0 +1,157 @@
+name: "Trend Intraday Strategy"
+strategy:
+  log_level: "DEBUG"
+account_id: "binance_hcr"
+dual_position_mode: true
+symbols:
+  - ETH/USDC
+  - SOL/USDC
+symbol_inventory_limits: # 保留数量上限为高值，交由名义限制生效
+  ETH/USDC: 0.2
+  SOL/USDC: 4.0
+
+symbol_inventory_value_limits: # 200U 账户下，每个趋势币种名义上限控制在 60U
+  ETH/USDC: 60.0
+  SOL/USDC: 60.0
+max_positions: 2
+max_daily_trades: 8
+min_account_balance: 100.0
+min_risk_reward_ratio: 1.8
+min_signal_confidence: 60.0
+max_holding_hours: 48
+pyramid_enabled: false
+pyramid_levels: []
+risk_config:
+  max_risk_per_trade: 0.01
+  max_daily_loss: 0.03
+  max_drawdown: 0.15
+  max_consecutive_losses: 5
+  max_total_exposure: 20.0   # 允许总仓位达到权益 20x
+  max_single_exposure: 2.0  # 单币种权益 2x 上限
+  max_correlated_exposure: 0.2
+  max_leverage: 3.0
+  max_slippage: 0.002
+  emergency_stop_loss: 0.1
+indicator_config:
+  primary_timeframe: "1h"
+  secondary_timeframe: "15m"
+  trigger_timeframe: "5m"
+  fast_ema: 20
+  slow_ema: 50
+  atr_period: 14
+  adx_period: 14
+  adx_threshold: 22.0
+  rsi_period: 14
+  rsi_overbought: 68.0
+  rsi_oversold: 32.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+signal_config:
+  breakout_lookback: 20
+  breakout_confirmation_bars: 2
+  pullback_ratio: 0.382
+  pullback_min_trend_strength: 35.0
+  momentum_threshold: 0.01
+  momentum_lookback: 12
+  pattern_min_bars: 6
+  pattern_confidence: 65.0
+  volume_multiplier: 1.4
+  volume_lookback: 24
+  signal_expiry: 1800
+position_config:
+  base_risk_ratio: 0.01
+  kelly_fraction: 0.25
+  pyramid_enabled: false
+  pyramid_levels: []
+  trend_factor_enabled: true
+  volatility_factor_enabled: true
+  time_factor_enabled: true
+  max_holding_hours: 48
+stop_config:
+  initial_stop_type: ATR
+  atr_multiplier: 2.2
+  fixed_stop_percent: 0.02
+  trailing_stop_enabled: true
+  trailing_activation: 1.5
+  trailing_distance: 0.5
+  trailing_step: 0.5
+  time_stop_hours: 48
+  breakeven_enabled: true
+  breakeven_trigger: 0.8
+  partial_targets:
+    - target_r: 1.0
+      close_ratio: 0.3
+    - target_r: 2.0
+      close_ratio: 0.3
+    - target_r: 3.0
+      close_ratio: 0.2
+  lock_profit_pct: 0.007
+  lock_buffer_pct: 0.001
+scoring:
+  primary_weight: 0.45
+  secondary_weight: 0.35
+  trigger_weight: 0.2
+  strong_threshold: 75.0
+  trade_threshold: 60.0
+  degrade_on_poor_data: true
+regime:
+  trending_threshold: 30.0
+  ranging_threshold: 15.0
+  volatility_threshold: 0.03
+  extreme_threshold: 0.08
+time_curve:
+  default_weight: 1.0
+  segments:
+    - start_hour: 0
+      end_hour: 8
+      weight: 0.8
+    - start_hour: 8
+      end_hour: 16
+      weight: 1.1
+    - start_hour: 16
+      end_hour: 24
+      weight: 0.9
+risk_budget:
+  max_portfolio_var: 0.04
+  max_symbol_var: 0.02
+  max_drawdown_pct: 0.12
+  panic_exit_drawdown: 0.2
+  pause_after_consecutive_losses: 5
+execution:
+  prefer_maker: true
+  allow_taker_fallback: true
+  maker_offset_bps: 2.0
+  taker_slippage_bps: 5.0
+  max_retries: 2
+  retry_backoff_ms: 250
+  order_timeout_secs: 300  # 限制单次等待，避免长时间阻塞导致信号吞吐下降
+  iceberg_enabled: false
+  iceberg_visible_ratio: 0.2
+
+# 固定每次开仓名义 25U，由三组入场模式共同使用
+entry_base_notional: 25.0
+# Maker 价格统一往里轻微改善，以提高成交概率
+entry_price_improve_bps: 0.5
+monitoring:
+  health_threshold: 65.0
+  warning_slippage_bps: 10.0
+  critical_slippage_bps: 25.0
+  enable_webhook: false
+  rotate_daily_logs: true
+poll_interval_secs: 30
+signal_cooldown_secs: 300
+market_data:
+  cache_depth: 900
+  bootstrap_bars: 700
+  max_data_lag_ms: 500
+  min_one_minute_bars: 60
+  min_five_minute_bars: 96
+  min_fifteen_minute_bars: 96
+  min_one_hour_bars: 96
+status_reporter:
+  enabled: true
+  webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=c983e2c0-5997-4198-8601-cbc5888a2751"
+  interval_secs: 300

@@ -40,43 +40,12 @@ pub fn compute_indicators(
     cfg: &IndicatorConfig,
     volume_cfg: &VolumeConfig,
 ) -> Result<IndicatorOutputs> {
-    if snapshot.five_minute.len() < cfg.bollinger.period + 2 {
-        return Err(anyhow!("not enough 5m data"));
-    }
     if snapshot.fifteen_minute.len() < cfg.bollinger.period + 2 {
         return Err(anyhow!("not enough 15m data"));
     }
-
-    let closes_5m: Vec<f64> = snapshot.five_minute.iter().map(|k| k.close).collect();
-    let highs_5m: Vec<f64> = snapshot.five_minute.iter().map(|k| k.high).collect();
-    let lows_5m: Vec<f64> = snapshot.five_minute.iter().map(|k| k.low).collect();
-
-    let boll_5m =
-        functions::bollinger_bands(&closes_5m, cfg.bollinger.period, cfg.bollinger.std_dev)
-            .ok_or_else(|| anyhow!("bollinger calculation failed"))?;
-    let sigma_5m = (boll_5m.0 - boll_5m.1) / cfg.bollinger.std_dev.max(1e-9);
-    let last_price = closes_5m.last().copied().unwrap_or_default();
-    let denom_5m = (boll_5m.0 - boll_5m.2).max(1e-9);
-    let band_percent = (last_price - boll_5m.2) / denom_5m;
-    let z_score = if sigma_5m.abs() < 1e-9 {
-        0.0
-    } else {
-        (last_price - boll_5m.1) / sigma_5m
-    };
-
-    let bollinger_5m = BollingerSnapshot {
-        upper: boll_5m.0,
-        middle: boll_5m.1,
-        lower: boll_5m.2,
-        sigma: sigma_5m,
-        band_percent,
-        z_score,
-    };
-
-    let atr = functions::atr(&highs_5m, &lows_5m, &closes_5m, cfg.atr.period)
-        .ok_or_else(|| anyhow!("ATR calculation failed"))?;
-    let rsi = functions::rsi(&closes_5m, cfg.rsi.period)
-        .ok_or_else(|| anyhow!("RSI calculation failed"))?;
+    if snapshot.one_hour.len() < cfg.bollinger.period + 2 {
+        return Err(anyhow!("not enough 1h data"));
+    }
 
     let closes_15m: Vec<f64> = snapshot.fifteen_minute.iter().map(|k| k.close).collect();
     let highs_15m: Vec<f64> = snapshot.fifteen_minute.iter().map(|k| k.high).collect();
@@ -84,30 +53,61 @@ pub fn compute_indicators(
 
     let boll_15m =
         functions::bollinger_bands(&closes_15m, cfg.bollinger.period, cfg.bollinger.std_dev)
-            .ok_or_else(|| anyhow!("15m bollinger calculation failed"))?;
+            .ok_or_else(|| anyhow!("bollinger calculation failed"))?;
     let sigma_15m = (boll_15m.0 - boll_15m.1) / cfg.bollinger.std_dev.max(1e-9);
+    let last_price = closes_15m.last().copied().unwrap_or_default();
     let denom_15m = (boll_15m.0 - boll_15m.2).max(1e-9);
-    let last_price_15m = closes_15m.last().copied().unwrap_or(last_price);
-    let band_percent_15m = (last_price_15m - boll_15m.2) / denom_15m;
-    let z_score_15m = if sigma_15m.abs() < 1e-9 {
+    let band_percent = (last_price - boll_15m.2) / denom_15m;
+    let z_score = if sigma_15m.abs() < 1e-9 {
         0.0
     } else {
-        (last_price_15m - boll_15m.1) / sigma_15m
+        (last_price - boll_15m.1) / sigma_15m
     };
 
-    let bollinger_15m = BollingerSnapshot {
+    let bollinger_5m = BollingerSnapshot {
         upper: boll_15m.0,
         middle: boll_15m.1,
         lower: boll_15m.2,
         sigma: sigma_15m,
-        band_percent: band_percent_15m,
-        z_score: z_score_15m,
+        band_percent,
+        z_score,
     };
 
-    let bbw = if boll_15m.1.abs() < 1e-9 {
+    let atr = functions::atr(&highs_15m, &lows_15m, &closes_15m, cfg.atr.period)
+        .ok_or_else(|| anyhow!("ATR calculation failed"))?;
+    let rsi = functions::rsi(&closes_15m, cfg.rsi.period)
+        .ok_or_else(|| anyhow!("RSI calculation failed"))?;
+
+    let closes_1h: Vec<f64> = snapshot.one_hour.iter().map(|k| k.close).collect();
+    let highs_1h: Vec<f64> = snapshot.one_hour.iter().map(|k| k.high).collect();
+    let lows_1h: Vec<f64> = snapshot.one_hour.iter().map(|k| k.low).collect();
+
+    let boll_1h =
+        functions::bollinger_bands(&closes_1h, cfg.bollinger.period, cfg.bollinger.std_dev)
+            .ok_or_else(|| anyhow!("1h bollinger calculation failed"))?;
+    let sigma_1h = (boll_1h.0 - boll_1h.1) / cfg.bollinger.std_dev.max(1e-9);
+    let denom_1h = (boll_1h.0 - boll_1h.2).max(1e-9);
+    let last_price_1h = closes_1h.last().copied().unwrap_or(last_price);
+    let band_percent_1h = (last_price_1h - boll_1h.2) / denom_1h;
+    let z_score_1h = if sigma_1h.abs() < 1e-9 {
         0.0
     } else {
-        (boll_15m.0 - boll_15m.2) / boll_15m.1
+        (last_price_1h - boll_1h.1) / sigma_1h
+    };
+
+    let bollinger_15m = BollingerSnapshot {
+        upper: boll_1h.0,
+        middle: boll_1h.1,
+        lower: boll_1h.2,
+        sigma: sigma_1h,
+        band_percent: band_percent_1h,
+        z_score: z_score_1h,
+    };
+
+    let bbw = if boll_1h.1.abs() < 1e-9 {
+        0.0
+    } else {
+        (boll_1h.0 - boll_1h.2) / boll_1h.1
     };
     let bbw_percentile = percentile_rank(bbw, &VecDeque::from(snapshot.bbw_history.clone()));
 
@@ -117,20 +117,19 @@ pub fn compute_indicators(
         cfg,
     );
 
-    let adx =
-        functions::adx(&highs_15m, &lows_15m, &closes_15m, cfg.adx.period).unwrap_or_default();
+    let adx = functions::adx(&highs_1h, &lows_1h, &closes_1h, cfg.adx.period).unwrap_or_default();
 
     let choppiness = cfg
         .choppiness
         .as_ref()
         .filter(|c| c.enabled)
-        .and_then(|c| compute_choppiness(&highs_15m, &lows_15m, &closes_15m, c.lookback))
+        .and_then(|c| compute_choppiness(&highs_1h, &lows_1h, &closes_1h, c.lookback))
         .filter(|ci| !ci.is_nan());
 
-    let volume_window_minutes = volume_cfg.lookback_minutes.max(5);
-    let volume_bars = ((volume_window_minutes as f64) / 5.0).ceil() as usize;
+    let volume_window_minutes = volume_cfg.lookback_minutes.max(15);
+    let volume_bars = ((volume_window_minutes as f64) / 15.0).ceil() as usize;
     let recent_volume_quote = snapshot
-        .five_minute
+        .fifteen_minute
         .iter()
         .rev()
         .take(volume_bars)
@@ -139,7 +138,7 @@ pub fn compute_indicators(
 
     Ok(IndicatorOutputs {
         timestamp: snapshot
-            .five_minute
+            .fifteen_minute
             .last()
             .map(|k| k.close_time)
             .unwrap_or_else(Utc::now),

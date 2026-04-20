@@ -963,6 +963,8 @@ impl MessageHandler for RangeGridWsHandler {
             WsMessage::Error(err) => {
                 if err.starts_with("ListenKeyRenewed") {
                     log::info!("[range_grid] {} ListenKey 已更新: {}", self.account_id, err);
+                } else if err.contains("TRADE_LITE") || err.contains("ACCOUNT_UPDATE") {
+                    log::debug!("[range_grid] {} 忽略提示性事件: {}", self.account_id, err);
                 } else {
                     log::warn!(
                         "[range_grid] {} WebSocket错误消息: {}",

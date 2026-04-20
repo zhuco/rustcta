@@ -1,0 +1,39 @@
+name: "SOL Orderflow"
+account_id: "binance_hcr"
+symbol: "SOL/USDC"
+order_size: 5.5
+# 价差（基点），缩窄以提升成交概率
+spread_bps: 2.0
+# 双边挂单阶梯数，收敛到中价附近
+orders_per_side: 2
+# 刷新/轮换挂单间隔（秒）—秒级重挂
+refresh_secs: 1
+# 中价跳变重挂阈值（bps）
+price_jump_bps: 1.5
+# 盘口不平衡对中价的偏移（bps），使用前3档
+imbalance_bias_bps: 5.0
+imbalance_levels: 3
+# OFI 计算使用档数与灵敏度
+ofi_levels: 5
+ofi_sensitivity_bps: 6.0
+# OFI 大幅变化触发重挂的阈值
+ofi_rebuild_bps: 10.0
+# 事件轮询间隔（ms），用于检测成交快速重挂
+event_poll_ms: 300
+# 挂单 TTL（秒），超过即撤销重挂
+order_ttl_secs: 12
+# REST 获取挂单最小轮询间隔（秒），其余时间用本地状态
+open_orders_poll_secs: 6
+# 队列前方允许的最大名义（超出触发撤换价）
+queue_ahead_notional: 20
+# 顶档滑点/跳价阈值（bps），超出触发重挂
+slippage_requote_bps: 1.5
+# 仓位名义上限（USDC），为避免库存偏斜
+max_position_notional: 250
+# 库存偏斜对价差的偏移（bps）
+inventory_spread_bps: 5.0
+# 风控阈值
+max_unrealized_loss: 120
+max_daily_loss: 200
+max_consecutive_losses: 8
+stop_loss_pct: 0.02

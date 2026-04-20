@@ -1,0 +1,35 @@
+strategy:
+  name: grid_scale_sol
+  log_level: INFO
+
+account:
+  account_id: binance_hcr
+  market_type: Futures
+
+symbol: SOL/USDC
+
+total_amount_quote: 300.0
+
+grid_ranges:
+  - id: Rb
+    start_price: 115.0
+    end_price: 129.5
+    total_amount_pct: 0.5
+    side: Buy
+    open_order_type: Limit
+    take_profit_order_type: Limit
+    active: true
+  - id: Rs
+    start_price: 129.51
+    end_price: 140.0
+    total_amount_pct: 0.5
+    side: Sell
+    open_order_type: Limit
+    take_profit_order_type: Limit
+    active: true
+
+activation_bounds: 0.01
+min_spread_between_orders: 0.0005   # 0.05%
+min_order_amount: 0.05
+max_open_orders: 12
+grid_range_update_interval: 30

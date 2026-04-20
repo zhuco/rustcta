@@ -1,6 +1,6 @@
 [package]
 name = "rustcta"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 default-run = "rustcta"
 
@@ -40,6 +40,11 @@ crossbeam = "0.8"
 clickhouse = { version = "0.11", features = ["time"] }
 rust_decimal = { version = "1.33", features = ["serde", "maths"] }
 rust_decimal_macros = "1.33"
+sha3 = "0.10"
+secp256k1 = { version = "0.27", features = ["recovery"] }
+rmp-serde = "1.1"
+axum = { version = "0.7", features = ["json"] }
+tower-http = { version = "0.6", features = ["cors"] }
 
 [[bin]]
 name = "rustcta"

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::{Mutex, RwLock};
+use tokio::time::Duration;
 
 use super::{
     config::{BatchSettings, GridManagement, SpacingType, TradingConfig, TrendAdjustment},
@@ -204,8 +205,13 @@ impl MessageHandler for TradeHandler {
                         // 释放锁并立即执行网格重置
                         drop(state_guard);
 
-                        // 立即重置网格
-                        log::info!("🔄 {} 开始立即重置网格", self.config_id);
+                        // 吃单后等待 30 秒再重置网格，重置时重新获取最新价格
+                        log::info!("⏳ {} 吃单后等待 30 秒再重置网格", self.config_id);
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        log::info!(
+                            "🔄 {} 开始重置网格（吃单触发，使用最新行情）",
+                            self.config_id
+                        );
                         if let Err(e) = operations::reset_grid_for_config(
                             &self.config,
                             &self.state,
@@ -213,6 +219,7 @@ impl MessageHandler for TradeHandler {
                             &self.batch_settings,
                             &self.trend_adjustment,
                             &self.grid_management,
+                            None, // 强制重置时再获取最新价格
                         )
                         .await
                         {

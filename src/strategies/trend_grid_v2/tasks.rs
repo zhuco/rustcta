@@ -162,6 +162,7 @@ pub(super) fn spawn_grid_check_task(
                             &batch_settings,
                             &trend_adjustment,
                             &grid_management,
+                            None,
                         )
                         .await
                         {
@@ -290,28 +291,33 @@ pub(super) fn spawn_trend_monitoring_task(
                             let trend_strength = state_guard.trend_strength;
                             drop(state_guard);
 
-                            let adjustment_request = match trend_strength {
-                                TrendStrength::StrongBear => Some(TrendAdjustmentRequest {
-                                    amount: 100.0,
-                                    side: OrderSide::Sell,
-                                    order_type: OrderType::Market,
-                                }),
-                                TrendStrength::Bear => Some(TrendAdjustmentRequest {
-                                    amount: 50.0,
-                                    side: OrderSide::Sell,
-                                    order_type: OrderType::Market,
-                                }),
-                                TrendStrength::StrongBull => Some(TrendAdjustmentRequest {
-                                    amount: 50.0,
-                                    side: OrderSide::Buy,
-                                    order_type: OrderType::Market,
-                                }),
-                                TrendStrength::Bull => Some(TrendAdjustmentRequest {
-                                    amount: 20.0,
-                                    side: OrderSide::Buy,
-                                    order_type: OrderType::Market,
-                                }),
-                                _ => None,
+                            let adjustment_request = if trend_adjustment.enable_trend_market_orders
+                            {
+                                match trend_strength {
+                                    TrendStrength::StrongBear => Some(TrendAdjustmentRequest {
+                                        amount: 100.0,
+                                        side: OrderSide::Sell,
+                                        order_type: OrderType::Market,
+                                    }),
+                                    TrendStrength::Bear => Some(TrendAdjustmentRequest {
+                                        amount: 50.0,
+                                        side: OrderSide::Sell,
+                                        order_type: OrderType::Market,
+                                    }),
+                                    TrendStrength::StrongBull => Some(TrendAdjustmentRequest {
+                                        amount: 50.0,
+                                        side: OrderSide::Buy,
+                                        order_type: OrderType::Market,
+                                    }),
+                                    TrendStrength::Bull => Some(TrendAdjustmentRequest {
+                                        amount: 20.0,
+                                        side: OrderSide::Buy,
+                                        order_type: OrderType::Market,
+                                    }),
+                                    _ => None,
+                                }
+                            } else {
+                                None
                             };
 
                             if let Some(req) = adjustment_request {
@@ -359,6 +365,7 @@ pub(super) fn spawn_trend_monitoring_task(
                                 &batch_settings,
                                 &trend_adjustment,
                                 &grid_management,
+                                None,
                             )
                             .await
                             {
@@ -565,6 +572,7 @@ async fn run_config_thread(
         &batch_settings,
         &trend_adjustment,
         &grid_management,
+        None,
     )
     .await?;
     services::write_log(&config_id, "INFO", "初始网格订单提交成功");
@@ -690,12 +698,14 @@ async fn run_config_thread(
                 }
             }
 
+            let expected_orders = config.grid.orders_per_side * 2;
+
+            // 每分钟检查，如遇主动标记重置或挂单少于一半则重置
             let state_guard = state.lock().await;
             let active_orders_count = state_guard.active_orders.len();
             let need_reset = state_guard.need_grid_reset;
             drop(state_guard);
 
-            let expected_orders = config.grid.orders_per_side * 2;
             if need_reset || active_orders_count < (expected_orders as usize / 2) {
                 services::write_log(
                     &config_id,
@@ -742,12 +752,64 @@ async fn run_config_thread(
                     &batch_settings,
                     &trend_adjustment,
                     &grid_management,
+                    None,
                 )
                 .await
                 {
                     services::write_log(&config_id, "ERROR", &format!("重建网格失败: {:?}", e));
                 } else {
                     services::write_log(&config_id, "INFO", "网格重建成功");
+                }
+            }
+
+            // 每 3 分钟强校验挂单总数，若不一致则立即撤销重挂
+            if loop_count % 3 == 0 {
+                let state_guard = state.lock().await;
+                let active_orders_count = state_guard.active_orders.len();
+                drop(state_guard);
+
+                if active_orders_count != expected_orders as usize {
+                    services::write_log(
+                        &config_id,
+                        "WARN",
+                        &format!(
+                            "挂单数量不一致: 当前 {} 预期 {}，执行重置",
+                            active_orders_count, expected_orders
+                        ),
+                    );
+
+                    if let Some(account) = account_manager.get_account(&config.account.id) {
+                        let _ = account
+                            .exchange
+                            .cancel_all_orders(Some(&config.symbol), MarketType::Futures)
+                            .await;
+                    }
+
+                    let mut guard = state.lock().await;
+                    guard.active_orders.clear();
+                    guard.grid_orders.clear();
+                    guard.need_grid_reset = false;
+                    drop(guard);
+
+                    if let Err(e) = operations::calculate_and_submit_grid(
+                        &config,
+                        &state,
+                        &account_manager,
+                        &batch_settings,
+                        &trend_adjustment,
+                        &grid_management,
+                        None,
+                    )
+                    .await
+                    {
+                        services::write_log(
+                            &config_id,
+                            "ERROR",
+                            &format!("挂单数量校验重置失败: {:?}", e),
+                        );
+                    } else {
+                        services::write_log(&config_id, "INFO", "挂单数量校验后重置成功");
+                    }
                 }
             }
         }

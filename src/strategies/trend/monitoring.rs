@@ -3,6 +3,8 @@
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
 use std::sync::Arc;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 
 use crate::core::error::ExchangeError;
@@ -142,6 +144,10 @@ impl TrendMonitor {
 
         // 更新指标
         self.update_metrics_from_trade(&record).await;
+
+        if let Err(err) = self.write_trade_log(&record).await {
+            warn!("写入交易日志失败: {}", err);
+        }
     }
 
     /// 从交易更新指标
@@ -207,6 +213,35 @@ impl TrendMonitor {
                 metrics.max_drawdown = metrics.current_drawdown;
             }
         }
+    }
+
+    async fn write_trade_log(&self, trade: &TradeRecord) -> Result<(), std::io::Error> {
+        let dir = "logs/strategies";
+        tokio::fs::create_dir_all(dir).await.ok();
+        let date = trade.exit_time.format("%Y%m%d");
+        let path = format!("{}/trend_trades_{}.log", dir, date);
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await?;
+
+        let line = format!(
+            "{timestamp},{symbol},{side},{entry:.6},{exit:.6},{size:.4},{pnl:.4},{reason}\n",
+            timestamp = trade.exit_time.format("%Y-%m-%d %H:%M:%S"),
+            symbol = trade.symbol,
+            side = trade.side,
+            entry = trade.entry_price,
+            exit = trade.exit_price,
+            size = trade.size,
+            pnl = trade.pnl,
+            reason = trade.exit_reason
+        );
+
+        file.write_all(line.as_bytes()).await?;
+        file.flush().await?;
+        Ok(())
     }
 
     /// 更新指标

@@ -48,10 +48,7 @@ impl TradeCollector {
     }
 
     /// 记录交易数据。精简版本中直接返回 Ok，保留异步接口兼容策略逻辑
-    pub async fn record_trade(
-        &self,
-        _trade: TradeData,
-    ) -> crate::core::types::Result<()> {
+    pub async fn record_trade(&self, _trade: TradeData) -> crate::core::types::Result<()> {
         Ok(())
     }
 }

@@ -8,6 +8,7 @@ use crate::strategies::common::{
 };
 use crate::strategies::poisson_market_maker::domain::{MMStrategyState, PoissonMMConfig};
 use chrono::Utc;
+use std::collections::HashMap;
 
 impl PoissonMarketMaker {
     pub(crate) fn build_risk_limits(config: &PoissonMMConfig) -> StrategyRiskLimits {
@@ -28,18 +29,22 @@ impl PoissonMarketMaker {
         state: &MMStrategyState,
         current_price: f64,
     ) -> StrategySnapshot {
+        let net_inventory = state.long_inventory - state.short_inventory;
+        let gross_inventory = state.long_inventory.max(state.short_inventory);
         let mut snapshot = StrategySnapshot::new(self.config.name.clone());
-        snapshot.exposure.notional = current_price * state.inventory;
-        snapshot.exposure.net_inventory = state.inventory;
+        snapshot.exposure.notional = current_price * net_inventory;
+        snapshot.exposure.net_inventory = net_inventory;
+        snapshot.exposure.long_position = state.long_inventory;
+        snapshot.exposure.short_position = state.short_inventory;
         if self.config.trading.max_inventory > 0.0 {
             snapshot.exposure.inventory_ratio = Some(
-                (current_price * state.inventory.abs() / self.config.trading.max_inventory)
-                    .min(10.0),
+                (current_price * gross_inventory / self.config.trading.max_inventory).min(10.0),
             );
         }
 
         snapshot.performance.realized_pnl = state.total_pnl;
-        snapshot.performance.unrealized_pnl = state.inventory * (current_price - state.avg_price);
+        snapshot.performance.unrealized_pnl =
+            net_inventory * (current_price - state.avg_price);
         snapshot.performance.daily_pnl = Some(state.daily_pnl);
         snapshot.performance.timestamp = Utc::now();
         snapshot.risk_limits = Some(self.risk_limits.clone());
@@ -100,9 +105,11 @@ impl PoissonMarketMaker {
         self.apply_risk_decision(decision).await?;
 
         let state = self.state.lock().await;
+        let net_inventory = state.long_inventory - state.short_inventory;
+        let gross_inventory = state.long_inventory.max(state.short_inventory);
 
         // 计算未实现盈亏
-        let unrealized_pnl = state.inventory * (current_price - state.avg_price);
+        let unrealized_pnl = net_inventory * (current_price - state.avg_price);
 
         // 检查止损
         if unrealized_pnl < -self.config.risk.max_unrealized_loss {
@@ -126,7 +133,7 @@ impl PoissonMarketMaker {
                     symbol,
                     unrealized_pnl,
                     self.config.risk.max_unrealized_loss,
-                    state.inventory,
+                    net_inventory,
                     Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
                 );
                 crate::utils::webhook::notify_critical("PoissonMM", &message).await;
@@ -139,7 +146,7 @@ impl PoissonMarketMaker {
 
         // 检查库存偏斜
         // max_inventory是USDT价值，直接计算当前库存的USDT价值
-        let current_inventory_value = state.inventory.abs() * current_price;
+        let current_inventory_value = gross_inventory * current_price;
         let inventory_ratio = current_inventory_value / self.config.trading.max_inventory;
         if inventory_ratio > self.config.risk.inventory_skew_limit {
             log::error!(
@@ -165,7 +172,7 @@ impl PoissonMarketMaker {
                      🔄 将平仓50%库存\n\
                      ⏰ 时间: {}",
                     symbol,
-                    state.inventory,
+                    net_inventory,
                     current_inventory_value,
                     inventory_ratio * 100.0,
                     self.config.risk.inventory_skew_limit * 100.0,
@@ -179,7 +186,7 @@ impl PoissonMarketMaker {
             self.cancel_all_orders().await?;
 
             // 使用市价单平仓50%库存
-            let position_to_close_raw = state.inventory * 0.5;
+            let position_to_close_raw = net_inventory * 0.5;
             // 应用精度处理，确保符合交易所要求
             let position_to_close = self.round_quantity(position_to_close_raw);
 
@@ -207,7 +214,10 @@ impl PoissonMarketMaker {
                         price: None,
                         client_order_id: Some(format!("POISSON_RISK_{}", Utc::now().timestamp())),
                         market_type: MarketType::Futures,
-                        params: None,
+                        params: Some(HashMap::from([
+                            ("reduceOnly".to_string(), "true".to_string()),
+                            ("positionSide".to_string(), "LONG".to_string()),
+                        ])),
                         time_in_force: None,
                         reduce_only: Some(true),
                         post_only: None,
@@ -232,7 +242,10 @@ impl PoissonMarketMaker {
                         price: None,
                         client_order_id: Some(format!("POISSON_RISK_{}", Utc::now().timestamp())),
                         market_type: MarketType::Futures,
-                        params: None,
+                        params: Some(HashMap::from([
+                            ("reduceOnly".to_string(), "true".to_string()),
+                            ("positionSide".to_string(), "SHORT".to_string()),
+                        ])),
                         time_in_force: None,
                         reduce_only: Some(true),
                         post_only: None,

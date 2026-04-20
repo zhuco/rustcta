@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// 日志配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ impl Default for LogConfig {
         Self {
             root_dir: "logs".to_string(),
             default_level: "INFO".to_string(),
-            max_file_size_mb: 10,
+            max_file_size_mb: 5,
             retention_days: 30,
             console_output: true,
             format: "[{timestamp}] [{level}] [{module}] {message}".to_string(),
@@ -34,11 +34,16 @@ impl Default for LogConfig {
 }
 
 /// 策略日志器（来自原logger.rs）
+struct StrategyLoggerState {
+    file: fs::File,
+    current_size: u64,
+    current_date: String,
+}
+
 pub struct StrategyLogger {
     name: String,
-    file: Mutex<Option<fs::File>>,
+    state: Mutex<StrategyLoggerState>,
     max_size: u64,
-    current_size: Mutex<u64>,
 }
 
 impl StrategyLogger {
@@ -49,22 +54,17 @@ impl StrategyLogger {
             fs::create_dir_all(log_dir).expect("创建日志目录失败");
         }
 
-        let timestamp = Local::now().format("%Y%m%d");
-        let log_file = format!("{}/{}_{}.log", log_dir, strategy_name, timestamp);
-
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_file)
-            .expect("打开日志文件失败");
-
-        let current_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-
+        let current_date = Local::now().format("%Y%m%d").to_string();
+        let (file, current_size) =
+            Self::open_log_file(strategy_name, &current_date).expect("打开日志文件失败");
         Self {
             name: strategy_name.to_string(),
-            file: Mutex::new(Some(file)),
+            state: Mutex::new(StrategyLoggerState {
+                file,
+                current_size,
+                current_date,
+            }),
             max_size: max_size_mb * 1024 * 1024,
-            current_size: Mutex::new(current_size),
         }
     }
 
@@ -73,34 +73,64 @@ impl StrategyLogger {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let formatted = format!("[{}] [{}] [{}] {}\n", timestamp, self.name, level, message);
 
-        let mut file_guard = self.file.lock().expect("Lock poisoned");
-        let mut size_guard = self.current_size.lock().expect("Lock poisoned");
+        let now = Local::now();
+        let today = now.format("%Y%m%d").to_string();
 
-        if *size_guard + formatted.len() as u64 > self.max_size {
-            *file_guard = None;
+        let mut state = self.state.lock().expect("Lock poisoned");
 
-            let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-            let new_log_file = format!(
-                "logs/strategies/{}_{}_{}.log",
-                self.name, timestamp, "rotated"
-            );
-
-            if let Ok(new_file) = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&new_log_file)
-            {
-                *file_guard = Some(new_file);
-                *size_guard = 0;
+        if state.current_date != today {
+            if let Ok((file, size)) = Self::open_log_file(&self.name, &today) {
+                state.file = file;
+                state.current_size = size;
+                state.current_date = today.clone();
             }
         }
 
-        if let Some(ref mut file) = *file_guard {
-            if file.write_all(formatted.as_bytes()).is_ok() {
-                *size_guard += formatted.len() as u64;
-                let _ = file.flush();
+        if state.current_size + formatted.len() as u64 > self.max_size {
+            let base_path = Self::log_path(&self.name, &state.current_date);
+            let rotated_path = base_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!(
+                    "{}_{}_rotated.log",
+                    self.name,
+                    now.format("%Y%m%d_%H%M%S")
+                ));
+
+            let _ = state.file.flush();
+            let _ = state.file.sync_all();
+
+            if fs::rename(&base_path, &rotated_path).is_ok() {
+                if let Ok((file, size)) = Self::open_log_file(&self.name, &state.current_date) {
+                    state.file = file;
+                    state.current_size = size;
+                } else {
+                    state.current_size = 0;
+                }
+            } else if let Ok((file, size)) = Self::open_log_file(&self.name, &state.current_date) {
+                state.file = file;
+                state.current_size = size;
             }
         }
+
+        if state.file.write_all(formatted.as_bytes()).is_ok() {
+            state.current_size += formatted.len() as u64;
+            let _ = state.file.flush();
+        }
+    }
+
+    fn open_log_file(strategy_name: &str, date: &str) -> Result<(fs::File, u64), std::io::Error> {
+        let path = Self::log_path(strategy_name, date);
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+        Ok((file, size))
+    }
+
+    fn log_path(strategy_name: &str, date: &str) -> PathBuf {
+        PathBuf::from(format!("logs/strategies/{}_{}.log", strategy_name, date))
     }
 }
 
@@ -441,19 +471,20 @@ pub fn get_strategy_log_path(strategy_name: &str) -> String {
 }
 
 /// 全局日志实例
-static mut GLOBAL_LOGGER: Option<Arc<UnifiedLogger>> = None;
+static GLOBAL_LOGGER: OnceLock<Arc<UnifiedLogger>> = OnceLock::new();
 
 /// 初始化全局日志器
 pub fn init_global_logger(config: LogConfig) -> Result<(), Box<dyn std::error::Error>> {
-    unsafe {
-        GLOBAL_LOGGER = Some(Arc::new(UnifiedLogger::new(config)?));
+    let logger = Arc::new(UnifiedLogger::new(config)?);
+    if GLOBAL_LOGGER.set(logger).is_err() {
+        log::warn!("全局日志器已初始化，忽略重复初始化请求");
     }
     Ok(())
 }
 
 /// 获取全局日志器
 pub fn get_logger() -> Option<Arc<UnifiedLogger>> {
-    unsafe { GLOBAL_LOGGER.as_ref().map(|l| l.clone()) }
+    GLOBAL_LOGGER.get().cloned()
 }
 
 /// 便捷的日志宏

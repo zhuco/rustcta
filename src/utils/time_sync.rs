@@ -4,7 +4,7 @@
 
 use crate::core::{error::ExchangeError, exchange::Exchange};
 use chrono::{DateTime, Duration, Utc};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
 /// 时间同步管理器
@@ -101,22 +101,18 @@ impl TimeSyncManager {
 }
 
 /// 全局时间同步管理器
-static mut GLOBAL_TIME_SYNC: Option<Arc<TimeSyncManager>> = None;
-static INIT: std::sync::Once = std::sync::Once::new();
+static GLOBAL_TIME_SYNC: OnceLock<Arc<TimeSyncManager>> = OnceLock::new();
 
 /// 初始化全局时间同步
 pub fn init_global_time_sync() -> Arc<TimeSyncManager> {
-    unsafe {
-        INIT.call_once(|| {
-            GLOBAL_TIME_SYNC = Some(Arc::new(TimeSyncManager::new(300))); // 5分钟同步一次
-        });
-        GLOBAL_TIME_SYNC.as_ref().unwrap().clone()
-    }
+    GLOBAL_TIME_SYNC
+        .get_or_init(|| Arc::new(TimeSyncManager::new(300)))
+        .clone()
 }
 
 /// 获取全局时间同步管理器
 pub fn get_time_sync() -> Option<Arc<TimeSyncManager>> {
-    unsafe { GLOBAL_TIME_SYNC.as_ref().map(|s| s.clone()) }
+    GLOBAL_TIME_SYNC.get().cloned()
 }
 
 /// 获取同步后的时间戳

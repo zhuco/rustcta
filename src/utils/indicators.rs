@@ -1124,10 +1124,10 @@ impl TrendStrength {
     /// 判断趋势类型
     pub fn classify(strength: f64) -> TrendType {
         match strength {
-            s if s > 50.0 => TrendType::StrongUp,
-            s if s > 20.0 => TrendType::Up,
-            s if s > -20.0 => TrendType::Sideways,
-            s if s > -50.0 => TrendType::Down,
+            s if s > 10.0 => TrendType::StrongUp,
+            s if s > 1.0 => TrendType::Up,
+            s if s > -1.0 => TrendType::Sideways,
+            s if s > -10.0 => TrendType::Down,
             _ => TrendType::StrongDown,
         }
     }
@@ -1229,7 +1229,7 @@ mod tests {
     #[test]
     fn test_macd() {
         let prices = vec![1.0; 30]; // 需要至少26个价格
-        prices
+        let _ = prices
             .iter()
             .enumerate()
             .map(|(i, _)| i as f64 + 1.0)
@@ -1375,7 +1375,7 @@ mod tests {
     #[test]
     fn test_streaming_macd() {
         let mut macd = MACD::new();
-        let prices: Vec<f64> = (1..=30).map(|i| i as f64).collect();
+        let prices: Vec<f64> = (1..=50).map(|i| i as f64).collect();
 
         let mut last_result = None;
         for price in prices {

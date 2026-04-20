@@ -550,6 +550,7 @@ pub fn aggregate_orderbook(orderbook: &OrderBook, tick_size: f64) -> OrderBook {
         bids,
         asks,
         timestamp: orderbook.timestamp,
+        info: serde_json::Value::Null,
     }
 }
 

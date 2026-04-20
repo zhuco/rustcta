@@ -22,6 +22,7 @@ pub(super) async fn calculate_and_submit_grid(
     batch_settings: &BatchSettings,
     trend_adjustment: &TrendAdjustment,
     _grid_management: &GridManagement,
+    price_hint: Option<f64>,
 ) -> Result<()> {
     let account = account_manager
         .get_account(&config.account.id)
@@ -31,34 +32,42 @@ pub(super) async fn calculate_and_submit_grid(
         let mut guard = state.lock().await;
         guard.grid_orders.clear();
         (
-            guard.current_price,
+            price_hint.unwrap_or(guard.current_price),
             guard.price_precision,
             guard.amount_precision,
             guard.trend_strength,
         )
     };
 
-    match account
-        .exchange
-        .get_ticker(&config.symbol, MarketType::Futures)
-        .await
-    {
-        Ok(ticker) => {
-            current_price = ticker.last;
-            log::info!(
-                "🔄 {} 重置网格前获取最新价格: {:.4}",
-                config.config_id,
-                current_price
-            );
+    if price_hint.is_none() {
+        match account
+            .exchange
+            .get_ticker(&config.symbol, MarketType::Futures)
+            .await
+        {
+            Ok(ticker) => {
+                current_price = ticker.last;
+                log::info!(
+                    "🔄 {} 重置网格前获取最新价格: {:.4}",
+                    config.config_id,
+                    current_price
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "⚠️ {} 无法获取最新价格，使用缓存价格: {:.4}, 错误: {}",
+                    config.config_id,
+                    current_price,
+                    e
+                );
+            }
         }
-        Err(e) => {
-            log::warn!(
-                "⚠️ {} 无法获取最新价格，使用缓存价格: {:.4}, 错误: {}",
-                config.config_id,
-                current_price,
-                e
-            );
-        }
+    } else {
+        log::info!(
+            "🔄 {} 使用成交价作为最新价格: {:.4}",
+            config.config_id,
+            current_price
+        );
     }
 
     {
@@ -210,6 +219,7 @@ pub(super) async fn reset_grid_for_config(
     batch_settings: &BatchSettings,
     trend_adjustment: &TrendAdjustment,
     grid_management: &GridManagement,
+    price_hint: Option<f64>,
 ) -> Result<()> {
     log::info!("🔄 {} 开始重置网格", config.config_id);
 
@@ -239,6 +249,7 @@ pub(super) async fn reset_grid_for_config(
         batch_settings,
         trend_adjustment,
         grid_management,
+        price_hint,
     )
     .await?;
 

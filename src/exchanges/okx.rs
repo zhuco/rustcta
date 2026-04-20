@@ -453,6 +453,7 @@ impl Exchange for OkxExchange {
                     0,
                 )
                 .unwrap_or_else(|| Utc::now()),
+                info: serde_json::Value::Null,
             })
         } else {
             Err(ExchangeError::SymbolError(format!(
@@ -1988,6 +1989,7 @@ impl OkxMessageHandler {
             asks,
             timestamp: DateTime::from_timestamp(orderbook.ts.parse::<i64>().unwrap_or(0) / 1000, 0)
                 .unwrap_or_else(|| Utc::now()),
+            info: serde_json::Value::Null,
         }))
     }
 

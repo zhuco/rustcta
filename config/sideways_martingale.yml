@@ -1,0 +1,61 @@
+strategy:
+  name: "sideways_martingale_cta"
+  version: "1.0.0"
+  enabled: true
+  log_level: "INFO"
+  description: "Industrial-grade sideways martingale CTA for crypto futures"
+
+account:
+  account_id: "binance_hcr"
+  market_type: "Futures"
+  allow_short: true
+  dual_position_mode: true
+  default_leverage: 2
+
+data:
+  poll_interval_secs: 30
+  decision_interval: "5m"
+  kline_limit: 120
+
+symbols:
+  - symbol: "BTC/USDC"
+    enabled: true
+    base_notional: 15
+    leverage: 2
+    allow_short: true
+  - symbol: "ETH/USDC"
+    enabled: true
+    base_notional: 15
+    leverage: 2
+    allow_short: true
+
+filters:
+  adx_period: 14
+  adx_threshold: 20
+  atr_period: 14
+  atr_ratio_max: 0.025
+  range_lookback: 20
+  range_amplitude_max: 0.06
+  single_bar_pause_pct: 0.03
+
+entry:
+  ema_period: 20
+  rsi_period: 14
+  long_rsi_max: 35
+  short_rsi_min: 65
+
+martingale:
+  layer_multipliers: [1.0, 1.5, 2.0, 2.5]
+  adverse_move_pct: 0.012
+
+take_profit:
+  target_pct: 0.006
+
+risk:
+  max_floating_loss_pct: 0.06
+  max_consecutive_stopouts: 2
+  cooldown_hours: 24
+
+execution:
+  use_market_orders: true
+  entry_cooldown_secs: 60

@@ -2,6 +2,7 @@
 
 use crate::core::error::ExchangeError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// 趋势策略主配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -11,6 +12,12 @@ pub struct TrendConfig {
 
     /// 账户ID
     pub account_id: String,
+
+    /// 是否强制启用双向持仓（Hedge Mode）
+    /// - true: 直接按双向模式下单（携带 positionSide）
+    /// - false: 由交易所自动检测（Binance）决定
+    #[serde(default)]
+    pub dual_position_mode: bool,
 
     /// 监控的交易对列表
     pub symbols: Vec<String>,
@@ -53,6 +60,74 @@ pub struct TrendConfig {
 
     /// 止损配置
     pub stop_config: StopConfig,
+
+    /// 评分配置
+    #[serde(default)]
+    pub scoring: ScoringConfig,
+
+    /// 行情状态配置
+    #[serde(default)]
+    pub regime: RegimeConfig,
+
+    /// 日内时间风险曲线
+    #[serde(default)]
+    pub time_curve: TimeCurveConfig,
+
+    /// 风险预算配置
+    #[serde(default)]
+    pub risk_budget: RiskBudgetConfig,
+
+    /// 交易对库存上限
+    #[serde(default)]
+    pub symbol_inventory_limits: HashMap<String, f64>,
+
+    /// 交易对按名义价值（USDT）限制库存
+    #[serde(default)]
+    pub symbol_inventory_value_limits: HashMap<String, f64>,
+
+    /// 执行配置
+    #[serde(default)]
+    pub execution: ExecutionConfig,
+
+    /// 监控配置
+    #[serde(default)]
+    pub monitoring: MonitoringConfig,
+
+    /// 入场杠杆倍数
+    #[serde(default = "default_entry_leverage")]
+    pub entry_leverage: f64,
+
+    /// 默认入场资金分配
+    #[serde(default)]
+    pub entry_allocation: EntryAllocation,
+
+    /// 行情状态自适应分配
+    #[serde(default)]
+    pub allocation_regimes: AllocationRegimesConfig,
+
+    /// 行情数据配置
+    #[serde(default)]
+    pub market_data: MarketDataConfig,
+
+    /// 每次开仓的固定名义（USDT），优先级高于杠杆计算
+    #[serde(default)]
+    pub entry_base_notional: Option<f64>,
+
+    /// Maker 订单统一的价格改善幅度（bps）
+    #[serde(default = "default_entry_price_improve_bps")]
+    pub entry_price_improve_bps: f64,
+
+    /// 轮询间隔（秒）
+    #[serde(default = "default_poll_interval_secs")]
+    pub poll_interval_secs: u64,
+
+    /// 信号冷却时间（秒）
+    #[serde(default = "default_signal_cooldown_secs")]
+    pub signal_cooldown_secs: u64,
+
+    /// 余额/持仓推送配置
+    #[serde(default)]
+    pub status_reporter: StatusReportConfig,
 }
 
 /// 风控配置
@@ -221,6 +296,18 @@ pub struct StopConfig {
 
     /// 部分止盈配置
     pub partial_targets: Vec<PartialTarget>,
+
+    /// PnL驱动的移动止损
+    #[serde(default)]
+    pub pnl_trailing: PnlTrailingConfig,
+
+    /// 浮盈锁定阈值（例如0.5%）
+    #[serde(default = "default_lock_profit_pct")]
+    pub lock_profit_pct: f64,
+
+    /// 锁盈后的缓冲比例
+    #[serde(default = "default_lock_buffer_pct")]
+    pub lock_buffer_pct: f64,
 }
 
 /// 止损类型
@@ -240,6 +327,33 @@ pub struct PartialTarget {
 
     /// 平仓比例
     pub close_ratio: f64,
+}
+
+/// PnL驱动的止损上移配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PnlTrailingConfig {
+    #[serde(default)]
+    pub enable: bool,
+    #[serde(default = "default_one_f64")]
+    pub atr_multiple: f64,
+    #[serde(default = "default_trailing_levels")]
+    pub lock_levels: Vec<PnlLockLevel>,
+}
+
+impl Default for PnlTrailingConfig {
+    fn default() -> Self {
+        Self {
+            enable: true,
+            atr_multiple: default_one_f64(),
+            lock_levels: default_trailing_levels(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PnlLockLevel {
+    pub profit_atr: f64,
+    pub stop_offset_atr: f64,
 }
 
 impl TrendConfig {
@@ -263,7 +377,47 @@ impl TrendConfig {
             return Err(ExchangeError::Other("总仓位不能超过50%".to_string()));
         }
 
-        // 其他验证...
+        if self.poll_interval_secs == 0 {
+            return Err(ExchangeError::Other("轮询间隔必须大于0秒".to_string()));
+        }
+
+        if self.signal_cooldown_secs == 0 {
+            return Err(ExchangeError::Other("信号冷却时间必须大于0秒".to_string()));
+        }
+
+        if self.execution.max_retries == 0 {
+            return Err(ExchangeError::Other(
+                "执行配置中的最大重试次数必须大于0".to_string(),
+            ));
+        }
+
+        if self.market_data.cache_depth == 0
+            || self.market_data.bootstrap_bars == 0
+            || self.market_data.min_one_minute_bars == 0
+            || self.market_data.min_one_hour_bars == 0
+        {
+            return Err(ExchangeError::Other("行情缓存配置必须为正数".to_string()));
+        }
+
+        if self.entry_leverage <= 0.0 || self.entry_leverage > self.risk_config.max_leverage {
+            return Err(ExchangeError::Other(
+                "入场杠杆必须在(0, max_leverage]范围内".to_string(),
+            ));
+        }
+
+        if let Some(notional) = self.entry_base_notional {
+            if notional <= 0.0 {
+                return Err(ExchangeError::Other(
+                    "entry_base_notional 必须大于0".to_string(),
+                ));
+            }
+        }
+
+        if self.entry_price_improve_bps < 0.0 {
+            return Err(ExchangeError::Other(
+                "entry_price_improve_bps 不能为负".to_string(),
+            ));
+        }
 
         Ok(())
     }
@@ -287,6 +441,7 @@ impl Default for TrendConfig {
         Self {
             name: "Trend Following Strategy".to_string(),
             account_id: "binance_main".to_string(),
+            dual_position_mode: false,
             symbols: vec![
                 "BTC/USDC".to_string(),
                 "ETH/USDC".to_string(),
@@ -318,7 +473,7 @@ impl Default for TrendConfig {
                 max_risk_per_trade: 0.01, // 1%
                 max_daily_loss: 0.03,     // 3%
                 max_drawdown: 0.15,       // 15%
-                max_consecutive_losses: 3,
+                max_consecutive_losses: 5,
                 max_total_exposure: 0.5,  // 50%
                 max_single_exposure: 0.1, // 10%
                 max_correlated_exposure: 0.2,
@@ -328,9 +483,9 @@ impl Default for TrendConfig {
             },
 
             indicator_config: IndicatorConfig {
-                primary_timeframe: "4h".to_string(),
-                secondary_timeframe: "1h".to_string(),
-                trigger_timeframe: "15m".to_string(),
+                primary_timeframe: "15m".to_string(),
+                secondary_timeframe: "5m".to_string(),
+                trigger_timeframe: "1m".to_string(),
                 fast_ema: 20,
                 slow_ema: 50,
                 atr_period: 14,
@@ -409,7 +564,518 @@ impl Default for TrendConfig {
                         close_ratio: 0.2,
                     },
                 ],
+                pnl_trailing: PnlTrailingConfig::default(),
+                lock_profit_pct: default_lock_profit_pct(),
+                lock_buffer_pct: default_lock_buffer_pct(),
             },
+
+            scoring: ScoringConfig::default(),
+            regime: RegimeConfig::default(),
+            time_curve: TimeCurveConfig::default(),
+            risk_budget: RiskBudgetConfig::default(),
+            execution: ExecutionConfig::default(),
+            monitoring: MonitoringConfig::default(),
+            entry_leverage: default_entry_leverage(),
+            entry_allocation: EntryAllocation::default(),
+            allocation_regimes: AllocationRegimesConfig::default(),
+            market_data: MarketDataConfig::default(),
+            entry_base_notional: None,
+            entry_price_improve_bps: default_entry_price_improve_bps(),
+            poll_interval_secs: default_poll_interval_secs(),
+            signal_cooldown_secs: default_signal_cooldown_secs(),
+            status_reporter: StatusReportConfig::default(),
+            symbol_inventory_limits: HashMap::new(),
+            symbol_inventory_value_limits: HashMap::new(),
+        }
+    }
+}
+
+fn default_poll_interval_secs() -> u64 {
+    5
+}
+
+fn default_signal_cooldown_secs() -> u64 {
+    60
+}
+
+fn default_entry_leverage() -> f64 {
+    1.0
+}
+
+fn default_entry_price_improve_bps() -> f64 {
+    15.0
+}
+
+fn default_lock_profit_pct() -> f64 {
+    0.005
+}
+
+fn default_lock_buffer_pct() -> f64 {
+    0.001
+}
+
+fn default_cache_depth() -> usize {
+    720
+}
+
+fn default_bootstrap_bars() -> usize {
+    600
+}
+
+fn default_max_data_lag_ms() -> u64 {
+    200
+}
+
+fn default_min_1m_bars() -> usize {
+    240
+}
+
+fn default_min_5m_bars() -> usize {
+    120
+}
+
+fn default_min_15m_bars() -> usize {
+    64
+}
+
+fn default_min_1h_bars() -> usize {
+    64
+}
+
+fn default_one_f64() -> f64 {
+    1.0
+}
+
+fn default_trailing_levels() -> Vec<PnlLockLevel> {
+    vec![
+        PnlLockLevel {
+            profit_atr: 1.5,
+            stop_offset_atr: 0.5,
+        },
+        PnlLockLevel {
+            profit_atr: 2.5,
+            stop_offset_atr: 0.2,
+        },
+    ]
+}
+
+/// 评分配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ScoringConfig {
+    #[serde(default = "ScoringConfig::default_primary_weight")]
+    pub primary_weight: f64,
+    #[serde(default = "ScoringConfig::default_secondary_weight")]
+    pub secondary_weight: f64,
+    #[serde(default = "ScoringConfig::default_trigger_weight")]
+    pub trigger_weight: f64,
+    #[serde(default = "ScoringConfig::default_strong_threshold")]
+    pub strong_threshold: f64,
+    #[serde(default = "ScoringConfig::default_trade_threshold")]
+    pub trade_threshold: f64,
+    #[serde(default)]
+    pub degrade_on_poor_data: bool,
+}
+
+impl Default for ScoringConfig {
+    fn default() -> Self {
+        Self {
+            primary_weight: Self::default_primary_weight(),
+            secondary_weight: Self::default_secondary_weight(),
+            trigger_weight: Self::default_trigger_weight(),
+            strong_threshold: Self::default_strong_threshold(),
+            trade_threshold: Self::default_trade_threshold(),
+            degrade_on_poor_data: true,
+        }
+    }
+}
+
+impl ScoringConfig {
+    fn default_primary_weight() -> f64 {
+        0.4
+    }
+    fn default_secondary_weight() -> f64 {
+        0.35
+    }
+    fn default_trigger_weight() -> f64 {
+        0.25
+    }
+    fn default_strong_threshold() -> f64 {
+        70.0
+    }
+    fn default_trade_threshold() -> f64 {
+        55.0
+    }
+}
+
+/// 行情状态配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RegimeConfig {
+    #[serde(default = "RegimeConfig::default_trending_threshold")]
+    pub trending_threshold: f64,
+    #[serde(default = "RegimeConfig::default_ranging_threshold")]
+    pub ranging_threshold: f64,
+    #[serde(default = "RegimeConfig::default_volatility_threshold")]
+    pub volatility_threshold: f64,
+    #[serde(default = "RegimeConfig::default_extreme_threshold")]
+    pub extreme_threshold: f64,
+}
+
+impl Default for RegimeConfig {
+    fn default() -> Self {
+        Self {
+            trending_threshold: Self::default_trending_threshold(),
+            ranging_threshold: Self::default_ranging_threshold(),
+            volatility_threshold: Self::default_volatility_threshold(),
+            extreme_threshold: Self::default_extreme_threshold(),
+        }
+    }
+}
+
+impl RegimeConfig {
+    fn default_trending_threshold() -> f64 {
+        35.0
+    }
+    fn default_ranging_threshold() -> f64 {
+        15.0
+    }
+    fn default_volatility_threshold() -> f64 {
+        0.035
+    }
+    fn default_extreme_threshold() -> f64 {
+        0.08
+    }
+}
+
+/// 日内时间曲线配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TimeCurveConfig {
+    #[serde(default = "TimeCurveConfig::default_segments")]
+    pub segments: Vec<TimeCurveSegment>,
+    #[serde(default = "TimeCurveConfig::default_weight")]
+    pub default_weight: f64,
+}
+
+impl Default for TimeCurveConfig {
+    fn default() -> Self {
+        Self {
+            segments: Self::default_segments(),
+            default_weight: Self::default_weight(),
+        }
+    }
+}
+
+impl TimeCurveConfig {
+    fn default_weight() -> f64 {
+        1.0
+    }
+
+    fn default_segments() -> Vec<TimeCurveSegment> {
+        vec![
+            TimeCurveSegment {
+                start_hour: 0,
+                end_hour: 8,
+                weight: 0.8,
+            },
+            TimeCurveSegment {
+                start_hour: 8,
+                end_hour: 16,
+                weight: 1.0,
+            },
+            TimeCurveSegment {
+                start_hour: 16,
+                end_hour: 24,
+                weight: 0.9,
+            },
+        ]
+    }
+}
+
+/// 时间曲线片段
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TimeCurveSegment {
+    pub start_hour: u8,
+    pub end_hour: u8,
+    pub weight: f64,
+}
+
+/// 风险预算配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RiskBudgetConfig {
+    #[serde(default = "RiskBudgetConfig::default_portfolio_var")]
+    pub max_portfolio_var: f64,
+    #[serde(default = "RiskBudgetConfig::default_symbol_var")]
+    pub max_symbol_var: f64,
+    #[serde(default = "RiskBudgetConfig::default_drawdown")]
+    pub max_drawdown_pct: f64,
+    #[serde(default = "RiskBudgetConfig::default_panic_exit")]
+    pub panic_exit_drawdown: f64,
+    #[serde(default = "RiskBudgetConfig::default_consecutive_losses")]
+    pub pause_after_consecutive_losses: usize,
+}
+
+impl Default for RiskBudgetConfig {
+    fn default() -> Self {
+        Self {
+            max_portfolio_var: Self::default_portfolio_var(),
+            max_symbol_var: Self::default_symbol_var(),
+            max_drawdown_pct: Self::default_drawdown(),
+            panic_exit_drawdown: Self::default_panic_exit(),
+            pause_after_consecutive_losses: Self::default_consecutive_losses(),
+        }
+    }
+}
+
+impl RiskBudgetConfig {
+    fn default_portfolio_var() -> f64 {
+        0.04
+    }
+    fn default_symbol_var() -> f64 {
+        0.02
+    }
+    fn default_drawdown() -> f64 {
+        0.12
+    }
+    fn default_panic_exit() -> f64 {
+        0.2
+    }
+    fn default_consecutive_losses() -> usize {
+        5
+    }
+}
+
+/// 执行配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ExecutionConfig {
+    #[serde(default = "ExecutionConfig::default_prefer_maker")]
+    pub prefer_maker: bool,
+    #[serde(default = "ExecutionConfig::default_allow_taker_fallback")]
+    pub allow_taker_fallback: bool,
+    #[serde(default = "ExecutionConfig::default_maker_offset_bps")]
+    pub maker_offset_bps: f64,
+    #[serde(default = "ExecutionConfig::default_taker_slippage_bps")]
+    pub taker_slippage_bps: f64,
+    #[serde(default = "ExecutionConfig::default_max_retries")]
+    pub max_retries: u32,
+    #[serde(default = "ExecutionConfig::default_retry_backoff_ms")]
+    pub retry_backoff_ms: u64,
+    #[serde(default = "ExecutionConfig::default_order_timeout_secs")]
+    pub order_timeout_secs: u64,
+    #[serde(default)]
+    pub iceberg_enabled: bool,
+    #[serde(default = "ExecutionConfig::default_iceberg_ratio")]
+    pub iceberg_visible_ratio: f64,
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            prefer_maker: Self::default_prefer_maker(),
+            allow_taker_fallback: Self::default_allow_taker_fallback(),
+            maker_offset_bps: Self::default_maker_offset_bps(),
+            taker_slippage_bps: Self::default_taker_slippage_bps(),
+            max_retries: Self::default_max_retries(),
+            retry_backoff_ms: Self::default_retry_backoff_ms(),
+            order_timeout_secs: Self::default_order_timeout_secs(),
+            iceberg_enabled: false,
+            iceberg_visible_ratio: Self::default_iceberg_ratio(),
+        }
+    }
+}
+
+impl ExecutionConfig {
+    fn default_prefer_maker() -> bool {
+        true
+    }
+    fn default_allow_taker_fallback() -> bool {
+        true
+    }
+    fn default_maker_offset_bps() -> f64 {
+        2.0
+    }
+    fn default_taker_slippage_bps() -> f64 {
+        5.0
+    }
+    fn default_max_retries() -> u32 {
+        3
+    }
+    fn default_retry_backoff_ms() -> u64 {
+        250
+    }
+    fn default_order_timeout_secs() -> u64 {
+        10
+    }
+    fn default_iceberg_ratio() -> f64 {
+        0.2
+    }
+}
+
+/// 监控配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MonitoringConfig {
+    #[serde(default = "MonitoringConfig::default_health_threshold")]
+    pub health_threshold: f64,
+    #[serde(default = "MonitoringConfig::default_warning_slippage_bps")]
+    pub warning_slippage_bps: f64,
+    #[serde(default = "MonitoringConfig::default_critical_slippage_bps")]
+    pub critical_slippage_bps: f64,
+    #[serde(default)]
+    pub enable_webhook: bool,
+    #[serde(default)]
+    pub rotate_daily_logs: bool,
+}
+
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        Self {
+            health_threshold: Self::default_health_threshold(),
+            warning_slippage_bps: Self::default_warning_slippage_bps(),
+            critical_slippage_bps: Self::default_critical_slippage_bps(),
+            enable_webhook: false,
+            rotate_daily_logs: true,
+        }
+    }
+}
+
+impl MonitoringConfig {
+    fn default_health_threshold() -> f64 {
+        65.0
+    }
+    fn default_warning_slippage_bps() -> f64 {
+        10.0
+    }
+    fn default_critical_slippage_bps() -> f64 {
+        25.0
+    }
+}
+
+/// 行情数据配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MarketDataConfig {
+    #[serde(default = "default_cache_depth")]
+    pub cache_depth: usize,
+    #[serde(default = "default_bootstrap_bars")]
+    pub bootstrap_bars: usize,
+    #[serde(default = "default_max_data_lag_ms")]
+    pub max_data_lag_ms: u64,
+    #[serde(default = "default_min_1m_bars")]
+    pub min_one_minute_bars: usize,
+    #[serde(default = "default_min_5m_bars")]
+    pub min_five_minute_bars: usize,
+    #[serde(default = "default_min_15m_bars")]
+    pub min_fifteen_minute_bars: usize,
+    #[serde(default = "default_min_1h_bars")]
+    pub min_one_hour_bars: usize,
+}
+
+/// 状态推送配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StatusReportConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub webhook_url: String,
+    #[serde(default = "default_status_report_interval")]
+    pub interval_secs: u64,
+}
+
+impl Default for StatusReportConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            webhook_url: String::new(),
+            interval_secs: default_status_report_interval(),
+        }
+    }
+}
+
+const fn default_status_report_interval() -> u64 {
+    300
+}
+
+impl Default for MarketDataConfig {
+    fn default() -> Self {
+        Self {
+            cache_depth: default_cache_depth(),
+            bootstrap_bars: default_bootstrap_bars(),
+            max_data_lag_ms: default_max_data_lag_ms(),
+            min_one_minute_bars: default_min_1m_bars(),
+            min_five_minute_bars: default_min_5m_bars(),
+            min_fifteen_minute_bars: default_min_15m_bars(),
+            min_one_hour_bars: default_min_1h_bars(),
+        }
+    }
+}
+
+/// 入场权重配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EntryAllocation {
+    pub ma: f64,
+    pub fib: f64,
+    pub bb: f64,
+}
+
+impl EntryAllocation {
+    pub fn normalized(&self) -> Self {
+        let sum = (self.ma + self.fib + self.bb).max(1e-6);
+        Self {
+            ma: (self.ma / sum).max(0.0),
+            fib: (self.fib / sum).max(0.0),
+            bb: (self.bb / sum).max(0.0),
+        }
+    }
+
+    pub fn trending_default() -> Self {
+        Self {
+            ma: 0.6,
+            fib: 0.25,
+            bb: 0.15,
+        }
+    }
+
+    pub fn ranging_default() -> Self {
+        Self {
+            ma: 0.25,
+            fib: 0.35,
+            bb: 0.40,
+        }
+    }
+
+    pub fn extreme_default() -> Self {
+        Self {
+            ma: 0.4,
+            fib: 0.4,
+            bb: 0.2,
+        }
+    }
+}
+
+impl Default for EntryAllocation {
+    fn default() -> Self {
+        Self {
+            ma: 0.4,
+            fib: 0.3,
+            bb: 0.3,
+        }
+    }
+}
+
+/// 行情状态分配配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AllocationRegimesConfig {
+    #[serde(default = "EntryAllocation::trending_default")]
+    pub trending: EntryAllocation,
+    #[serde(default = "EntryAllocation::ranging_default")]
+    pub ranging: EntryAllocation,
+    #[serde(default = "EntryAllocation::extreme_default")]
+    pub extreme: EntryAllocation,
+}
+
+impl Default for AllocationRegimesConfig {
+    fn default() -> Self {
+        Self {
+            trending: EntryAllocation::trending_default(),
+            ranging: EntryAllocation::ranging_default(),
+            extreme: EntryAllocation::extreme_default(),
         }
     }
 }

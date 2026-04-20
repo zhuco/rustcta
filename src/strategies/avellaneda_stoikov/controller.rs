@@ -33,6 +33,7 @@ pub struct AvellanedaStoikovStrategy {
     logger: Arc<UnifiedLogger>,
     ws_client: Option<Arc<tokio::sync::Mutex<BinanceWebSocketClient>>>,
     listen_key: Option<String>,
+    market_type: MarketType,
 
     // 市场数据缓存
     price_history: Arc<RwLock<VecDeque<f64>>>,
@@ -90,6 +91,7 @@ impl AvellanedaStoikovStrategy {
             None,
             Some(risk_limits.clone()),
         );
+        let market_type = Self::parse_market_type(&config.trading.market_type);
 
         Ok(Self {
             config,
@@ -103,7 +105,24 @@ impl AvellanedaStoikovStrategy {
             listen_key: None,
             risk_evaluator,
             risk_limits,
+            market_type,
         })
+    }
+
+    fn parse_market_type(value: &str) -> MarketType {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "spot" => MarketType::Spot,
+            "futures" | "perpetual" => MarketType::Futures,
+            other => {
+                log::warn!("未识别的market_type: '{}', 默认使用Spot", other);
+                MarketType::Spot
+            }
+        }
+    }
+
+    fn market_type(&self) -> MarketType {
+        self.market_type
     }
 
     /// 计算预留价格 (Reservation Price)
@@ -216,10 +235,15 @@ impl AvellanedaStoikovStrategy {
         // 应用精度（简单四舍五入）
         let price_precision = self.config.trading.price_precision as i32;
         let multiplier = 10_f64.powi(price_precision);
-        let bid = (bid * multiplier).round() / multiplier;
-        let ask = (ask * multiplier).round() / multiplier;
+        let bid = (bid * multiplier).floor() / multiplier;
+        let ask = (ask * multiplier).ceil() / multiplier;
 
-        (bid, ask)
+        let adjusted_bid = bid.min(state.mid_price);
+        let adjusted_ask = ask.max(state.mid_price);
+        let final_bid = adjusted_bid.min(adjusted_ask - 1.0 / multiplier);
+        let final_ask = adjusted_ask.max(final_bid + 1.0 / multiplier);
+
+        (final_bid, final_ask)
     }
     fn build_risk_limits(config: &ASConfig) -> StrategyRiskLimits {
         StrategyRiskLimits {
@@ -371,7 +395,7 @@ impl AvellanedaStoikovStrategy {
                 filled: 0.0,
                 remaining: buy_qty,
                 status: OrderStatus::Open,
-                market_type: crate::core::types::MarketType::Futures,
+                market_type: self.market_type(),
                 timestamp: Utc::now(),
                 last_trade_timestamp: None,
                 info: serde_json::json!({}),
@@ -384,11 +408,19 @@ impl AvellanedaStoikovStrategy {
                 order_type: buy_order.order_type.clone(),
                 amount: buy_order.amount,
                 price: buy_order.price,
-                market_type: crate::core::types::MarketType::Futures,
+                market_type: self.market_type(),
                 params: None,
-                reduce_only: Some(false),
-                post_only: Some(true),
-                time_in_force: Some("GTX".to_string()),
+                reduce_only: if self.market_type() == MarketType::Futures {
+                    Some(false)
+                } else {
+                    None
+                },
+                post_only: if self.config.trading.order_config.post_only {
+                    Some(true)
+                } else {
+                    None
+                },
+                time_in_force: Some(self.config.trading.order_config.time_in_force.clone()),
                 client_order_id: Some(buy_order.id.clone()),
             };
 
@@ -416,7 +448,7 @@ impl AvellanedaStoikovStrategy {
                 filled: 0.0,
                 remaining: sell_qty,
                 status: OrderStatus::Open,
-                market_type: crate::core::types::MarketType::Futures,
+                market_type: self.market_type(),
                 timestamp: Utc::now(),
                 last_trade_timestamp: None,
                 info: serde_json::json!({}),
@@ -429,11 +461,19 @@ impl AvellanedaStoikovStrategy {
                 order_type: sell_order.order_type.clone(),
                 amount: sell_order.amount,
                 price: sell_order.price,
-                market_type: crate::core::types::MarketType::Futures,
+                market_type: self.market_type(),
                 params: None,
-                reduce_only: Some(false),
-                post_only: Some(true),
-                time_in_force: Some("GTX".to_string()),
+                reduce_only: if self.market_type() == MarketType::Futures {
+                    Some(false)
+                } else {
+                    None
+                },
+                post_only: if self.config.trading.order_config.post_only {
+                    Some(true)
+                } else {
+                    None
+                },
+                time_in_force: Some(self.config.trading.order_config.time_in_force.clone()),
                 client_order_id: Some(sell_order.id.clone()),
             };
 
@@ -467,7 +507,7 @@ impl AvellanedaStoikovStrategy {
                 .cancel_order(
                     &self.config.trading.symbol,
                     buy_order_id,
-                    crate::core::types::MarketType::Futures,
+                    self.market_type(),
                 )
                 .await
             {
@@ -482,7 +522,7 @@ impl AvellanedaStoikovStrategy {
                 .cancel_order(
                     &self.config.trading.symbol,
                     sell_order_id,
-                    crate::core::types::MarketType::Futures,
+                    self.market_type(),
                 )
                 .await
             {
@@ -500,23 +540,46 @@ impl AvellanedaStoikovStrategy {
             .get_account(&self.config.account.account_id)
             .ok_or_else(|| anyhow::anyhow!("Account not found"))?;
 
-        let positions = account
-            .exchange
-            .get_positions(Some(&self.config.trading.symbol))
-            .await?;
-        let mut state = self.state.write().await;
+        match self.market_type() {
+            MarketType::Futures => {
+                let positions = account
+                    .exchange
+                    .get_positions(Some(&self.config.trading.symbol))
+                    .await?;
+                let mut state = self.state.write().await;
 
-        // 查找对应交易对的仓位
-        for position in positions {
-            if position.symbol == self.config.trading.symbol {
-                // 使用amount字段，它包含了正负号
-                state.inventory = position.amount;
-                state.inventory_value = state.inventory * state.mid_price;
+                for position in positions {
+                    if position.symbol == self.config.trading.symbol {
+                        state.inventory = position.amount;
+                        state.inventory_value = state.inventory * state.mid_price;
+                        state.unrealized_pnl = position.unrealized_pnl;
+                        break;
+                    }
+                }
+            }
+            MarketType::Spot => {
+                let balances = account.exchange.get_balance(MarketType::Spot).await?;
+                let base_asset = self
+                    .config
+                    .trading
+                    .symbol
+                    .split('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_ascii_uppercase();
 
-                // 更新未实现盈亏
-                state.unrealized_pnl = position.unrealized_pnl;
-
-                break;
+                let mut state = self.state.write().await;
+                if let Some(balance) = balances
+                    .iter()
+                    .find(|b| b.currency.eq_ignore_ascii_case(&base_asset))
+                {
+                    state.inventory = balance.total;
+                    state.inventory_value = state.inventory * state.mid_price;
+                } else {
+                    state.inventory = 0.0;
+                    state.inventory_value = 0.0;
+                }
+                state.unrealized_pnl = 0.0;
             }
         }
 
@@ -528,10 +591,16 @@ impl AvellanedaStoikovStrategy {
         log::info!("🔄 撤销所有挂单...");
 
         // 直接调用account_manager的撤单功能
-        self.account_manager
+        let account = self
+            .account_manager
+            .get_account(&self.config.account.account_id)
+            .ok_or_else(|| anyhow::anyhow!("Account not found"))?;
+
+        account
+            .exchange
             .cancel_all_orders(
-                &self.config.account.account_id,
-                Some(&self.config.trading.symbol.as_str()),
+                Some(self.config.trading.symbol.as_str()),
+                self.market_type(),
             )
             .await?;
 
@@ -563,11 +632,7 @@ impl AvellanedaStoikovStrategy {
             .ok_or_else(|| anyhow::anyhow!("Not a Binance exchange"))?;
 
         // 获取listenKey
-        let market_type = match self.config.trading.market_type.to_lowercase().as_str() {
-            "futures" => MarketType::Futures,
-            "spot" => MarketType::Spot,
-            _ => MarketType::Futures, // 默认期货
-        };
+        let market_type = self.market_type();
 
         if let Ok(listen_key) = binance_exchange.create_listen_key(market_type).await {
             log::info!("✅ 获取listenKey成功");
@@ -772,6 +837,7 @@ impl AvellanedaStoikovStrategy {
         // 库存同步计时器
         let mut last_inventory_sync = Utc::now();
         let inventory_sync_interval = 180; // 3分钟同步一次
+        let mut last_log_time: Option<i64> = None;
 
         loop {
             interval.tick().await;
@@ -867,19 +933,16 @@ impl AvellanedaStoikovStrategy {
             }
 
             // 每30秒记录一次状态
-            static mut LAST_LOG_TIME: Option<i64> = None;
             let now_timestamp = Utc::now().timestamp();
-            unsafe {
-                if LAST_LOG_TIME.is_none() || now_timestamp - LAST_LOG_TIME.unwrap() > 30 {
-                    let state = self.state.read().await;
-                    log::info!(
-                        "📊 策略状态 - 库存: {:.4}, 未实现盈亏: {:.2}, 日盈亏: {:.2}",
-                        state.inventory,
-                        state.unrealized_pnl,
-                        state.daily_pnl
-                    );
-                    LAST_LOG_TIME = Some(now_timestamp);
-                }
+            if last_log_time.map_or(true, |last| now_timestamp - last > 30) {
+                let state = self.state.read().await;
+                log::info!(
+                    "📊 策略状态 - 库存: {:.4}, 未实现盈亏: {:.2}, 日盈亏: {:.2}",
+                    state.inventory,
+                    state.unrealized_pnl,
+                    state.daily_pnl
+                );
+                last_log_time = Some(now_timestamp);
             }
         }
     }
@@ -920,11 +983,7 @@ impl AvellanedaStoikovStrategy {
         // 获取订单簿
         let orderbook = account
             .exchange
-            .get_orderbook(
-                &self.config.trading.symbol,
-                crate::core::types::MarketType::Futures,
-                Some(5),
-            )
+            .get_orderbook(&self.config.trading.symbol, self.market_type(), Some(5))
             .await?;
 
         // 更新价格

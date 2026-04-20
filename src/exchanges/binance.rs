@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio::time::{interval, Duration};
 
@@ -223,6 +223,131 @@ impl BinanceExchange {
         );
 
         Ok(response.dual_side_position)
+    }
+
+    fn is_futures_conditional_order(order_type: OrderType, market_type: MarketType) -> bool {
+        market_type == MarketType::Futures
+            && matches!(
+                order_type,
+                OrderType::StopLimit
+                    | OrderType::StopMarket
+                    | OrderType::TakeProfitLimit
+                    | OrderType::TakeProfitMarket
+                    | OrderType::TrailingStop
+            )
+    }
+
+    fn should_fallback_to_algo_order(err: &ExchangeError) -> bool {
+        match err {
+            ExchangeError::ApiError { message, .. } => {
+                message.contains("\"code\":-4120")
+                    || message.contains("Algo Order API")
+                    || message.contains("Please use the Algo Order API endpoints instead")
+            }
+            _ => false,
+        }
+    }
+
+    fn should_fallback_to_legacy_order(err: &ExchangeError) -> bool {
+        match err {
+            ExchangeError::ApiError { code, message } => {
+                *code == 404
+                    || message.contains("Not Found")
+                    || message.contains("Unknown")
+                    || message.contains("Invalid endpoint")
+            }
+            _ => false,
+        }
+    }
+
+    fn normalize_algo_order_params(params: &mut HashMap<String, String>) {
+        if let Some(stop_price) = params.remove("stopPrice") {
+            params
+                .entry("triggerPrice".to_string())
+                .or_insert(stop_price);
+        }
+        params.insert("algoType".to_string(), "CONDITIONAL".to_string());
+    }
+
+    fn parse_binance_order_type(order_type: &str) -> OrderType {
+        match order_type {
+            "MARKET" => OrderType::Market,
+            "LIMIT" | "LIMIT_MAKER" => OrderType::Limit,
+            "STOP" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" => OrderType::StopLimit,
+            "STOP_MARKET" | "STOP_LOSS" => OrderType::StopMarket,
+            "TAKE_PROFIT" | "TAKE_PROFIT_LIMIT" => OrderType::TakeProfitLimit,
+            "TAKE_PROFIT_MARKET" => OrderType::TakeProfitMarket,
+            "TRAILING_STOP_MARKET" => OrderType::TrailingStop,
+            _ => OrderType::Limit,
+        }
+    }
+
+    fn parse_binance_order_status(status: &str) -> OrderStatus {
+        match status {
+            "NEW" | "OPEN" => OrderStatus::Open,
+            "PARTIALLY_FILLED" => OrderStatus::PartiallyFilled,
+            "FILLED" => OrderStatus::Closed,
+            "CANCELED" | "CANCELLED" => OrderStatus::Canceled,
+            "EXPIRED" => OrderStatus::Expired,
+            "REJECTED" => OrderStatus::Rejected,
+            "TRIGGERED" => OrderStatus::Triggered,
+            _ => OrderStatus::Pending,
+        }
+    }
+
+    fn parse_binance_order_side(side: &str, fallback: OrderSide) -> OrderSide {
+        match side {
+            "BUY" => OrderSide::Buy,
+            "SELL" => OrderSide::Sell,
+            _ => fallback,
+        }
+    }
+
+    fn value_as_f64(value: &serde_json::Value) -> Option<f64> {
+        if let Some(v) = value.as_f64() {
+            return Some(v);
+        }
+        if let Some(v) = value.as_i64() {
+            return Some(v as f64);
+        }
+        if let Some(v) = value.as_u64() {
+            return Some(v as f64);
+        }
+        value.as_str().and_then(|v| v.parse::<f64>().ok())
+    }
+
+    fn value_as_i64(value: &serde_json::Value) -> Option<i64> {
+        if let Some(v) = value.as_i64() {
+            return Some(v);
+        }
+        if let Some(v) = value.as_u64() {
+            return Some(v as i64);
+        }
+        value.as_str().and_then(|v| v.parse::<i64>().ok())
+    }
+
+    fn first_f64(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+        keys.iter()
+            .find_map(|k| value.get(*k).and_then(Self::value_as_f64))
+    }
+
+    fn first_i64(value: &serde_json::Value, keys: &[&str]) -> Option<i64> {
+        keys.iter()
+            .find_map(|k| value.get(*k).and_then(Self::value_as_i64))
+    }
+
+    fn first_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+        keys.iter().find_map(|k| {
+            value.get(*k).and_then(|v| {
+                if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else if v.is_number() {
+                    Some(v.to_string())
+                } else {
+                    None
+                }
+            })
+        })
     }
 
     // 辅助方法：逐个创建订单
@@ -654,8 +779,10 @@ impl BinanceExchange {
         };
         let url = format!("{}{}?{}", base_url, endpoint, final_query);
 
+        let method_upper = method.to_ascii_uppercase();
+
         // 设置请求头
-        let response = match method.to_uppercase().as_str() {
+        let response = match method_upper.as_str() {
             "GET" => {
                 self.base
                     .client
@@ -668,6 +795,15 @@ impl BinanceExchange {
                 self.base
                     .client
                     .post(&url)
+                    .header("X-MBX-APIKEY", &self.base.api_keys.api_key)
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .send()
+                    .await?
+            }
+            "PUT" => {
+                self.base
+                    .client
+                    .put(&url)
                     .header("X-MBX-APIKEY", &self.base.api_keys.api_key)
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .send()
@@ -822,6 +958,8 @@ impl Exchange for BinanceExchange {
             locked: Option<String>,
             #[serde(alias = "walletBalance")]
             wallet_balance: Option<String>,
+            #[serde(alias = "marginBalance")]
+            margin_balance: Option<String>,
         }
 
         // 先获取原始响应来调试
@@ -848,16 +986,25 @@ impl Exchange for BinanceExchange {
                 .as_ref()
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(0.0);
-            let total = asset
-                .wallet_balance
-                .as_ref()
-                .and_then(|s| s.parse::<f64>().ok())
-                .unwrap_or(free);
-            let used = asset
+            let locked = asset
                 .locked
                 .as_ref()
                 .and_then(|s| s.parse::<f64>().ok())
-                .unwrap_or(total - free);
+                .unwrap_or(0.0);
+            let wallet_balance = asset
+                .wallet_balance
+                .as_ref()
+                .and_then(|s| s.parse::<f64>().ok());
+            let margin_balance = asset
+                .margin_balance
+                .as_ref()
+                .and_then(|s| s.parse::<f64>().ok());
+            let total = margin_balance.or(wallet_balance).unwrap_or(free + locked);
+            let used = if margin_balance.is_some() || wallet_balance.is_some() {
+                (total - free).max(0.0)
+            } else {
+                locked
+            };
 
             if total > 0.0 || free > 0.0 {
                 balances.push(Balance {
@@ -1076,6 +1223,7 @@ impl Exchange for BinanceExchange {
             bids,
             asks,
             timestamp: Utc::now(),
+            info: serde_json::json!({ "lastUpdateId": orderbook.last_update_id }),
         })
     }
 
@@ -1086,10 +1234,13 @@ impl Exchange for BinanceExchange {
             order_request.market_type,
         )?;
 
-        let endpoint = match order_request.market_type {
+        let default_endpoint = match order_request.market_type {
             MarketType::Spot => "/api/v3/order",
             MarketType::Futures => "/fapi/v1/order",
         };
+        let algo_endpoint = "/fapi/v1/algoOrder";
+        let use_algo_order =
+            Self::is_futures_conditional_order(order_request.order_type, order_request.market_type);
 
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), exchange_symbol);
@@ -1100,35 +1251,59 @@ impl Exchange for BinanceExchange {
                 OrderSide::Sell => "SELL".to_string(),
             },
         );
-        params.insert(
-            "type".to_string(),
-            match order_request.order_type {
-                OrderType::Market => "MARKET".to_string(),
-                OrderType::Limit => "LIMIT".to_string(),
-                OrderType::StopLimit => "STOP_LOSS_LIMIT".to_string(),
-                OrderType::StopMarket => "STOP_LOSS".to_string(),
-                OrderType::TakeProfitLimit => "TAKE_PROFIT_LIMIT".to_string(),
-                OrderType::TakeProfitMarket => "TAKE_PROFIT".to_string(),
-                OrderType::TrailingStop => "TRAILING_STOP_MARKET".to_string(),
-            },
-        );
+
+        let mut order_type = match (order_request.order_type, order_request.market_type) {
+            (OrderType::Market, _) => "MARKET",
+            (OrderType::Limit, _) => "LIMIT",
+            (OrderType::StopLimit, MarketType::Futures) => "STOP",
+            (OrderType::StopLimit, _) => "STOP_LOSS_LIMIT",
+            (OrderType::StopMarket, MarketType::Futures) => "STOP_MARKET",
+            (OrderType::StopMarket, _) => "STOP_LOSS",
+            (OrderType::TakeProfitLimit, MarketType::Futures) => "TAKE_PROFIT",
+            (OrderType::TakeProfitLimit, _) => "TAKE_PROFIT_LIMIT",
+            (OrderType::TakeProfitMarket, MarketType::Futures) => "TAKE_PROFIT_MARKET",
+            (OrderType::TakeProfitMarket, _) => "TAKE_PROFIT",
+            (OrderType::TrailingStop, _) => "TRAILING_STOP_MARKET",
+        };
+        let mut skip_time_in_force = false;
+
+        let post_only = order_request.post_only.unwrap_or(false);
+
+        if post_only && order_request.order_type == OrderType::Limit {
+            match order_request.market_type {
+                MarketType::Spot => {
+                    order_type = "LIMIT_MAKER";
+                    skip_time_in_force = true;
+                }
+                MarketType::Futures => {
+                    // 币安合约的 PostOnly 通过 GTX 实现
+                    params.insert("timeInForce".to_string(), "GTX".to_string());
+                    skip_time_in_force = true;
+                }
+            }
+        }
+
+        params.insert("type".to_string(), order_type.to_string());
         params.insert("quantity".to_string(), order_request.amount.to_string());
 
         if let Some(price) = order_request.price {
             params.insert("price".to_string(), price.to_string());
         }
 
-        if order_request.order_type == OrderType::Limit {
-            params.insert("timeInForce".to_string(), "GTC".to_string());
-        }
-
-        // 添加自定义订单ID（用于策略识别）
-        if let Some(client_order_id) = &order_request.client_order_id {
-            params.insert("newClientOrderId".to_string(), client_order_id.clone());
+        if !skip_time_in_force {
+            if let Some(tif) = order_request.time_in_force.clone() {
+                params.insert("timeInForce".to_string(), tif);
+            } else if order_request.order_type == OrderType::Limit {
+                params.insert("timeInForce".to_string(), "GTC".to_string());
+            }
         }
 
         // 对于期货订单，添加额外参数
         if order_request.market_type == MarketType::Futures {
+            if order_request.reduce_only.unwrap_or(false) {
+                params.insert("reduceOnly".to_string(), "true".to_string());
+            }
+
             // 如果有额外参数，添加它们
             if let Some(extra_params) = &order_request.params {
                 for (key, value) in extra_params {
@@ -1187,62 +1362,107 @@ impl Exchange for BinanceExchange {
             }
         }
 
-        #[derive(Deserialize)]
-        struct BinanceOrderResponse {
-            #[serde(rename = "orderId")]
-            order_id: i64,
-            symbol: String,
-            side: String,
-            #[serde(rename = "type")]
-            order_type: String,
-            #[serde(rename = "origQty")]
-            orig_qty: String,
-            price: Option<String>,
-            #[serde(rename = "executedQty")]
-            executed_qty: String,
-            status: String,
-            #[serde(rename = "transactTime")]
-            transact_time: Option<i64>,
-            #[serde(rename = "updateTime")]
-            update_time: Option<i64>,
+        // 添加自定义订单ID（用于策略识别）
+        if let Some(client_order_id) = &order_request.client_order_id {
+            let client_id_key = if use_algo_order {
+                "clientAlgoId"
+            } else {
+                "newClientOrderId"
+            };
+            params.insert(client_id_key.to_string(), client_order_id.clone());
         }
 
-        let response: BinanceOrderResponse = self
-            .send_signed_request("POST", endpoint, params, order_request.market_type)
-            .await?;
+        let mut primary_params = params.clone();
+        let mut fallback_params = params;
+
+        let (primary_endpoint, fallback_endpoint) = if use_algo_order {
+            Self::normalize_algo_order_params(&mut primary_params);
+            (algo_endpoint, Some(default_endpoint))
+        } else {
+            (default_endpoint, Some(algo_endpoint))
+        };
+
+        let response: serde_json::Value = match self
+            .send_signed_request(
+                "POST",
+                primary_endpoint,
+                primary_params.clone(),
+                order_request.market_type,
+            )
+            .await
+        {
+            Ok(response) => response,
+            Err(primary_err) => {
+                let should_try_fallback = if order_request.market_type != MarketType::Futures {
+                    false
+                } else if use_algo_order {
+                    Self::should_fallback_to_legacy_order(&primary_err)
+                } else {
+                    Self::should_fallback_to_algo_order(&primary_err)
+                };
+
+                if !should_try_fallback {
+                    return Err(primary_err);
+                }
+
+                if fallback_endpoint == Some(algo_endpoint) {
+                    Self::normalize_algo_order_params(&mut fallback_params);
+                }
+
+                let endpoint = fallback_endpoint.unwrap_or(default_endpoint);
+                log::warn!(
+                    "Binance 创建订单主路径失败，尝试回退到 {}: {}",
+                    endpoint,
+                    primary_err
+                );
+                self.send_signed_request(
+                    "POST",
+                    endpoint,
+                    fallback_params,
+                    order_request.market_type,
+                )
+                .await?
+            }
+        };
+
+        let order_id = Self::first_string(&response, &["orderId", "algoId"]).ok_or_else(|| {
+            ExchangeError::ParseError(format!("Binance下单响应缺少订单ID: {}", response))
+        })?;
+        let amount =
+            Self::first_f64(&response, &["origQty", "quantity"]).unwrap_or(order_request.amount);
+        let filled = Self::first_f64(&response, &["executedQty", "executedQuantity", "cumQty"])
+            .unwrap_or(0.0);
+        let price = Self::first_f64(&response, &["price"]).filter(|p| *p > 0.0);
+        let status = Self::first_string(&response, &["status", "algoStatus"])
+            .map(|s| Self::parse_binance_order_status(&s))
+            .unwrap_or(OrderStatus::Open);
+        let side = Self::first_string(&response, &["side"])
+            .map(|s| Self::parse_binance_order_side(&s, order_request.side))
+            .unwrap_or(order_request.side);
+        let order_type = Self::first_string(&response, &["type", "orderType"])
+            .map(|s| Self::parse_binance_order_type(&s))
+            .unwrap_or(order_request.order_type);
+        let timestamp = Self::first_i64(
+            &response,
+            &["transactTime", "updateTime", "time", "createTime"],
+        )
+        .and_then(|t| DateTime::from_timestamp(t / 1000, 0))
+        .unwrap_or_else(|| Utc::now());
 
         Ok(Order {
-            id: response.order_id.to_string(),
+            id: order_id,
             symbol: order_request.symbol,
-            side: order_request.side,
-            order_type: order_request.order_type,
-            amount: response.orig_qty.parse().unwrap_or(0.0),
-            price: response.price.as_ref().and_then(|p| {
-                if p != "0.00000000" {
-                    Some(p.parse().unwrap_or(0.0))
-                } else {
-                    None
-                }
-            }),
-            filled: response.executed_qty.parse().unwrap_or(0.0),
-            remaining: response.orig_qty.parse().unwrap_or(0.0)
-                - response.executed_qty.parse().unwrap_or(0.0),
-            status: match response.status.as_str() {
-                "NEW" => OrderStatus::Open,
-                "FILLED" => OrderStatus::Closed,
-                "CANCELED" => OrderStatus::Canceled,
-                "EXPIRED" => OrderStatus::Expired,
-                "REJECTED" => OrderStatus::Rejected,
-                _ => OrderStatus::Pending,
-            },
+            side,
+            order_type,
+            amount,
+            price,
+            filled,
+            remaining: (amount - filled).max(0.0),
+            status,
             market_type: order_request.market_type,
-            timestamp: response
-                .transact_time
-                .or(response.update_time)
-                .and_then(|t| DateTime::from_timestamp(t / 1000, 0))
-                .unwrap_or_else(|| Utc::now()),
+            timestamp,
             last_trade_timestamp: None,
-            info: serde_json::json!({}),
+            info: response,
         })
     }
 
@@ -1260,60 +1480,61 @@ impl Exchange for BinanceExchange {
             MarketType::Spot => "/api/v3/order",
             MarketType::Futures => "/fapi/v1/order",
         };
+        let algo_endpoint = "/fapi/v1/algoOrder";
 
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), exchange_symbol);
         params.insert("orderId".to_string(), order_id.to_string());
 
-        #[derive(Deserialize)]
-        struct BinanceOrderResponse {
-            #[serde(rename = "orderId")]
-            order_id: i64,
-            symbol: String,
-            side: String,
-            #[serde(rename = "type")]
-            order_type: String,
-            #[serde(rename = "origQty")]
-            orig_qty: String,
-            price: Option<String>,
-            #[serde(rename = "executedQty")]
-            executed_qty: String,
-            status: String,
-        }
+        let response: serde_json::Value = match self
+            .send_signed_request("DELETE", endpoint, params.clone(), market_type)
+            .await
+        {
+            Ok(resp) => resp,
+            Err(primary_err) => {
+                if market_type != MarketType::Futures {
+                    return Err(primary_err);
+                }
+                let mut algo_params = params;
+                algo_params.remove("orderId");
+                algo_params.insert("algoId".to_string(), order_id.to_string());
+                log::warn!("Binance 撤单主路径失败，尝试 Algo 撤单: {}", primary_err);
+                self.send_signed_request("DELETE", algo_endpoint, algo_params, market_type)
+                    .await?
+            }
+        };
 
-        let response: BinanceOrderResponse = self
-            .send_signed_request("DELETE", endpoint, params, market_type)
-            .await?;
+        let amount = Self::first_f64(&response, &["origQty", "quantity"]).unwrap_or(0.0);
+        let filled = Self::first_f64(&response, &["executedQty", "executedQuantity", "cumQty"])
+            .unwrap_or(0.0);
+        let status = Self::first_string(&response, &["status", "algoStatus"])
+            .map(|s| Self::parse_binance_order_status(&s))
+            .unwrap_or(OrderStatus::Canceled);
+        let side = Self::first_string(&response, &["side"])
+            .map(|s| Self::parse_binance_order_side(&s, OrderSide::Buy))
+            .unwrap_or(OrderSide::Buy);
+        let order_type = Self::first_string(&response, &["type", "orderType"])
+            .map(|s| Self::parse_binance_order_type(&s))
+            .unwrap_or(OrderType::Limit);
+        let timestamp = Self::first_i64(&response, &["updateTime", "time", "createTime"])
+            .and_then(|t| DateTime::from_timestamp(t / 1000, 0))
+            .unwrap_or_else(|| Utc::now());
 
         Ok(Order {
-            id: response.order_id.to_string(),
+            id: Self::first_string(&response, &["orderId", "algoId"])
+                .unwrap_or_else(|| order_id.to_string()),
             symbol: symbol.to_string(),
-            side: match response.side.as_str() {
-                "BUY" => OrderSide::Buy,
-                "SELL" => OrderSide::Sell,
-                _ => OrderSide::Buy,
-            },
-            order_type: match response.order_type.as_str() {
-                "MARKET" => OrderType::Market,
-                "LIMIT" => OrderType::Limit,
-                _ => OrderType::Limit,
-            },
-            amount: response.orig_qty.parse().unwrap_or(0.0),
-            price: response.price.as_ref().and_then(|p| {
-                if p != "0.00000000" {
-                    Some(p.parse().unwrap_or(0.0))
-                } else {
-                    None
-                }
-            }),
-            filled: response.executed_qty.parse().unwrap_or(0.0),
-            remaining: response.orig_qty.parse().unwrap_or(0.0)
-                - response.executed_qty.parse().unwrap_or(0.0),
-            status: OrderStatus::Canceled,
+            side,
+            order_type,
+            amount,
+            price: Self::first_f64(&response, &["price"]).filter(|p| *p > 0.0),
+            filled,
+            remaining: (amount - filled).max(0.0),
+            status,
             market_type,
-            timestamp: Utc::now(),
+            timestamp,
             last_trade_timestamp: None,
-            info: serde_json::json!({}),
+            info: response,
         })
     }
 
@@ -1331,74 +1552,63 @@ impl Exchange for BinanceExchange {
             MarketType::Spot => "/api/v3/order",
             MarketType::Futures => "/fapi/v1/order",
         };
+        let algo_endpoint = "/fapi/v1/algoOrder";
 
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), exchange_symbol);
         params.insert("orderId".to_string(), order_id.to_string());
 
-        #[derive(Deserialize)]
-        struct BinanceOrderResponse {
-            #[serde(rename = "orderId")]
-            order_id: i64,
-            symbol: String,
-            side: String,
-            #[serde(rename = "type")]
-            order_type: String,
-            #[serde(rename = "origQty")]
-            orig_qty: String,
-            price: Option<String>,
-            #[serde(rename = "executedQty")]
-            executed_qty: String,
-            status: String,
-            time: i64,
-            #[serde(rename = "updateTime")]
-            update_time: i64,
-        }
+        let response: serde_json::Value = match self
+            .send_signed_request("GET", endpoint, params.clone(), market_type)
+            .await
+        {
+            Ok(resp) => resp,
+            Err(primary_err) => {
+                if market_type != MarketType::Futures {
+                    return Err(primary_err);
+                }
+                let mut algo_params = params;
+                algo_params.remove("orderId");
+                algo_params.insert("algoId".to_string(), order_id.to_string());
+                log::warn!("Binance 查单主路径失败，尝试 Algo 查单: {}", primary_err);
+                self.send_signed_request("GET", algo_endpoint, algo_params, market_type)
+                    .await?
+            }
+        };
 
-        let response: BinanceOrderResponse = self
-            .send_signed_request("GET", endpoint, params, market_type)
-            .await?;
+        let amount = Self::first_f64(&response, &["origQty", "quantity"]).unwrap_or(0.0);
+        let filled = Self::first_f64(&response, &["executedQty", "executedQuantity", "cumQty"])
+            .unwrap_or(0.0);
+        let status = Self::first_string(&response, &["status", "algoStatus"])
+            .map(|s| Self::parse_binance_order_status(&s))
+            .unwrap_or(OrderStatus::Pending);
+        let side = Self::first_string(&response, &["side"])
+            .map(|s| Self::parse_binance_order_side(&s, OrderSide::Buy))
+            .unwrap_or(OrderSide::Buy);
+        let order_type = Self::first_string(&response, &["type", "orderType"])
+            .map(|s| Self::parse_binance_order_type(&s))
+            .unwrap_or(OrderType::Limit);
+        let timestamp = Self::first_i64(&response, &["time", "createTime", "transactTime"])
+            .and_then(|t| DateTime::from_timestamp(t / 1000, 0))
+            .unwrap_or_else(|| Utc::now());
+        let update_time = Self::first_i64(&response, &["updateTime", "triggerTime"])
+            .and_then(|t| DateTime::from_timestamp(t / 1000, 0));
 
         Ok(Order {
-            id: response.order_id.to_string(),
+            id: Self::first_string(&response, &["orderId", "algoId"])
+                .unwrap_or_else(|| order_id.to_string()),
             symbol: symbol.to_string(),
-            side: match response.side.as_str() {
-                "BUY" => OrderSide::Buy,
-                "SELL" => OrderSide::Sell,
-                _ => OrderSide::Buy,
-            },
-            order_type: match response.order_type.as_str() {
-                "MARKET" => OrderType::Market,
-                "LIMIT" => OrderType::Limit,
-                _ => OrderType::Limit,
-            },
-            amount: response.orig_qty.parse().unwrap_or(0.0),
-            price: response.price.as_ref().and_then(|p| {
-                if p != "0.00000000" {
-                    Some(p.parse().unwrap_or(0.0))
-                } else {
-                    None
-                }
-            }),
-            filled: response.executed_qty.parse().unwrap_or(0.0),
-            remaining: response.orig_qty.parse().unwrap_or(0.0)
-                - response.executed_qty.parse().unwrap_or(0.0),
-            status: match response.status.as_str() {
-                "NEW" => OrderStatus::Open,
-                "FILLED" => OrderStatus::Closed,
-                "CANCELED" => OrderStatus::Canceled,
-                "EXPIRED" => OrderStatus::Expired,
-                "REJECTED" => OrderStatus::Rejected,
-                _ => OrderStatus::Pending,
-            },
+            side,
+            order_type,
+            amount,
+            price: Self::first_f64(&response, &["price"]).filter(|p| *p > 0.0),
+            filled,
+            remaining: (amount - filled).max(0.0),
+            status,
             market_type,
-            timestamp: DateTime::from_timestamp(response.time / 1000, 0)
-                .unwrap_or_else(|| Utc::now()),
-            last_trade_timestamp: Some(
-                DateTime::from_timestamp(response.update_time / 1000, 0)
-                    .unwrap_or_else(|| Utc::now()),
-            ),
-            info: serde_json::json!({}),
+            timestamp,
+            last_trade_timestamp: update_time,
+            info: response,
         })
     }
 
@@ -1440,29 +1650,24 @@ impl Exchange for BinanceExchange {
         }
 
         let orders: Vec<BinanceOrderResponse> = self
-            .send_signed_request("GET", endpoint, params, market_type)
+            .send_signed_request("GET", endpoint, params.clone(), market_type)
             .await?;
 
         let mut result = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
         for order in orders {
             // 转换交易对格式
             if let Ok(standard_symbol) =
                 self.symbol_converter
                     .from_exchange_symbol(&order.symbol, "binance", market_type)
             {
+                let id = order.order_id.to_string();
+                seen_ids.insert(id.clone());
                 result.push(Order {
-                    id: order.order_id.to_string(),
+                    id,
                     symbol: standard_symbol,
-                    side: match order.side.as_str() {
-                        "BUY" => OrderSide::Buy,
-                        "SELL" => OrderSide::Sell,
-                        _ => OrderSide::Buy,
-                    },
-                    order_type: match order.order_type.as_str() {
-                        "MARKET" => OrderType::Market,
-                        "LIMIT" => OrderType::Limit,
-                        _ => OrderType::Limit,
-                    },
+                    side: Self::parse_binance_order_side(&order.side, OrderSide::Buy),
+                    order_type: Self::parse_binance_order_type(&order.order_type),
                     amount: order.orig_qty.parse().unwrap_or(0.0),
                     price: order.price.as_ref().and_then(|p| {
                         if p != "0.00000000" {
@@ -1474,14 +1679,7 @@ impl Exchange for BinanceExchange {
                     filled: order.executed_qty.parse().unwrap_or(0.0),
                     remaining: order.orig_qty.parse().unwrap_or(0.0)
                         - order.executed_qty.parse().unwrap_or(0.0),
-                    status: match order.status.as_str() {
-                        "NEW" => OrderStatus::Open,
-                        "FILLED" => OrderStatus::Closed,
-                        "CANCELED" => OrderStatus::Canceled,
-                        "EXPIRED" => OrderStatus::Expired,
-                        "REJECTED" => OrderStatus::Rejected,
-                        _ => OrderStatus::Pending,
-                    },
+                    status: Self::parse_binance_order_status(&order.status),
                     market_type,
                     timestamp: DateTime::from_timestamp(order.time / 1000, 0)
                         .unwrap_or_else(|| Utc::now()),
@@ -1491,6 +1689,81 @@ impl Exchange for BinanceExchange {
                     ),
                     info: serde_json::json!({}),
                 });
+            }
+        }
+
+        if market_type == MarketType::Futures {
+            let algo_orders: Result<serde_json::Value> = self
+                .send_signed_request("GET", "/fapi/v1/openAlgoOrders", params, market_type)
+                .await;
+
+            match algo_orders {
+                Ok(payload) => {
+                    if let Some(items) = payload.as_array() {
+                        for item in items {
+                            let id = Self::first_string(item, &["algoId", "orderId"]);
+                            let symbol_raw = Self::first_string(item, &["symbol"]);
+                            let (Some(id), Some(symbol_raw)) = (id, symbol_raw) else {
+                                continue;
+                            };
+
+                            if seen_ids.contains(&id) {
+                                continue;
+                            }
+
+                            let Ok(standard_symbol) = self.symbol_converter.from_exchange_symbol(
+                                &symbol_raw,
+                                "binance",
+                                market_type,
+                            ) else {
+                                continue;
+                            };
+
+                            let amount =
+                                Self::first_f64(item, &["origQty", "quantity"]).unwrap_or(0.0);
+                            let filled = Self::first_f64(
+                                item,
+                                &["executedQty", "executedQuantity", "cumQty"],
+                            )
+                            .unwrap_or(0.0);
+                            let timestamp =
+                                Self::first_i64(item, &["time", "createTime", "triggerTime"])
+                                    .and_then(|t| DateTime::from_timestamp(t / 1000, 0))
+                                    .unwrap_or_else(|| Utc::now());
+                            let update_time = Self::first_i64(item, &["updateTime"])
+                                .and_then(|t| DateTime::from_timestamp(t / 1000, 0));
+
+                            result.push(Order {
+                                id: id.clone(),
+                                symbol: standard_symbol,
+                                side: Self::first_string(item, &["side"])
+                                    .map(|s| Self::parse_binance_order_side(&s, OrderSide::Buy))
+                                    .unwrap_or(OrderSide::Buy),
+                                order_type: Self::first_string(item, &["orderType", "type"])
+                                    .map(|s| Self::parse_binance_order_type(&s))
+                                    .unwrap_or(OrderType::StopMarket),
+                                amount,
+                                price: Self::first_f64(item, &["price"]).filter(|p| *p > 0.0),
+                                filled,
+                                remaining: (amount - filled).max(0.0),
+                                status: Self::first_string(item, &["algoStatus", "status"])
+                                    .map(|s| Self::parse_binance_order_status(&s))
+                                    .unwrap_or(OrderStatus::Open),
+                                market_type,
+                                timestamp,
+                                last_trade_timestamp: update_time,
+                                info: item.clone(),
+                            });
+                            seen_ids.insert(id);
+                        }
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "查询 Binance openAlgoOrders 失败，继续返回普通挂单: {}",
+                        err
+                    );
+                }
             }
         }
 
@@ -1552,16 +1825,8 @@ impl Exchange for BinanceExchange {
                 result.push(Order {
                     id: order.order_id.to_string(),
                     symbol: standard_symbol,
-                    side: match order.side.as_str() {
-                        "BUY" => OrderSide::Buy,
-                        "SELL" => OrderSide::Sell,
-                        _ => OrderSide::Buy,
-                    },
-                    order_type: match order.order_type.as_str() {
-                        "MARKET" => OrderType::Market,
-                        "LIMIT" => OrderType::Limit,
-                        _ => OrderType::Limit,
-                    },
+                    side: Self::parse_binance_order_side(&order.side, OrderSide::Buy),
+                    order_type: Self::parse_binance_order_type(&order.order_type),
                     amount: order.orig_qty.parse().unwrap_or(0.0),
                     price: order.price.as_ref().and_then(|p| {
                         if p != "0.00000000" {
@@ -1573,14 +1838,7 @@ impl Exchange for BinanceExchange {
                     filled: order.executed_qty.parse().unwrap_or(0.0),
                     remaining: order.orig_qty.parse().unwrap_or(0.0)
                         - order.executed_qty.parse().unwrap_or(0.0),
-                    status: match order.status.as_str() {
-                        "NEW" => OrderStatus::Open,
-                        "FILLED" => OrderStatus::Closed,
-                        "CANCELED" => OrderStatus::Canceled,
-                        "EXPIRED" => OrderStatus::Expired,
-                        "REJECTED" => OrderStatus::Rejected,
-                        _ => OrderStatus::Pending,
-                    },
+                    status: Self::parse_binance_order_status(&order.status),
                     market_type,
                     timestamp: DateTime::from_timestamp(order.time / 1000, 0)
                         .unwrap_or_else(|| Utc::now()),
@@ -1695,6 +1953,8 @@ impl Exchange for BinanceExchange {
             #[serde(rename = "isBuyer")]
             #[serde(alias = "buyer")]
             is_buyer: bool,
+            #[serde(rename = "realizedPnl")]
+            realized_pnl: Option<String>,
         }
 
         let trades: Vec<BinanceMyTrade> = self
@@ -1724,7 +1984,8 @@ impl Exchange for BinanceExchange {
                     fee: Some(Fee {
                         currency: trade.commission_asset,
                         cost: trade.commission.parse().unwrap_or(0.0),
-                        rate: None,
+                        // Futures userTrades 提供 realizedPnl；Spot 场景该字段为空
+                        rate: trade.realized_pnl.and_then(|v| v.parse::<f64>().ok()),
                     }),
                 });
             }
@@ -2036,6 +2297,8 @@ impl Exchange for BinanceExchange {
             unrealized_profit: String,
             #[serde(default = "default_zero_string")]
             percentage: String,
+            #[serde(rename = "marginType")]
+            margin_type: Option<String>,
             #[serde(rename = "isolatedMargin")]
             isolated_margin: String,
             leverage: String,
@@ -2070,7 +2333,7 @@ impl Exchange for BinanceExchange {
                         margin: pos.isolated_margin.parse().unwrap_or(0.0),
                         margin_ratio: 0.0, // 币安API不直接提供
                         leverage: pos.leverage.parse().ok(),
-                        margin_type: None, // BinancePosition没有这个字段
+                        margin_type: pos.margin_type,
                         amount: size,
                         timestamp: DateTime::from_timestamp(pos.update_time / 1000, 0)
                             .unwrap_or_else(|| chrono::Utc::now()),
@@ -2254,15 +2517,18 @@ impl Exchange for BinanceExchange {
                     batch_request.market_type,
                 )?;
 
-                let order_type = match order.order_type {
-                    OrderType::Limit => "LIMIT",
-                    OrderType::Market => "MARKET",
-                    OrderType::StopLimit => "STOP",
-                    OrderType::StopMarket => "STOP_MARKET",
-                    OrderType::TakeProfitLimit => "TAKE_PROFIT",
-                    OrderType::TakeProfitMarket => "TAKE_PROFIT_MARKET",
-                    OrderType::TrailingStop => "TRAILING_STOP_MARKET",
-                    _ => "LIMIT",
+                let order_type = match (order.order_type, batch_request.market_type) {
+                    (OrderType::Limit, _) => "LIMIT",
+                    (OrderType::Market, _) => "MARKET",
+                    (OrderType::StopLimit, MarketType::Futures) => "STOP",
+                    (OrderType::StopLimit, _) => "STOP_LOSS_LIMIT",
+                    (OrderType::StopMarket, MarketType::Futures) => "STOP_MARKET",
+                    (OrderType::StopMarket, _) => "STOP_LOSS",
+                    (OrderType::TakeProfitLimit, MarketType::Futures) => "TAKE_PROFIT",
+                    (OrderType::TakeProfitLimit, _) => "TAKE_PROFIT_LIMIT",
+                    (OrderType::TakeProfitMarket, MarketType::Futures) => "TAKE_PROFIT_MARKET",
+                    (OrderType::TakeProfitMarket, _) => "TAKE_PROFIT",
+                    (OrderType::TrailingStop, _) => "TRAILING_STOP_MARKET",
                 };
 
                 let mut params = serde_json::Map::new();
@@ -2308,9 +2574,13 @@ impl Exchange for BinanceExchange {
                     | OrderType::StopMarket
                     | OrderType::TakeProfitMarket
                     | OrderType::TrailingStop => {
-                        if let Some(tif) = order.time_in_force.clone() {
-                            params
-                                .insert("timeInForce".to_string(), serde_json::Value::String(tif));
+                        if order.order_type != OrderType::Market {
+                            if let Some(tif) = order.time_in_force.clone() {
+                                params.insert(
+                                    "timeInForce".to_string(),
+                                    serde_json::Value::String(tif),
+                                );
+                            }
                         }
 
                         if let Some(price) = order.price {
@@ -2320,7 +2590,6 @@ impl Exchange for BinanceExchange {
                             );
                         }
                     }
-                    _ => {}
                 }
 
                 if let Some(client_id) = &order.client_order_id {
@@ -2333,8 +2602,17 @@ impl Exchange for BinanceExchange {
                 if let Some(reduce_only) = order.reduce_only {
                     params.insert(
                         "reduceOnly".to_string(),
-                        serde_json::Value::Bool(reduce_only),
+                        serde_json::Value::String(reduce_only.to_string()),
                     );
+                }
+
+                // 透传额外参数（如双向持仓 positionSide 等）
+                if let Some(extra_params) = &order.params {
+                    for (key, value) in extra_params {
+                        if !params.contains_key(key) {
+                            params.insert(key.clone(), serde_json::Value::String(value.clone()));
+                        }
+                    }
                 }
 
                 batch_orders.push(serde_json::Value::Object(params));
@@ -2652,34 +2930,10 @@ impl Exchange for BinanceExchange {
             market_type
         );
 
-        let endpoint = match market_type {
-            MarketType::Spot => "/api/v3/userDataStream",
-            MarketType::Futures => "/fapi/v1/listenKey",
-        };
-
-        #[derive(Deserialize)]
-        struct ListenKeyResponse {
-            #[serde(rename = "listenKey")]
-            listen_key: String,
-        }
-
-        log::info!("🔍 准备调用 send_signed_request，endpoint: {}", endpoint);
-        let response: ListenKeyResponse = self
-            .send_signed_request("POST", endpoint, HashMap::new(), market_type)
+        let listen_key = self
+            .create_listen_key_with_auto_renewal(market_type)
             .await?;
-
-        // 更新管理器
-        let manager = match market_type {
-            MarketType::Spot => &self.spot_listen_key_manager,
-            MarketType::Futures => &self.futures_listen_key_manager,
-        };
-
-        manager
-            .lock()
-            .unwrap()
-            .set_listen_key(response.listen_key.clone());
-
-        Ok(response.listen_key)
+        Ok(listen_key)
     }
 
     async fn keepalive_user_data_stream(
@@ -2692,12 +2946,32 @@ impl Exchange for BinanceExchange {
             MarketType::Futures => "/fapi/v1/listenKey",
         };
 
-        let mut params = HashMap::new();
-        params.insert("listenKey".to_string(), listen_key.to_string());
+        let base_url = match market_type {
+            MarketType::Spot => "https://api.binance.com",
+            MarketType::Futures => "https://fapi.binance.com",
+        };
 
-        let _: serde_json::Value = self
-            .send_signed_request("PUT", endpoint, params, market_type)
+        let url = format!("{}{}?listenKey={}", base_url, endpoint, listen_key);
+
+        let response = self
+            .base
+            .client
+            .put(&url)
+            .header("X-MBX-APIKEY", &self.base.api_keys.api_key)
+            .send()
             .await?;
+
+        if !response.status().is_success() {
+            let status_code = response.status().as_u16() as i32;
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "未知错误".to_string());
+            return Err(ExchangeError::ApiError {
+                code: status_code,
+                message: error_text,
+            });
+        }
 
         // 更新管理器的续期时间
         let manager = match market_type {
@@ -2717,17 +2991,32 @@ impl Exchange for BinanceExchange {
         listen_key: &str,
         market_type: MarketType,
     ) -> Result<()> {
-        let endpoint = match market_type {
-            MarketType::Spot => "/api/v3/userDataStream",
-            MarketType::Futures => "/fapi/v1/listenKey",
+        let (base_url, endpoint) = match market_type {
+            MarketType::Spot => ("https://api.binance.com", "/api/v3/userDataStream"),
+            MarketType::Futures => ("https://fapi.binance.com", "/fapi/v1/listenKey"),
         };
 
-        let mut params = HashMap::new();
-        params.insert("listenKey".to_string(), listen_key.to_string());
+        let url = format!("{}{}?listenKey={}", base_url, endpoint, listen_key);
 
-        let _: serde_json::Value = self
-            .send_signed_request("DELETE", endpoint, params, market_type)
+        let response = self
+            .base
+            .client
+            .delete(&url)
+            .header("X-MBX-APIKEY", &self.base.api_keys.api_key)
+            .send()
             .await?;
+
+        if !response.status().is_success() {
+            let status_code = response.status().as_u16() as i32;
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "未知错误".to_string());
+            return Err(ExchangeError::ApiError {
+                code: status_code,
+                message: error_text,
+            });
+        }
 
         // 清理管理器
         let manager = match market_type {
@@ -2881,13 +3170,7 @@ impl BinanceWebSocketClient {
         };
 
         // 转换订单类型
-        let order_type = match report.order_type.as_str() {
-            "MARKET" => OrderType::Market,
-            "LIMIT" => OrderType::Limit,
-            "STOP_MARKET" => OrderType::StopMarket,
-            "STOP_LIMIT" => OrderType::StopLimit,
-            _ => OrderType::Limit,
-        };
+        let order_type = BinanceExchange::parse_binance_order_type(&report.order_type);
 
         let executed_amount = report.executed_amount.parse::<f64>().unwrap_or(0.0);
         let executed_price = if executed_amount > 0.0 {
@@ -3009,13 +3292,7 @@ impl BinanceWebSocketClient {
         };
 
         // 转换订单类型
-        let order_type = match order.order_type.as_str() {
-            "MARKET" => OrderType::Market,
-            "LIMIT" => OrderType::Limit,
-            "STOP_MARKET" => OrderType::StopMarket,
-            "STOP" | "STOP_LIMIT" => OrderType::StopLimit,
-            _ => OrderType::Limit,
-        };
+        let order_type = BinanceExchange::parse_binance_order_type(&order.order_type);
 
         let executed_amount = order.executed_qty.parse::<f64>().unwrap_or(0.0);
         let executed_price = order.avg_price.parse::<f64>().unwrap_or(0.0);
@@ -3143,6 +3420,7 @@ impl BinanceWebSocketClient {
             asks,
             timestamp: DateTime::from_timestamp(orderbook.event_time / 1000, 0)
                 .unwrap_or_else(|| Utc::now()),
+            info: serde_json::json!({ "lastUpdateId": json.get("u").and_then(|v| v.as_i64()) }),
         }))
     }
 
@@ -3316,10 +3594,9 @@ impl BinanceMessageHandler {
 
     /// 解析账户更新
     fn parse_account_update(&self, json: &serde_json::Value) -> Result<WsMessage> {
-        // 暂时返回错误消息
-        Ok(WsMessage::Error(
-            "Account update not implemented".to_string(),
-        ))
+        // 暂时记录账户更新事件，但不上抛业务错误
+        log::debug!("📈 收到账户更新事件: {}", json);
+        Ok(WsMessage::Error("ACCOUNT_UPDATE".to_string()))
     }
 
     /// 解析TRADE_LITE事件（期货轻量级成交事件）
@@ -3520,6 +3797,7 @@ impl BinanceMessageHandler {
             asks,
             timestamp: DateTime::from_timestamp(orderbook.event_time / 1000, 0)
                 .unwrap_or_else(|| Utc::now()),
+            info: serde_json::json!({ "lastUpdateId": json.get("u").and_then(|v| v.as_i64()) }),
         }))
     }
 

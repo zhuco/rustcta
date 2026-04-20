@@ -4,9 +4,9 @@ use chrono::{DateTime, Duration, Utc};
 use log::{debug, info, warn};
 
 use crate::core::error::ExchangeError;
-use crate::core::types::MarketType;
 use crate::core::types::OrderSide;
 use crate::cta::account_manager::AccountManager;
+use crate::strategies::common::get_trend_inputs;
 use crate::strategies::trend::config::{StopConfig, StopType};
 use crate::strategies::trend::position_manager::TrendPosition;
 use std::sync::Arc;
@@ -82,7 +82,21 @@ impl StopManager {
         &self,
         position: &TrendPosition,
     ) -> Result<Option<StopUpdate>, ExchangeError> {
-        let current_price = self.get_current_price(&position.symbol).await?;
+        let shared = get_trend_inputs(&position.symbol).ok_or_else(|| {
+            ExchangeError::Other(format!("缺少 {} 的共享行情数据", position.symbol))
+        })?;
+        let current_price = shared.indicators.last_price;
+        let atr_fast = shared
+            .trend_snapshot
+            .as_ref()
+            .map(|s| s.atr_5m)
+            .unwrap_or(shared.indicators.atr);
+        let atr_slow = shared
+            .trend_snapshot
+            .as_ref()
+            .map(|s| s.atr_15m)
+            .unwrap_or(atr_fast);
+        let atr_value = atr_fast.max(atr_slow).max(1e-6);
 
         // 计算当前盈利
         let profit = match position.side {
@@ -92,6 +106,23 @@ impl StopManager {
 
         let profit_percent = profit / position.average_price;
         let profit_r = profit / (position.average_price - position.stop_loss).abs();
+
+        if profit_percent >= self.config.lock_profit_pct {
+            let lock_price = match position.side {
+                OrderSide::Buy => position.entry_price * (1.0 + self.config.lock_buffer_pct),
+                OrderSide::Sell => position.entry_price * (1.0 - self.config.lock_buffer_pct),
+            };
+
+            if self.should_update_stop(position, lock_price) {
+                info!(
+                    "锁定利润: {} -> stop={:.6} (profit {:.2}%)",
+                    position.symbol,
+                    lock_price,
+                    profit_percent * 100.0
+                );
+                return Ok(Some(StopUpdate::MoveTo(lock_price)));
+            }
+        }
 
         // 检查时间止损
         if let Some(time_stop_hours) = self.config.time_stop_hours {
@@ -105,7 +136,6 @@ impl StopManager {
             }
         }
 
-        // 检查保本止损
         if self.config.breakeven_enabled && profit_r >= self.config.breakeven_trigger {
             if !self.is_at_breakeven(position) {
                 info!("移动止损到保本: {}", position.symbol);
@@ -113,7 +143,10 @@ impl StopManager {
             }
         }
 
-        // 检查追踪止损
+        if let Some(update) = self.evaluate_pnl_trailing(position, current_price, atr_value) {
+            return Ok(Some(update));
+        }
+
         if self.config.trailing_stop_enabled && profit_r >= self.config.trailing_activation {
             let new_stop = self.calculate_trailing_stop(position, current_price);
             if self.should_update_stop(position, new_stop) {
@@ -148,23 +181,49 @@ impl StopManager {
         (position.stop_loss - position.entry_price).abs() < 0.0001
     }
 
-    /// 获取当前价格
-    async fn get_current_price(&self, symbol: &str) -> Result<f64, ExchangeError> {
-        if let Some(account_manager) = &self.account_manager {
-            if let Some(account) = account_manager.get_account("binance_hcr") {
-                let ticker = account
-                    .exchange
-                    .get_ticker(symbol, MarketType::Spot)
-                    .await?;
-                return Ok(ticker.last);
+    fn evaluate_pnl_trailing(
+        &self,
+        position: &TrendPosition,
+        current_price: f64,
+        atr_value: f64,
+    ) -> Option<StopUpdate> {
+        if !self.config.pnl_trailing.enable {
+            return None;
+        }
+
+        let profit_in_atr = match position.side {
+            OrderSide::Buy => (current_price - position.entry_price) / atr_value,
+            OrderSide::Sell => (position.entry_price - current_price) / atr_value,
+        };
+
+        let mut candidate: Option<f64> = None;
+        for level in &self.config.pnl_trailing.lock_levels {
+            if profit_in_atr >= level.profit_atr {
+                let target = match position.side {
+                    OrderSide::Buy => {
+                        current_price
+                            - atr_value
+                                * level.stop_offset_atr
+                                * self.config.pnl_trailing.atr_multiple
+                    }
+                    OrderSide::Sell => {
+                        current_price
+                            + atr_value
+                                * level.stop_offset_atr
+                                * self.config.pnl_trailing.atr_multiple
+                    }
+                };
+                candidate = Some(target);
             }
         }
 
-        // 如果无法获取真实价格，返回错误
-        Err(ExchangeError::ParseError(format!(
-            "无法获取 {} 的市场价格",
-            symbol
-        )))
+        if let Some(target) = candidate {
+            if self.should_update_stop(position, target) {
+                return Some(StopUpdate::MoveTo(target));
+            }
+        }
+
+        None
     }
 
     /// 处理部分止盈

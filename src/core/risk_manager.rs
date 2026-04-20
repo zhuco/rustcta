@@ -231,7 +231,7 @@ impl GlobalRiskManager {
     }
 }
 
-/// 单例模式的全局风险管理器
+// 单例模式的全局风险管理器
 lazy_static::lazy_static! {
     pub static ref GLOBAL_RISK_MANAGER: Arc<GlobalRiskManager> = {
         let config = RiskConfig::default();

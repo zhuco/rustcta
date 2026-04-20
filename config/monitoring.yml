@@ -1,0 +1,36 @@
+# 监控页面配置
+# 每个策略源指向一个策略配置文件，服务会解析其中的 account/symbol 并聚合监控。
+
+refresh_secs: 3
+trades_refresh_secs: 20
+
+strategies:
+  - id: hedged_grid_xrp
+    name: 对冲网格(XRP)
+    kind: solusdc_hedged_grid
+    config_path: config/solusdc_hedged_grid.yml
+    enabled: true
+
+  - id: hedged_grid_bnb
+    name: 对冲网格(BNB)
+    kind: solusdc_hedged_grid
+    config_path: config/solusdc_hedged_grid_bnb.yml
+    enabled: true
+
+  - id: hedged_grid_ada
+    name: 对冲网格(ADA)
+    kind: solusdc_hedged_grid
+    config_path: config/solusdc_hedged_grid_ada.yml
+    enabled: true
+
+  - id: trend_follow
+    name: 趋势跟踪
+    kind: trend
+    config_path: config/trend_following.yml
+    enabled: true
+
+  - id: mean_reversion
+    name: 均值回归
+    kind: mean_reversion
+    config_path: config/mean_reversion.yml
+    enabled: true

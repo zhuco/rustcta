@@ -10,7 +10,7 @@ impl MeanReversionStrategy {
         snapshot: &super::model::SymbolSnapshot,
         plan: &OrderPlan,
     ) -> bool {
-        if snapshot.position.is_some() {
+        if snapshot.position(plan.side).is_some() {
             return false;
         }
 
@@ -48,24 +48,24 @@ impl MeanReversionStrategy {
         let states = self.symbol_states.read().await;
         states
             .values()
-            .filter(|state| state.position.is_some())
-            .count()
+            .map(|state| {
+                state.long_position.is_some() as usize + state.short_position.is_some() as usize
+            })
+            .sum()
     }
 
     async fn current_net_exposure(&self) -> f64 {
         let states = self.symbol_states.read().await;
-        states
-            .values()
-            .filter_map(|state| state.position.as_ref())
-            .map(|pos| {
-                let direction = if pos.side == OrderSide::Buy {
-                    1.0
-                } else {
-                    -1.0
-                };
-                direction * pos.remaining_qty * pos.entry_price
-            })
-            .sum()
+        let mut exposure = 0.0;
+        for state in states.values() {
+            if let Some(pos) = &state.long_position {
+                exposure += pos.remaining_qty * pos.entry_price;
+            }
+            if let Some(pos) = &state.short_position {
+                exposure -= pos.remaining_qty * pos.entry_price;
+            }
+        }
+        exposure
     }
 
     pub(super) async fn update_status(&self) {
@@ -73,16 +73,18 @@ impl MeanReversionStrategy {
             let states = self.symbol_states.read().await;
             states
                 .iter()
-                .filter_map(|(symbol, state)| {
-                    state.position.as_ref().map(|pos| StrategyPosition {
-                        symbol: symbol.clone(),
-                        net_position: if pos.side == OrderSide::Buy {
-                            pos.remaining_qty
-                        } else {
-                            -pos.remaining_qty
-                        },
-                        notional: pos.remaining_qty * pos.entry_price,
-                    })
+                .flat_map(|(symbol, state)| {
+                    state
+                        .iter_positions()
+                        .map(move |(side, pos)| StrategyPosition {
+                            symbol: symbol.clone(),
+                            net_position: if side == OrderSide::Buy {
+                                pos.remaining_qty
+                            } else {
+                                -pos.remaining_qty
+                            },
+                            notional: pos.remaining_qty * pos.entry_price,
+                        })
                 })
                 .collect::<Vec<_>>()
         };
