@@ -1,4 +1,5 @@
 // 核心策略模块
+pub mod accumulation;
 pub mod automated_scalping;
 pub mod avellaneda_stoikov;
 pub mod common;
@@ -31,6 +32,7 @@ pub trait Strategy: Send + Sync {
 }
 
 // 导出策略类型
+pub use accumulation::{AccumulationConfig, AccumulationStrategy};
 pub use automated_scalping::{ASConfig, AutomatedScalpingStrategy};
 pub use avellaneda_stoikov::{ASConfig as AVSConfig, AvellanedaStoikovStrategy};
 pub use copy_trading::{CopyTradingConfig, CopyTradingStrategy};

@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .short('s')
             .long("strategy")
             .value_name("STRATEGY")
-            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, mean_reversion, sideways_martingale, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow")
+            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow")
             .required(true))
         .arg(Arg::new("config")
             .short('c')
@@ -435,6 +435,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tokio::signal::ctrl_c().await?;
             log::info!("收到停止信号，正在关闭震荡行情马丁策略...");
+            strategy.stop().await?;
+        }
+        "accumulation" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: AccumulationConfig = serde_yaml::from_str(&file_content)?;
+
+            let risk_evaluator =
+                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
+
+            let deps = StrategyDepsBuilder::new()
+                .with_account_manager(account_manager.clone())
+                .with_risk_evaluator(risk_evaluator)
+                .build()?;
+
+            let strategy = AccumulationStrategy::create(config, deps)?;
+            log::info!("吸筹策略已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭吸筹策略...");
             strategy.stop().await?;
         }
         "poisson" => {

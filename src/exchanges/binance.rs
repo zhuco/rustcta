@@ -2127,6 +2127,42 @@ impl Exchange for BinanceExchange {
         })
     }
 
+    async fn get_open_interest(&self, symbol: &str) -> Result<OpenInterest> {
+        let exchange_symbol =
+            self.symbol_converter
+                .to_exchange_symbol(symbol, "binance", MarketType::Futures)?;
+
+        let endpoint = "/fapi/v1/openInterest";
+        let mut params = HashMap::new();
+        params.insert("symbol".to_string(), exchange_symbol);
+
+        #[derive(Deserialize)]
+        struct BinanceOpenInterest {
+            #[serde(rename = "openInterest")]
+            open_interest: String,
+            time: i64,
+        }
+
+        let response: BinanceOpenInterest = self
+            .send_public_request(endpoint, Some(params), MarketType::Futures)
+            .await?;
+
+        let open_interest = response.open_interest.parse::<f64>().unwrap_or(0.0);
+        let mark_price = self
+            .get_ticker(symbol, MarketType::Futures)
+            .await
+            .map(|ticker| ticker.last)
+            .unwrap_or(0.0);
+
+        Ok(OpenInterest {
+            symbol: symbol.to_string(),
+            open_interest,
+            open_interest_value: open_interest * mark_price,
+            timestamp: DateTime::from_timestamp(response.time / 1000, 0)
+                .unwrap_or_else(|| chrono::Utc::now()),
+        })
+    }
+
     async fn get_all_24h_statistics(&self, market_type: MarketType) -> Result<Vec<Statistics24h>> {
         let endpoint = match market_type {
             MarketType::Spot => "/api/v3/ticker/24hr",
