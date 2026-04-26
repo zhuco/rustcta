@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::core::types::OrderSide;
 use crate::strategies::common::{MarketRegime, SharedSymbolData};
 use crate::strategies::trend::config::{AllocationRegimesConfig, EntryAllocation};
-use crate::strategies::trend::signal_generator::TradeSignal;
+use crate::strategies::trend::signal_generator::{SignalType, TradeSignal};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntryMode {
@@ -53,6 +53,7 @@ impl AllocationResult {
 #[derive(Debug, Clone)]
 pub struct EntryOrderPlan {
     pub mode: EntryMode,
+    pub signal_type: SignalType,
     pub price: f64,
     pub side: OrderSide,
     pub notional: f64,
@@ -278,6 +279,7 @@ impl EntryPlanner {
 
                 Some(EntryOrderPlan {
                     mode: slice.mode,
+                    signal_type: trade_signal.signal_type.clone(),
                     price,
                     side: trade_signal.side,
                     notional: slice.notional,

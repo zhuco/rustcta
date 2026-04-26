@@ -1,0 +1,183 @@
+name: "Trend 4H Pullback Strategy"
+account_id: "binance_hcr"
+dual_position_mode: true
+
+symbols:
+  - BTC/USDC
+  - DOGE/USDC
+  - SUI/USDC
+  - LINK/USDC
+  - 1000PEPE/USDC
+
+symbol_inventory_limits: {}
+symbol_inventory_value_limits:
+  BTC/USDC: 360.0
+  DOGE/USDC: 300.0
+  SUI/USDC: 300.0
+  LINK/USDC: 300.0
+  1000PEPE/USDC: 300.0
+
+max_positions: 10
+max_daily_trades: 8
+min_account_balance: 100.0
+min_risk_reward_ratio: 1.5
+min_signal_confidence: 60.0
+max_holding_hours: 120
+pyramid_enabled: false
+pyramid_levels: []
+
+risk_config:
+  max_risk_per_trade: 0.01
+  max_daily_loss: 0.03
+  max_drawdown: 0.15
+  max_consecutive_losses: 5
+  max_total_exposure: 5.0
+  max_single_exposure: 0.6
+  max_correlated_exposure: 1.0
+  max_leverage: 5.0
+  max_slippage: 0.003
+  emergency_stop_loss: 0.1
+
+indicator_config:
+  primary_timeframe: "4h"
+  secondary_timeframe: "1h"
+  trigger_timeframe: "1h"
+  fast_ema: 20
+  slow_ema: 60
+  atr_period: 14
+  adx_period: 14
+  adx_threshold: 20.0
+  rsi_period: 14
+  rsi_overbought: 72.0
+  rsi_oversold: 28.0
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+
+signal_config:
+  breakout_lookback: 40
+  breakout_confirmation_bars: 1
+  pullback_ratio: 0.5
+  pullback_min_trend_strength: 30.0
+  momentum_threshold: 0.01
+  momentum_lookback: 12
+  pattern_min_bars: 6
+  pattern_confidence: 65.0
+  volume_multiplier: 1.2
+  volume_lookback: 24
+  signal_expiry: 14400
+
+position_config:
+  base_risk_ratio: 0.01
+  kelly_fraction: 0.25
+  pyramid_enabled: false
+  pyramid_levels: []
+  trend_factor_enabled: false
+  volatility_factor_enabled: false
+  time_factor_enabled: false
+  max_holding_hours: 120
+
+stop_config:
+  initial_stop_type: ATR
+  atr_multiplier: 2.0
+  fixed_stop_percent: 0.02
+  trailing_stop_enabled: true
+  trailing_activation: 1.5
+  trailing_distance: 0.5
+  trailing_step: 0.5
+  time_stop_hours: 120
+  breakeven_enabled: true
+  breakeven_trigger: 1.0
+  partial_targets:
+    - target_r: 1.0
+      close_ratio: 0.3
+    - target_r: 2.0
+      close_ratio: 0.3
+    - target_r: 3.0
+      close_ratio: 0.4
+  lock_profit_pct: 0.007
+  lock_buffer_pct: 0.001
+
+scoring:
+  primary_weight: 0.65
+  secondary_weight: 0.35
+  trigger_weight: 0.0
+  strong_threshold: 75.0
+  trade_threshold: 60.0
+  degrade_on_poor_data: true
+
+regime:
+  trending_threshold: 25.0
+  ranging_threshold: 15.0
+  volatility_threshold: 0.04
+  extreme_threshold: 0.1
+
+time_curve:
+  default_weight: 1.0
+  segments:
+    - start_hour: 0
+      end_hour: 24
+      weight: 1.0
+
+risk_budget:
+  max_portfolio_var: 0.04
+  max_symbol_var: 0.02
+  max_drawdown_pct: 0.12
+  panic_exit_drawdown: 0.2
+  pause_after_consecutive_losses: 5
+
+execution:
+  prefer_maker: true
+  allow_taker_fallback: true
+  maker_offset_bps: 2.0
+  taker_slippage_bps: 8.0
+  max_retries: 2
+  retry_backoff_ms: 250
+  order_timeout_secs: 300
+  iceberg_enabled: false
+  iceberg_visible_ratio: 0.2
+
+entry_base_notional: 100.0
+symbol_entry_notional:
+  BTC/USDC: 120.0
+  DOGE/USDC: 100.0
+  SUI/USDC: 100.0
+  LINK/USDC: 100.0
+  1000PEPE/USDC: 100.0
+max_trend_notional_multiplier: 5.0
+market_entry_on_breakout: true
+entry_price_improve_bps: 0.5
+entry_allocation:
+  ma: 1.0
+  fib: 0.0
+  bb: 0.0
+allocation_regimes:
+  trending:
+    ma: 1.0
+    fib: 0.0
+    bb: 0.0
+  ranging:
+    ma: 0.0
+    fib: 1.0
+    bb: 0.0
+  extreme:
+    ma: 1.0
+    fib: 0.0
+    bb: 0.0
+
+market_data:
+  cache_depth: 500
+  bootstrap_bars: 240
+  min_one_minute_bars: 60
+  min_one_hour_bars: 80
+
+poll_interval_secs: 60
+signal_cooldown_secs: 14400
+
+monitoring:
+  health_threshold: 65.0
+  warning_slippage_bps: 10.0
+  critical_slippage_bps: 25.0
+  enable_webhook: false

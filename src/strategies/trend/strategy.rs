@@ -105,6 +105,10 @@ impl ExitOrderKind {
 
 impl TrendIntradayStrategy {
     fn new(config: TrendConfig, deps: StrategyDeps) -> Result<Self> {
+        config
+            .validate()
+            .map_err(|err| anyhow!("趋势策略配置无效: {}", err))?;
+
         let account_manager = deps.account_manager.clone();
         let account = account_manager
             .get_account(&config.account_id)
@@ -303,7 +307,32 @@ impl TrendIntradayStrategy {
             return Err(anyhow!("账户可用余额为0，无法计算仓位"));
         }
 
-        let planned_notional = self.capital_allocator.planned_notional(capital.total);
+        let mut planned_notional = self
+            .config
+            .symbol_entry_notional
+            .get(symbol)
+            .copied()
+            .unwrap_or_else(|| self.capital_allocator.planned_notional(capital.total));
+
+        if let Some(multiplier) = self.config.max_trend_notional_multiplier {
+            let cap_notional = capital.total * multiplier;
+            let current_notional = self.current_trend_notional().await;
+            let remaining_notional = (cap_notional - current_notional).max(0.0);
+            if remaining_notional <= self.min_notional(symbol) {
+                warn!(
+                    "{} 趋势总名义已达上限: current={:.2}, cap={:.2}, skip",
+                    symbol, current_notional, cap_notional
+                );
+                return Ok(());
+            }
+            if planned_notional > remaining_notional {
+                info!(
+                    "{} 入场名义从 {:.2} 调整到剩余额度 {:.2}",
+                    symbol, planned_notional, remaining_notional
+                );
+                planned_notional = remaining_notional;
+            }
+        }
 
         let raw_risk_size = {
             let manager = self.position_manager.read().await;
@@ -498,6 +527,18 @@ impl TrendIntradayStrategy {
         status.updated_at = Utc::now();
     }
 
+    async fn current_trend_notional(&self) -> f64 {
+        let positions = {
+            let manager = self.position_manager.read().await;
+            manager.get_positions_report().positions
+        };
+
+        positions
+            .iter()
+            .map(|position| position.current_size * position.current_price.abs())
+            .sum()
+    }
+
     async fn refresh_account_metrics(&self) -> Result<AccountCapital> {
         let exchange = self.account.exchange.clone();
         let balances = exchange
@@ -585,6 +626,7 @@ impl TrendIntradayStrategy {
         let interval = Duration::from_secs(300);
 
         let handle = tokio::spawn(async move {
+            sleep(Duration::from_secs(30)).await;
             loop {
                 if !strategy.is_running().await {
                     break;
@@ -626,6 +668,78 @@ impl TrendIntradayStrategy {
         });
 
         self.task_handles.lock().await.push(handle);
+    }
+
+    fn order_position_side(order: &Order) -> Option<&str> {
+        order
+            .info
+            .get("positionSide")
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                order
+                    .info
+                    .get("positionSide")
+                    .and_then(|value| value.get(0))
+                    .and_then(|value| value.as_str())
+            })
+    }
+
+    fn order_reduce_only(order: &Order) -> bool {
+        order
+            .info
+            .get("reduceOnly")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    }
+
+    fn order_remaining_qty(order: &Order) -> f64 {
+        if order.remaining > f64::EPSILON {
+            order.remaining
+        } else {
+            (order.amount - order.filled).max(0.0)
+        }
+    }
+
+    fn is_same_position_exit_order(order: &Order, position: &TrendPosition) -> bool {
+        let exit_side = match position.side {
+            OrderSide::Buy => OrderSide::Sell,
+            OrderSide::Sell => OrderSide::Buy,
+        };
+        order.side == exit_side
+            && Self::order_position_side(order) == Some(Self::position_side_label(position.side))
+            && Self::order_reduce_only(order)
+    }
+
+    fn protection_status_for_position(
+        position: &TrendPosition,
+        orders: &[Order],
+    ) -> (bool, bool, f64, f64) {
+        let mut stop_qty = 0.0;
+        let mut take_profit_qty = 0.0;
+
+        for order in orders {
+            if !Self::is_same_position_exit_order(order, position) {
+                continue;
+            }
+
+            let qty = Self::order_remaining_qty(order);
+            match order.order_type {
+                OrderType::StopMarket | OrderType::StopLimit => stop_qty += qty,
+                OrderType::TakeProfitLimit | OrderType::TakeProfitMarket | OrderType::Limit => {
+                    take_profit_qty += qty
+                }
+                _ => {}
+            }
+        }
+
+        let required = position.current_size.max(0.0);
+        let tolerance = (required * 0.002).max(1e-6);
+        (
+            stop_qty + tolerance >= required,
+            take_profit_qty + tolerance >= required,
+            stop_qty,
+            take_profit_qty,
+        )
     }
 
     async fn sync_positions_and_protections(&self) -> Result<()> {
@@ -772,47 +886,42 @@ impl TrendIntradayStrategy {
                 continue;
             }
 
-            let exit_side = match position.side {
-                OrderSide::Buy => OrderSide::Sell,
-                OrderSide::Sell => OrderSide::Buy,
-            };
-
             let orders = orders_by_symbol
                 .get(&position.symbol)
                 .cloned()
                 .unwrap_or_default();
 
-            let mut has_stop = false;
-            let mut has_take_profit = false;
-            for order in &orders {
-                if order.side != exit_side {
-                    continue;
-                }
-                match order.order_type {
-                    OrderType::StopMarket | OrderType::StopLimit => has_stop = true,
-                    OrderType::TakeProfitLimit | OrderType::TakeProfitMarket | OrderType::Limit => {
-                        has_take_profit = true
-                    }
-                    _ => {}
-                }
-            }
+            let (has_stop, has_take_profit, stop_qty, take_profit_qty) =
+                Self::protection_status_for_position(&position, &orders);
 
             if has_stop && has_take_profit {
+                debug!(
+                    "{} {} 保护单完整: stop_qty={:.8}, tp_qty={:.8}, pos_qty={:.8}",
+                    position.symbol,
+                    Self::position_side_label(position.side),
+                    stop_qty,
+                    take_profit_qty,
+                    position.current_size
+                );
                 continue;
             }
 
             warn!(
-                "{} 缺少{}，重新挂保护单",
+                "{} {} 缺少{}: stop_qty={:.8}, tp_qty={:.8}, pos_qty={:.8}，重新挂保护单",
                 position.symbol,
+                Self::position_side_label(position.side),
                 match (has_stop, has_take_profit) {
                     (false, false) => "止损与止盈",
                     (false, true) => "止损",
                     (true, false) => "止盈",
                     _ => "保护单",
-                }
+                },
+                stop_qty,
+                take_profit_qty,
+                position.current_size
             );
 
-            self.cancel_exit_orders(&position.symbol, &orders, exit_side.clone())
+            self.cancel_exit_orders_for_position(&position.symbol, &orders, &position)
                 .await;
 
             let handles = self
@@ -839,13 +948,18 @@ impl TrendIntradayStrategy {
         Ok(())
     }
 
-    async fn cancel_exit_orders(&self, symbol: &str, orders: &[Order], exit_side: OrderSide) {
+    async fn cancel_exit_orders_for_position(
+        &self,
+        symbol: &str,
+        orders: &[Order],
+        position: &TrendPosition,
+    ) {
         if orders.is_empty() {
             return;
         }
 
         for order in orders {
-            if order.side != exit_side {
+            if !Self::is_same_position_exit_order(order, position) {
                 continue;
             }
             if let Err(err) = self
@@ -854,9 +968,20 @@ impl TrendIntradayStrategy {
                 .cancel_order(&order.id, symbol, MarketType::Futures)
                 .await
             {
-                warn!("{} 取消旧保护单 {} 失败: {}", symbol, order.id, err);
+                warn!(
+                    "{} {} 取消旧保护单 {} 失败: {}",
+                    symbol,
+                    Self::position_side_label(position.side),
+                    order.id,
+                    err
+                );
             } else {
-                info!("{} 已取消旧保护单 {}", symbol, order.id);
+                info!(
+                    "{} {} 已取消旧保护单 {}",
+                    symbol,
+                    Self::position_side_label(position.side),
+                    order.id
+                );
             }
         }
     }
@@ -1658,14 +1783,21 @@ impl TrendIntradayStrategy {
                 .map_err(|e| anyhow!("批量下单失败: {}", e))?;
 
             let mut order_map: HashMap<String, String> = HashMap::new();
+            let mut immediate_fills: HashMap<String, (f64, f64)> = HashMap::new();
             for order in response.successful_orders {
                 if let Some(client_id) = order
                     .info
                     .get("clientOrderId")
+                    .or_else(|| order.info.get("clientOrderId"))
                     .and_then(|v| v.as_str())
+                    .or_else(|| order.info.get("newClientOrderId").and_then(|v| v.as_str()))
                     .map(|s| s.to_string())
                 {
-                    order_map.insert(client_id, order.id.clone());
+                    order_map.insert(client_id.clone(), order.id.clone());
+                    if order.filled > f64::EPSILON {
+                        let price = order.price.unwrap_or(0.0);
+                        immediate_fills.insert(client_id, (order.filled, price));
+                    }
                 }
             }
             for order in pending.iter_mut() {
@@ -1680,6 +1812,21 @@ impl TrendIntradayStrategy {
 
             let mut next_round = Vec::new();
             for mut order in pending.into_iter() {
+                if let Some((qty, price)) = immediate_fills.remove(&order.client_id) {
+                    fills.push(PlanFill {
+                        mode: order.plan.mode,
+                        signal_type: order.plan.signal_type.clone(),
+                        qty,
+                        price: if price > f64::EPSILON {
+                            price
+                        } else {
+                            order.price
+                        },
+                        reference_price: order.plan.price,
+                    });
+                    continue;
+                }
+
                 match self
                     .order_tracker
                     .wait_client_with_timeout(order.client_id.clone(), timeout, "entry_fill")
@@ -1699,6 +1846,7 @@ impl TrendIntradayStrategy {
                         if qty > f64::EPSILON {
                             fills.push(PlanFill {
                                 mode: order.plan.mode,
+                                signal_type: order.plan.signal_type.clone(),
                                 qty,
                                 price,
                                 reference_price: order.plan.price,
@@ -1990,19 +2138,42 @@ impl TrendIntradayStrategy {
         order: &WorkingOrder,
         include_position_side: bool,
     ) -> Option<OrderRequest> {
-        if order.quantity <= f64::EPSILON || order.price <= 0.0 {
+        if order.quantity <= f64::EPSILON {
             return None;
         }
-        let mut request = OrderRequest::new(
-            symbol.to_string(),
-            order.plan.side,
-            OrderType::Limit,
-            order.quantity,
-            Some(order.price),
-            MarketType::Futures,
-        );
-        request.time_in_force = Some("GTX".to_string());
-        request.post_only = Some(true);
+
+        let use_market = self.config.market_entry_on_breakout
+            && matches!(
+                order.plan.signal_type,
+                SignalType::TrendBreakout | SignalType::MomentumSurge | SignalType::PatternBreakout
+            );
+
+        let mut request = if use_market {
+            OrderRequest::new(
+                symbol.to_string(),
+                order.plan.side,
+                OrderType::Market,
+                order.quantity,
+                None,
+                MarketType::Futures,
+            )
+        } else {
+            if order.price <= 0.0 {
+                return None;
+            }
+            let mut request = OrderRequest::new(
+                symbol.to_string(),
+                order.plan.side,
+                OrderType::Limit,
+                order.quantity,
+                Some(order.price),
+                MarketType::Futures,
+            );
+            request.time_in_force = Some("GTX".to_string());
+            request.post_only = Some(true);
+            request
+        };
+
         request.client_order_id = Some(order.client_id.clone());
         if include_position_side {
             let mut params = HashMap::new();
@@ -2135,6 +2306,19 @@ impl TrendIntradayStrategy {
             .get_positions(None)
             .await
             .map_err(|e| anyhow!("获取账户持仓失败: {}", e))?;
+        let open_orders = self
+            .account
+            .exchange
+            .get_open_orders(None, MarketType::Futures)
+            .await
+            .map_err(|e| anyhow!("获取账户挂单失败: {}", e))?;
+        let mut orders_by_symbol: HashMap<String, Vec<Order>> = HashMap::new();
+        for order in open_orders {
+            if let Some(symbol) = self.match_config_symbol(&order.symbol) {
+                orders_by_symbol.entry(symbol).or_default().push(order);
+            }
+        }
+
         let total_positions = positions.len();
         let mut unmatched_symbols: Vec<String> = Vec::new();
 
@@ -2177,6 +2361,34 @@ impl TrendIntradayStrategy {
                 }
                 manager.restore_position(restored_position.clone());
             }
+
+            let existing_orders = orders_by_symbol.get(&symbol).cloned().unwrap_or_default();
+            let (has_stop, has_take_profit, stop_qty, take_profit_qty) =
+                Self::protection_status_for_position(&restored_position, &existing_orders);
+
+            if has_stop && has_take_profit {
+                info!(
+                    "启动接管: {} {} 已有完整保护单 stop_qty={:.8}, tp_qty={:.8}, pos_qty={:.8}",
+                    symbol,
+                    Self::position_side_label(side),
+                    stop_qty,
+                    take_profit_qty,
+                    size
+                );
+                restored += 1;
+                continue;
+            }
+
+            warn!(
+                "启动接管: {} {} 缺少保护单 stop_qty={:.8}, tp_qty={:.8}, pos_qty={:.8}，重新挂保护单",
+                symbol,
+                Self::position_side_label(side),
+                stop_qty,
+                take_profit_qty,
+                size
+            );
+            self.cancel_exit_orders_for_position(&symbol, &existing_orders, &restored_position)
+                .await;
 
             let handles = self
                 .submit_bracket_orders(
@@ -2236,6 +2448,7 @@ impl WorkingOrder {
 #[derive(Clone)]
 struct PlanFill {
     mode: EntryMode,
+    signal_type: SignalType,
     qty: f64,
     price: f64,
     reference_price: f64,
@@ -2265,7 +2478,6 @@ impl StrategyInstance for TrendIntradayStrategy {
         self.risk_controller.self_check().await?;
         self.refresh_account_metrics().await?;
         self.takeover_existing_positions().await?;
-        self.sync_positions_and_protections().await?;
         self.spawn_housekeeping_task().await;
         self.spawn_protection_guard_task().await;
         self.spawn_status_report_task().await;

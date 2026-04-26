@@ -1,6 +1,8 @@
 // 核心策略模块
+pub mod accumulation;
 pub mod automated_scalping;
 pub mod avellaneda_stoikov;
+pub mod beta_hedge_market_maker;
 pub mod common;
 pub mod copy_trading;
 pub mod grid_scale;
@@ -31,8 +33,10 @@ pub trait Strategy: Send + Sync {
 }
 
 // 导出策略类型
+pub use accumulation::{AccumulationConfig, AccumulationStrategy};
 pub use automated_scalping::{ASConfig, AutomatedScalpingStrategy};
 pub use avellaneda_stoikov::{ASConfig as AVSConfig, AvellanedaStoikovStrategy};
+pub use beta_hedge_market_maker::{BetaHedgeMarketMaker, BetaHedgeMarketMakerConfig};
 pub use copy_trading::{CopyTradingConfig, CopyTradingStrategy};
 pub use grid_scale::{GridScaleConfig, GridScaleStrategy};
 pub use hedged_grid::{HedgedGridConfig, HedgedGridStrategy};

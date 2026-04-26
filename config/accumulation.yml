@@ -1,0 +1,64 @@
+strategy:
+  name: "industrial_accumulation"
+  version: "1.0.0"
+  enabled: true
+  log_level: "INFO"
+  description: "5m 吸筹量化策略，结合放量、小波动、Delta/CVD、OI 与 15m EMA50 趋势过滤"
+
+account:
+  account_id: "binance_hcr"
+  market_type: "Futures"
+  dual_position_mode: true
+  allow_long: true
+  allow_short: true
+
+data:
+  scan_interval_secs: 60
+  lookback_5m: 160
+  lookback_15m: 120
+  trade_limit: 1000
+
+symbols:
+  - symbol: "ETH/USDC"
+    enabled: true
+  - symbol: "BTC/USDC"
+    enabled: true
+  - symbol: "SOL/USDC"
+    enabled: true
+
+signal:
+  volume_lookback_bars: 20
+  delta_lookback_bars: 6
+  volume_spike_ratio: 1.8
+  small_price_change_pct: 0.35
+  delta_ratio_threshold: 0.12
+  oi_change_threshold: 0.002
+  entry_score_threshold: 0.68
+  weights:
+    volume_change: 0.35
+    price_change: 0.10
+    cvd_delta: 0.35
+    open_interest: 0.20
+
+trend_filter:
+  ema_period: 50
+
+risk:
+  fixed_notional_usdt: 50.0
+  max_active_trades_per_symbol: 2
+  min_entry_interval_minutes: 10
+
+exits:
+  atr_period: 14
+  atr_stop_multiplier: 1.4
+  tp1_atr_multiple: 1.0
+  tp2_atr_multiple: 2.0
+  tp1_fraction: 0.5
+  time_stop_bars: 15
+  conservative_intrabar: true
+
+review:
+  enabled: true
+  review_bars: 15
+  title: "吸筹策略15根K线回顾"
+  webhook_url: null

@@ -223,8 +223,8 @@ impl StrategyConfig {
         if self.symbol.trim().is_empty() {
             return Err("symbol 不能为空".to_string());
         }
-        if !(2..=10).contains(&self.grid.levels_per_side) {
-            return Err("levels_per_side 必须在 2..=10".to_string());
+        if !(1..=10).contains(&self.grid.levels_per_side) {
+            return Err("levels_per_side 必须在 1..=10".to_string());
         }
         if let Some(abs) = self.grid.grid_spacing_abs {
             if abs <= 0.0 {
@@ -317,6 +317,20 @@ impl ResolvedPrecision {
         };
         let factor = 10f64.powi(self.qty_digits as i32);
         (adjusted * factor).ceil() / factor
+    }
+
+    pub fn quantize_qty_nearest(&self, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+        let adjusted = if self.step_size > 0.0 {
+            let multiples = (qty / self.step_size).round();
+            multiples * self.step_size
+        } else {
+            qty
+        };
+        let factor = 10f64.powi(self.qty_digits as i32);
+        (adjusted * factor).round() / factor
     }
 }
 
