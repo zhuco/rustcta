@@ -113,6 +113,18 @@ pub struct TrendConfig {
     #[serde(default)]
     pub entry_base_notional: Option<f64>,
 
+    /// 按交易对覆盖每次开仓固定名义（USDT）
+    #[serde(default)]
+    pub symbol_entry_notional: HashMap<String, f64>,
+
+    /// 趋势策略总名义上限倍数（相对账户权益），用于硬限制新开仓
+    #[serde(default)]
+    pub max_trend_notional_multiplier: Option<f64>,
+
+    /// 突破类信号是否使用市价单，回调类信号仍使用限价单
+    #[serde(default)]
+    pub market_entry_on_breakout: bool,
+
     /// Maker 订单统一的价格改善幅度（bps）
     #[serde(default = "default_entry_price_improve_bps")]
     pub entry_price_improve_bps: f64,
@@ -368,13 +380,13 @@ impl TrendConfig {
             return Err(ExchangeError::Other("日最大亏损不能超过5%".to_string()));
         }
 
-        if self.risk_config.max_leverage > 3.0 {
-            return Err(ExchangeError::Other("最大杠杆不能超过3倍".to_string()));
+        if self.risk_config.max_leverage > 5.0 {
+            return Err(ExchangeError::Other("最大杠杆不能超过5倍".to_string()));
         }
 
         // 仓位参数验证
-        if self.risk_config.max_total_exposure > 0.5 {
-            return Err(ExchangeError::Other("总仓位不能超过50%".to_string()));
+        if self.risk_config.max_total_exposure > 5.0 {
+            return Err(ExchangeError::Other("总仓位不能超过账户5倍".to_string()));
         }
 
         if self.poll_interval_secs == 0 {
@@ -409,6 +421,23 @@ impl TrendConfig {
             if notional <= 0.0 {
                 return Err(ExchangeError::Other(
                     "entry_base_notional 必须大于0".to_string(),
+                ));
+            }
+        }
+
+        for (symbol, notional) in &self.symbol_entry_notional {
+            if *notional <= 0.0 {
+                return Err(ExchangeError::Other(format!(
+                    "{} 的 symbol_entry_notional 必须大于0",
+                    symbol
+                )));
+            }
+        }
+
+        if let Some(multiplier) = self.max_trend_notional_multiplier {
+            if multiplier <= 0.0 || multiplier > 5.0 {
+                return Err(ExchangeError::Other(
+                    "max_trend_notional_multiplier 必须在(0, 5]范围内".to_string(),
                 ));
             }
         }
@@ -580,6 +609,9 @@ impl Default for TrendConfig {
             allocation_regimes: AllocationRegimesConfig::default(),
             market_data: MarketDataConfig::default(),
             entry_base_notional: None,
+            symbol_entry_notional: HashMap::new(),
+            max_trend_notional_multiplier: None,
+            market_entry_on_breakout: false,
             entry_price_improve_bps: default_entry_price_improve_bps(),
             poll_interval_secs: default_poll_interval_secs(),
             signal_cooldown_secs: default_signal_cooldown_secs(),

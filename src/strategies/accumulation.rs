@@ -1938,7 +1938,11 @@ mod tests {
             atr_at_entry: 1.0,
             tp1_price: 101.0,
             tp2_price: 102.0,
+            tp1_target_quantity: 0.5,
+            tp2_target_quantity: 0.5,
             trailing_stop_price: 98.0,
+            tp1_order: None,
+            tp2_order: None,
             signal: SignalBreakdown {
                 total_score: 0.8,
                 volume_score: 0.8,

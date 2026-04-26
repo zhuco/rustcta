@@ -14,7 +14,7 @@ engine:
     # ADA 当前价格约 0.254 USDC，间距 0.0006 约等于 0.24%，
     # 与现有 XRP / BNB 配置的相对密度接近，但对小账户更保守。
     grid_spacing_abs: 0.0006
-    order_notional: 5.0
+    order_notional: 8.0
     strict_pairing: false
     fill_remaining_slots_with_opens: true
   follow:

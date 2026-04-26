@@ -424,6 +424,59 @@ mod solusdc_hedged_grid {
     }
 
     #[test]
+    fn fill_qty_with_float_residue_should_preserve_step_aligned_close_qty() {
+        let mut config = test_config();
+        config.grid.levels_per_side = 1;
+        config.grid.order_qty = Some(0.002);
+        config.precision.min_notional = Some(0.0);
+        let mut engine = GridEngine::new(config, true).expect("engine");
+        let position = PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        };
+        engine.update_position(position);
+        let snap = snapshot(100.0);
+        engine.rebuild_grid(&snap);
+
+        let buy_order = engine
+            .buy_orders()
+            .iter()
+            .find(|o| o.intent == OrderIntent::OpenLongBuy)
+            .cloned()
+            .expect("buy");
+        let fill = FillEvent {
+            order_id: buy_order.id.clone(),
+            intent: buy_order.intent,
+            fill_qty: buy_order.qty - 1e-9,
+            fill_price: buy_order.price,
+            timestamp: Utc::now(),
+            partial: false,
+        };
+        let actions = engine.handle_fill(fill, &snap);
+
+        let close_qtys: Vec<f64> = actions
+            .iter()
+            .filter_map(|action| match action {
+                EngineAction::Place(draft) if draft.intent == OrderIntent::CloseLongSell => {
+                    Some(draft.qty)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(close_qtys.iter().any(|qty| (*qty - 0.002).abs() < 1e-9));
+
+        let position = engine.position();
+        assert!((position.long_available - 1.002).abs() < 1e-9);
+    }
+
+    #[test]
     fn same_price_double_sell_fills_should_roll_twice() {
         let config = test_config();
         let spacing = config.grid.grid_spacing_pct;

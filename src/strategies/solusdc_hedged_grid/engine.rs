@@ -188,6 +188,7 @@ impl GridEngine {
 
     pub fn handle_fill(&mut self, fill: FillEvent, snapshot: &MarketSnapshot) -> Vec<EngineAction> {
         self.update_market(snapshot);
+        let fill = self.normalize_fill(fill);
         let order_price = self
             .state
             .ledger
@@ -1480,12 +1481,49 @@ impl GridEngine {
         id
     }
 
+    fn normalize_fill(&self, mut fill: FillEvent) -> FillEvent {
+        fill.fill_qty = self.normalize_fill_qty(fill.fill_qty);
+        fill
+    }
+
+    fn normalize_fill_qty(&self, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+        if self.precision.step_size <= 0.0 {
+            return qty;
+        }
+
+        // Binance 成交回报里的数量理论上已经符合 step_size，但浮点解析/差分后
+        // 可能出现 0.001999999 这类残差。若与最近的步长倍数足够接近，就吸附回去。
+        let snapped = self.precision.quantize_qty_nearest(qty);
+        let tolerance = (self.precision.step_size * 1e-6).max(1e-9);
+        if (snapped - qty).abs() <= tolerance {
+            snapped
+        } else {
+            self.precision.quantize_qty(qty)
+        }
+    }
+
+    fn snap_position_qty(&self, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+        let snapped = self.precision.quantize_qty_nearest(qty);
+        if snapped < self.precision.min_qty * 0.5 {
+            0.0
+        } else {
+            snapped
+        }
+    }
+
     fn apply_fill(&mut self, fill: &FillEvent) {
+        let fill_qty = self.normalize_fill_qty(fill.fill_qty);
         let mut remove_order = false;
         let mut intent_side = None;
         if let Some(record) = self.state.ledger.get_mut(&fill.order_id) {
-            record.filled_qty += fill.fill_qty;
-            let remaining = (record.qty - fill.fill_qty).max(0.0);
+            record.filled_qty += fill_qty;
+            let remaining = (record.qty - fill_qty).max(0.0);
             if fill.partial && remaining > 0.0 {
                 record.qty = remaining;
                 match record.intent.side() {
@@ -1513,24 +1551,28 @@ impl GridEngine {
 
         match fill.intent {
             OrderIntent::OpenLongBuy => {
-                self.state.position.long_qty += fill.fill_qty;
-                self.state.position.long_available += fill.fill_qty;
+                self.state.position.long_qty =
+                    self.snap_position_qty(self.state.position.long_qty + fill_qty);
+                self.state.position.long_available =
+                    self.snap_position_qty(self.state.position.long_available + fill_qty);
             }
             OrderIntent::CloseLongSell => {
                 self.state.position.long_qty =
-                    (self.state.position.long_qty - fill.fill_qty).max(0.0);
-                self.state.position.long_available =
-                    (self.state.position.long_available - fill.fill_qty).max(0.0);
+                    self.snap_position_qty((self.state.position.long_qty - fill_qty).max(0.0));
+                self.state.position.long_available = self
+                    .snap_position_qty((self.state.position.long_available - fill_qty).max(0.0));
             }
             OrderIntent::OpenShortSell => {
-                self.state.position.short_qty += fill.fill_qty;
-                self.state.position.short_available += fill.fill_qty;
+                self.state.position.short_qty =
+                    self.snap_position_qty(self.state.position.short_qty + fill_qty);
+                self.state.position.short_available =
+                    self.snap_position_qty(self.state.position.short_available + fill_qty);
             }
             OrderIntent::CloseShortBuy => {
                 self.state.position.short_qty =
-                    (self.state.position.short_qty - fill.fill_qty).max(0.0);
-                self.state.position.short_available =
-                    (self.state.position.short_available - fill.fill_qty).max(0.0);
+                    self.snap_position_qty((self.state.position.short_qty - fill_qty).max(0.0));
+                self.state.position.short_available = self
+                    .snap_position_qty((self.state.position.short_available - fill_qty).max(0.0));
             }
         }
 
