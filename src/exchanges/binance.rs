@@ -15,6 +15,37 @@ use crate::core::{
 use crate::utils::{get_synced_timestamp, get_time_sync, SignatureHelper, SymbolConverter};
 use tokio_tungstenite::tungstenite::Message;
 
+pub fn build_binance_kline_query_params(
+    symbol: &str,
+    interval: Interval,
+    limit: Option<u32>,
+    start_time: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
+) -> HashMap<String, String> {
+    let mut params = HashMap::new();
+    params.insert("symbol".to_string(), symbol.to_string());
+    params.insert(
+        "interval".to_string(),
+        interval.to_exchange_format("binance"),
+    );
+    if let Some(limit) = limit {
+        params.insert("limit".to_string(), limit.to_string());
+    }
+    if let Some(start_time) = start_time {
+        params.insert(
+            "startTime".to_string(),
+            start_time.timestamp_millis().to_string(),
+        );
+    }
+    if let Some(end_time) = end_time {
+        params.insert(
+            "endTime".to_string(),
+            end_time.timestamp_millis().to_string(),
+        );
+    }
+    params
+}
+
 /// ListenKey管理器，负责自动续期和重连
 #[derive(Debug, Clone)]
 pub struct ListenKeyManager {
@@ -121,6 +152,67 @@ impl Clone for BinanceExchange {
 }
 
 impl BinanceExchange {
+    pub async fn get_klines_window(
+        &self,
+        symbol: &str,
+        interval: Interval,
+        market_type: MarketType,
+        limit: Option<u32>,
+        start_time: Option<DateTime<Utc>>,
+        end_time: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Kline>> {
+        let exchange_symbol =
+            self.symbol_converter
+                .to_exchange_symbol(symbol, "binance", market_type)?;
+
+        let endpoint = match market_type {
+            MarketType::Spot => "/api/v3/klines",
+            MarketType::Futures => "/fapi/v1/klines",
+        };
+
+        let params = build_binance_kline_query_params(
+            &exchange_symbol,
+            interval,
+            limit,
+            start_time,
+            end_time,
+        );
+
+        // 币安 K 线数据格式: [open_time, open, high, low, close, volume, close_time, quote_volume, trade_count, ...]
+        let klines_data: Vec<Vec<serde_json::Value>> = self
+            .send_public_request(endpoint, Some(params), market_type)
+            .await?;
+
+        let mut result = Vec::new();
+        for kline_data in klines_data {
+            if kline_data.len() >= 9 {
+                result.push(Kline {
+                    symbol: symbol.to_string(),
+                    interval: interval.to_string(),
+                    open_time: DateTime::from_timestamp(
+                        kline_data[0].as_i64().unwrap_or(0) / 1000,
+                        0,
+                    )
+                    .unwrap_or_else(|| chrono::Utc::now()),
+                    close_time: DateTime::from_timestamp(
+                        kline_data[6].as_i64().unwrap_or(0) / 1000,
+                        0,
+                    )
+                    .unwrap_or_else(|| chrono::Utc::now()),
+                    open: kline_data[1].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                    high: kline_data[2].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                    low: kline_data[3].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                    close: kline_data[4].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                    volume: kline_data[5].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                    quote_volume: kline_data[7].as_str().unwrap_or("0").parse().unwrap_or(0.0),
+                    trade_count: kline_data[8].as_u64().unwrap_or(0),
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
     /// 同步服务器时间，计算本地时间与服务器时间的偏移（增加重试机制）
     pub async fn sync_server_time(&self) -> Result<()> {
         // 使用静态变量记录是否已经同步过（进程级别）
@@ -2046,58 +2138,8 @@ impl Exchange for BinanceExchange {
         market_type: MarketType,
         limit: Option<u32>,
     ) -> Result<Vec<Kline>> {
-        let exchange_symbol =
-            self.symbol_converter
-                .to_exchange_symbol(symbol, "binance", market_type)?;
-
-        let endpoint = match market_type {
-            MarketType::Spot => "/api/v3/klines",
-            MarketType::Futures => "/fapi/v1/klines",
-        };
-
-        let mut params = HashMap::new();
-        params.insert("symbol".to_string(), exchange_symbol);
-        params.insert(
-            "interval".to_string(),
-            interval.to_exchange_format("binance"),
-        );
-        if let Some(limit) = limit {
-            params.insert("limit".to_string(), limit.to_string());
-        }
-
-        // 币安K线数据格式: [开盘时间, 开盘价, 最高价, 最低价, 收盘价, 成交量, 收盘时间, 成交额, 成交次数, ...]
-        let klines_data: Vec<Vec<serde_json::Value>> = self
-            .send_public_request(endpoint, Some(params), market_type)
-            .await?;
-
-        let mut result = Vec::new();
-        for kline_data in klines_data {
-            if kline_data.len() >= 9 {
-                result.push(Kline {
-                    symbol: symbol.to_string(),
-                    interval: interval.to_string(),
-                    open_time: DateTime::from_timestamp(
-                        kline_data[0].as_i64().unwrap_or(0) / 1000,
-                        0,
-                    )
-                    .unwrap_or_else(|| chrono::Utc::now()),
-                    close_time: DateTime::from_timestamp(
-                        kline_data[6].as_i64().unwrap_or(0) / 1000,
-                        0,
-                    )
-                    .unwrap_or_else(|| chrono::Utc::now()),
-                    open: kline_data[1].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                    high: kline_data[2].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                    low: kline_data[3].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                    close: kline_data[4].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                    volume: kline_data[5].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                    quote_volume: kline_data[7].as_str().unwrap_or("0").parse().unwrap_or(0.0),
-                    trade_count: kline_data[8].as_u64().unwrap_or(0),
-                });
-            }
-        }
-
-        Ok(result)
+        self.get_klines_window(symbol, interval, market_type, limit, None, None)
+            .await
     }
 
     async fn get_24h_statistics(

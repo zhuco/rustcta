@@ -3,6 +3,7 @@
 #![allow(unused_imports)]
 
 pub mod analysis;
+pub mod backtest;
 pub mod core;
 pub mod cta;
 pub mod exchanges;

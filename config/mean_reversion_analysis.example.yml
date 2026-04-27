@@ -1,0 +1,4 @@
+scan_report: reports/scan-report.json
+walk_forward_report: reports/walk-forward-report.json
+analysis_output: reports/analysis-report.json
+top_runs: 10

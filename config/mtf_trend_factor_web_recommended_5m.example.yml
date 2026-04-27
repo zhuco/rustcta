@@ -1,0 +1,88 @@
+initial_equity: 10000.0
+trade_notional: 1000.0
+fee_rate: 0.001
+slippage_rate: 0.0002
+search:
+  min_trades: 12
+cost_scenarios:
+  - name: normal
+    fee_rate: 0.001
+    slippage_rate: 0.0002
+  - name: stress
+    fee_rate: 0.0012
+    slippage_rate: 0.0005
+candidate_filter:
+  min_trades: 15
+  min_profit_factor: 1.08
+  min_roi_pct: 0.2
+  max_drawdown_pct: -8.0
+  require_profitable_cost_scenarios: 2
+timeframes:
+  trend: "15m"
+  structure: "5m"
+  trigger: "5m"
+strategies:
+  - name: web_turtle_20_10_ema20_50_5m
+    trend:
+      ema_trend:
+        fast: [20]
+        slow: [50]
+      adx_min: [25]
+      choppiness_max:
+        period: [14]
+        threshold: [38.2, 50.0]
+    structure:
+      donchian_breakout:
+        lookback: [20]
+      breakout_valid_bars: [1]
+    trigger:
+      supertrend_direction:
+        period: [10]
+        multiplier: [3.0]
+      mfi_range:
+        period: [14]
+        min: [20]
+        max: [80]
+    exit:
+      atr_stop: [2.0]
+      reward_r: [999.0]
+      time_stop_bars: [240]
+      reverse_signal_exit: true
+      donchian_exit:
+        lookback: [10]
+      trailing_atr:
+        period: [14]
+        multiplier: [2.0]
+        activation_r: [1.0]
+  - name: web_turtle_55_20_ema50_200_5m
+    trend:
+      ema_trend:
+        fast: [50]
+        slow: [200]
+      adx_min: [25]
+      choppiness_max:
+        period: [14]
+        threshold: [38.2, 50.0]
+    structure:
+      donchian_breakout:
+        lookback: [55]
+      breakout_valid_bars: [1]
+    trigger:
+      supertrend_direction:
+        period: [10]
+        multiplier: [3.0]
+      mfi_range:
+        period: [14]
+        min: [20]
+        max: [80]
+    exit:
+      atr_stop: [2.0]
+      reward_r: [999.0]
+      time_stop_bars: [240]
+      reverse_signal_exit: true
+      donchian_exit:
+        lookback: [20]
+      trailing_atr:
+        period: [14]
+        multiplier: [2.0]
+        activation_r: [1.0]

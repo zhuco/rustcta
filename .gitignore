@@ -5,6 +5,7 @@ Cargo.lock
 # Logs
 logs/
 *.log
+data/
 
 # Environment files
 .env

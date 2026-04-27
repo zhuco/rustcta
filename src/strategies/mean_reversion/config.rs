@@ -71,6 +71,22 @@ fn default_take_profit_atr_k() -> f64 {
     1.8
 }
 
+fn default_maker_fee_bps() -> f64 {
+    2.0
+}
+
+fn default_taker_fee_bps() -> f64 {
+    5.0
+}
+
+fn default_market_slippage_bps() -> f64 {
+    0.0
+}
+
+fn default_zero_latency_ms() -> u64 {
+    0
+}
+
 fn default_per_trade_notional() -> f64 {
     6.0
 }
@@ -120,6 +136,10 @@ fn default_indicator_choppiness() -> Option<ChoppinessConfig> {
 }
 
 fn default_blackout_windows() -> Vec<BlackoutWindow> {
+    Vec::new()
+}
+
+fn default_trading_sessions() -> Vec<TradingSession> {
     Vec::new()
 }
 
@@ -364,6 +384,8 @@ pub struct SymbolConfig {
     pub enforce_spread_rule: bool,
     #[serde(default = "default_blackout_windows")]
     pub blackout_windows: Vec<BlackoutWindow>,
+    #[serde(default = "default_trading_sessions")]
+    pub trading_sessions: Vec<TradingSession>,
     #[serde(default)]
     pub overrides: HashMap<String, f64>,
     #[serde(default)]
@@ -373,6 +395,15 @@ pub struct SymbolConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlackoutWindow {
     pub reason: String,
+    pub start: String,
+    pub end: String,
+    #[serde(default)]
+    pub timezone: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TradingSession {
+    pub name: String,
     pub start: String,
     pub end: String,
     #[serde(default)]
@@ -564,6 +595,32 @@ pub struct ExecutionConfig {
     pub lock_profit_pct: f64,
     #[serde(default = "default_lock_buffer_pct")]
     pub lock_buffer_pct: f64,
+    #[serde(default = "default_zero_latency_ms")]
+    pub submit_latency_ms: u64,
+    #[serde(default = "default_zero_latency_ms")]
+    pub cancel_latency_ms: u64,
+    #[serde(default = "default_zero_latency_ms")]
+    pub market_latency_ms: u64,
+    #[serde(default = "default_maker_fee_bps")]
+    pub maker_fee_bps: f64,
+    #[serde(default = "default_taker_fee_bps")]
+    pub taker_fee_bps: f64,
+    #[serde(default = "default_market_slippage_bps")]
+    pub market_slippage_bps: f64,
+    #[serde(default = "default_true")]
+    pub auto_resolve_constraints: bool,
+    #[serde(default)]
+    pub venue: ExecutionVenueConstraints,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExecutionVenueConstraints {
+    #[serde(default)]
+    pub tick_size: Option<f64>,
+    #[serde(default)]
+    pub step_size: Option<f64>,
+    #[serde(default)]
+    pub min_notional: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

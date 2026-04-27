@@ -4,13 +4,13 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use anyhow::Result;
 use chrono::{Duration as ChronoDuration, Utc};
 use rustcta::core::config::Config;
-use rustcta::core::types::{Kline, OrderSide};
+use rustcta::core::types::{Kline, MarketType, OrderSide, OrderStatus};
 use rustcta::cta::account_manager::{AccountConfig, AccountManager};
 use rustcta::strategies::common::{
     application::deps::StrategyDepsBuilder, application::status::StrategyState,
     risk::build_unified_risk_evaluator, Strategy, StrategyInstance,
 };
-use rustcta::strategies::trend::order_tracker::OrderTracker;
+use rustcta::strategies::trend::order_tracker::{FillEvent, OrderTracker};
 use rustcta::strategies::trend::{
     config::TrendConfig, execution_engine::TrendExecutionEngine, signal_generator::SignalGenerator,
     signal_generator::SignalMetadata, signal_generator::SignalType, signal_generator::TakeProfit,
@@ -99,6 +99,7 @@ fn build_shared_snapshot(symbol: &str) -> (SymbolSnapshot, IndicatorOutputs) {
             depth_levels: 5,
             enforce_spread_rule: false,
             blackout_windows: Vec::new(),
+            trading_sessions: Vec::new(),
             overrides: HashMap::new(),
             allow_short: Some(true),
         },
@@ -206,6 +207,9 @@ async fn trend_intraday_continues_running_after_first_order() -> Result<()> {
     config.position_config.pyramid_enabled = false;
     config.position_config.pyramid_levels.clear();
     config.risk_config.max_total_exposure = 1.0;
+    config
+        .symbol_entry_notional
+        .insert("BTC/USDC".to_string(), 1_000.0);
 
     let (snapshot, indicators) = build_shared_snapshot("BTC/USDC");
     publish_trend_inputs("BTC/USDC", &snapshot, &indicators, None);
@@ -263,12 +267,52 @@ async fn execution_engine_places_maker_order() -> Result<()> {
         account_manager.clone(),
         "binance_main",
         config.execution.clone(),
-        order_tracker,
+        order_tracker.clone(),
         symbol_precisions,
     );
 
     let signal = sample_trade_signal("ETH/USDC");
-    let report = engine.execute_order(&signal, 0.05).await?;
+    let execution_signal = signal.clone();
+    let execution =
+        tokio::spawn(async move { engine.execute_order(&execution_signal, 0.05, true).await });
+
+    let mut filled = false;
+    for _ in 0..50 {
+        let account = account_manager
+            .get_account("binance_main")
+            .expect("mock account should exist");
+        let orders = account
+            .exchange
+            .get_open_orders(Some(&signal.symbol), MarketType::Futures)
+            .await?;
+        if let Some(order) = orders.last() {
+            let fill_price = order.price.unwrap_or(signal.entry_price);
+            order_tracker
+                .notify_fill(FillEvent {
+                    order_id: order.id.clone(),
+                    client_order_id: Some(order.id.clone()),
+                    symbol: order.symbol.clone(),
+                    side: order.side,
+                    status: OrderStatus::Closed,
+                    filled_qty: order.amount,
+                    last_filled_qty: order.amount,
+                    average_price: fill_price,
+                    last_filled_price: fill_price,
+                    reduce_only: false,
+                    event_time: Utc::now(),
+                })
+                .await;
+            filled = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        filled,
+        "mock exchange should receive an order before fill notification"
+    );
+
+    let report = execution.await??;
 
     assert_eq!(report.order.symbol, "ETH/USDC");
     assert!(report.used_maker);

@@ -1,0 +1,15 @@
+sort_by: final_equity
+train_bars: 2880
+validation_bars: 720
+step_bars: 720
+top_n: 3
+max_workers: 8
+parameters:
+  - path: execution.base_improve
+    values: [0.0, 0.01, 0.02]
+  - path: execution.take_profit_atr_k
+    values: [0.8, 1.0, 1.2]
+  - path: indicators.atr.initial_stop_k
+    values: [1.2, 1.4, 1.6]
+  - path: risk.per_trade_notional
+    values: [10.0, 20.0]

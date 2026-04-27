@@ -1,0 +1,103 @@
+initial_equity: 10000.0
+trade_notional: 1000.0
+fee_rate: 0.001
+slippage_rate: 0.0002
+search:
+  min_trades: 30
+  sort_by: composite_score
+cost_scenarios:
+  - name: normal
+    fee_rate: 0.001
+    slippage_rate: 0.0002
+  - name: stressed
+    fee_rate: 0.002
+    slippage_rate: 0.001
+candidate_filter:
+  min_trades: 30
+  min_profit_factor: 1.2
+  min_roi_pct: 0.2
+  max_drawdown_pct: -5.0
+  require_profitable_cost_scenarios: 2
+strategies:
+  - name: donchian_adx_volume
+    entry:
+      donchian_breakout:
+        lookback: [20, 40]
+    filters:
+      adx_min: [18, 25]
+      volume_ratio_min:
+        period: [20]
+        threshold: [1.0, 1.3]
+      choppiness_max:
+        period: [14]
+        threshold: [55]
+    exit:
+      atr_stop: [1.8, 2.4]
+      reward_r: [2.0, 2.8]
+      time_stop_bars: [144, 288]
+      reverse_signal_exit: true
+  - name: ema_slope_keltner_volume
+    entry:
+      ema_slope:
+        period: [20, 34]
+        lookback: [5, 10]
+        threshold: [0.02]
+      keltner_breakout:
+        ema_period: [20]
+        atr_period: [10]
+        multiplier: [1.5, 2.0]
+    filters:
+      volume_zscore_min:
+        period: [20]
+        threshold: [0.3, 0.8]
+      choppiness_max:
+        period: [14]
+        threshold: [55]
+    exit:
+      atr_stop: [1.8, 2.4]
+      reward_r: [2.0, 2.8]
+      time_stop_bars: [144, 288]
+      reverse_signal_exit: true
+  - name: supertrend_mfi_vwap
+    entry:
+      supertrend_direction:
+        period: [10, 14]
+        multiplier: [2.0, 3.0]
+    filters:
+      mfi_range:
+        period: [14]
+        min: [35]
+        max: [75]
+      vwap_deviation_max_abs:
+        period: [20]
+        threshold: [1.0, 2.0]
+      volume_ratio_min:
+        period: [20]
+        threshold: [1.0]
+    exit:
+      atr_stop: [2.0]
+      reward_r: [2.5]
+      time_stop_bars: [144, 288]
+      reverse_signal_exit: true
+  - name: roc_adx_stoch
+    entry:
+      roc_direction:
+        period: [12, 24]
+        threshold: [0.15, 0.3]
+    filters:
+      adx_min: [18, 25]
+      stoch_rsi_range:
+        rsi_period: [14]
+        stoch_period: [14]
+        min: [20]
+        max: [85]
+      atr_percentile_range:
+        atr_period: [14]
+        percentile_window: [60]
+        min: [20]
+        max: [90]
+    exit:
+      atr_stop: [1.8, 2.4]
+      reward_r: [2.0, 2.8]
+      time_stop_bars: [144, 288]
+      reverse_signal_exit: true

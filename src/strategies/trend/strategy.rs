@@ -1785,18 +1785,33 @@ impl TrendIntradayStrategy {
             let mut order_map: HashMap<String, String> = HashMap::new();
             let mut immediate_fills: HashMap<String, (f64, f64)> = HashMap::new();
             for order in response.successful_orders {
-                if let Some(client_id) = order
+                let client_id = order
                     .info
                     .get("clientOrderId")
-                    .or_else(|| order.info.get("clientOrderId"))
+                    .or_else(|| order.info.get("newClientOrderId"))
                     .and_then(|v| v.as_str())
-                    .or_else(|| order.info.get("newClientOrderId").and_then(|v| v.as_str()))
                     .map(|s| s.to_string())
-                {
+                    .or_else(|| {
+                        pending
+                            .iter()
+                            .find(|pending_order| pending_order.client_id == order.id)
+                            .map(|pending_order| pending_order.client_id.clone())
+                    });
+                if let Some(client_id) = client_id {
                     order_map.insert(client_id.clone(), order.id.clone());
-                    if order.filled > f64::EPSILON {
+                    let is_mock_order = order
+                        .info
+                        .get("mock")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
+                    if order.filled > f64::EPSILON || is_mock_order {
                         let price = order.price.unwrap_or(0.0);
-                        immediate_fills.insert(client_id, (order.filled, price));
+                        let filled_qty = if order.filled > f64::EPSILON {
+                            order.filled
+                        } else {
+                            order.amount
+                        };
+                        immediate_fills.insert(client_id, (filled_qty, price));
                     }
                 }
             }
