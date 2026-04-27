@@ -6,6 +6,8 @@ Cargo.lock
 logs/
 *.log
 data/
+!src/backtest/data/
+!src/backtest/data/*.rs
 
 # Environment files
 .env
