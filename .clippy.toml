@@ -1,23 +1,6 @@
-# 禁止使用 unwrap 和 expect
+# Clippy 配置：这里只保留当前版本支持的规则项。
 disallowed-methods = [
-    { path = "Option::unwrap", reason = "use ? operator or handle error properly" },
-    { path = "Result::unwrap", reason = "use ? operator or handle error properly" },
-    { path = "Result::expect", reason = "use ? operator with context" },
-]
-
-# 严格的 lint 规则
-warn = [
-    "clippy::all",
-    "clippy::pedantic",
-    "clippy::nursery",
-    "clippy::cargo",
-]
-
-# 禁止的模式
-deny = [
-    "clippy::unwrap_used",
-    "clippy::expect_used",
-    "clippy::panic",
-    "clippy::unimplemented",
-    "clippy::todo",
+    { path = "Option::unwrap", reason = "请改用 ? 或显式处理错误" },
+    { path = "Result::unwrap", reason = "请改用 ? 或显式处理错误" },
+    { path = "Result::expect", reason = "请改用 ? 并补充上下文" },
 ]

@@ -1,0 +1,73 @@
+strategy:
+  name: "short_ladder_live_aggressive_usdc"
+  version: "0.1.0"
+  enabled: true
+  log_level: "INFO"
+  description: "BJT 19-06 + L4 full + 不保本；仅做空 USDC 合约，重启后按交易所真实空头仓位接管 L1-L4 进度。"
+
+account:
+  account_id: "binance_hcr"
+  market_type: "Futures"
+  dual_position_mode: true
+  default_leverage: 10
+
+data:
+  poll_interval_secs: 30
+  decision_interval: "5m"
+  kline_limit: 720
+  session_start_hour_utc: 11
+  session_end_hour_utc: 22
+
+symbols:
+  - symbol: "ORDIUSDC"
+    enabled: true
+    initial_notional: 200.0
+    max_notional: 2000.0
+    leverage: 10
+  - symbol: "TIAUSDC"
+    enabled: true
+    initial_notional: 200.0
+    max_notional: 2000.0
+    leverage: 10
+  - symbol: "WLDUSDC"
+    enabled: true
+    initial_notional: 200.0
+    max_notional: 2000.0
+    leverage: 10
+  - symbol: "ENAUSDC"
+    enabled: true
+    initial_notional: 200.0
+    max_notional: 2000.0
+    leverage: 10
+  - symbol: "WIFUSDC"
+    enabled: true
+    initial_notional: 200.0
+    max_notional: 2000.0
+    leverage: 10
+
+signal:
+  atr_period: 14
+  rsi_period: 14
+  entry_rsi_min: 52.0
+  entry_requires_lower_close: false
+  entry_requires_prior_high_sweep: false
+  filter_15m_ema: 50
+  filter_1h_ema: 50
+  final_layer_requires_strong_1h: true
+  strong_1h_ema_slope_lookback: 3
+  strong_1h_ema_slope_max_pct: -0.03
+
+ladder:
+  layer_weights: [1.0, 1.0, 3.0, 5.0]
+  layer_spacing_atr: 0.55
+  take_profit_atr: 1.2
+  stop_loss_atr: 1.7
+  max_hold_bars: 48
+  breakeven_stop: false
+  adopt_progress_tolerance_pct: 0.02
+
+execution:
+  use_post_only_entry: true
+  maker_price_offset_bps: 1.0
+  order_cooldown_secs: 300
+  close_with_market_order: true

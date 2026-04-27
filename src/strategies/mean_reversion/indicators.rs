@@ -40,6 +40,9 @@ pub fn compute_indicators(
     cfg: &IndicatorConfig,
     volume_cfg: &VolumeConfig,
 ) -> Result<IndicatorOutputs> {
+    if snapshot.five_minute.len() < cfg.bollinger.period + 2 {
+        return Err(anyhow!("not enough 5m data"));
+    }
     if snapshot.fifteen_minute.len() < cfg.bollinger.period + 2 {
         return Err(anyhow!("not enough 15m data"));
     }
@@ -47,36 +50,60 @@ pub fn compute_indicators(
         return Err(anyhow!("not enough 1h data"));
     }
 
-    let closes_15m: Vec<f64> = snapshot.fifteen_minute.iter().map(|k| k.close).collect();
-    let highs_15m: Vec<f64> = snapshot.fifteen_minute.iter().map(|k| k.high).collect();
-    let lows_15m: Vec<f64> = snapshot.fifteen_minute.iter().map(|k| k.low).collect();
+    let closes_5m: Vec<f64> = snapshot.five_minute.iter().map(|k| k.close).collect();
+    let highs_5m: Vec<f64> = snapshot.five_minute.iter().map(|k| k.high).collect();
+    let lows_5m: Vec<f64> = snapshot.five_minute.iter().map(|k| k.low).collect();
 
-    let boll_15m =
-        functions::bollinger_bands(&closes_15m, cfg.bollinger.period, cfg.bollinger.std_dev)
-            .ok_or_else(|| anyhow!("bollinger calculation failed"))?;
-    let sigma_15m = (boll_15m.0 - boll_15m.1) / cfg.bollinger.std_dev.max(1e-9);
-    let last_price = closes_15m.last().copied().unwrap_or_default();
-    let denom_15m = (boll_15m.0 - boll_15m.2).max(1e-9);
-    let band_percent = (last_price - boll_15m.2) / denom_15m;
-    let z_score = if sigma_15m.abs() < 1e-9 {
+    let boll_5m =
+        functions::bollinger_bands(&closes_5m, cfg.bollinger.period, cfg.bollinger.std_dev)
+            .ok_or_else(|| anyhow!("5m bollinger calculation failed"))?;
+    let sigma_5m = (boll_5m.0 - boll_5m.1) / cfg.bollinger.std_dev.max(1e-9);
+    let last_price = closes_5m.last().copied().unwrap_or_default();
+    let denom_5m = (boll_5m.0 - boll_5m.2).max(1e-9);
+    let band_percent_5m = (last_price - boll_5m.2) / denom_5m;
+    let z_score_5m = if sigma_5m.abs() < 1e-9 {
         0.0
     } else {
-        (last_price - boll_15m.1) / sigma_15m
+        (last_price - boll_5m.1) / sigma_5m
     };
 
     let bollinger_5m = BollingerSnapshot {
+        upper: boll_5m.0,
+        middle: boll_5m.1,
+        lower: boll_5m.2,
+        sigma: sigma_5m,
+        band_percent: band_percent_5m,
+        z_score: z_score_5m,
+    };
+
+    let atr = functions::atr(&highs_5m, &lows_5m, &closes_5m, cfg.atr.period)
+        .ok_or_else(|| anyhow!("5m ATR calculation failed"))?;
+    let rsi = functions::rsi(&closes_5m, cfg.rsi.period)
+        .ok_or_else(|| anyhow!("5m RSI calculation failed"))?;
+
+    let closes_15m: Vec<f64> = snapshot.fifteen_minute.iter().map(|k| k.close).collect();
+
+    let boll_15m =
+        functions::bollinger_bands(&closes_15m, cfg.bollinger.period, cfg.bollinger.std_dev)
+            .ok_or_else(|| anyhow!("15m bollinger calculation failed"))?;
+    let sigma_15m = (boll_15m.0 - boll_15m.1) / cfg.bollinger.std_dev.max(1e-9);
+    let denom_15m = (boll_15m.0 - boll_15m.2).max(1e-9);
+    let last_price_15m = closes_15m.last().copied().unwrap_or(last_price);
+    let band_percent_15m = (last_price_15m - boll_15m.2) / denom_15m;
+    let z_score_15m = if sigma_15m.abs() < 1e-9 {
+        0.0
+    } else {
+        (last_price_15m - boll_15m.1) / sigma_15m
+    };
+
+    let bollinger_15m = BollingerSnapshot {
         upper: boll_15m.0,
         middle: boll_15m.1,
         lower: boll_15m.2,
         sigma: sigma_15m,
-        band_percent,
-        z_score,
+        band_percent: band_percent_15m,
+        z_score: z_score_15m,
     };
-
-    let atr = functions::atr(&highs_15m, &lows_15m, &closes_15m, cfg.atr.period)
-        .ok_or_else(|| anyhow!("ATR calculation failed"))?;
-    let rsi = functions::rsi(&closes_15m, cfg.rsi.period)
-        .ok_or_else(|| anyhow!("RSI calculation failed"))?;
 
     let closes_1h: Vec<f64> = snapshot.one_hour.iter().map(|k| k.close).collect();
     let highs_1h: Vec<f64> = snapshot.one_hour.iter().map(|k| k.high).collect();
@@ -93,15 +120,6 @@ pub fn compute_indicators(
         0.0
     } else {
         (last_price_1h - boll_1h.1) / sigma_1h
-    };
-
-    let bollinger_15m = BollingerSnapshot {
-        upper: boll_1h.0,
-        middle: boll_1h.1,
-        lower: boll_1h.2,
-        sigma: sigma_1h,
-        band_percent: band_percent_1h,
-        z_score: z_score_1h,
     };
 
     let bbw = if boll_1h.1.abs() < 1e-9 {
@@ -138,7 +156,7 @@ pub fn compute_indicators(
 
     Ok(IndicatorOutputs {
         timestamp: snapshot
-            .fifteen_minute
+            .five_minute
             .last()
             .map(|k| k.close_time)
             .unwrap_or_else(Utc::now),

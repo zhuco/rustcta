@@ -435,6 +435,7 @@ mod tests {
                 depth_levels: 5,
                 enforce_spread_rule: false,
                 blackout_windows: Vec::new(),
+                trading_sessions: Vec::new(),
                 overrides: HashMap::new(),
                 allow_short: Some(true),
             },

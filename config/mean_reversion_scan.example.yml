@@ -1,0 +1,13 @@
+sort_by: final_equity
+max_workers: 8
+parameters:
+  - path: execution.base_improve
+    values: [0.0, 0.0005, 0.001, 0.002]
+  - path: execution.take_profit_atr_k
+    values: [1.2, 1.6, 2.0]
+  - path: indicators.atr.initial_stop_k
+    values: [0.8, 1.2, 1.6]
+  - path: risk.per_trade_notional
+    values: [10.0, 20.0, 50.0]
+  - path: risk.time_stop_bars
+    values: [6, 10, 14]

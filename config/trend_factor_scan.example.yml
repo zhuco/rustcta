@@ -1,0 +1,86 @@
+initial_equity: 10000.0
+trade_notional: 1000.0
+fee_rate: 0.001
+slippage_rate: 0.0002
+search:
+  min_trades: 10
+  sort_by: composite_score
+strategies:
+  - name: ema_adx_macd
+    entry:
+      ema_trend:
+        fast: [10, 20]
+        slow: [30, 50]
+      macd_histogram_direction:
+        enabled: [true]
+    filters:
+      adx_min: [18, 25]
+      rsi_range:
+        min: [45]
+        max: [75]
+    exit:
+      atr_stop: [1.8, 2.4]
+      reward_r: [2.0, 2.8]
+      time_stop_bars: [288]
+      reverse_signal_exit: true
+  - name: donchian_adx_volume
+    entry:
+      donchian_breakout:
+        lookback: [20, 30]
+    filters:
+      adx_min: [20, 28]
+      volume_ratio_min:
+        period: [20]
+        threshold: [1.0, 1.2]
+    exit:
+      atr_stop: [2.0, 2.8]
+      reward_r: [2.0, 3.0]
+      time_stop_bars: [288]
+      reverse_signal_exit: true
+  - name: supertrend_rsi_volume
+    entry:
+      supertrend_direction:
+        period: [10, 14]
+        multiplier: [2.0, 3.0]
+    filters:
+      rsi_range:
+        min: [40]
+        max: [70]
+      volume_ratio_min:
+        period: [20]
+        threshold: [1.0]
+    exit:
+      atr_stop: [2.0]
+      reward_r: [2.5]
+      time_stop_bars: [288]
+      reverse_signal_exit: true
+  - name: ema_bbwidth_breakout
+    entry:
+      ema_trend:
+        fast: [20]
+        slow: [50]
+      donchian_breakout:
+        lookback: [20, 40]
+    filters:
+      bb_width_min:
+        period: [20]
+        threshold: [0.01, 0.015]
+    exit:
+      atr_stop: [2.0, 2.5]
+      reward_r: [2.0, 3.0]
+      time_stop_bars: [288]
+      reverse_signal_exit: true
+  - name: roc_adx_breakout
+    entry:
+      roc_direction:
+        period: [12, 24]
+        threshold: [0.2, 0.5]
+      donchian_breakout:
+        lookback: [20]
+    filters:
+      adx_min: [18, 25]
+    exit:
+      atr_stop: [2.0]
+      reward_r: [2.5]
+      time_stop_bars: [288]
+      reverse_signal_exit: true

@@ -1,0 +1,66 @@
+initial_equity: 10000.0
+trade_notional: 1000.0
+fee_rate: 0.001
+slippage_rate: 0.0002
+search:
+  min_trades: 18
+cost_scenarios:
+  - name: normal
+    fee_rate: 0.001
+    slippage_rate: 0.0002
+  - name: stress
+    fee_rate: 0.0012
+    slippage_rate: 0.0005
+candidate_filter:
+  min_trades: 20
+  min_profit_factor: 1.08
+  min_roi_pct: 0.2
+  max_drawdown_pct: -8.0
+  require_profitable_cost_scenarios: 2
+timeframes:
+  trend: "15m"
+  structure: "5m"
+  trigger: "15m"
+strategies:
+  - name: mtf_event_pullback_15m
+    trend:
+      ema_trend:
+        fast: [20, 34]
+        slow: [55]
+      adx_min: [18, 22]
+      choppiness_max:
+        period: [14]
+        threshold: [55]
+    structure:
+      donchian_breakout:
+        lookback: [20]
+      bb_width_min:
+        period: [20]
+        threshold: [0.008]
+      breakout_valid_bars: [2, 4]
+      pullback_entry:
+        max_pullback_pct: [0.002, 0.004]
+        reclaim_pct: [0.0]
+    trigger:
+      roc_direction:
+        period: [3, 6]
+        threshold: [0.03]
+      volume_zscore_min:
+        period: [20]
+        threshold: [0.0]
+      supertrend_direction:
+        period: [10]
+        multiplier: [2.0]
+      mfi_range:
+        period: [14]
+        min: [20]
+        max: [85]
+    exit:
+      atr_stop: [2.0]
+      reward_r: [2.0, 2.6]
+      time_stop_bars: [24]
+      reverse_signal_exit: true
+      trailing_atr:
+        period: [14]
+        multiplier: [1.8, 2.4]
+        activation_r: [0.6, 1.0]
