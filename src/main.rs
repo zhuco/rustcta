@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .short('s')
             .long("strategy")
             .value_name("STRATEGY")
-            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, mean_reversion, sideways_martingale, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow")
+            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow, beta_hedge_market_maker")
             .required(true))
         .arg(Arg::new("config")
             .short('c')
@@ -151,7 +151,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = matches.get_one::<String>("config").unwrap();
     let single_symbol = matches.get_one::<String>("symbol").cloned();
 
-    let _process_lock = if strategy_type.as_str() == "solusdc_hedged_grid" {
+    let _process_lock = if matches!(
+        strategy_type.as_str(),
+        "solusdc_hedged_grid" | "beta_hedge_market_maker"
+    ) {
         Some(ProcessLock::acquire(strategy_type, config_file)?)
     } else {
         None
@@ -437,6 +440,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭震荡行情马丁策略...");
             strategy.stop().await?;
         }
+        "accumulation" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: AccumulationConfig = serde_yaml::from_str(&file_content)?;
+
+            let risk_evaluator =
+                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
+
+            let deps = StrategyDepsBuilder::new()
+                .with_account_manager(account_manager.clone())
+                .with_risk_evaluator(risk_evaluator)
+                .build()?;
+
+            let strategy = AccumulationStrategy::create(config, deps)?;
+            log::info!("吸筹策略已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭吸筹策略...");
+            strategy.stop().await?;
+        }
         "poisson" => {
             // 从文件读取配置
             let file_content = std::fs::read_to_string(config_file)?;
@@ -542,6 +566,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tokio::signal::ctrl_c().await?;
             log::info!("收到停止信号，正在关闭Grid Scale策略...");
+            strategy.stop().await?;
+        }
+        "beta_hedge_market_maker" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: BetaHedgeMarketMakerConfig = serde_yaml::from_str(&file_content)?;
+
+            let risk_evaluator = build_unified_risk_evaluator(
+                config.strategy.name.clone(),
+                None,
+                Some(
+                    rustcta::strategies::beta_hedge_market_maker::risk::build_strategy_limits(
+                        &config,
+                    ),
+                ),
+            );
+
+            let deps = StrategyDepsBuilder::new()
+                .with_account_manager(account_manager.clone())
+                .with_risk_evaluator(risk_evaluator)
+                .build()?;
+
+            let strategy = BetaHedgeMarketMaker::create(config, deps)?;
+            log::info!("Beta hedge market maker 已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭 beta hedge market maker...");
             strategy.stop().await?;
         }
         "orderflow" => {

@@ -12,8 +12,9 @@ use crate::core::{
     exchange::Exchange,
     types::{
         AccountSnapshot, Balance, BatchOrderError, BatchOrderRequest, BatchOrderResponse,
-        ExchangeInfo, Interval, MarketType, Order, OrderBook, OrderRequest, OrderSide, OrderStatus,
-        Position, Result, Statistics24h, Ticker, Trade, TradeFee, TradingPair,
+        ExchangeInfo, Interval, MarketType, OpenInterest, Order, OrderBook, OrderRequest,
+        OrderSide, OrderStatus, Position, Result, Statistics24h, Ticker, Trade, TradeFee,
+        TradingPair,
     },
     websocket::WebSocketClient,
 };
@@ -381,6 +382,15 @@ impl Exchange for MockExchange {
             stats.push(self.get_24h_statistics(symbol, market_type).await?);
         }
         Ok(stats)
+    }
+
+    async fn get_open_interest(&self, symbol: &str) -> Result<OpenInterest> {
+        Ok(OpenInterest {
+            symbol: symbol.to_string(),
+            open_interest: 10_000.0,
+            open_interest_value: 10_000.0,
+            timestamp: Utc::now(),
+        })
     }
 
     async fn get_trade_fee(&self, symbol: &str, _market_type: MarketType) -> Result<TradeFee> {

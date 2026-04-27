@@ -1636,6 +1636,8 @@ impl Exchange for BinanceExchange {
             order_id: i64,
             symbol: String,
             side: String,
+            #[serde(rename = "clientOrderId")]
+            client_order_id: Option<String>,
             #[serde(rename = "type")]
             order_type: String,
             #[serde(rename = "origQty")]
@@ -1647,6 +1649,10 @@ impl Exchange for BinanceExchange {
             time: i64,
             #[serde(rename = "updateTime")]
             update_time: i64,
+            #[serde(rename = "positionSide")]
+            position_side: Option<String>,
+            #[serde(rename = "reduceOnly")]
+            reduce_only: Option<bool>,
         }
 
         let orders: Vec<BinanceOrderResponse> = self
@@ -1687,7 +1693,11 @@ impl Exchange for BinanceExchange {
                         DateTime::from_timestamp(order.update_time / 1000, 0)
                             .unwrap_or_else(|| Utc::now()),
                     ),
-                    info: serde_json::json!({}),
+                    info: serde_json::json!({
+                        "clientOrderId": order.client_order_id,
+                        "positionSide": order.position_side,
+                        "reduceOnly": order.reduce_only.unwrap_or(false),
+                    }),
                 });
             }
         }
@@ -1733,6 +1743,39 @@ impl Exchange for BinanceExchange {
                             let update_time = Self::first_i64(item, &["updateTime"])
                                 .and_then(|t| DateTime::from_timestamp(t / 1000, 0));
 
+                            let mut info = item.clone();
+                            if let Some(obj) = info.as_object_mut() {
+                                if !obj.contains_key("positionSide") {
+                                    if let Some(value) = Self::first_string(item, &["ps"]) {
+                                        obj.insert(
+                                            "positionSide".to_string(),
+                                            serde_json::Value::String(value),
+                                        );
+                                    }
+                                }
+                                if !obj.contains_key("reduceOnly") {
+                                    obj.insert(
+                                        "reduceOnly".to_string(),
+                                        serde_json::Value::Bool(
+                                            Self::first_string(item, &["reduceOnly"])
+                                                .map(|value| value.eq_ignore_ascii_case("true"))
+                                                .unwrap_or(false),
+                                        ),
+                                    );
+                                }
+                                if !obj.contains_key("stopPrice") {
+                                    if let Some(value) = Self::first_string(
+                                        item,
+                                        &["triggerPrice", "stopPrice", "activationPrice"],
+                                    ) {
+                                        obj.insert(
+                                            "stopPrice".to_string(),
+                                            serde_json::Value::String(value),
+                                        );
+                                    }
+                                }
+                            }
+
                             result.push(Order {
                                 id: id.clone(),
                                 symbol: standard_symbol,
@@ -1752,7 +1795,7 @@ impl Exchange for BinanceExchange {
                                 market_type,
                                 timestamp,
                                 last_trade_timestamp: update_time,
-                                info: item.clone(),
+                                info,
                             });
                             seen_ids.insert(id);
                         }
@@ -2124,6 +2167,42 @@ impl Exchange for BinanceExchange {
             low_price: Some(stats.low_price.parse().unwrap_or(0.0)),
             close_price: Some(stats.last_price.parse().unwrap_or(0.0)),
             count: Some(stats.count),
+        })
+    }
+
+    async fn get_open_interest(&self, symbol: &str) -> Result<OpenInterest> {
+        let exchange_symbol =
+            self.symbol_converter
+                .to_exchange_symbol(symbol, "binance", MarketType::Futures)?;
+
+        let endpoint = "/fapi/v1/openInterest";
+        let mut params = HashMap::new();
+        params.insert("symbol".to_string(), exchange_symbol);
+
+        #[derive(Deserialize)]
+        struct BinanceOpenInterest {
+            #[serde(rename = "openInterest")]
+            open_interest: String,
+            time: i64,
+        }
+
+        let response: BinanceOpenInterest = self
+            .send_public_request(endpoint, Some(params), MarketType::Futures)
+            .await?;
+
+        let open_interest = response.open_interest.parse::<f64>().unwrap_or(0.0);
+        let mark_price = self
+            .get_ticker(symbol, MarketType::Futures)
+            .await
+            .map(|ticker| ticker.last)
+            .unwrap_or(0.0);
+
+        Ok(OpenInterest {
+            symbol: symbol.to_string(),
+            open_interest,
+            open_interest_value: open_interest * mark_price,
+            timestamp: DateTime::from_timestamp(response.time / 1000, 0)
+                .unwrap_or_else(|| chrono::Utc::now()),
         })
     }
 
@@ -2646,16 +2725,30 @@ impl Exchange for BinanceExchange {
                         for (i, result) in arr.iter().enumerate() {
                             if let Some(order_id) = result.get("orderId") {
                                 // 成功的订单
+                                let amount = Self::first_f64(result, &["origQty", "quantity"])
+                                    .unwrap_or(batch_request.orders[i].amount);
+                                let filled = Self::first_f64(
+                                    result,
+                                    &["executedQty", "executedQuantity", "cumQty"],
+                                )
+                                .unwrap_or(0.0);
+                                let price = Self::first_f64(result, &["avgPrice", "price"])
+                                    .filter(|p| *p > 0.0)
+                                    .or(batch_request.orders[i].price);
+                                let status = Self::first_string(result, &["status", "algoStatus"])
+                                    .map(|s| Self::parse_binance_order_status(&s))
+                                    .unwrap_or(OrderStatus::Open);
+
                                 let order = Order {
                                     id: order_id.as_i64().unwrap_or(0).to_string(),
                                     symbol: batch_request.orders[i].symbol.clone(),
                                     side: batch_request.orders[i].side.clone(),
-                                    order_type: OrderType::Limit,
-                                    amount: batch_request.orders[i].amount,
-                                    price: batch_request.orders[i].price,
-                                    filled: 0.0,
-                                    remaining: batch_request.orders[i].amount,
-                                    status: OrderStatus::Open,
+                                    order_type: batch_request.orders[i].order_type,
+                                    amount,
+                                    price,
+                                    filled,
+                                    remaining: (amount - filled).max(0.0),
+                                    status,
                                     market_type: MarketType::Futures,
                                     timestamp: Utc::now(),
                                     last_trade_timestamp: None,

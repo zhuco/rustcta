@@ -79,6 +79,7 @@ impl TrendExecutionEngine {
         &self,
         signal: &TradeSignal,
         size: f64,
+        include_position_side: bool,
     ) -> Result<ExecutionReport, ExchangeError> {
         let account = self
             .account_manager
@@ -94,7 +95,13 @@ impl TrendExecutionEngine {
             attempts += 1;
             let client_id = self.build_entry_client_id(&signal.symbol);
             let receiver = self.order_tracker.watch_client(client_id.clone()).await;
-            let request = self.build_order_request(signal, size, prefer_maker, &client_id);
+            let request = self.build_order_request(
+                signal,
+                size,
+                prefer_maker,
+                &client_id,
+                include_position_side,
+            );
             let used_maker = matches!(request.order_type, OrderType::Limit);
             let start = Instant::now();
 
@@ -149,6 +156,7 @@ impl TrendExecutionEngine {
         size: f64,
         prefer_maker: bool,
         client_id: &str,
+        include_position_side: bool,
     ) -> OrderRequest {
         let precision = self.precision_for(&signal.symbol);
         let mut qty = self.quantize_amount(size, &precision);
@@ -186,6 +194,16 @@ impl TrendExecutionEngine {
         }
 
         request.client_order_id = Some(client_id.to_string());
+
+        if include_position_side {
+            let mut params = HashMap::new();
+            let position_side = match signal.side {
+                OrderSide::Buy => "LONG",
+                OrderSide::Sell => "SHORT",
+            };
+            params.insert("positionSide".to_string(), position_side.to_string());
+            request.params = Some(params);
+        }
 
         request
     }
