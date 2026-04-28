@@ -165,6 +165,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 manifest.report_path.display()
             );
         }
+        BacktestCommandOutput::RunShortLadderMtfExecution(manifest) => {
+            println!(
+                "short ladder mtf {:?} completed {} trades, roi={:.4}%, pf={:.4}, cooldown={}s, min_l4={}m, max_layers_per_hour={}; report written to {}",
+                manifest.report.mode,
+                manifest.report.summary.trades,
+                manifest.report.summary.roi_pct,
+                manifest.report.summary.profit_factor,
+                manifest.report.execution_config.order_cooldown_secs,
+                manifest.report.execution_config.min_minutes_to_l4,
+                manifest.report.execution_config.max_layers_per_hour,
+                manifest.report_path.display()
+            );
+        }
     }
 
     Ok(())

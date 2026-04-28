@@ -58,6 +58,18 @@ fn default_take_profit_atr() -> f64 {
     1.2
 }
 
+fn default_take_profit_mode() -> LiveTakeProfitMode {
+    LiveTakeProfitMode::FixedAtr
+}
+
+fn default_trailing_take_profit_activation_atr() -> f64 {
+    1.4
+}
+
+fn default_trailing_take_profit_distance_atr() -> f64 {
+    1.4
+}
+
 fn default_stop_loss_atr() -> f64 {
     1.7
 }
@@ -122,6 +134,13 @@ pub struct ShortLadderLiveConfig {
     pub ladder: LadderConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveTakeProfitMode {
+    FixedAtr,
+    AtrTrailing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +242,12 @@ pub struct LadderConfig {
     pub layer_spacing_atr: f64,
     #[serde(default = "default_take_profit_atr")]
     pub take_profit_atr: f64,
+    #[serde(default = "default_take_profit_mode")]
+    pub take_profit_mode: LiveTakeProfitMode,
+    #[serde(default = "default_trailing_take_profit_activation_atr")]
+    pub trailing_take_profit_activation_atr: f64,
+    #[serde(default = "default_trailing_take_profit_distance_atr")]
+    pub trailing_take_profit_distance_atr: f64,
     #[serde(default = "default_stop_loss_atr")]
     pub stop_loss_atr: f64,
     #[serde(default = "default_max_hold_bars")]
@@ -243,6 +268,9 @@ impl Default for LadderConfig {
             layer_weights: default_layer_weights(),
             layer_spacing_atr: default_layer_spacing_atr(),
             take_profit_atr: default_take_profit_atr(),
+            take_profit_mode: default_take_profit_mode(),
+            trailing_take_profit_activation_atr: default_trailing_take_profit_activation_atr(),
+            trailing_take_profit_distance_atr: default_trailing_take_profit_distance_atr(),
             stop_loss_atr: default_stop_loss_atr(),
             max_hold_bars: default_max_hold_bars(),
             breakeven_stop: default_false(),
@@ -261,6 +289,8 @@ pub struct ExecutionConfig {
     pub maker_price_offset_bps: f64,
     #[serde(default = "default_order_cooldown_secs")]
     pub order_cooldown_secs: u64,
+    #[serde(default)]
+    pub initial_order_taker_fallback_secs: Option<u64>,
     #[serde(default = "default_true")]
     pub close_with_market_order: bool,
 }
@@ -271,7 +301,43 @@ impl Default for ExecutionConfig {
             use_post_only_entry: default_true(),
             maker_price_offset_bps: default_maker_price_offset_bps(),
             order_cooldown_secs: default_order_cooldown_secs(),
+            initial_order_taker_fallback_secs: None,
             close_with_market_order: default_true(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_config_accepts_atr_trailing_take_profit_and_entry_fallback() {
+        let yaml = r#"
+strategy:
+  name: short_ladder_live_test
+  version: 0.1.0
+account:
+  account_id: binance_hcr
+data: {}
+symbols:
+  - symbol: ENAUSDC
+ladder:
+  take_profit_mode: atr_trailing
+  trailing_take_profit_activation_atr: 1.4
+  trailing_take_profit_distance_atr: 1.4
+execution:
+  initial_order_taker_fallback_secs: 45
+"#;
+
+        let config: ShortLadderLiveConfig = serde_yaml::from_str(yaml).expect("配置应可解析");
+
+        assert_eq!(
+            config.ladder.take_profit_mode,
+            LiveTakeProfitMode::AtrTrailing
+        );
+        assert_eq!(config.ladder.trailing_take_profit_activation_atr, 1.4);
+        assert_eq!(config.ladder.trailing_take_profit_distance_atr, 1.4);
+        assert_eq!(config.execution.initial_order_taker_fallback_secs, Some(45));
     }
 }

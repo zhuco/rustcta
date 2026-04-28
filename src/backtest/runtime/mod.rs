@@ -36,7 +36,9 @@ use crate::backtest::strategy::mean_reversion::{
 };
 use crate::backtest::strategy::mtf_trend_factor::run_mtf_trend_factor_definition;
 use crate::backtest::strategy::short_ladder::{
-    run_short_ladder_backtest, ShortLadderConfig, ShortLadderMode, ShortLadderRunReport,
+    run_short_ladder_backtest, run_short_ladder_mtf_execution_backtest, ShortLadderConfig,
+    ShortLadderMode, ShortLadderMtfExecutionConfig, ShortLadderMtfExecutionRunReport,
+    ShortLadderRunReport,
 };
 use crate::backtest::strategy::trend_factor::{
     run_trend_factor_definition, TrendFactorRunReport, TrendFactorRunSummary,
@@ -69,6 +71,7 @@ pub enum BacktestCommand {
     ScanTrendFactor(ScanTrendFactorArgs),
     ScanMtfTrendFactor(ScanMtfTrendFactorArgs),
     RunShortLadder(RunShortLadderArgs),
+    RunShortLadderMtfExecution(RunShortLadderMtfExecutionArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -295,6 +298,38 @@ pub struct RunShortLadderArgs {
     pub report_output: String,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct RunShortLadderMtfExecutionArgs {
+    #[arg(long)]
+    pub exchange: String,
+    #[arg(long)]
+    pub market: String,
+    #[arg(long)]
+    pub symbol: String,
+    #[arg(long, default_value = "5m")]
+    pub signal_interval: String,
+    #[arg(long, default_value = "1m")]
+    pub execution_interval: String,
+    #[arg(long)]
+    pub start: String,
+    #[arg(long)]
+    pub end: String,
+    #[arg(long)]
+    pub dataset: String,
+    #[arg(long)]
+    pub config: String,
+    #[arg(long)]
+    pub mode: String,
+    #[arg(long)]
+    pub report_output: String,
+    #[arg(long, default_value_t = 300)]
+    pub order_cooldown_secs: u64,
+    #[arg(long, default_value_t = 15)]
+    pub min_minutes_to_l4: u64,
+    #[arg(long, default_value_t = 3)]
+    pub max_layers_per_hour: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct BacktestRuntimeConfig {
     pub exchange: String,
@@ -324,6 +359,13 @@ pub struct ShortLadderRunManifest {
     pub config_path: PathBuf,
     pub report_path: PathBuf,
     pub report: ShortLadderRunReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortLadderMtfExecutionRunManifest {
+    pub config_path: PathBuf,
+    pub report_path: PathBuf,
+    pub report: ShortLadderMtfExecutionRunReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -530,6 +572,7 @@ pub enum BacktestCommandOutput {
     ScanTrendFactor(TrendFactorScanManifest),
     ScanMtfTrendFactor(MtfTrendFactorScanManifest),
     RunShortLadder(ShortLadderRunManifest),
+    RunShortLadderMtfExecution(ShortLadderMtfExecutionRunManifest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -957,6 +1000,9 @@ impl BacktestRuntimeConfig {
                 "scan-mtf-trend-factor requires timeframes from scan config"
             )),
             BacktestCommand::RunShortLadder(args) => Self::from_run_short_ladder_args(args),
+            BacktestCommand::RunShortLadderMtfExecution(args) => {
+                Self::from_run_short_ladder_mtf_execution_args(args)
+            }
         }
     }
 
@@ -1110,6 +1156,34 @@ impl BacktestRuntimeConfig {
         })
     }
 
+    pub fn from_run_short_ladder_mtf_execution_args(
+        args: &RunShortLadderMtfExecutionArgs,
+    ) -> Result<Self> {
+        let symbol = normalize_symbol_input(&args.symbol)?;
+
+        Ok(Self {
+            exchange: args.exchange.clone(),
+            market: args.market.clone(),
+            symbol,
+            interval: Interval::from_string(&args.execution_interval).map_err(|err| {
+                anyhow!(
+                    "invalid execution interval {}: {}",
+                    args.execution_interval,
+                    err
+                )
+            })?,
+            start: args
+                .start
+                .parse::<DateTime<Utc>>()
+                .map_err(|err| anyhow!("invalid start timestamp {}: {}", args.start, err))?,
+            end: args
+                .end
+                .parse::<DateTime<Utc>>()
+                .map_err(|err| anyhow!("invalid end timestamp {}: {}", args.end, err))?,
+            output: PathBuf::from(&args.dataset),
+        })
+    }
+
     pub fn from_walk_forward_mean_reversion_args(
         args: &WalkForwardMeanReversionArgs,
     ) -> Result<Self> {
@@ -1184,6 +1258,22 @@ impl BacktestRuntime {
             &candles,
             mode,
             config,
+        ))
+    }
+
+    pub fn run_short_ladder_mtf_execution_backtest(
+        &self,
+        mode: ShortLadderMode,
+        config: ShortLadderConfig,
+        execution_config: ShortLadderMtfExecutionConfig,
+    ) -> Result<ShortLadderMtfExecutionRunReport> {
+        let candles = self.collect_kline_candles_for_interval(&self.config.interval.to_string())?;
+        Ok(run_short_ladder_mtf_execution_backtest(
+            &self.config.symbol,
+            &candles,
+            mode,
+            config,
+            execution_config,
         ))
     }
 
@@ -1789,6 +1879,33 @@ pub async fn execute_cli(cli: BacktestCli) -> Result<BacktestCommandOutput> {
 
             Ok(BacktestCommandOutput::RunShortLadder(
                 ShortLadderRunManifest {
+                    config_path,
+                    report_path,
+                    report,
+                },
+            ))
+        }
+        BacktestCommand::RunShortLadderMtfExecution(args) => {
+            let runtime_config =
+                BacktestRuntimeConfig::from_run_short_ladder_mtf_execution_args(&args)?;
+            let runtime = BacktestRuntime::new(runtime_config);
+            let config_path = PathBuf::from(&args.config);
+            let report_path = PathBuf::from(&args.report_output);
+            let config = load_short_ladder_config(&config_path)?;
+            let mode = parse_short_ladder_mode(&args.mode)?;
+            let execution_config = ShortLadderMtfExecutionConfig {
+                signal_interval: args.signal_interval.clone(),
+                execution_interval: args.execution_interval.clone(),
+                order_cooldown_secs: args.order_cooldown_secs,
+                min_minutes_to_l4: args.min_minutes_to_l4,
+                max_layers_per_hour: args.max_layers_per_hour,
+            };
+            let report =
+                runtime.run_short_ladder_mtf_execution_backtest(mode, config, execution_config)?;
+            persist_json(&report_path, &report)?;
+
+            Ok(BacktestCommandOutput::RunShortLadderMtfExecution(
+                ShortLadderMtfExecutionRunManifest {
                     config_path,
                     report_path,
                     report,

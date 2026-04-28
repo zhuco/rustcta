@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use chrono::Utc;
 use tokio::time::{sleep, Duration as TokioDuration};
 
+use super::config::LiveTakeProfitMode;
 use super::logging;
 use super::market::{
     build_signal_snapshot, is_in_session, parse_interval, ShortLadderSignalSnapshot,
@@ -87,6 +88,8 @@ impl ShortLadderLiveStrategy {
         self.sync_short_position(symbol, snapshot.atr_5m, snapshot.current_price)
             .await?;
 
+        self.fallback_stale_initial_entry_to_market(symbol).await?;
+
         if self.has_open_orders(symbol).await? {
             logging::info(Some(symbol), "存在未成交挂单，本轮不新增订单");
             return Ok(());
@@ -115,7 +118,7 @@ impl ShortLadderLiveStrategy {
             return Ok(false);
         };
 
-        if let Some(reason) = self.exit_reason(&short, snapshot) {
+        if let Some(reason) = self.exit_reason(symbol, &short, snapshot).await? {
             self.close_short(symbol, snapshot.current_price, &reason)
                 .await?;
             return Ok(true);
@@ -166,29 +169,43 @@ impl ShortLadderLiveStrategy {
         self.open_initial_short(symbol, snapshot).await
     }
 
-    fn exit_reason(
+    async fn exit_reason(
         &self,
+        symbol: &str,
         short: &super::model::LiveShortPosition,
         snapshot: &ShortLadderSignalSnapshot,
-    ) -> Option<String> {
+    ) -> Result<Option<String>> {
         let stop_price =
             short.average_entry_price + self.config.ladder.stop_loss_atr * short.atr_at_entry;
         if snapshot.current_price >= stop_price {
-            return Some("stop_loss".to_string());
+            return Ok(Some("stop_loss".to_string()));
         }
 
         if self.config.ladder.breakeven_stop {
             let breakeven_price = short.average_entry_price
                 * (1.0 - self.config.ladder.breakeven_buffer_bps.max(0.0) / 10_000.0);
             if short.breakeven_armed && snapshot.current_price >= breakeven_price {
-                return Some("breakeven_stop".to_string());
+                return Ok(Some("breakeven_stop".to_string()));
             }
         }
 
-        let take_profit_price =
-            short.average_entry_price - self.config.ladder.take_profit_atr * short.atr_at_entry;
-        if snapshot.current_price <= take_profit_price {
-            return Some("take_profit".to_string());
+        match self.config.ladder.take_profit_mode {
+            LiveTakeProfitMode::FixedAtr => {
+                let take_profit_price = short.average_entry_price
+                    - self.config.ladder.take_profit_atr * short.atr_at_entry;
+                if snapshot.current_price <= take_profit_price {
+                    return Ok(Some("take_profit".to_string()));
+                }
+            }
+            LiveTakeProfitMode::AtrTrailing => {
+                if self
+                    .update_trailing_take_profit_state(symbol, snapshot.current_price)
+                    .await?
+                    .is_some()
+                {
+                    return Ok(Some("trailing_take_profit".to_string()));
+                }
+            }
         }
 
         let held_bars = held_bars_since(
@@ -197,14 +214,39 @@ impl ShortLadderLiveStrategy {
             self.decision_interval_secs(),
         );
         if held_bars >= self.config.ladder.max_hold_bars {
-            return Some("time_stop".to_string());
+            return Ok(Some("time_stop".to_string()));
         }
 
         if !is_in_session(snapshot.close_time, &self.config) {
-            return Some("session_end".to_string());
+            return Ok(Some("session_end".to_string()));
         }
 
-        None
+        Ok(None)
+    }
+
+    async fn update_trailing_take_profit_state(
+        &self,
+        symbol: &str,
+        current_price: f64,
+    ) -> Result<Option<f64>> {
+        let mut runtime = self.runtime.write().await;
+        let Some(position) = runtime
+            .symbols
+            .get_mut(symbol)
+            .and_then(|state| state.short.as_mut())
+        else {
+            return Ok(None);
+        };
+
+        let result = position.update_short_trailing_take_profit(
+            current_price,
+            self.config.ladder.trailing_take_profit_activation_atr,
+            self.config.ladder.trailing_take_profit_distance_atr,
+        );
+        if result.is_some() {
+            logging::info(Some(symbol), "动态 ATR 跟踪止盈触发");
+        }
+        Ok(result)
     }
 
     async fn arm_breakeven_if_needed(

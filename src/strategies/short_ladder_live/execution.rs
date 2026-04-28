@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 
-use crate::core::types::{MarketType, OrderRequest, OrderSide, OrderType, Position};
+use crate::core::types::{MarketType, Order, OrderRequest, OrderSide, OrderType, Position};
 
 use super::config::SymbolConfig;
 use super::logging;
@@ -9,7 +9,8 @@ use super::market::ShortLadderSignalSnapshot;
 use super::model::{
     adopt_short_progress, capped_layer_notional, cumulative_layer_notionals,
     infer_short_ladder_last_price, matches_short_position_side, position_params,
-    precision_round_down, precision_round_up, LiveShortPosition, SymbolPrecision,
+    precision_round_down, precision_round_up, LiveShortPosition, PendingInitialEntry,
+    SymbolPrecision,
 };
 use super::ShortLadderLiveStrategy;
 
@@ -228,6 +229,15 @@ impl ShortLadderLiveStrategy {
                 .map(|short| short.breakeven_armed)
                 .unwrap_or(false)
         };
+        let (trailing_take_profit_armed, best_favorable_price) = {
+            let runtime = self.runtime.read().await;
+            runtime
+                .symbols
+                .get(symbol)
+                .and_then(|state| state.short.as_ref())
+                .map(|short| (short.trailing_take_profit_armed, short.best_favorable_price))
+                .unwrap_or((false, None))
+        };
         let opened_at = {
             let runtime = self.runtime.read().await;
             runtime
@@ -251,6 +261,8 @@ impl ShortLadderLiveStrategy {
             last_layer_price,
             atr_at_entry,
             breakeven_armed,
+            trailing_take_profit_armed,
+            best_favorable_price,
             opened_at,
             last_sync_at: Utc::now(),
         };
@@ -411,7 +423,8 @@ impl ShortLadderLiveStrategy {
             post_only: Some(self.config.execution.use_post_only_entry),
         };
 
-        self.exchange
+        let created_order = self
+            .exchange
             .create_order(request)
             .await
             .map_err(|err| anyhow!("create short order failed for {}: {}", symbol, err))?;
@@ -420,6 +433,16 @@ impl ShortLadderLiveStrategy {
             let mut runtime = self.runtime.write().await;
             if let Some(state) = runtime.symbols.get_mut(symbol) {
                 state.last_order_at = Some(Utc::now());
+                if self.should_fallback_initial_entry_to_market(layer_index) {
+                    state.pending_initial_entry = Some(PendingInitialEntry {
+                        order_id: created_order.id.clone(),
+                        client_order_id: client_order_id(&created_order).map(str::to_string),
+                        notional,
+                        order_price,
+                        reference_price,
+                        submitted_at: created_order.timestamp,
+                    });
+                }
                 state.last_error = None;
             }
         }
@@ -442,6 +465,132 @@ impl ShortLadderLiveStrategy {
         );
         self.update_status().await;
         Ok(())
+    }
+
+    fn should_fallback_initial_entry_to_market(&self, layer_index: usize) -> bool {
+        layer_index == 0
+            && self.config.execution.use_post_only_entry
+            && self
+                .config
+                .execution
+                .initial_order_taker_fallback_secs
+                .is_some_and(|seconds| seconds > 0)
+    }
+
+    pub(super) async fn fallback_stale_initial_entry_to_market(&self, symbol: &str) -> Result<()> {
+        let Some(wait_secs) = self.config.execution.initial_order_taker_fallback_secs else {
+            return Ok(());
+        };
+        let pending = {
+            let runtime = self.runtime.read().await;
+            runtime
+                .symbols
+                .get(symbol)
+                .and_then(|state| state.pending_initial_entry.clone())
+        };
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+
+        let elapsed = Utc::now()
+            .signed_duration_since(pending.submitted_at)
+            .num_seconds()
+            .max(0) as u64;
+        if elapsed < wait_secs {
+            return Ok(());
+        }
+
+        let open_orders = self
+            .exchange
+            .get_open_orders(Some(symbol), self.market_type)
+            .await
+            .map_err(|err| anyhow!("get_open_orders failed for {}: {}", symbol, err))?;
+        let Some(open_order) = open_orders
+            .into_iter()
+            .find(|order| same_pending_initial_order(order, &pending))
+        else {
+            self.clear_pending_initial_entry(symbol).await;
+            logging::info(Some(symbol), "L1 挂单已成交或已撤销，无需转市价");
+            return Ok(());
+        };
+
+        self.exchange
+            .cancel_order(&open_order.id, symbol, self.market_type)
+            .await
+            .map_err(|err| anyhow!("cancel stale L1 maker order failed for {}: {}", symbol, err))?;
+
+        let remaining_notional = if open_order.remaining > 0.0 {
+            (open_order.remaining * pending.order_price)
+                .min(pending.notional)
+                .max(0.0)
+        } else if open_order.filled > 0.0 && open_order.amount > open_order.filled {
+            ((open_order.amount - open_order.filled) * pending.order_price)
+                .min(pending.notional)
+                .max(0.0)
+        } else {
+            pending.notional
+        };
+        if remaining_notional <= 0.0 {
+            self.clear_pending_initial_entry(symbol).await;
+            logging::info(Some(symbol), "L1 挂单撤销时无剩余数量，无需转市价");
+            return Ok(());
+        }
+
+        let quantity = self
+            .derive_order_quantity(
+                symbol,
+                remaining_notional,
+                pending.reference_price.max(pending.order_price),
+            )
+            .await?;
+        let request = OrderRequest {
+            symbol: symbol.to_string(),
+            side: OrderSide::Sell,
+            order_type: OrderType::Market,
+            amount: quantity,
+            price: None,
+            market_type: self.market_type,
+            params: self.build_short_position_params(),
+            client_order_id: Some(format!(
+                "sll_{}_L1_mkt_{}",
+                symbol.to_lowercase(),
+                Utc::now().timestamp_millis()
+            )),
+            time_in_force: None,
+            reduce_only: None,
+            post_only: Some(false),
+        };
+
+        self.exchange.create_order(request).await.map_err(|err| {
+            anyhow!(
+                "create fallback market short failed for {}: {}",
+                symbol,
+                err
+            )
+        })?;
+        {
+            let mut runtime = self.runtime.write().await;
+            if let Some(state) = runtime.symbols.get_mut(symbol) {
+                state.pending_initial_entry = None;
+                state.last_order_at = Some(Utc::now());
+            }
+        }
+
+        logging::info(
+            Some(symbol),
+            format!(
+                "L1 挂单 {} 秒未成交，已撤单并按市价补开: qty={:.6} notional≈{:.2}",
+                wait_secs, quantity, remaining_notional
+            ),
+        );
+        Ok(())
+    }
+
+    async fn clear_pending_initial_entry(&self, symbol: &str) {
+        let mut runtime = self.runtime.write().await;
+        if let Some(state) = runtime.symbols.get_mut(symbol) {
+            state.pending_initial_entry = None;
+        }
     }
 
     pub(super) async fn close_short(
@@ -540,6 +689,20 @@ fn position_quantity(position: &Position) -> f64 {
         .max(position.amount.abs())
 }
 
+fn same_pending_initial_order(order: &Order, pending: &PendingInitialEntry) -> bool {
+    order.id == pending.order_id
+        || client_order_id(order)
+            .zip(pending.client_order_id.as_deref())
+            .is_some_and(|(left_id, right_id)| left_id == right_id)
+}
+
+fn client_order_id(order: &Order) -> Option<&str> {
+    order
+        .info
+        .get("clientOrderId")
+        .and_then(|value| value.as_str())
+}
+
 fn layer_notionals_until(
     initial_notional: f64,
     layer_weights: &[f64],
@@ -551,4 +714,57 @@ fn layer_notionals_until(
         .take(filled_layers.min(cumulative_len))
         .map(|weight| initial_notional * *weight)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use serde_json::json;
+
+    use crate::core::types::{MarketType, OrderStatus};
+
+    use super::*;
+
+    fn sample_order(id: &str, client_order_id: Option<&str>) -> Order {
+        Order {
+            id: id.to_string(),
+            symbol: "ENA/USDC".to_string(),
+            side: OrderSide::Sell,
+            order_type: OrderType::Limit,
+            amount: 2.0,
+            price: Some(100.0),
+            filled: 0.0,
+            remaining: 2.0,
+            status: OrderStatus::Open,
+            market_type: MarketType::Futures,
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            last_trade_timestamp: None,
+            info: json!({ "clientOrderId": client_order_id }),
+        }
+    }
+
+    #[test]
+    fn pending_initial_order_matches_exchange_id_or_client_order_id() {
+        let pending = PendingInitialEntry {
+            order_id: "12345".to_string(),
+            client_order_id: Some("sll_enausdc_L1_1".to_string()),
+            notional: 200.0,
+            order_price: 1.0,
+            reference_price: 1.0,
+            submitted_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        };
+
+        assert!(same_pending_initial_order(
+            &sample_order("12345", Some("other")),
+            &pending
+        ));
+        assert!(same_pending_initial_order(
+            &sample_order("99999", Some("sll_enausdc_L1_1")),
+            &pending
+        ));
+        assert!(!same_pending_initial_order(
+            &sample_order("99999", Some("other")),
+            &pending
+        ));
+    }
 }

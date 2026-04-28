@@ -22,6 +22,8 @@ pub struct LiveShortPosition {
     pub last_layer_price: f64,
     pub atr_at_entry: f64,
     pub breakeven_armed: bool,
+    pub trailing_take_profit_armed: bool,
+    pub best_favorable_price: Option<f64>,
     pub opened_at: DateTime<Utc>,
     pub last_sync_at: DateTime<Utc>,
 }
@@ -34,6 +36,50 @@ impl LiveShortPosition {
     pub fn is_losing(&self, reference_price: f64) -> bool {
         self.unrealized_pnl(reference_price) < 0.0
     }
+
+    pub fn update_short_trailing_take_profit(
+        &mut self,
+        current_price: f64,
+        activation_atr: f64,
+        distance_atr: f64,
+    ) -> Option<f64> {
+        if self.atr_at_entry <= 0.0 || activation_atr <= 0.0 || distance_atr <= 0.0 {
+            return None;
+        }
+
+        let activation_price = self.average_entry_price - activation_atr * self.atr_at_entry;
+        if current_price <= activation_price {
+            self.trailing_take_profit_armed = true;
+            self.best_favorable_price = Some(
+                self.best_favorable_price
+                    .map(|best| best.min(current_price))
+                    .unwrap_or(current_price),
+            );
+        }
+
+        if !self.trailing_take_profit_armed {
+            return None;
+        }
+
+        if let Some(best_price) = self.best_favorable_price {
+            let stop_price = best_price + distance_atr * self.atr_at_entry;
+            if current_price >= stop_price {
+                return Some(stop_price);
+            }
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingInitialEntry {
+    pub order_id: String,
+    pub client_order_id: Option<String>,
+    pub notional: f64,
+    pub order_price: f64,
+    pub reference_price: f64,
+    pub submitted_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +89,7 @@ pub struct SymbolState {
     pub short: Option<LiveShortPosition>,
     pub last_klines: Vec<Kline>,
     pub last_order_at: Option<DateTime<Utc>>,
+    pub pending_initial_entry: Option<PendingInitialEntry>,
     pub last_error: Option<String>,
 }
 
@@ -54,6 +101,7 @@ impl SymbolState {
             short: None,
             last_klines: Vec::new(),
             last_order_at: None,
+            pending_initial_entry: None,
             last_error: None,
         }
     }
@@ -326,6 +374,8 @@ mod tests {
             last_layer_price: 101.0,
             atr_at_entry: 2.0,
             breakeven_armed: false,
+            trailing_take_profit_armed: false,
+            best_favorable_price: None,
             opened_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
             last_sync_at: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
         };
@@ -374,5 +424,45 @@ mod tests {
     fn precision_round_up_respects_exchange_tick() {
         assert!((precision_round_up(10.001, 0.01) - 10.01).abs() < 1e-9);
         assert!((precision_round_up(10.0, 0.01) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn short_trailing_take_profit_activates_then_exits_on_rebound() {
+        let opened_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let mut position = LiveShortPosition {
+            average_entry_price: 100.0,
+            quantity: 2.0,
+            current_notional: 200.0,
+            filled_layers: 1,
+            next_layer_index: 1,
+            last_layer_price: 100.0,
+            atr_at_entry: 2.0,
+            breakeven_armed: false,
+            trailing_take_profit_armed: false,
+            best_favorable_price: None,
+            opened_at,
+            last_sync_at: opened_at,
+        };
+
+        assert_eq!(
+            position.update_short_trailing_take_profit(98.0, 1.4, 1.4),
+            None
+        );
+        assert_eq!(
+            position.update_short_trailing_take_profit(97.0, 1.4, 1.4),
+            None
+        );
+        assert!(position.trailing_take_profit_armed);
+        assert_eq!(position.best_favorable_price, Some(97.0));
+
+        assert_eq!(
+            position.update_short_trailing_take_profit(96.0, 1.4, 1.4),
+            None
+        );
+        assert_eq!(position.best_favorable_price, Some(96.0));
+        assert_eq!(
+            position.update_short_trailing_take_profit(98.9, 1.4, 1.4),
+            Some(98.8)
+        );
     }
 }

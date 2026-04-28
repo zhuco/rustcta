@@ -3,7 +3,7 @@ strategy:
   version: "0.1.0"
   enabled: true
   log_level: "INFO"
-  description: "BJT 19-06 + L4 full + 不保本；仅做空 USDC 合约，重启后按交易所真实空头仓位接管 L1-L4 进度。"
+  description: "BJT 19-06 + L1 only + 动态 ATR 止盈 + L1 45秒挂单转市价；仅做空 USDC 合约，单交易对最大名义仓位 200U，重启后按交易所真实空头仓位接管 L1 进度。"
 
 account:
   account_id: "binance_hcr"
@@ -22,27 +22,27 @@ symbols:
   - symbol: "ORDIUSDC"
     enabled: true
     initial_notional: 200.0
-    max_notional: 2000.0
+    max_notional: 200.0
     leverage: 10
   - symbol: "TIAUSDC"
     enabled: true
     initial_notional: 200.0
-    max_notional: 2000.0
+    max_notional: 200.0
     leverage: 10
-  - symbol: "WLDUSDC"
+  - symbol: "ARBUSDC"
     enabled: true
     initial_notional: 200.0
-    max_notional: 2000.0
+    max_notional: 200.0
     leverage: 10
   - symbol: "ENAUSDC"
     enabled: true
     initial_notional: 200.0
-    max_notional: 2000.0
+    max_notional: 200.0
     leverage: 10
-  - symbol: "WIFUSDC"
+  - symbol: "AVAXUSDC"
     enabled: true
     initial_notional: 200.0
-    max_notional: 2000.0
+    max_notional: 200.0
     leverage: 10
 
 signal:
@@ -58,9 +58,12 @@ signal:
   strong_1h_ema_slope_max_pct: -0.03
 
 ladder:
-  layer_weights: [1.0, 1.0, 3.0, 5.0]
+  layer_weights: [1.0]
   layer_spacing_atr: 0.55
   take_profit_atr: 1.2
+  take_profit_mode: "atr_trailing"
+  trailing_take_profit_activation_atr: 1.4
+  trailing_take_profit_distance_atr: 1.4
   stop_loss_atr: 1.7
   max_hold_bars: 48
   breakeven_stop: false
@@ -69,5 +72,6 @@ ladder:
 execution:
   use_post_only_entry: true
   maker_price_offset_bps: 1.0
-  order_cooldown_secs: 300
+  order_cooldown_secs: 900
+  initial_order_taker_fallback_secs: 45
   close_with_market_order: true

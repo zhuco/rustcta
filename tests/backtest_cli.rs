@@ -63,6 +63,9 @@ fn parses_fetch_klines_command() {
         BacktestCommand::RunShortLadder(_) => {
             panic!("expected fetch-klines command")
         }
+        BacktestCommand::RunShortLadderMtfExecution(_) => {
+            panic!("expected fetch-klines command")
+        }
     }
 }
 
@@ -135,6 +138,9 @@ fn parses_run_mean_reversion_command() {
             panic!("expected run-mean-reversion command")
         }
         BacktestCommand::RunShortLadder(_) => {
+            panic!("expected run-mean-reversion command")
+        }
+        BacktestCommand::RunShortLadderMtfExecution(_) => {
             panic!("expected run-mean-reversion command")
         }
     }
@@ -467,6 +473,63 @@ fn parses_run_short_ladder_command() {
             assert_eq!(args.report_output, "reports/short_ladder.json");
         }
         _ => panic!("expected run-short-ladder command"),
+    }
+}
+
+#[test]
+fn parses_run_short_ladder_mtf_execution_command() {
+    let cli = BacktestCli::try_parse_from([
+        "backtest",
+        "run-short-ladder-mtf-execution",
+        "--exchange",
+        "binance",
+        "--market",
+        "futures",
+        "--symbol",
+        "TIAUSDC",
+        "--signal-interval",
+        "5m",
+        "--execution-interval",
+        "1m",
+        "--start",
+        "2025-04-27T00:00:00Z",
+        "--end",
+        "2026-04-27T00:00:00Z",
+        "--dataset",
+        "data",
+        "--config",
+        "config/short_ladder.yml",
+        "--mode",
+        "adverse_averaging",
+        "--report-output",
+        "reports/short_ladder_mtf.json",
+        "--order-cooldown-secs",
+        "600",
+        "--min-minutes-to-l4",
+        "30",
+        "--max-layers-per-hour",
+        "2",
+    ])
+    .expect("cli should parse");
+
+    match cli.command {
+        BacktestCommand::RunShortLadderMtfExecution(args) => {
+            assert_eq!(args.exchange, "binance");
+            assert_eq!(args.market, "futures");
+            assert_eq!(args.symbol, "TIAUSDC");
+            assert_eq!(args.signal_interval, "5m");
+            assert_eq!(args.execution_interval, "1m");
+            assert_eq!(args.start, "2025-04-27T00:00:00Z");
+            assert_eq!(args.end, "2026-04-27T00:00:00Z");
+            assert_eq!(args.dataset, "data");
+            assert_eq!(args.config, "config/short_ladder.yml");
+            assert_eq!(args.mode, "adverse_averaging");
+            assert_eq!(args.report_output, "reports/short_ladder_mtf.json");
+            assert_eq!(args.order_cooldown_secs, 600);
+            assert_eq!(args.min_minutes_to_l4, 30);
+            assert_eq!(args.max_layers_per_hour, 2);
+        }
+        _ => panic!("expected run-short-ladder-mtf-execution command"),
     }
 }
 
