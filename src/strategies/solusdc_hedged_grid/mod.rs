@@ -4,6 +4,7 @@ pub mod engine;
 pub mod ledger;
 pub mod multi;
 pub mod risk;
+pub mod shared;
 pub mod sim;
 
 pub use config::*;
@@ -12,6 +13,7 @@ pub use engine::*;
 pub use ledger::*;
 pub use multi::*;
 pub use risk::*;
+pub use shared::*;
 pub use sim::*;
 
 #[cfg(test)]
