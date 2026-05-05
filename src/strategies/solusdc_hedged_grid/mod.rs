@@ -866,6 +866,45 @@ mod solusdc_hedged_grid {
     }
 
     #[test]
+    fn balanced_hedged_inventory_over_total_limit_should_still_seed_open_orders() {
+        let mut config = test_config();
+        config.grid.grid_spacing_abs = Some(2.5);
+        config.grid.grid_spacing_pct = 0.0;
+        config.grid.order_qty = Some(0.011);
+        config.grid.strict_pairing = false;
+        config.risk.max_total_notional = 2000.0;
+        config.risk.max_net_notional = 2000.0;
+        let levels = config.grid.levels_per_side;
+
+        let mut engine = GridEngine::new(config, true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 0.43,
+            short_qty: 0.43,
+            long_entry_price: 2370.0,
+            short_entry_price: 2370.0,
+            long_available: 0.43,
+            short_available: 0.43,
+            equity: 1000.0,
+            maintenance_margin: 20.0,
+            mark_price: 2370.0,
+        });
+        engine.rebuild_grid(&snapshot(2370.0));
+
+        let open_longs = engine
+            .buy_orders()
+            .iter()
+            .filter(|order| order.intent == OrderIntent::OpenLongBuy)
+            .count();
+        let open_shorts = engine
+            .sell_orders()
+            .iter()
+            .filter(|order| order.intent == OrderIntent::OpenShortSell)
+            .count();
+        assert_eq!(open_longs, levels);
+        assert_eq!(open_shorts, levels);
+    }
+
+    #[test]
     fn fill_should_repair_near_gap_and_trim_far_orders_with_abs_spacing() {
         let mut config = test_config();
         config.grid.grid_spacing_abs = Some(2.5);
