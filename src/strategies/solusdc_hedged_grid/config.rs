@@ -47,6 +47,10 @@ pub struct PollingConfig {
     pub request_timeout_secs: u64,
     #[serde(default = "default_watchdog_timeout_secs")]
     pub watchdog_timeout_secs: u64,
+    #[serde(default = "default_trade_reconcile_interval_ms")]
+    pub trade_reconcile_interval_ms: u64,
+    #[serde(default = "default_cancel_unknown_interval_ms")]
+    pub cancel_unknown_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +84,8 @@ impl Default for PollingConfig {
             trade_fetch_limit: default_trade_fetch_limit(),
             request_timeout_secs: default_request_timeout_secs(),
             watchdog_timeout_secs: default_watchdog_timeout_secs(),
+            trade_reconcile_interval_ms: default_trade_reconcile_interval_ms(),
+            cancel_unknown_interval_ms: default_cancel_unknown_interval_ms(),
         }
     }
 }
@@ -397,6 +403,14 @@ fn default_request_timeout_secs() -> u64 {
 
 fn default_watchdog_timeout_secs() -> u64 {
     60
+}
+
+fn default_trade_reconcile_interval_ms() -> u64 {
+    30000
+}
+
+fn default_cancel_unknown_interval_ms() -> u64 {
+    60000
 }
 
 fn default_ws_enabled() -> bool {

@@ -9,7 +9,7 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     Mutex,
 };
-use tokio::time::{interval, sleep, Duration};
+use tokio::time::{interval, sleep, Duration, Instant};
 
 use crate::core::error::ExchangeError;
 use crate::core::types::{
@@ -67,7 +67,10 @@ impl OrderMap {
 
 #[derive(Debug, Clone)]
 enum UserStreamEvent {
-    ExecutionReport(ExecutionReport),
+    ExecutionReport {
+        report: ExecutionReport,
+        ws_receive_at: Instant,
+    },
 }
 
 pub struct SolusdcHedgedGridStrategy {
@@ -171,6 +174,10 @@ async fn run_loop(
     let zero_position_refresh_interval = ChronoDuration::minutes(2);
     let mut last_hourly_reset = Utc::now();
     let hourly_reset_interval = ChronoDuration::hours(12);
+    let mut last_trade_reconcile = Utc::now()
+        - ChronoDuration::milliseconds(config.polling.trade_reconcile_interval_ms as i64);
+    let mut last_cancel_unknown =
+        Utc::now() - ChronoDuration::milliseconds(config.polling.cancel_unknown_interval_ms as i64);
     let request_timeout = Duration::from_secs(config.polling.request_timeout_secs);
     let watchdog_timeout =
         ChronoDuration::seconds(config.polling.watchdog_timeout_secs.max(10) as i64);
@@ -406,22 +413,32 @@ async fn run_loop(
                             return Err(err);
                         }
                     };
-                    let trades = match with_timeout(
-                        "get_my_trades",
-                        request_timeout,
-                        account.exchange.get_my_trades(
-                            Some(&config.engine.symbol),
-                            config.account.market_type,
-                            Some(config.polling.trade_fetch_limit),
-                        ),
-                    )
-                    .await
-                    {
-                        Ok(trades) => trades,
-                        Err(err) => {
-                            log::warn!("[solusdc_hedged_grid] 成交记录拉取失败: {}", err);
-                            Vec::new()
+                    let should_fetch_trades = config.polling.trade_reconcile_interval_ms > 0
+                        && now - last_trade_reconcile
+                            >= ChronoDuration::milliseconds(
+                                config.polling.trade_reconcile_interval_ms as i64,
+                            );
+                    let trades = if should_fetch_trades {
+                        last_trade_reconcile = now;
+                        match with_timeout(
+                            "get_my_trades",
+                            request_timeout,
+                            account.exchange.get_my_trades(
+                                Some(&config.engine.symbol),
+                                config.account.market_type,
+                                Some(config.polling.trade_fetch_limit),
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(trades) => trades,
+                            Err(err) => {
+                                log::warn!("[solusdc_hedged_grid] 成交记录拉取失败: {}", err);
+                                Vec::new()
+                            }
                         }
+                    } else {
+                        Vec::new()
                     };
 
                     let long_empty = position.long_qty.abs() < 1e-8;
@@ -494,15 +511,23 @@ async fn run_loop(
                         );
                     }
 
-                    cancel_unknown_orders(
-                        account.as_ref(),
-                        &config.engine.symbol,
-                        config.account.market_type,
-                        request_timeout,
-                        &order_map,
-                        &open_orders,
-                    )
-                    .await;
+                    if config.polling.cancel_unknown_interval_ms > 0
+                        && now - last_cancel_unknown
+                            >= ChronoDuration::milliseconds(
+                                config.polling.cancel_unknown_interval_ms as i64,
+                            )
+                    {
+                        last_cancel_unknown = now;
+                        cancel_unknown_orders(
+                            account.as_ref(),
+                            &config.engine.symbol,
+                            config.account.market_type,
+                            request_timeout,
+                            &order_map,
+                            &open_orders,
+                        )
+                        .await;
+                    }
                 }
 
                 if failure_count >= config.execution.max_consecutive_failures {
@@ -656,8 +681,12 @@ async fn handle_user_stream_event(
     last_snapshot: &mut Option<MarketSnapshot>,
     event: UserStreamEvent,
 ) -> Result<()> {
-    let report = match event {
-        UserStreamEvent::ExecutionReport(report) => report,
+    let event_dequeue_at = Instant::now();
+    let (report, ws_receive_at) = match event {
+        UserStreamEvent::ExecutionReport {
+            report,
+            ws_receive_at,
+        } => (report, ws_receive_at),
     };
 
     let target_symbol = normalize_symbol(&config.engine.symbol);
@@ -669,6 +698,7 @@ async fn handle_user_stream_event(
         return Ok(());
     };
 
+    let engine_start_at = Instant::now();
     let mut actions = Vec::new();
     let mut fill_info: Option<FillEvent> = None;
     let mut fill_order_price: Option<f64> = None;
@@ -738,6 +768,8 @@ async fn handle_user_stream_event(
         }
     }
 
+    let engine_done_at = Instant::now();
+
     if remove_mapping {
         order_map.remove_client(&client_id);
     }
@@ -747,6 +779,7 @@ async fn handle_user_stream_event(
     }
 
     if !actions.is_empty() {
+        let executor_enqueue_at = Instant::now();
         execute_actions(
             config,
             account,
@@ -757,6 +790,29 @@ async fn handle_user_stream_event(
             actions,
         )
         .await?;
+        let executor_done_at = Instant::now();
+        if let Some(fill) = &fill_info {
+            log::info!(
+                "[solusdc_hedged_grid] latency_breakdown source=ws symbol={} order_id={} client_id={} ws_queue_ms={} engine_ms={} executor_ms={} total_ms={}",
+                report.symbol,
+                report.order_id,
+                fill.order_id,
+                event_dequeue_at.duration_since(ws_receive_at).as_millis(),
+                engine_done_at.duration_since(engine_start_at).as_millis(),
+                executor_done_at.duration_since(executor_enqueue_at).as_millis(),
+                executor_done_at.duration_since(ws_receive_at).as_millis()
+            );
+        }
+    } else if let Some(fill) = &fill_info {
+        log::info!(
+            "[solusdc_hedged_grid] latency_breakdown source=ws symbol={} order_id={} client_id={} ws_queue_ms={} engine_ms={} executor_ms=0 total_ms={}",
+            report.symbol,
+            report.order_id,
+            fill.order_id,
+            event_dequeue_at.duration_since(ws_receive_at).as_millis(),
+            engine_done_at.duration_since(engine_start_at).as_millis(),
+            engine_done_at.duration_since(ws_receive_at).as_millis()
+        );
     }
 
     Ok(())
@@ -836,7 +892,10 @@ fn spawn_user_stream_listener(
                                 Ok(WsMessage::ExecutionReport(report)) => {
                                     if normalize_symbol(&report.symbol) == normalized_symbol {
                                         if event_tx
-                                            .send(UserStreamEvent::ExecutionReport(report))
+                                            .send(UserStreamEvent::ExecutionReport {
+                                                report,
+                                                ws_receive_at: Instant::now(),
+                                            })
                                             .is_err()
                                         {
                                             log::warn!(
