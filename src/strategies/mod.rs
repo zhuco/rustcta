@@ -49,6 +49,8 @@ pub use range_grid::{RangeGridConfig, RangeGridStrategy};
 pub use short_ladder_live::{ShortLadderLiveConfig, ShortLadderLiveStrategy};
 pub use sideways_martingale::{SidewaysMartingaleConfig, SidewaysMartingaleStrategy};
 pub use solusdc_hedged_grid::GridEngine as SolusdcHedgedGridEngine;
+pub use solusdc_hedged_grid::MultiHedgedGridStrategy;
+pub use solusdc_hedged_grid::MultiRuntimeConfig as MultiHedgedGridRuntimeConfig;
 pub use solusdc_hedged_grid::RuntimeConfig as SolusdcHedgedGridRuntimeConfig;
 pub use solusdc_hedged_grid::SimulationEngine as SolusdcHedgedGridSimulation;
 pub use solusdc_hedged_grid::SolusdcHedgedGridStrategy;

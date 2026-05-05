@@ -376,6 +376,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
+        "multi_hedged_grid" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: MultiHedgedGridRuntimeConfig = serde_yaml::from_str(&file_content)?;
+            let strategy = MultiHedgedGridStrategy::new(config, account_manager.clone());
+            log::info!("多交易对对冲滚动网格策略已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭策略...");
+            strategy.stop().await?;
+        }
         "short_ladder_live" => {
             let file_content = std::fs::read_to_string(config_file)?;
             let config: ShortLadderLiveConfig = serde_yaml::from_str(&file_content)?;

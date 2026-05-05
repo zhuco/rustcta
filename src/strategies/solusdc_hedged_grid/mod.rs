@@ -2,6 +2,7 @@ pub mod config;
 pub mod controller;
 pub mod engine;
 pub mod ledger;
+pub mod multi;
 pub mod risk;
 pub mod sim;
 
@@ -9,6 +10,7 @@ pub use config::*;
 pub use controller::SolusdcHedgedGridStrategy;
 pub use engine::*;
 pub use ledger::*;
+pub use multi::*;
 pub use risk::*;
 pub use sim::*;
 
