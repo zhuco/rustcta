@@ -66,7 +66,7 @@ impl OrderMap {
 }
 
 #[derive(Debug, Clone)]
-enum UserStreamEvent {
+pub(super) enum UserStreamEvent {
     ExecutionReport {
         report: ExecutionReport,
         ws_receive_at: Instant,
@@ -104,7 +104,14 @@ impl SolusdcHedgedGridStrategy {
                 if !running.load(Ordering::SeqCst) {
                     break;
                 }
-                match run_loop(config.clone(), account_manager.clone(), running.clone()).await {
+                match run_loop(
+                    config.clone(),
+                    account_manager.clone(),
+                    running.clone(),
+                    None,
+                )
+                .await
+                {
                     Ok(_) => break,
                     Err(err) => {
                         log::error!("[solusdc_hedged_grid] 运行异常: {}，30秒后重启策略", err);
@@ -153,10 +160,11 @@ impl SolusdcHedgedGridStrategy {
     }
 }
 
-async fn run_loop(
+pub(super) async fn run_loop(
     config: RuntimeConfig,
     account_manager: Arc<AccountManager>,
     running: Arc<AtomicBool>,
+    external_ws_rx: Option<UnboundedReceiver<UserStreamEvent>>,
 ) -> Result<()> {
     let account = account_manager
         .get_account(&config.account.account_id)
@@ -185,7 +193,13 @@ async fn run_loop(
     let mut failure_count = 0u32;
     let mut restart_requested = false;
     let (ws_tx, mut ws_rx) = unbounded_channel();
-    if config.websocket.enabled {
+    if let Some(external_ws_rx) = external_ws_rx {
+        ws_rx = external_ws_rx;
+        log::info!(
+            "[solusdc_hedged_grid] 使用共享WebSocket用户流 symbol={}",
+            config.engine.symbol
+        );
+    } else if config.websocket.enabled {
         spawn_user_stream_listener(
             config.clone(),
             account_manager.clone(),
@@ -818,7 +832,7 @@ async fn handle_user_stream_event(
     Ok(())
 }
 
-fn spawn_user_stream_listener(
+pub(super) fn spawn_user_stream_listener(
     config: RuntimeConfig,
     account_manager: Arc<AccountManager>,
     running: Arc<AtomicBool>,
