@@ -455,15 +455,28 @@ pub(super) async fn run_loop(
                         Vec::new()
                     };
 
-                    let long_empty = position.long_qty.abs() < 1e-8;
-                    let short_empty = position.short_qty.abs() < 1e-8;
-                    let needs_zero_position_refresh = (long_empty && short_empty)
-                        && now - last_zero_position_refresh >= zero_position_refresh_interval;
                     let needs_hourly_reset = now - last_hourly_reset >= hourly_reset_interval;
+                    let low_inventory_info;
                     let mut actions = Vec::new();
                     {
                         let mut guard = engine.lock().await;
-                        guard.update_position(position);
+                        guard.update_position(position.clone());
+                        let low_inventory_threshold = guard
+                            .low_inventory_threshold_qty(snapshot.mark_price)
+                            .unwrap_or(0.0);
+                        let long_low = position.long_qty.abs() < low_inventory_threshold;
+                        let short_low = position.short_qty.abs() < low_inventory_threshold;
+                        let needs_low_inventory_refresh = low_inventory_threshold > 0.0
+                            && (long_low || short_low)
+                            && now - last_zero_position_refresh >= zero_position_refresh_interval;
+                        low_inventory_info = Some((
+                            low_inventory_threshold,
+                            long_low,
+                            short_low,
+                            position.long_qty,
+                            position.short_qty,
+                        ));
+
                         actions.extend(sync_orders(
                             &mut *guard,
                             &mut order_map,
@@ -473,7 +486,7 @@ pub(super) async fn run_loop(
                         ));
                         if needs_hourly_reset {
                             actions.extend(guard.rebuild_grid(&snapshot));
-                        } else if needs_zero_position_refresh {
+                        } else if needs_low_inventory_refresh {
                             actions.extend(guard.rebuild_grid(&snapshot));
                         } else {
                             actions.extend(guard.reconcile_inventory(&snapshot));
@@ -516,13 +529,21 @@ pub(super) async fn run_loop(
                         log::info!("[solusdc_hedged_grid] 定时重置网格 interval=12h");
                     }
 
-                    if needs_zero_position_refresh {
-                        last_zero_position_refresh = now;
-                        log::info!(
-                            "[solusdc_hedged_grid] 零仓刷新订单 long_empty={} short_empty={}",
-                            long_empty,
-                            short_empty
-                        );
+                    if let Some((threshold, long_low, short_low, long_qty, short_qty)) = low_inventory_info {
+                        if threshold > 0.0
+                            && (long_low || short_low)
+                            && now - last_zero_position_refresh >= zero_position_refresh_interval
+                        {
+                            last_zero_position_refresh = now;
+                            log::info!(
+                                "[solusdc_hedged_grid] 低仓刷新订单 threshold_qty={:.6} long_qty={:.6} short_qty={:.6} long_low={} short_low={}",
+                                threshold,
+                                long_qty,
+                                short_qty,
+                                long_low,
+                                short_low
+                            );
+                        }
                     }
 
                     if config.polling.cancel_unknown_interval_ms > 0

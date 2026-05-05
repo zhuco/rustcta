@@ -866,6 +866,18 @@ mod solusdc_hedged_grid {
     }
 
     #[test]
+    fn low_inventory_threshold_should_equal_three_grid_quantities() {
+        let mut config = test_config();
+        config.grid.levels_per_side = 3;
+        config.grid.order_qty = Some(0.011);
+        let engine = GridEngine::new(config, true).expect("engine");
+        let threshold = engine
+            .low_inventory_threshold_qty(2370.0)
+            .expect("threshold");
+        assert!((threshold - 0.033).abs() < 1e-9);
+    }
+
+    #[test]
     fn balanced_hedged_inventory_over_total_limit_should_still_seed_open_orders() {
         let mut config = test_config();
         config.grid.grid_spacing_abs = Some(2.5);

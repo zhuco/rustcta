@@ -125,6 +125,15 @@ impl GridEngine {
         self.state.sell_book.slots.clone()
     }
 
+    pub fn configured_order_qty(&self, reference_price: f64) -> Option<f64> {
+        self.qty_from_notional(reference_price)
+    }
+
+    pub fn low_inventory_threshold_qty(&self, reference_price: f64) -> Option<f64> {
+        self.configured_order_qty(reference_price)
+            .map(|qty| qty * self.config.grid.levels_per_side as f64)
+    }
+
     pub fn order_ids(&self) -> Vec<String> {
         self.state.ledger.all_ids()
     }
