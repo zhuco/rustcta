@@ -1500,48 +1500,140 @@ async fn execute_actions(
                 .await?;
             }
             EngineAction::Cancel { order_id, reason } => {
-                if let Some(exchange_id) = order_map.exchange_id(&order_id) {
-                    match with_timeout(
-                        "cancel_order",
-                        request_timeout,
-                        account.exchange.cancel_order(
-                            &exchange_id,
-                            &config.engine.symbol,
-                            config.account.market_type,
-                        ),
-                    )
-                    .await
-                    {
-                        Ok(_) => {
-                            order_map.remove_exchange(&exchange_id);
-                            log::info!(
-                                "[solusdc_hedged_grid] 撤单成功 {} exchange_id={} reason={}",
-                                order_id,
-                                exchange_id,
-                                reason
-                            );
-                        }
-                        Err(err) => {
-                            log::warn!(
-                                "[solusdc_hedged_grid] 撤单失败 {} exchange_id={} reason={} err={}",
-                                order_id,
-                                exchange_id,
-                                reason,
-                                err
-                            );
-                        }
-                    }
+                cancel_queue.push_front(EngineAction::Cancel { order_id, reason });
+                execute_cancel_batch(
+                    config,
+                    account,
+                    order_map,
+                    request_timeout,
+                    &mut cancel_queue,
+                )
+                .await;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn execute_cancel_batch(
+    config: &RuntimeConfig,
+    account: &AccountInfo,
+    order_map: &mut OrderMap,
+    request_timeout: Duration,
+    cancel_queue: &mut VecDeque<EngineAction>,
+) {
+    let mut cancel_items = Vec::new();
+    while let Some(action) = cancel_queue.pop_front() {
+        if let EngineAction::Cancel { order_id, reason } = action {
+            if let Some(exchange_id) = order_map.exchange_id(&order_id) {
+                cancel_items.push((order_id, exchange_id, reason));
+            } else {
+                log::warn!(
+                    "[solusdc_hedged_grid] 撤单跳过: 本地订单缺少exchange_id order_id={} reason={}",
+                    order_id,
+                    reason
+                );
+            }
+        }
+    }
+
+    if cancel_items.is_empty() {
+        return;
+    }
+
+    let exchange_ids: Vec<String> = cancel_items
+        .iter()
+        .map(|(_, exchange_id, _)| exchange_id.clone())
+        .collect();
+    log::info!(
+        "[solusdc_hedged_grid] 批量撤单 {} 共{}笔: {}",
+        config.engine.symbol,
+        cancel_items.len(),
+        cancel_items
+            .iter()
+            .map(|(order_id, exchange_id, reason)| format!(
+                "{} exchange_id={} reason={}",
+                order_id, exchange_id, reason
+            ))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
+
+    match with_timeout(
+        "cancel_multiple_orders",
+        request_timeout,
+        account.exchange.cancel_multiple_orders(
+            exchange_ids,
+            &config.engine.symbol,
+            config.account.market_type,
+        ),
+    )
+    .await
+    {
+        Ok(canceled_orders) => {
+            let canceled_ids: HashSet<String> = canceled_orders
+                .iter()
+                .map(|order| order.id.clone())
+                .collect();
+            for (order_id, exchange_id, reason) in cancel_items {
+                if canceled_ids.contains(&exchange_id) {
+                    order_map.remove_exchange(&exchange_id);
+                    log::info!(
+                        "[solusdc_hedged_grid] 撤单成功 {} exchange_id={} reason={}",
+                        order_id,
+                        exchange_id,
+                        reason
+                    );
                 } else {
                     log::warn!(
-                        "[solusdc_hedged_grid] 撤单跳过: 本地订单缺少exchange_id order_id={} reason={}",
+                        "[solusdc_hedged_grid] 批量撤单未确认 {} exchange_id={} reason={}",
                         order_id,
+                        exchange_id,
                         reason
                     );
                 }
             }
         }
+        Err(err) => {
+            log::warn!(
+                "[solusdc_hedged_grid] 批量撤单失败 count={} err={}",
+                cancel_items.len(),
+                err
+            );
+            for (order_id, exchange_id, reason) in cancel_items {
+                match with_timeout(
+                    "cancel_order_fallback",
+                    request_timeout,
+                    account.exchange.cancel_order(
+                        &exchange_id,
+                        &config.engine.symbol,
+                        config.account.market_type,
+                    ),
+                )
+                .await
+                {
+                    Ok(_) => {
+                        order_map.remove_exchange(&exchange_id);
+                        log::info!(
+                            "[solusdc_hedged_grid] 撤单成功 {} exchange_id={} reason={} fallback=true",
+                            order_id,
+                            exchange_id,
+                            reason
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[solusdc_hedged_grid] 撤单失败 {} exchange_id={} reason={} err={}",
+                            order_id,
+                            exchange_id,
+                            reason,
+                            err
+                        );
+                    }
+                }
+            }
+        }
     }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1918,6 +2010,28 @@ mod tests {
             _ => "",
         };
         assert_eq!(placed_id, "grid-2");
+    }
+
+    #[test]
+    fn pop_next_action_should_batch_cancels_after_places() {
+        let mut cancel_queue = VecDeque::new();
+        let mut place_queue = VecDeque::new();
+        cancel_queue.push_back(EngineAction::Cancel {
+            order_id: "grid-old-1".to_string(),
+            reason: "roll".to_string(),
+        });
+        cancel_queue.push_back(EngineAction::Cancel {
+            order_id: "grid-old-2".to_string(),
+            reason: "trim".to_string(),
+        });
+
+        let next = pop_next_action(&mut cancel_queue, &mut place_queue);
+
+        match next {
+            Some(EngineAction::Cancel { order_id, .. }) => assert_eq!(order_id, "grid-old-1"),
+            _ => panic!("expected first cancel when no places remain"),
+        }
+        assert_eq!(cancel_queue.len(), 1);
     }
 
     #[test]
