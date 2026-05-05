@@ -26,6 +26,7 @@ use super::engine::{
 };
 
 const MAX_BATCH_ORDERS: usize = 5;
+const WS_FILL_MICRO_BATCH_MS: u64 = 8;
 
 #[derive(Default)]
 struct OrderMap {
@@ -586,7 +587,8 @@ pub(super) async fn run_loop(
             }
             ws_event = ws_rx.recv() => {
                 if let Some(event) = ws_event {
-                    handle_user_stream_event(
+                    let events = collect_user_stream_micro_batch(event, &mut ws_rx).await;
+                    handle_user_stream_event_batch(
                         &config,
                         account.as_ref(),
                         engine.as_ref(),
@@ -594,7 +596,7 @@ pub(super) async fn run_loop(
                         &mut failure_count,
                         &mut restart_requested,
                         &mut last_snapshot,
-                        event,
+                        events,
                     )
                     .await?;
                     last_progress = Utc::now();
@@ -667,6 +669,19 @@ pub(super) async fn run_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn collect_user_stream_micro_batch(
+    first: UserStreamEvent,
+    ws_rx: &mut UnboundedReceiver<UserStreamEvent>,
+) -> Vec<UserStreamEvent> {
+    let mut events = vec![first];
+    sleep(Duration::from_millis(WS_FILL_MICRO_BATCH_MS)).await;
+    while let Ok(event) = ws_rx.try_recv() {
+        events.push(event);
+    }
+    events
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn drain_user_stream_events(
     config: &RuntimeConfig,
     account: &AccountInfo,
@@ -678,31 +693,145 @@ async fn drain_user_stream_events(
     ws_rx: &mut UnboundedReceiver<UserStreamEvent>,
     last_progress: &mut chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let mut drained = 0usize;
+    let mut events = Vec::new();
     while let Ok(event) = ws_rx.try_recv() {
-        handle_user_stream_event(
+        events.push(event);
+    }
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    let drained = events.len();
+    handle_user_stream_event_batch(
+        config,
+        account,
+        engine,
+        order_map,
+        failure_count,
+        restart_requested,
+        last_snapshot,
+        events,
+    )
+    .await?;
+    *last_progress = Utc::now();
+    log::debug!(
+        "[solusdc_hedged_grid] tick前优先处理WebSocket事件 count={}",
+        drained
+    );
+    Ok(())
+}
+
+struct ProcessedUserStreamEvent {
+    report_symbol: String,
+    report_order_id: String,
+    ws_receive_at: Instant,
+    event_dequeue_at: Instant,
+    engine_start_at: Instant,
+    engine_done_at: Instant,
+    fill_info: Option<FillEvent>,
+    fill_order_price: Option<f64>,
+    actions: Vec<EngineAction>,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_user_stream_event_batch(
+    config: &RuntimeConfig,
+    account: &AccountInfo,
+    engine: &Mutex<GridEngine>,
+    order_map: &mut OrderMap,
+    failure_count: &mut u32,
+    restart_requested: &mut bool,
+    last_snapshot: &mut Option<MarketSnapshot>,
+    events: Vec<UserStreamEvent>,
+) -> Result<()> {
+    let mut processed = Vec::new();
+    let mut actions = Vec::new();
+    let mut place_count = 0usize;
+    let mut cancel_count = 0usize;
+
+    for event in events {
+        let Some(mut item) = process_user_stream_event(
+            config,
+            engine,
+            order_map,
+            restart_requested,
+            last_snapshot,
+            event,
+        )
+        .await?
+        else {
+            continue;
+        };
+
+        if let (Some(fill), Some(order_price)) = (&item.fill_info, item.fill_order_price) {
+            log_fill_actions("ws", fill, order_price, &item.actions);
+        }
+        for action in &item.actions {
+            match action {
+                EngineAction::Place(_) => place_count += 1,
+                EngineAction::Cancel { .. } => cancel_count += 1,
+            }
+        }
+        actions.append(&mut item.actions);
+        processed.push(item);
+
+        if *restart_requested {
+            break;
+        }
+    }
+
+    if processed.is_empty() {
+        return Ok(());
+    }
+
+    let fill_count = processed
+        .iter()
+        .filter(|item| item.fill_info.is_some())
+        .count();
+    let action_count = actions.len();
+    let executor_enqueue_at = Instant::now();
+    if !actions.is_empty() {
+        execute_actions(
             config,
             account,
             engine,
             order_map,
             failure_count,
             restart_requested,
-            last_snapshot,
-            event,
+            actions,
         )
         .await?;
-        *last_progress = Utc::now();
-        drained += 1;
-        if *restart_requested {
-            break;
-        }
     }
-    if drained > 0 {
-        log::debug!(
-            "[solusdc_hedged_grid] tick前优先处理WebSocket事件 count={}",
-            drained
+    let executor_done_at = Instant::now();
+    if fill_count > 1 || action_count > 0 {
+        log::info!(
+            "[solusdc_hedged_grid] ws_micro_batch symbol={} events={} fills={} actions={} places={} cancels={} window_ms={} executor_ms={}",
+            config.engine.symbol,
+            processed.len(),
+            fill_count,
+            action_count,
+            place_count,
+            cancel_count,
+            WS_FILL_MICRO_BATCH_MS,
+            executor_done_at.duration_since(executor_enqueue_at).as_millis()
         );
     }
+
+    for item in processed {
+        if let Some(fill) = &item.fill_info {
+            log::info!(
+                "[solusdc_hedged_grid] latency_breakdown source=ws symbol={} order_id={} client_id={} ws_queue_ms={} engine_ms={} executor_ms={} total_ms={}",
+                item.report_symbol,
+                item.report_order_id,
+                fill.order_id,
+                item.event_dequeue_at.duration_since(item.ws_receive_at).as_millis(),
+                item.engine_done_at.duration_since(item.engine_start_at).as_millis(),
+                executor_done_at.duration_since(executor_enqueue_at).as_millis(),
+                executor_done_at.duration_since(item.ws_receive_at).as_millis()
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -716,6 +845,27 @@ async fn handle_user_stream_event(
     last_snapshot: &mut Option<MarketSnapshot>,
     event: UserStreamEvent,
 ) -> Result<()> {
+    handle_user_stream_event_batch(
+        config,
+        account,
+        engine,
+        order_map,
+        failure_count,
+        restart_requested,
+        last_snapshot,
+        vec![event],
+    )
+    .await
+}
+
+async fn process_user_stream_event(
+    config: &RuntimeConfig,
+    engine: &Mutex<GridEngine>,
+    order_map: &mut OrderMap,
+    restart_requested: &mut bool,
+    last_snapshot: &mut Option<MarketSnapshot>,
+    event: UserStreamEvent,
+) -> Result<Option<ProcessedUserStreamEvent>> {
     let event_dequeue_at = Instant::now();
     let (report, ws_receive_at) = match event {
         UserStreamEvent::ExecutionReport {
@@ -726,11 +876,11 @@ async fn handle_user_stream_event(
 
     let target_symbol = normalize_symbol(&config.engine.symbol);
     if normalize_symbol(&report.symbol) != target_symbol {
-        return Ok(());
+        return Ok(None);
     }
 
     let Some(client_id) = resolve_client_id(order_map, &report) else {
-        return Ok(());
+        return Ok(None);
     };
 
     let engine_start_at = Instant::now();
@@ -742,7 +892,7 @@ async fn handle_user_stream_event(
         let mut guard = engine.lock().await;
         let Some(record) = guard.order_record(&client_id) else {
             order_map.remove_exchange(&report.order_id);
-            return Ok(());
+            return Ok(None);
         };
 
         if order_map.exchange_id(&client_id).is_none() {
@@ -809,48 +959,17 @@ async fn handle_user_stream_event(
         order_map.remove_client(&client_id);
     }
 
-    if let (Some(fill), Some(order_price)) = (&fill_info, fill_order_price) {
-        log_fill_actions("ws", fill, order_price, &actions);
-    }
-
-    if !actions.is_empty() {
-        let executor_enqueue_at = Instant::now();
-        execute_actions(
-            config,
-            account,
-            engine,
-            order_map,
-            failure_count,
-            restart_requested,
-            actions,
-        )
-        .await?;
-        let executor_done_at = Instant::now();
-        if let Some(fill) = &fill_info {
-            log::info!(
-                "[solusdc_hedged_grid] latency_breakdown source=ws symbol={} order_id={} client_id={} ws_queue_ms={} engine_ms={} executor_ms={} total_ms={}",
-                report.symbol,
-                report.order_id,
-                fill.order_id,
-                event_dequeue_at.duration_since(ws_receive_at).as_millis(),
-                engine_done_at.duration_since(engine_start_at).as_millis(),
-                executor_done_at.duration_since(executor_enqueue_at).as_millis(),
-                executor_done_at.duration_since(ws_receive_at).as_millis()
-            );
-        }
-    } else if let Some(fill) = &fill_info {
-        log::info!(
-            "[solusdc_hedged_grid] latency_breakdown source=ws symbol={} order_id={} client_id={} ws_queue_ms={} engine_ms={} executor_ms=0 total_ms={}",
-            report.symbol,
-            report.order_id,
-            fill.order_id,
-            event_dequeue_at.duration_since(ws_receive_at).as_millis(),
-            engine_done_at.duration_since(engine_start_at).as_millis(),
-            engine_done_at.duration_since(ws_receive_at).as_millis()
-        );
-    }
-
-    Ok(())
+    Ok(Some(ProcessedUserStreamEvent {
+        report_symbol: report.symbol,
+        report_order_id: report.order_id,
+        ws_receive_at,
+        event_dequeue_at,
+        engine_start_at,
+        engine_done_at,
+        fill_info,
+        fill_order_price,
+        actions,
+    }))
 }
 
 pub(super) fn spawn_user_stream_listener(
@@ -1737,10 +1856,10 @@ fn pop_next_action(
     cancel_queue: &mut VecDeque<EngineAction>,
     place_queue: &mut VecDeque<EngineAction>,
 ) -> Option<EngineAction> {
-    if let Some(action) = cancel_queue.pop_front() {
+    if let Some(action) = place_queue.pop_front() {
         return Some(action);
     }
-    place_queue.pop_front()
+    cancel_queue.pop_front()
 }
 
 fn drain_place_batch(
@@ -1799,6 +1918,31 @@ mod tests {
             _ => "",
         };
         assert_eq!(placed_id, "grid-2");
+    }
+
+    #[test]
+    fn pop_next_action_should_place_before_cancel() {
+        let mut cancel_queue = VecDeque::new();
+        let mut place_queue = VecDeque::new();
+        cancel_queue.push_back(EngineAction::Cancel {
+            order_id: "grid-old".to_string(),
+            reason: "roll".to_string(),
+        });
+        place_queue.push_back(EngineAction::Place(OrderDraft {
+            id: "grid-new".to_string(),
+            intent: OrderIntent::OpenLongBuy,
+            price: 100.0,
+            qty: 1.0,
+            post_only: true,
+        }));
+
+        let next = pop_next_action(&mut cancel_queue, &mut place_queue);
+
+        match next {
+            Some(EngineAction::Place(draft)) => assert_eq!(draft.id, "grid-new"),
+            _ => panic!("expected place action first"),
+        }
+        assert_eq!(cancel_queue.len(), 1);
     }
 
     #[test]
