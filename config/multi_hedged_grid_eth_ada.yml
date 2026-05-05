@@ -1,0 +1,90 @@
+strategy:
+  name: multi_hedged_grid_eth_ada
+  log_level: INFO
+account:
+  account_id: binance_hcr
+  market_type: Futures
+symbols:
+- enabled: true
+  engine:
+    symbol: ETH/USDC
+    require_hedge_mode: true
+    price_reference: mid
+    risk_reference: mark
+    grid:
+      levels_per_side: 3
+      grid_spacing_abs: 2.5
+      order_notional: 25.0
+      strict_pairing: false
+      fill_remaining_slots_with_opens: true
+    follow:
+      max_gap_steps: 1.0
+      follow_cooldown_ms: 800
+      max_follow_actions_per_minute: 30
+    execution:
+      cooldown_ms: 500
+      post_only: true
+      post_only_retries: 3
+    precision:
+      tick_size: 0.01
+      step_size: 0.001
+      min_qty: 0.001
+      min_notional: 20.0
+    fees:
+      maker_fee: 0.0
+      taker_fee: 0.0004
+    risk:
+      max_net_notional: 2000.0
+      max_total_notional: 2000.0
+      margin_ratio_limit: 0.75
+      funding_rate_limit: 0.003
+      funding_cost_limit: 3.0
+- enabled: true
+  engine:
+    symbol: ADA/USDC
+    require_hedge_mode: true
+    price_reference: mid
+    risk_reference: mark
+    grid:
+      levels_per_side: 3
+      grid_spacing_abs: 0.0006
+      order_notional: 8.0
+      strict_pairing: false
+      fill_remaining_slots_with_opens: true
+    follow:
+      max_gap_steps: 1.0
+      follow_cooldown_ms: 800
+      max_follow_actions_per_minute: 30
+    execution:
+      cooldown_ms: 500
+      post_only: true
+      post_only_retries: 3
+    precision:
+      tick_size: 0.0001
+      step_size: 0.1
+      min_qty: 0.1
+      min_notional: 5.0
+    fees:
+      maker_fee: 0.0
+      taker_fee: 0.0004
+    risk:
+      max_net_notional: 600.0
+      max_total_notional: 600.0
+      margin_ratio_limit: 0.75
+      funding_rate_limit: 0.003
+      funding_cost_limit: 3.0
+polling:
+  tick_interval_ms: 2000
+  reconcile_interval_ms: 6000
+  trade_fetch_limit: 50
+  request_timeout_secs: 15
+  watchdog_timeout_secs: 60
+websocket:
+  enabled: true
+  keepalive_interval_secs: 1200
+  reconnect_delay_ms: 1000
+  max_reconnect_delay_ms: 30000
+execution:
+  startup_cancel_all: true
+  shutdown_cancel_all: true
+  max_consecutive_failures: 5
