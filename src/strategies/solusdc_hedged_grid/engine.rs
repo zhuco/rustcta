@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use crate::core::types::OrderSide;
 
@@ -202,15 +202,15 @@ impl GridEngine {
 
         self.state.last_fill_action = Some(fill.timestamp);
 
-        let actions = match fill.intent {
+        let mut actions = match fill.intent {
             OrderIntent::OpenLongBuy => self.roll_after_open_long(&fill, snapshot, order_price),
             OrderIntent::OpenShortSell => self.roll_after_open_short(&fill, snapshot, order_price),
             OrderIntent::CloseLongSell => self.roll_after_close_long(&fill, snapshot),
             OrderIntent::CloseShortBuy => self.roll_after_close_short(&fill, snapshot),
         };
 
-        // 成交事件路径保持最小动作集：
-        // 每笔成交仅执行对应滚动（补2撤1），其余归一化交给周期 reconcile。
+        // 成交后必须立即修复近端网格形态，不能只依赖周期 reconcile。
+        actions.extend(self.repair_grid_shape_after_fill(snapshot));
         actions
     }
 
@@ -859,6 +859,172 @@ impl GridEngine {
         actions.extend(self.enforce_close_limit(OrderSide::Sell));
         actions.extend(self.enforce_close_limit(OrderSide::Buy));
         actions
+    }
+
+    fn repair_grid_shape_after_fill(&mut self, snapshot: &MarketSnapshot) -> Vec<EngineAction> {
+        if self.config.grid.strict_pairing || self.state.kill_switch {
+            return Vec::new();
+        }
+
+        let mut actions = Vec::new();
+        actions.extend(self.repair_near_gap(snapshot));
+        actions.extend(self.trim_far_orders_after_fill(OrderSide::Buy));
+        actions.extend(self.trim_far_orders_after_fill(OrderSide::Sell));
+        actions
+    }
+
+    fn repair_near_gap(&mut self, snapshot: &MarketSnapshot) -> Vec<EngineAction> {
+        if !self.config.grid.fill_remaining_slots_with_opens {
+            return Vec::new();
+        }
+        let Some(spacing_abs) = self.grid_spacing_abs() else {
+            return Vec::new();
+        };
+        let highest_buy = self.best_open_price(OrderSide::Buy);
+        let lowest_sell = self.best_open_price(OrderSide::Sell);
+        let (Some(highest_buy), Some(lowest_sell)) = (highest_buy, lowest_sell) else {
+            return Vec::new();
+        };
+
+        let expected_gap = spacing_abs * 2.0;
+        let tolerance = self.precision.tick_size.max(1e-8) * 0.5;
+        let actual_gap = lowest_sell - highest_buy;
+        if actual_gap <= expected_gap + tolerance {
+            return Vec::new();
+        }
+
+        let missing_steps = ((actual_gap - expected_gap) / spacing_abs).floor() as usize;
+        if missing_steps == 0 {
+            return Vec::new();
+        }
+
+        log::warn!(
+            "[solusdc_hedged_grid] grid_shape_check near_gap actual={:.6} expected={:.6} highest_buy={:.6} lowest_sell={:.6} missing_steps={} action=repair_near_gap",
+            actual_gap,
+            expected_gap,
+            highest_buy,
+            lowest_sell,
+            missing_steps
+        );
+
+        let reference = self.reference_price(snapshot);
+        let mut actions = Vec::new();
+        for step in 1..=missing_steps {
+            let buy_price = lowest_sell - spacing_abs * (step as f64 + 1.0);
+            if buy_price > highest_buy + tolerance && buy_price < lowest_sell - tolerance {
+                if reference <= 0.0 || buy_price < reference - tolerance {
+                    if let Some(action) = self.place_open_at_price(OrderSide::Buy, buy_price) {
+                        actions.push(action);
+                    }
+                }
+            }
+
+            let sell_price = highest_buy + spacing_abs * (step as f64 + 1.0);
+            if sell_price > highest_buy + tolerance && sell_price < lowest_sell - tolerance {
+                if reference <= 0.0 || sell_price > reference + tolerance {
+                    if let Some(action) = self.place_open_at_price(OrderSide::Sell, sell_price) {
+                        actions.push(action);
+                    }
+                }
+            }
+        }
+        actions
+    }
+
+    fn trim_far_orders_after_fill(&mut self, side: OrderSide) -> Vec<EngineAction> {
+        if self.config.grid.strict_pairing {
+            return Vec::new();
+        }
+        let mut actions = Vec::new();
+        actions.extend(self.trim_far_orders_for_intent(side, Self::open_intent_for_side(side)));
+        actions.extend(self.trim_far_orders_for_intent(side, Self::close_intent_for_side(side)));
+        actions
+    }
+
+    fn trim_far_orders_for_intent(
+        &mut self,
+        side: OrderSide,
+        intent: OrderIntent,
+    ) -> Vec<EngineAction> {
+        let desired = self.config.grid.levels_per_side;
+        if desired == 0 {
+            return Vec::new();
+        }
+
+        let slots: Vec<OrderSlot> = self
+            .book_for_side(side)
+            .slots
+            .iter()
+            .filter(|slot| slot.intent == intent)
+            .cloned()
+            .collect();
+        if slots.len() <= desired {
+            return Vec::new();
+        }
+
+        let target_keys = self.near_target_keys_for_side(side, desired);
+        let mut kept_per_key: HashSet<i64> = HashSet::new();
+        let mut cancel_ids = Vec::new();
+
+        for slot in slots.iter() {
+            let key = self.price_key(slot.price);
+            if !target_keys.contains(&key) || !kept_per_key.insert(key) {
+                cancel_ids.push(slot.id.clone());
+            }
+        }
+
+        let mut remaining_count = slots.len().saturating_sub(cancel_ids.len());
+        if remaining_count > desired {
+            for slot in slots.iter().rev() {
+                if remaining_count <= desired {
+                    break;
+                }
+                if cancel_ids.iter().any(|id| id == &slot.id) {
+                    continue;
+                }
+                cancel_ids.push(slot.id.clone());
+                remaining_count -= 1;
+            }
+        }
+
+        let mut actions = Vec::new();
+        for order_id in cancel_ids {
+            actions.extend(self.cancel_order(&order_id, "trim_far_orders_after_fill"));
+        }
+        actions
+    }
+
+    fn near_target_keys_for_side(&self, side: OrderSide, desired: usize) -> HashSet<i64> {
+        let mut grouped: BTreeMap<i64, f64> = BTreeMap::new();
+        for slot in self.book_for_side(side).slots.iter() {
+            grouped
+                .entry(self.price_key(slot.price))
+                .or_insert(slot.price);
+        }
+
+        let prices: Vec<f64> = match side {
+            OrderSide::Buy => grouped.values().rev().copied().take(desired).collect(),
+            OrderSide::Sell => grouped.values().copied().take(desired).collect(),
+        };
+
+        prices
+            .into_iter()
+            .map(|price| self.price_key(price))
+            .collect()
+    }
+
+    fn best_open_price(&self, side: OrderSide) -> Option<f64> {
+        let intent = Self::open_intent_for_side(side);
+        self.book_for_side(side)
+            .slots
+            .iter()
+            .filter(|slot| slot.intent == intent)
+            .map(|slot| slot.price)
+            .reduce(|current, price| match side {
+                OrderSide::Buy if price > current => price,
+                OrderSide::Sell if price < current => price,
+                _ => current,
+            })
     }
 
     fn follow_buy_side(&mut self, best_buy: f64, mid: f64) -> Vec<EngineAction> {

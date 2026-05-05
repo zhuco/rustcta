@@ -862,6 +862,92 @@ mod solusdc_hedged_grid {
     }
 
     #[test]
+    fn fill_should_repair_near_gap_and_trim_far_orders_with_abs_spacing() {
+        let mut config = test_config();
+        config.grid.grid_spacing_abs = Some(2.5);
+        config.grid.grid_spacing_pct = 0.0;
+        config.grid.levels_per_side = 3;
+        config.grid.order_qty = Some(0.011);
+        config.grid.order_notional = 0.0;
+        config.grid.strict_pairing = false;
+        config.precision.tick_size = 0.01;
+        config.precision.price_digits = Some(2);
+        config.precision.min_notional = Some(5.0);
+        config.risk.max_net_notional = 100000.0;
+        config.risk.max_total_notional = 100000.0;
+
+        let mut engine = GridEngine::new(config, true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 2371.38,
+        });
+        let snap = snapshot(2371.38);
+        engine.rebuild_grid(&snap);
+
+        let near_sell = engine
+            .sell_orders()
+            .into_iter()
+            .filter(|order| order.intent == OrderIntent::OpenShortSell)
+            .min_by(|a, b| a.price.partial_cmp(&b.price).unwrap())
+            .expect("near open short");
+        let fill = FillEvent {
+            order_id: near_sell.id,
+            intent: near_sell.intent,
+            fill_qty: near_sell.qty,
+            fill_price: near_sell.price,
+            timestamp: Utc::now(),
+            partial: false,
+        };
+        let actions = engine.handle_fill(fill, &snap);
+        let (_, cancel_count) = action_counts(&actions);
+        assert!(
+            cancel_count >= 1,
+            "far order should be trimmed after repair"
+        );
+
+        let highest_buy = engine
+            .buy_orders()
+            .into_iter()
+            .filter(|order| order.intent == OrderIntent::OpenLongBuy)
+            .map(|order| order.price)
+            .reduce(f64::max)
+            .expect("highest buy");
+        let lowest_sell = engine
+            .sell_orders()
+            .into_iter()
+            .filter(|order| order.intent == OrderIntent::OpenShortSell)
+            .map(|order| order.price)
+            .reduce(f64::min)
+            .expect("lowest sell");
+        assert!(
+            (lowest_sell - highest_buy - 5.0).abs() <= 0.01,
+            "near gap should stay at two spacings: highest_buy={highest_buy} lowest_sell={lowest_sell}"
+        );
+
+        let mut sell_open_prices: Vec<f64> = engine
+            .sell_orders()
+            .into_iter()
+            .filter(|order| order.intent == OrderIntent::OpenShortSell)
+            .map(|order| order.price)
+            .collect();
+        sell_open_prices.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(sell_open_prices.len(), 3);
+        for pair in sell_open_prices.windows(2) {
+            assert!(
+                (pair[1] - pair[0] - 2.5).abs() <= 0.01,
+                "sell open ladder should be continuous: {sell_open_prices:?}"
+            );
+        }
+    }
+
+    #[test]
     fn strict_pairing_should_seed_only_open_ladders() {
         let mut config = test_config();
         config.grid.strict_pairing = true;

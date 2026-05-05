@@ -1288,7 +1288,7 @@ async fn execute_actions(
             }
             EngineAction::Cancel { order_id, reason } => {
                 if let Some(exchange_id) = order_map.exchange_id(&order_id) {
-                    let _ = with_timeout(
+                    match with_timeout(
                         "cancel_order",
                         request_timeout,
                         account.exchange.cancel_order(
@@ -1297,9 +1297,33 @@ async fn execute_actions(
                             config.account.market_type,
                         ),
                     )
-                    .await;
-                    order_map.remove_exchange(&exchange_id);
-                    log::debug!("[solusdc_hedged_grid] 撤单 {} ({})", order_id, reason);
+                    .await
+                    {
+                        Ok(_) => {
+                            order_map.remove_exchange(&exchange_id);
+                            log::info!(
+                                "[solusdc_hedged_grid] 撤单成功 {} exchange_id={} reason={}",
+                                order_id,
+                                exchange_id,
+                                reason
+                            );
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "[solusdc_hedged_grid] 撤单失败 {} exchange_id={} reason={} err={}",
+                                order_id,
+                                exchange_id,
+                                reason,
+                                err
+                            );
+                        }
+                    }
+                } else {
+                    log::warn!(
+                        "[solusdc_hedged_grid] 撤单跳过: 本地订单缺少exchange_id order_id={} reason={}",
+                        order_id,
+                        reason
+                    );
                 }
             }
         }
