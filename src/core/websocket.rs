@@ -351,7 +351,7 @@ pub fn get_websocket_url(exchange: &str, market_type: MarketType, is_private: bo
             (MarketType::Spot, false) => "wss://stream.binance.com:9443/ws",
             (MarketType::Spot, true) => "wss://stream.binance.com:9443/ws",
             (MarketType::Futures, false) => "wss://fstream.binance.com/ws",
-            (MarketType::Futures, true) => "wss://fstream.binance.com/ws",
+            (MarketType::Futures, true) => "wss://fstream.binance.com/private/ws",
         },
         "okx" => {
             if is_private {

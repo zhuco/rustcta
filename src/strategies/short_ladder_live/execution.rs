@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use serde::Serialize;
 
 use crate::core::types::{MarketType, Order, OrderRequest, OrderSide, OrderType, Position};
 
@@ -8,25 +9,21 @@ use super::logging;
 use super::market::ShortLadderSignalSnapshot;
 use super::model::{
     adopt_short_progress, capped_layer_notional, cumulative_layer_notionals,
-    infer_short_ladder_last_price, matches_short_position_side, position_params,
-    precision_round_down, precision_round_up, LiveShortPosition, PendingInitialEntry,
-    SymbolPrecision,
+    infer_short_ladder_last_price, matches_short_position_side, position_params, precision_format,
+    precision_round_down, precision_round_up, LiveShortPosition, PendingExitOrder,
+    PendingInitialEntry, SymbolPrecision,
 };
 use super::ShortLadderLiveStrategy;
 
 impl ShortLadderLiveStrategy {
     pub(super) async fn ensure_symbol_setup(&self, symbol: &str) -> Result<()> {
-        let (needs_precision, leverage) = {
+        let needs_precision = {
             let runtime = self.runtime.read().await;
             let state = runtime
                 .symbols
                 .get(symbol)
                 .ok_or_else(|| anyhow!("symbol {} not configured", symbol))?;
-            let leverage = self
-                .symbol_config(symbol)
-                .and_then(|cfg| cfg.leverage)
-                .or(self.config.account.default_leverage);
-            (state.precision.is_none(), leverage)
+            state.precision.is_none()
         };
 
         if needs_precision {
@@ -49,19 +46,6 @@ impl ShortLadderLiveStrategy {
             }
         }
 
-        if matches!(self.market_type, MarketType::Futures) {
-            if let Some(lev) = leverage {
-                if let Err(err) = self.exchange.set_leverage(symbol, lev).await {
-                    logging::warn(
-                        Some(symbol),
-                        format!("设置杠杆失败 leverage={} err={}", lev, err),
-                    );
-                } else {
-                    logging::info(Some(symbol), format!("设置杠杆成功 leverage={}", lev));
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -78,7 +62,9 @@ impl ShortLadderLiveStrategy {
             .get_open_orders(Some(symbol), self.market_type)
             .await
             .map_err(|err| anyhow!("get_open_orders failed for {}: {}", symbol, err))?;
-        Ok(!orders.is_empty())
+        Ok(orders
+            .into_iter()
+            .any(|order| !is_short_ladder_exit_order(&order)))
     }
 
     pub(super) fn build_short_position_params(
@@ -88,6 +74,26 @@ impl ShortLadderLiveStrategy {
             return None;
         }
         position_params(self.config.account.dual_position_mode, OrderSide::Sell)
+    }
+
+    fn order_params_with_precision(
+        &self,
+        precision: &SymbolPrecision,
+        quantity: f64,
+        price: Option<f64>,
+    ) -> Option<std::collections::HashMap<String, String>> {
+        let mut params = self.build_short_position_params().unwrap_or_default();
+        params.insert(
+            "quantity".to_string(),
+            precision_format(quantity, precision.step_size),
+        );
+        if let Some(price) = price {
+            params.insert(
+                "price".to_string(),
+                precision_format(price, precision.tick_size),
+            );
+        }
+        Some(params)
     }
 
     pub(super) async fn derive_order_quantity(
@@ -407,12 +413,19 @@ impl ShortLadderLiveStrategy {
                 None
             },
             market_type: self.market_type,
-            params: self.build_short_position_params(),
-            client_order_id: Some(format!(
-                "sll_{}_L{}_{}",
-                symbol.to_lowercase(),
+            params: self.order_params_with_precision(
+                &precision,
+                quantity,
+                if matches!(order_type, OrderType::Limit) {
+                    Some(order_price)
+                } else {
+                    None
+                },
+            ),
+            client_order_id: Some(build_short_ladder_client_order_id(
+                symbol,
+                "l",
                 layer_index + 1,
-                Utc::now().timestamp_millis()
             )),
             time_in_force: if self.config.execution.use_post_only_entry {
                 Some("GTX".to_string())
@@ -463,6 +476,19 @@ impl ShortLadderLiveStrategy {
                 reason
             ),
         );
+        self.notify_trade_event(
+            "开仓/加仓",
+            symbol,
+            format!(
+                "方向: 开空\n层级: L{}\n数量: {:.6}\n价格: {:.6}\n名义价值: {:.2} USDC\n原因: {}",
+                layer_index + 1,
+                quantity,
+                order_price,
+                quantity * order_price,
+                reason
+            ),
+        )
+        .await;
         self.update_status().await;
         Ok(())
     }
@@ -543,6 +569,7 @@ impl ShortLadderLiveStrategy {
                 pending.reference_price.max(pending.order_price),
             )
             .await?;
+        let precision = self.symbol_precision(symbol).await?;
         let request = OrderRequest {
             symbol: symbol.to_string(),
             side: OrderSide::Sell,
@@ -550,12 +577,8 @@ impl ShortLadderLiveStrategy {
             amount: quantity,
             price: None,
             market_type: self.market_type,
-            params: self.build_short_position_params(),
-            client_order_id: Some(format!(
-                "sll_{}_L1_mkt_{}",
-                symbol.to_lowercase(),
-                Utc::now().timestamp_millis()
-            )),
+            params: self.order_params_with_precision(&precision, quantity, None),
+            client_order_id: Some(build_short_ladder_client_order_id(symbol, "lm", 1)),
             time_in_force: None,
             reduce_only: None,
             post_only: Some(false),
@@ -614,13 +637,43 @@ impl ShortLadderLiveStrategy {
             return Ok(());
         }
 
+        let maker_first_take_profit = matches!(reason, "take_profit" | "trailing_take_profit")
+            && self.config.execution.take_profit_maker_first;
+        let order_type =
+            if self.config.execution.close_with_market_order && !maker_first_take_profit {
+                OrderType::Market
+            } else {
+                OrderType::Limit
+            };
+        self.submit_short_close_order(symbol, reference_price, reason, order_type)
+            .await
+    }
+
+    async fn submit_short_close_order(
+        &self,
+        symbol: &str,
+        reference_price: f64,
+        reason: &str,
+        order_type: OrderType,
+    ) -> Result<()> {
+        let existing = {
+            let runtime = self.runtime.read().await;
+            runtime
+                .symbols
+                .get(symbol)
+                .and_then(|state| state.short.clone())
+        };
+
+        let Some(position) = existing else {
+            return Ok(());
+        };
+        if position.quantity <= 0.0 {
+            return Ok(());
+        }
+
         let precision = self.symbol_precision(symbol).await?;
         let close_price = self.maker_buy_price(&precision, reference_price);
-        let order_type = if self.config.execution.close_with_market_order {
-            OrderType::Market
-        } else {
-            OrderType::Limit
-        };
+        let client_order_id_value = build_short_ladder_client_order_id(symbol, "c", 0);
         let request = OrderRequest {
             symbol: symbol.to_string(),
             side: OrderSide::Buy,
@@ -632,14 +685,18 @@ impl ShortLadderLiveStrategy {
                 None
             },
             market_type: self.market_type,
-            params: self.build_short_position_params(),
-            client_order_id: Some(format!(
-                "sll_{}_close_{}",
-                symbol.to_lowercase(),
-                Utc::now().timestamp_millis()
-            )),
+            params: self.order_params_with_precision(
+                &precision,
+                position.quantity,
+                if matches!(order_type, OrderType::Limit) {
+                    Some(close_price)
+                } else {
+                    None
+                },
+            ),
+            client_order_id: Some(client_order_id_value.clone()),
             time_in_force: if matches!(order_type, OrderType::Limit) {
-                Some("GTC".to_string())
+                Some("GTX".to_string())
             } else {
                 None
             },
@@ -648,10 +705,11 @@ impl ShortLadderLiveStrategy {
             } else {
                 Some(true)
             },
-            post_only: Some(false),
+            post_only: Some(matches!(order_type, OrderType::Limit)),
         };
 
-        self.exchange
+        let created_order = self
+            .exchange
             .create_order(request)
             .await
             .map_err(|err| anyhow!("close short failed for {}: {}", symbol, err))?;
@@ -660,7 +718,20 @@ impl ShortLadderLiveStrategy {
         {
             let mut runtime = self.runtime.write().await;
             if let Some(state) = runtime.symbols.get_mut(symbol) {
-                state.short = None;
+                if matches!(order_type, OrderType::Market) {
+                    state.short = None;
+                    state.pending_exit = None;
+                } else {
+                    state.pending_exit = Some(PendingExitOrder {
+                        order_id: created_order.id.clone(),
+                        client_order_id: client_order_id(&created_order)
+                            .map(str::to_string)
+                            .or(Some(client_order_id_value)),
+                        reason: reason.to_string(),
+                        submitted_at: Utc::now(),
+                        reference_price,
+                    });
+                }
                 state.last_order_at = Some(Utc::now());
                 state.last_error = None;
             }
@@ -673,11 +744,152 @@ impl ShortLadderLiveStrategy {
                 position.quantity, position.average_entry_price, reference_price, pnl, reason
             ),
         );
-        let _ = self
-            .sync_short_position(symbol, position.atr_at_entry, reference_price)
-            .await;
+        let title = if reason == "take_profit" || reason == "trailing_take_profit" {
+            "止盈"
+        } else if reason == "stop_loss" {
+            "止损"
+        } else {
+            "平仓"
+        };
+        self.notify_trade_event(
+            title,
+            symbol,
+            format!(
+                "方向: 平空\n数量: {:.6}\n均价: {:.6}\n参考价: {:.6}\n预估PnL: {:.4} USDC\n原因: {}",
+                position.quantity,
+                position.average_entry_price,
+                reference_price,
+                pnl,
+                reason
+            ),
+        )
+        .await;
+        if matches!(order_type, OrderType::Market) {
+            let _ = self
+                .sync_short_position(symbol, position.atr_at_entry, reference_price)
+                .await;
+        }
         self.update_status().await;
         Ok(())
+    }
+
+    pub(super) async fn fallback_stale_exit_to_market(&self, symbol: &str) -> Result<()> {
+        let pending = {
+            let runtime = self.runtime.read().await;
+            runtime
+                .symbols
+                .get(symbol)
+                .and_then(|state| state.pending_exit.clone())
+        };
+        let Some(pending) = pending else {
+            return Ok(());
+        };
+
+        let elapsed = Utc::now()
+            .signed_duration_since(pending.submitted_at)
+            .num_seconds()
+            .max(0) as u64;
+        if elapsed < self.config.execution.take_profit_maker_timeout_secs.max(1) {
+            return Ok(());
+        }
+
+        let open_orders = self
+            .exchange
+            .get_open_orders(Some(symbol), self.market_type)
+            .await
+            .map_err(|err| anyhow!("get_open_orders failed for {}: {}", symbol, err))?;
+        let Some(open_order) = open_orders.into_iter().find(|order| {
+            order.id == pending.order_id
+                || client_order_id(order)
+                    .zip(pending.client_order_id.as_deref())
+                    .is_some_and(|(actual, expected)| actual == expected)
+        }) else {
+            let mut runtime = self.runtime.write().await;
+            if let Some(state) = runtime.symbols.get_mut(symbol) {
+                state.pending_exit = None;
+            }
+            logging::info(Some(symbol), "止盈 maker 平仓单已成交或已撤销");
+            return Ok(());
+        };
+
+        self.exchange
+            .cancel_order(&open_order.id, symbol, self.market_type)
+            .await
+            .map_err(|err| anyhow!("cancel stale exit order failed for {}: {}", symbol, err))?;
+
+        {
+            let mut runtime = self.runtime.write().await;
+            if let Some(state) = runtime.symbols.get_mut(symbol) {
+                state.pending_exit = None;
+            }
+        }
+
+        logging::info(
+            Some(symbol),
+            format!(
+                "止盈 maker 平仓单 {} 秒未成交，撤单后转市价: reason={} ref={:.6}",
+                elapsed, pending.reason, pending.reference_price
+            ),
+        );
+        self.submit_short_close_order(
+            symbol,
+            pending.reference_price,
+            &pending.reason,
+            OrderType::Market,
+        )
+        .await
+    }
+
+    async fn notify_trade_event(&self, title: &str, symbol: &str, body: String) {
+        if !self.config.notifications.enabled {
+            return;
+        }
+        let url = self.config.notifications.wechat_webhook_url.trim();
+        if url.is_empty() {
+            return;
+        }
+
+        #[derive(Serialize)]
+        struct MarkdownMessage<'a> {
+            msgtype: &'a str,
+            markdown: MarkdownContent,
+        }
+
+        #[derive(Serialize)]
+        struct MarkdownContent {
+            content: String,
+        }
+
+        let content = format!(
+            "## Short Ladder {}\n\n**策略**: {}\n**交易对**: {}\n**时间**: {} UTC\n\n{}",
+            title,
+            self.config.strategy.name,
+            symbol,
+            Utc::now().format("%Y-%m-%d %H:%M:%S"),
+            body
+        );
+        let payload = MarkdownMessage {
+            msgtype: "markdown",
+            markdown: MarkdownContent { content },
+        };
+
+        match reqwest::Client::new().post(url).json(&payload).send().await {
+            Ok(response) if response.status().is_success() => {
+                logging::info(Some(symbol), format!("企业微信通知已发送: {}", title));
+            }
+            Ok(response) => {
+                logging::warn(
+                    Some(symbol),
+                    format!("企业微信通知失败: {} status={}", title, response.status()),
+                );
+            }
+            Err(err) => {
+                logging::warn(
+                    Some(symbol),
+                    format!("企业微信通知异常: {} err={}", title, err),
+                );
+            }
+        }
     }
 }
 
@@ -694,6 +906,47 @@ fn same_pending_initial_order(order: &Order, pending: &PendingInitialEntry) -> b
         || client_order_id(order)
             .zip(pending.client_order_id.as_deref())
             .is_some_and(|(left_id, right_id)| left_id == right_id)
+}
+
+fn is_short_ladder_exit_order(order: &Order) -> bool {
+    client_order_id(order)
+        .map(|id| id.starts_with("sll_") && (id.contains("_close_") || id.contains("_c_")))
+        .unwrap_or(false)
+}
+
+fn build_short_ladder_client_order_id(symbol: &str, tag: &str, level: usize) -> String {
+    let symbol_slug = symbol
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let timestamp = Utc::now().timestamp_millis().rem_euclid(1_000_000_000);
+    let id = format!(
+        "sll_{}_{}_{}_{:02}",
+        symbol_slug,
+        tag,
+        timestamp,
+        level % 100
+    );
+    if id.len() <= 36 {
+        id
+    } else {
+        let max_symbol_len = 36usize
+            .saturating_sub("sll_".len())
+            .saturating_sub(tag.len())
+            .saturating_sub(1)
+            .saturating_sub(timestamp.to_string().len())
+            .saturating_sub(1)
+            .saturating_sub(2);
+        let truncated_symbol = symbol_slug.chars().take(max_symbol_len).collect::<String>();
+        format!(
+            "sll_{}_{}_{}_{:02}",
+            truncated_symbol,
+            tag,
+            timestamp,
+            level % 100
+        )
+    }
 }
 
 fn client_order_id(order: &Order) -> Option<&str> {

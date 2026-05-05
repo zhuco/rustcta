@@ -28,6 +28,18 @@ pub struct LiveShortPosition {
     pub last_sync_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingEntryOrder {
+    pub order_id: String,
+    pub layer_index: usize,
+    pub quantity: f64,
+    pub notional: f64,
+    pub reference_price: f64,
+    pub reason: String,
+    pub attempts: u32,
+    pub submitted_at: DateTime<Utc>,
+}
+
 impl LiveShortPosition {
     pub fn unrealized_pnl(&self, reference_price: f64) -> f64 {
         (self.average_entry_price - reference_price) * self.quantity
@@ -83,13 +95,26 @@ pub struct PendingInitialEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct PendingExitOrder {
+    pub order_id: String,
+    pub client_order_id: Option<String>,
+    pub reason: String,
+    pub submitted_at: DateTime<Utc>,
+    pub reference_price: f64,
+}
+
+#[derive(Debug, Clone)]
 pub struct SymbolState {
     pub symbol: String,
     pub precision: Option<SymbolPrecision>,
     pub short: Option<LiveShortPosition>,
+    pub pending_entry: Option<PendingEntryOrder>,
     pub last_klines: Vec<Kline>,
     pub last_order_at: Option<DateTime<Utc>>,
     pub pending_initial_entry: Option<PendingInitialEntry>,
+    pub pending_exit: Option<PendingExitOrder>,
+    pub last_ws_exit_check_at: Option<DateTime<Utc>>,
+    pub last_trailing_update_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
 }
 
@@ -99,9 +124,13 @@ impl SymbolState {
             symbol: symbol.into(),
             precision: None,
             short: None,
+            pending_entry: None,
             last_klines: Vec::new(),
             last_order_at: None,
             pending_initial_entry: None,
+            pending_exit: None,
+            last_ws_exit_check_at: None,
+            last_trailing_update_at: None,
             last_error: None,
         }
     }
@@ -296,6 +325,37 @@ pub fn precision_round_up(value: f64, step: f64) -> f64 {
         return value;
     }
     (value / step).ceil() * step
+}
+
+pub fn decimal_places_from_step(step: f64) -> usize {
+    if step <= 0.0 || !step.is_finite() {
+        return 8;
+    }
+    let mut places = 0usize;
+    let mut scaled = step.abs();
+    while places < 12 && (scaled.fract()).abs() > 1e-12 {
+        scaled *= 10.0;
+        places += 1;
+    }
+    places
+}
+
+pub fn precision_format(value: f64, step: f64) -> String {
+    let places = decimal_places_from_step(step);
+    let mut text = format!("{:.*}", places, value);
+    if text.contains('.') {
+        while text.ends_with('0') {
+            text.pop();
+        }
+        if text.ends_with('.') {
+            text.pop();
+        }
+    }
+    if text == "-0" || text.is_empty() {
+        "0".to_string()
+    } else {
+        text
+    }
 }
 
 pub fn matches_short_position_side(side: &str) -> bool {

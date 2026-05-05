@@ -12,7 +12,8 @@ engine:
   grid:
     levels_per_side: 3
     grid_spacing_abs: 0.14
-    order_notional: 5.0
+    order_notional: 8.0
+    order_qty: 0.10
     strict_pairing: false
     fill_remaining_slots_with_opens: true
   follow:

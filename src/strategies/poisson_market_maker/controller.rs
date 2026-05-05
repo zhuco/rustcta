@@ -332,9 +332,9 @@ impl PoissonMarketMaker {
         let symbol_info = self.symbol_info.read().await;
         if let Some(info) = symbol_info.as_ref() {
             log::info!(
-                "  - 最大库存: {} {}",
+                "  - 最大库存名义价值: {} {}",
                 self.config.trading.max_inventory,
-                info.base_asset
+                info.quote_asset
             );
             log::info!(
                 "  - 价差范围: {}-{} bp",
@@ -984,7 +984,8 @@ impl PoissonMarketMaker {
         };
 
         let tick_size = self.tick_size();
-        let inventory_cap = self.config.trading.max_inventory * 0.9;
+        let max_inventory_qty = self.max_inventory_quantity(current_price);
+        let inventory_cap = max_inventory_qty * 0.9;
         let (can_buy, can_sell) = if is_dual_mode {
             (
                 long_inventory < inventory_cap,
@@ -1005,6 +1006,8 @@ impl PoissonMarketMaker {
         let need_close_long = long_inventory > reduce_threshold;
         let need_open_long = can_buy;
         let need_open_short = can_sell;
+        let close_short_quantity = self.close_order_quantity(short_inventory, order_quantity);
+        let close_long_quantity = self.close_order_quantity(long_inventory, order_quantity);
 
         let open_long_price =
             self.round_price_for_side(best_bid * (1.0 - bid_spread), OrderSide::Buy);
@@ -1019,16 +1022,25 @@ impl PoissonMarketMaker {
         let close_long_base = best_ask + tick_size;
         let close_long_price = self.round_price_for_side(close_long_base, OrderSide::Sell);
 
-        let mut required_map: HashMap<OrderIntent, (bool, f64)> = HashMap::new();
-        required_map.insert(OrderIntent::OpenLong, (need_open_long, open_long_price));
-        required_map.insert(OrderIntent::OpenShort, (need_open_short, open_short_price));
+        let mut required_map: HashMap<OrderIntent, (bool, f64, f64)> = HashMap::new();
+        required_map.insert(
+            OrderIntent::OpenLong,
+            (need_open_long, open_long_price, order_quantity),
+        );
+        required_map.insert(
+            OrderIntent::OpenShort,
+            (need_open_short, open_short_price, order_quantity),
+        );
         required_map.insert(
             OrderIntent::CloseShort,
-            (need_close_short, close_short_price),
+            (need_close_short, close_short_price, close_short_quantity),
         );
-        required_map.insert(OrderIntent::CloseLong, (need_close_long, close_long_price));
+        required_map.insert(
+            OrderIntent::CloseLong,
+            (need_close_long, close_long_price, close_long_quantity),
+        );
 
-        for (intent, (required, _)) in &required_map {
+        for (intent, (required, _, _)) in &required_map {
             if *required && !slot_infos.contains_key(intent) {
                 log::debug!("槽位 {:?} 缺失，需要刷新", intent);
                 return true;
@@ -1038,7 +1050,7 @@ impl PoissonMarketMaker {
         for (intent, _info) in slot_infos.iter() {
             if !required_map
                 .get(intent)
-                .map(|(required, _)| *required)
+                .map(|(required, _, _)| *required)
                 .unwrap_or(false)
             {
                 log::debug!("槽位 {:?} 已不需要，准备撤单", intent);
@@ -1047,7 +1059,7 @@ impl PoissonMarketMaker {
         }
 
         let now = Utc::now();
-        for (intent, (required, target_price)) in &required_map {
+        for (intent, (required, target_price, target_quantity)) in &required_map {
             if !*required {
                 continue;
             }
@@ -1089,12 +1101,12 @@ impl PoissonMarketMaker {
                 return true;
             }
 
-            if (order.amount - order_quantity).abs() > 1e-9 {
+            if (order.amount - target_quantity).abs() > 1e-9 {
                 log::debug!(
                     "槽位 {:?} 数量与配置不一致 (当前 {:.5} | 目标 {:.5})",
                     intent,
                     order.amount,
-                    order_quantity
+                    target_quantity
                 );
                 return true;
             }
@@ -1216,7 +1228,8 @@ impl PoissonMarketMaker {
             .ok_or_else(|| ExchangeError::Other("账户不存在".to_string()))?;
 
         let tick_size = self.tick_size();
-        let inventory_cap = self.config.trading.max_inventory * 0.9;
+        let max_inventory_qty = self.max_inventory_quantity(current_price);
+        let inventory_cap = max_inventory_qty * 0.9;
         let (can_buy, can_sell) = if is_dual_mode {
             (
                 long_inventory < inventory_cap,
@@ -1238,6 +1251,8 @@ impl PoissonMarketMaker {
         let need_close_long = long_inventory > reduce_threshold;
         let need_open_long = can_buy;
         let need_open_short = can_sell;
+        let close_short_quantity = self.close_order_quantity(short_inventory, order_quantity);
+        let close_long_quantity = self.close_order_quantity(long_inventory, order_quantity);
 
         let open_long_price =
             self.round_price_for_side(best_bid * (1.0 - bid_spread), OrderSide::Buy);
@@ -1296,7 +1311,7 @@ impl PoissonMarketMaker {
             OrderIntent::CloseShort,
             OrderSide::Buy,
             close_short_price,
-            order_quantity,
+            close_short_quantity,
             true,
             "GTX",
             Some("SHORT"),
@@ -1334,7 +1349,7 @@ impl PoissonMarketMaker {
             OrderIntent::CloseLong,
             OrderSide::Sell,
             close_long_price,
-            order_quantity,
+            close_long_quantity,
             true,
             "GTX",
             Some("LONG"),
@@ -1481,7 +1496,7 @@ impl PoissonMarketMaker {
 
         let mut params = HashMap::new();
         params.insert("timeInForce".to_string(), time_in_force.to_string());
-        if post_only {
+        if post_only && !is_dual_mode {
             params.insert("postOnly".to_string(), "true".to_string());
         }
 
@@ -1495,6 +1510,18 @@ impl PoissonMarketMaker {
 
         let client_order_id =
             crate::utils::generate_order_id_with_tag(strategy_prefix, &account.exchange_name, tag);
+
+        log::info!(
+            "📨 提交{}挂单: side={:?} qty={:.8} price={:.5} tif={} reduce={} dual={} ps={:?}",
+            log_label,
+            side,
+            order_quantity,
+            target_price,
+            time_in_force,
+            reduce_only,
+            is_dual_mode,
+            position_side_dual
+        );
 
         let order_request = OrderRequest {
             symbol: symbol.clone(),
@@ -1935,12 +1962,20 @@ impl PoissonMarketMaker {
         let decision = self.risk_evaluator.evaluate(&snapshot).await;
         self.apply_risk_decision(decision).await?;
 
-        let state = self.state.lock().await;
-        let net_inventory = state.long_inventory - state.short_inventory;
-        let gross_inventory = state.long_inventory.max(state.short_inventory);
+        let (net_inventory, gross_inventory, long_inventory, short_inventory, avg_price, daily_pnl) = {
+            let state = self.state.lock().await;
+            (
+                state.long_inventory - state.short_inventory,
+                state.long_inventory.max(state.short_inventory),
+                state.long_inventory,
+                state.short_inventory,
+                state.avg_price,
+                state.daily_pnl,
+            )
+        };
 
         // 计算未实现盈亏
-        let unrealized_pnl = net_inventory * (current_price - state.avg_price);
+        let unrealized_pnl = net_inventory * (current_price - avg_price);
 
         // 检查止损
         if unrealized_pnl < -self.config.risk.max_unrealized_loss {
@@ -1969,7 +2004,6 @@ impl PoissonMarketMaker {
             );
             crate::utils::webhook::notify_critical("PoissonMM", &message).await;
 
-            drop(state);
             self.close_all_positions().await?;
             return Ok(());
         }
@@ -2014,12 +2048,15 @@ impl PoissonMarketMaker {
             // 立即取消所有挂单
             self.cancel_all_orders().await?;
 
-            // 使用市价单平仓50%库存
+            let is_dual_mode = self.is_dual_position_mode().await;
+            let long_to_close = self.round_quantity(long_inventory * 0.5);
+            let short_to_close = self.round_quantity(short_inventory * 0.5);
             let position_to_close_raw = net_inventory * 0.5;
-            // 应用精度处理，确保符合交易所要求
             let position_to_close = self.round_quantity(position_to_close_raw);
 
-            if position_to_close.abs() > 0.001 {
+            if (is_dual_mode && (long_to_close > 0.001 || short_to_close > 0.001))
+                || (!is_dual_mode && position_to_close.abs() > 0.001)
+            {
                 let account = self
                     .account_manager
                     .get_account(&self.config.account.account_id)
@@ -2027,8 +2064,61 @@ impl PoissonMarketMaker {
                 let exchange = account.exchange.clone();
                 let symbol = self.config.trading.symbol.clone();
 
-                if position_to_close > 0.0 {
-                    // 多头，需要卖出
+                if is_dual_mode {
+                    if long_to_close > 0.001 {
+                        log::warn!("📉 市价卖出 {} {} 以降低LONG库存", long_to_close, symbol);
+                        let order_req = OrderRequest {
+                            symbol: symbol.clone(),
+                            side: OrderSide::Sell,
+                            order_type: OrderType::Market,
+                            amount: long_to_close,
+                            price: None,
+                            client_order_id: Some(format!(
+                                "POISSON_RISK_L_{}",
+                                Utc::now().timestamp()
+                            )),
+                            market_type: MarketType::Futures,
+                            params: Some(HashMap::from([(
+                                "positionSide".to_string(),
+                                "LONG".to_string(),
+                            )])),
+                            time_in_force: None,
+                            reduce_only: None,
+                            post_only: None,
+                        };
+                        match exchange.create_order(order_req).await {
+                            Ok(_) => log::info!("✅ LONG减仓订单已提交"),
+                            Err(e) => log::error!("LONG减仓失败: {}", e),
+                        }
+                    }
+
+                    if short_to_close > 0.001 {
+                        log::warn!("📈 市价买入 {} {} 以降低SHORT库存", short_to_close, symbol);
+                        let order_req = OrderRequest {
+                            symbol: symbol.clone(),
+                            side: OrderSide::Buy,
+                            order_type: OrderType::Market,
+                            amount: short_to_close,
+                            price: None,
+                            client_order_id: Some(format!(
+                                "POISSON_RISK_S_{}",
+                                Utc::now().timestamp()
+                            )),
+                            market_type: MarketType::Futures,
+                            params: Some(HashMap::from([(
+                                "positionSide".to_string(),
+                                "SHORT".to_string(),
+                            )])),
+                            time_in_force: None,
+                            reduce_only: None,
+                            post_only: None,
+                        };
+                        match exchange.create_order(order_req).await {
+                            Ok(_) => log::info!("✅ SHORT减仓订单已提交"),
+                            Err(e) => log::error!("SHORT减仓失败: {}", e),
+                        }
+                    }
+                } else if position_to_close > 0.0 {
                     log::warn!(
                         "📉 市价卖出 {} {} 以降低库存（原始数量: {}）",
                         position_to_close,
@@ -2056,7 +2146,6 @@ impl PoissonMarketMaker {
                         Err(e) => log::error!("平仓失败: {}", e),
                     }
                 } else {
-                    // 空头，需要买入
                     log::warn!(
                         "📈 市价买入 {} {} 以降低库存（原始数量: {}）",
                         position_to_close.abs(),
@@ -2145,9 +2234,8 @@ impl PoissonMarketMaker {
         }
 
         // 检查日亏损
-        if state.daily_pnl < -self.config.risk.max_daily_loss {
-            log::error!("❌ 达到日最大亏损限制: {:.2} USDC", state.daily_pnl);
-            drop(state);
+        if daily_pnl < -self.config.risk.max_daily_loss {
+            log::error!("❌ 达到日最大亏损限制: {:.2} USDC", daily_pnl);
             *self.running.write().await = false;
         }
 
@@ -2215,13 +2303,13 @@ impl PoissonMarketMaker {
                     amount,
                     price: None,
                     market_type: MarketType::Futures,
-                    params: Some(HashMap::from([
-                        ("reduceOnly".to_string(), "true".to_string()),
-                        ("positionSide".to_string(), "LONG".to_string()),
-                    ])),
+                    params: Some(HashMap::from([(
+                        "positionSide".to_string(),
+                        "LONG".to_string(),
+                    )])),
                     client_order_id: None,
                     time_in_force: None,
-                    reduce_only: Some(true),
+                    reduce_only: None,
                     post_only: None,
                 };
                 account.exchange.create_order(close_long).await?;
@@ -2236,13 +2324,13 @@ impl PoissonMarketMaker {
                     amount,
                     price: None,
                     market_type: MarketType::Futures,
-                    params: Some(HashMap::from([
-                        ("reduceOnly".to_string(), "true".to_string()),
-                        ("positionSide".to_string(), "SHORT".to_string()),
-                    ])),
+                    params: Some(HashMap::from([(
+                        "positionSide".to_string(),
+                        "SHORT".to_string(),
+                    )])),
                     client_order_id: None,
                     time_in_force: None,
-                    reduce_only: Some(true),
+                    reduce_only: None,
                     post_only: None,
                 };
                 account.exchange.create_order(close_short).await?;
@@ -2364,20 +2452,42 @@ impl PoissonMarketMaker {
         }
     }
 
+    fn max_inventory_quantity(&self, current_price: f64) -> f64 {
+        if current_price <= 0.0 || self.config.trading.max_inventory <= 0.0 {
+            return 0.0;
+        }
+
+        self.config.trading.max_inventory / current_price
+    }
+
+    fn close_order_quantity(&self, position_quantity: f64, order_quantity: f64) -> f64 {
+        if position_quantity <= 0.0 || order_quantity <= 0.0 {
+            return 0.0;
+        }
+
+        self.round_quantity(position_quantity.min(order_quantity))
+    }
+
+    fn quantity_step_size(&self) -> f64 {
+        if let Ok(guard) = self.symbol_info.try_read() {
+            if let Some(info) = guard.as_ref() {
+                if info.step_size > 0.0 {
+                    return info.step_size;
+                }
+            }
+        }
+
+        1.0 / 10_f64.powi(self.config.trading.quantity_precision as i32)
+    }
+
     /// 数量精度处理
     fn round_quantity(&self, quantity: f64) -> f64 {
-        // 优先使用动态获取的精度，否则使用配置文件中的精度
-        let precision = if let Ok(guard) = self.symbol_info.try_read() {
-            guard
-                .as_ref()
-                .map(|info| info.quantity_precision)
-                .unwrap_or(self.config.trading.quantity_precision)
-        } else {
-            self.config.trading.quantity_precision
-        };
+        let step_size = self.quantity_step_size();
+        if quantity <= 0.0 || step_size <= 0.0 {
+            return 0.0;
+        }
 
-        let multiplier = 10_f64.powi(precision as i32);
-        (quantity * multiplier).round() / multiplier
+        (quantity / step_size).floor() * step_size
     }
 
     /// 获取缓存的开放订单（优先使用缓存，减少API调用）

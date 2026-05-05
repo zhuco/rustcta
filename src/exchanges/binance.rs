@@ -1590,7 +1590,18 @@ impl Exchange for BinanceExchange {
                 let mut algo_params = params;
                 algo_params.remove("orderId");
                 algo_params.insert("algoId".to_string(), order_id.to_string());
-                log::warn!("Binance 撤单主路径失败，尝试 Algo 撤单: {}", primary_err);
+                let primary_err_text = primary_err.to_string();
+                if primary_err_text.contains("Unknown order sent") {
+                    log::debug!(
+                        "Binance 撤单主路径返回 Unknown order sent，尝试 Algo 撤单: {}",
+                        primary_err_text
+                    );
+                } else {
+                    log::warn!(
+                        "Binance 撤单主路径失败，尝试 Algo 撤单: {}",
+                        primary_err_text
+                    );
+                }
                 self.send_signed_request("DELETE", algo_endpoint, algo_params, market_type)
                     .await?
             }
@@ -3055,7 +3066,7 @@ impl Exchange for BinanceExchange {
     fn get_websocket_url(&self, market_type: MarketType) -> String {
         match market_type {
             MarketType::Spot => "wss://stream.binance.com:9443/ws".to_string(),
-            MarketType::Futures => "wss://fstream.binance.com/ws".to_string(),
+            MarketType::Futures => "wss://fstream.binance.com/private/ws".to_string(),
         }
     }
 
@@ -3394,12 +3405,17 @@ impl BinanceWebSocketClient {
             let trade_value = order.executed_qty.parse::<f64>().unwrap_or(0.0)
                 * order.avg_price.parse::<f64>().unwrap_or(0.0);
             log::info!(
-                "[成交] {} {} {} @ {} | {:.2} USDT",
+                "[成交] {} {} {} @ {} | {:.2} USDT order_id={} client_id={} status={} cum_qty={} avg_price={}",
                 now.format("%H:%M:%S"),
                 order.symbol,
                 side_str,
                 order.avg_price,
-                trade_value
+                trade_value,
+                order.order_id,
+                order.client_order_id,
+                order.status,
+                order.executed_qty,
+                order.avg_price
             );
         }
 

@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .short('s')
             .long("strategy")
             .value_name("STRATEGY")
-            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow, beta_hedge_market_maker")
+            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, short_ladder_live, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow, beta_hedge_market_maker")
             .required(true))
         .arg(Arg::new("config")
             .short('c')
@@ -175,7 +175,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("RUST_LOG", log_level);
 
     // 重新初始化env_logger以应用新的日志级别
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level))
+        .format_timestamp_millis()
+        .init();
 
     log::info!(
         "启动策略: {} with config: {}, 日志级别: {}",
@@ -372,6 +374,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tokio::signal::ctrl_c().await?;
             log::info!("收到停止信号，正在关闭策略...");
+            strategy.stop().await?;
+        }
+        "short_ladder_live" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: ShortLadderLiveConfig = serde_yaml::from_str(&file_content)?;
+
+            let risk_evaluator =
+                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
+
+            let deps = StrategyDepsBuilder::new()
+                .with_account_manager(account_manager.clone())
+                .with_risk_evaluator(risk_evaluator)
+                .build()?;
+
+            let strategy = ShortLadderLiveStrategy::create(config, deps)?;
+            log::info!("Short ladder live 策略已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭 short ladder live 策略...");
             strategy.stop().await?;
         }
         "range_grid" => {

@@ -19,30 +19,55 @@ data:
   session_end_hour_utc: 22
 
 symbols:
-  - symbol: "ORDIUSDC"
+  - symbol: "BOME/USDC"
     enabled: true
-    initial_notional: 200.0
-    max_notional: 200.0
+    initial_notional: 50.0
+    max_notional: 50.0
     leverage: 10
-  - symbol: "TIAUSDC"
+  - symbol: "1000BONK/USDC"
     enabled: true
-    initial_notional: 200.0
-    max_notional: 200.0
+    initial_notional: 50.0
+    max_notional: 50.0
     leverage: 10
-  - symbol: "ARBUSDC"
+  - symbol: "ENA/USDC"
     enabled: true
-    initial_notional: 200.0
-    max_notional: 200.0
+    initial_notional: 50.0
+    max_notional: 50.0
     leverage: 10
-  - symbol: "ENAUSDC"
+  - symbol: "TIA/USDC"
     enabled: true
-    initial_notional: 200.0
-    max_notional: 200.0
+    initial_notional: 50.0
+    max_notional: 50.0
     leverage: 10
-  - symbol: "AVAXUSDC"
+  - symbol: "CRV/USDC"
     enabled: true
-    initial_notional: 200.0
-    max_notional: 200.0
+    initial_notional: 50.0
+    max_notional: 50.0
+    leverage: 10
+  - symbol: "ETHFI/USDC"
+    enabled: true
+    initial_notional: 50.0
+    max_notional: 50.0
+    leverage: 10
+  - symbol: "ORDI/USDC"
+    enabled: true
+    initial_notional: 50.0
+    max_notional: 50.0
+    leverage: 10
+  - symbol: "FIL/USDC"
+    enabled: true
+    initial_notional: 50.0
+    max_notional: 50.0
+    leverage: 10
+  - symbol: "ARB/USDC"
+    enabled: true
+    initial_notional: 50.0
+    max_notional: 50.0
+    leverage: 10
+  - symbol: "AVAX/USDC"
+    enabled: true
+    initial_notional: 50.0
+    max_notional: 50.0
     leverage: 10
 
 signal:
@@ -62,9 +87,9 @@ ladder:
   layer_spacing_atr: 0.55
   take_profit_atr: 1.2
   take_profit_mode: "atr_trailing"
-  trailing_take_profit_activation_atr: 1.4
-  trailing_take_profit_distance_atr: 1.4
-  stop_loss_atr: 1.7
+  trailing_take_profit_activation_atr: 2.0
+  trailing_take_profit_distance_atr: 2.0
+  stop_loss_atr: 2.4
   max_hold_bars: 48
   breakeven_stop: false
   adopt_progress_tolerance_pct: 0.02
@@ -75,3 +100,15 @@ execution:
   order_cooldown_secs: 900
   initial_order_taker_fallback_secs: 45
   close_with_market_order: true
+  take_profit_maker_first: true
+  take_profit_maker_timeout_secs: 45
+  take_profit_maker_poll_secs: 5
+  websocket:
+    enabled: true
+    exit_check_interval_ms: 1000
+    trailing_update_interval_secs: 15
+    reconnect_delay_secs: 5
+
+notifications:
+  enabled: true
+  wechat_webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=21c70d13-f279-4af7-adc7-a99f3bb10905"

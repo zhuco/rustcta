@@ -94,6 +94,8 @@ pub struct QuotingConfig {
     pub max_inventory_bias_bps: f64,
     #[serde(default = "default_level_size_decay")]
     pub level_size_decay: f64,
+    #[serde(default)]
+    pub independent_dual_side: bool,
 }
 
 impl Default for QuotingConfig {
@@ -113,6 +115,7 @@ impl Default for QuotingConfig {
             min_spread_bps: default_min_spread_bps(),
             max_inventory_bias_bps: default_max_inventory_bias_bps(),
             level_size_decay: default_level_size_decay(),
+            independent_dual_side: false,
         }
     }
 }
@@ -850,6 +853,7 @@ impl BetaHedgeMarketMaker {
                 max_inventory_bias_bps: self.config.quoting.max_inventory_bias_bps,
                 level_size_decay: self.config.quoting.level_size_decay,
                 dual_position_mode,
+                independent_dual_side: self.config.quoting.independent_dual_side,
             },
         );
 
@@ -942,10 +946,11 @@ impl StrategyInstance for BetaHedgeMarketMaker {
         let dual_position_mode = self.detect_dual_position_mode().await?;
         *self.dual_position_mode.write().await = dual_position_mode;
         log::info!(
-            "[beta_hedge_mm] account={} hedge_symbol={} dual_position_mode={} maker_only={} dry_run={}",
+            "[beta_hedge_mm] account={} hedge_symbol={} dual_position_mode={} independent_dual_side={} maker_only={} dry_run={}",
             self.config.account.account_id,
             self.config.hedge.hedge_symbol,
             dual_position_mode,
+            self.config.quoting.independent_dual_side,
             self.config.quoting.post_only,
             self.config.dry_run
         );

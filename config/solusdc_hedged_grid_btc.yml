@@ -10,8 +10,8 @@ engine:
   price_reference: mid
   risk_reference: mark
   grid:
-    levels_per_side: 1
-    grid_spacing_pct: 0.003
+    levels_per_side: 2
+    grid_spacing_pct: 0.0025
     order_notional: 80.0
     order_qty: 0.001
     strict_pairing: false
@@ -34,7 +34,7 @@ engine:
     taker_fee: 0.0004
   risk:
     max_net_notional: 2000.0
-    max_total_notional: 2000.0
+    max_total_notional: 5000.0
     margin_ratio_limit: 0.75
     funding_rate_limit: 0.003
     funding_cost_limit: 3.0

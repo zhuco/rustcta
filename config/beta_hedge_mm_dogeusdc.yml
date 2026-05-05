@@ -30,5 +30,6 @@ quoting:
   min_spread_bps: 2.0
   max_inventory_bias_bps: 4.0
   level_size_decay: 0.8
+  independent_dual_side: true
 
 dry_run: false

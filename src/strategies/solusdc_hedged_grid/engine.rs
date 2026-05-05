@@ -1140,25 +1140,28 @@ impl GridEngine {
                     target_prices.push(quantized);
                 }
             }
-        } else if !close_slots.is_empty() {
-            // 兜底：当 open 侧为空（如 only-close 风险模式）时，
-            // 保持原有 close 梯队形态，避免 close 订单被全部撤空。
-            let mut anchor_price = None;
-            for slot in &close_slots {
-                anchor_price = match anchor_price {
-                    None => Some(slot.price),
-                    Some(current) => match side {
-                        OrderSide::Buy if slot.price > current => Some(slot.price),
-                        OrderSide::Sell if slot.price < current => Some(slot.price),
-                        _ => Some(current),
-                    },
-                };
-            }
+        }
+
+        // 即使 open 侧因风控或 post-only 拒单不足，也必须保持 close 梯队完整；
+        // 否则已有仓位会少一档平仓单，表现为交易所挂单不完整。
+        if target_prices.len() < levels {
+            let anchor_price = close_slots
+                .iter()
+                .map(|slot| slot.price)
+                .chain(target_prices.iter().copied())
+                .reduce(|current, price| match side {
+                    OrderSide::Buy if price > current => price,
+                    OrderSide::Sell if price < current => price,
+                    _ => current,
+                });
             let anchor_price = match anchor_price {
                 Some(price) => price,
                 None => return Vec::new(),
             };
             for step in 0..levels {
+                if target_prices.len() >= levels {
+                    break;
+                }
                 let price = self.step_price(anchor_price, side, step);
                 let quantized = self.precision.quantize_price_for_side(price, side);
                 let key = self.price_key(quantized);
@@ -1166,7 +1169,9 @@ impl GridEngine {
                     target_prices.push(quantized);
                 }
             }
-        } else {
+        }
+
+        if target_prices.is_empty() {
             return Vec::new();
         }
 

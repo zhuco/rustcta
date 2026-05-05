@@ -309,14 +309,15 @@ impl ResolvedPrecision {
         if qty <= 0.0 {
             return 0.0;
         }
+        let eps = 1e-9;
         let adjusted = if self.step_size > 0.0 {
-            let multiples = (qty / self.step_size).ceil();
+            let multiples = ((qty / self.step_size) - eps).ceil();
             multiples * self.step_size
         } else {
             qty
         };
         let factor = 10f64.powi(self.qty_digits as i32);
-        (adjusted * factor).ceil() / factor
+        ((adjusted * factor) - eps).ceil() / factor
     }
 
     pub fn quantize_qty_nearest(&self, qty: f64) -> f64 {
@@ -448,4 +449,24 @@ fn apply_precision(value: f64, step: f64, digits: u32) -> f64 {
     };
     let factor = 10f64.powi(digits as i32);
     ((adjusted * factor) + eps).floor() / factor
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ResolvedPrecision;
+
+    #[test]
+    fn quantize_qty_up_should_not_overshoot_exact_step_after_rounding() {
+        let precision = ResolvedPrecision {
+            tick_size: 0.01,
+            step_size: 0.01,
+            min_qty: 0.01,
+            min_notional: 5.0,
+            price_digits: 2,
+            qty_digits: 2,
+        };
+
+        assert_eq!(precision.quantize_qty_up(5.0 / 83.32), 0.07);
+        assert_eq!(precision.quantize_qty_up(0.07), 0.07);
+    }
 }

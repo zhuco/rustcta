@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use chrono::{Duration as ChronoDuration, Utc};
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     Mutex,
 };
 use tokio::time::{interval, sleep, Duration};
@@ -210,6 +210,38 @@ async fn run_loop(
         tokio::select! {
             _ = poll_interval.tick() => {
                 let now = Utc::now();
+
+                drain_user_stream_events(
+                    &config,
+                    account.as_ref(),
+                    engine.as_ref(),
+                    &mut order_map,
+                    &mut failure_count,
+                    &mut restart_requested,
+                    &mut last_snapshot,
+                    &mut ws_rx,
+                    &mut last_progress,
+                )
+                .await?;
+                if restart_requested {
+                    restart_requested = false;
+                    restart_strategy(
+                        &config,
+                        account.as_ref(),
+                        hedge_enabled,
+                        request_timeout,
+                        &mut engine,
+                        &mut order_map,
+                        &mut initialized,
+                        &mut last_reconcile,
+                        &mut last_zero_position_refresh,
+                        &mut last_hourly_reset,
+                        &mut failure_count,
+                        "order_reject",
+                    )
+                    .await?;
+                    continue;
+                }
 
                 if now - last_progress >= watchdog_timeout {
                     restart_strategy(
@@ -525,38 +557,35 @@ async fn run_loop(
                         .await?;
                         continue;
                     }
-                    while let Ok(event) = ws_rx.try_recv() {
-                        handle_user_stream_event(
+                    drain_user_stream_events(
+                        &config,
+                        account.as_ref(),
+                        engine.as_ref(),
+                        &mut order_map,
+                        &mut failure_count,
+                        &mut restart_requested,
+                        &mut last_snapshot,
+                        &mut ws_rx,
+                        &mut last_progress,
+                    )
+                    .await?;
+                    if restart_requested {
+                        restart_requested = false;
+                        restart_strategy(
                             &config,
                             account.as_ref(),
-                            engine.as_ref(),
+                            hedge_enabled,
+                            request_timeout,
+                            &mut engine,
                             &mut order_map,
+                            &mut initialized,
+                            &mut last_reconcile,
+                            &mut last_zero_position_refresh,
+                            &mut last_hourly_reset,
                             &mut failure_count,
-                            &mut restart_requested,
-                            &mut last_snapshot,
-                            event,
+                            "order_reject",
                         )
                         .await?;
-                        last_progress = Utc::now();
-                        if restart_requested {
-                            restart_requested = false;
-                            restart_strategy(
-                                &config,
-                                account.as_ref(),
-                                hedge_enabled,
-                                request_timeout,
-                                &mut engine,
-                                &mut order_map,
-                                &mut initialized,
-                                &mut last_reconcile,
-                                &mut last_zero_position_refresh,
-                                &mut last_hourly_reset,
-                                &mut failure_count,
-                                "order_reject",
-                            )
-                            .await?;
-                            break;
-                        }
                     }
                 }
             }
@@ -574,6 +603,46 @@ async fn run_loop(
         .await;
     }
 
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn drain_user_stream_events(
+    config: &RuntimeConfig,
+    account: &AccountInfo,
+    engine: &Mutex<GridEngine>,
+    order_map: &mut OrderMap,
+    failure_count: &mut u32,
+    restart_requested: &mut bool,
+    last_snapshot: &mut Option<MarketSnapshot>,
+    ws_rx: &mut UnboundedReceiver<UserStreamEvent>,
+    last_progress: &mut chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    let mut drained = 0usize;
+    while let Ok(event) = ws_rx.try_recv() {
+        handle_user_stream_event(
+            config,
+            account,
+            engine,
+            order_map,
+            failure_count,
+            restart_requested,
+            last_snapshot,
+            event,
+        )
+        .await?;
+        *last_progress = Utc::now();
+        drained += 1;
+        if *restart_requested {
+            break;
+        }
+    }
+    if drained > 0 {
+        log::debug!(
+            "[solusdc_hedged_grid] tick前优先处理WebSocket事件 count={}",
+            drained
+        );
+    }
     Ok(())
 }
 
@@ -674,7 +743,7 @@ async fn handle_user_stream_event(
     }
 
     if let (Some(fill), Some(order_price)) = (&fill_info, fill_order_price) {
-        log_fill_actions(fill, order_price, &actions);
+        log_fill_actions("ws", fill, order_price, &actions);
     }
 
     if !actions.is_empty() {
@@ -737,7 +806,9 @@ fn spawn_user_stream_listener(
 
             let ws_url = match market_type {
                 MarketType::Spot => format!("wss://stream.binance.com:9443/ws/{}", listen_key),
-                MarketType::Futures => format!("wss://fstream.binance.com/ws/{}", listen_key),
+                MarketType::Futures => {
+                    format!("wss://fstream.binance.com/private/ws/{}", listen_key)
+                }
             };
 
             let mut ws_client = BinanceWebSocketClient::new(ws_url, market_type);
@@ -819,7 +890,7 @@ fn spawn_user_stream_listener(
     });
 }
 
-fn log_fill_actions(fill: &FillEvent, order_price: f64, actions: &[EngineAction]) {
+fn log_fill_actions(source: &str, fill: &FillEvent, order_price: f64, actions: &[EngineAction]) {
     let mut placed = Vec::new();
     let mut canceled = Vec::new();
 
@@ -849,7 +920,8 @@ fn log_fill_actions(fill: &FillEvent, order_price: f64, actions: &[EngineAction]
     };
 
     log::info!(
-        "[solusdc_hedged_grid] 成交箱\n  成交: id={} intent={:?} qty={:.6} price={:.6} order_price={:.6} partial={}\n  新挂单({}): {}\n  取消({}): {}",
+        "[solusdc_hedged_grid] 成交箱 source={}\n  成交: id={} intent={:?} qty={:.6} price={:.6} order_price={:.6} partial={}\n  新挂单({}): {}\n  取消({}): {}",
+        source,
         fill.order_id,
         fill.intent,
         fill.fill_qty,
@@ -865,7 +937,7 @@ fn log_fill_actions(fill: &FillEvent, order_price: f64, actions: &[EngineAction]
 
 fn log_position_snapshot(symbol: &str, position: &PositionState) {
     let net_qty = position.long_qty - position.short_qty;
-    log::info!(
+    log::debug!(
         "[solusdc_hedged_grid] 库存快照 {} long={:.6} short={:.6} long_entry={:.4} short_entry={:.4} long_avail={:.6} short_avail={:.6} net={:.6} mark={:.4} equity={:.2} mm={:.4}",
         symbol,
         position.long_qty,
@@ -1122,7 +1194,7 @@ fn sync_orders(
                     partial: open_order.remaining > 0.0,
                 };
                 let fill_actions = engine.handle_fill(fill.clone(), snapshot);
-                log_fill_actions(&fill, record.price, &fill_actions);
+                log_fill_actions("reconcile_open_order", &fill, record.price, &fill_actions);
                 actions.extend(fill_actions);
             }
             continue;
@@ -1146,7 +1218,7 @@ fn sync_orders(
                     partial,
                 };
                 let fill_actions = engine.handle_fill(fill.clone(), snapshot);
-                log_fill_actions(&fill, record.price, &fill_actions);
+                log_fill_actions("reconcile_trade", &fill, record.price, &fill_actions);
                 actions.extend(fill_actions);
             }
         } else {

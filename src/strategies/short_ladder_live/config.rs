@@ -118,8 +118,45 @@ fn default_order_cooldown_secs() -> u64 {
     300
 }
 
+fn default_take_profit_maker_timeout_secs() -> u64 {
+    45
+}
+
+fn default_take_profit_maker_poll_secs() -> u64 {
+    5
+}
+
+fn default_take_profit_maker_timeout_bars() -> u64 {
+    0
+}
+
+fn default_entry_maker_timeout_secs() -> u64 {
+    45
+}
+
+fn default_entry_maker_reprice_attempts() -> u32 {
+    1
+}
+
 fn default_adopt_progress_tolerance_pct() -> f64 {
     0.02
+}
+
+fn default_wechat_webhook_url() -> String {
+    "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=21c70d13-f279-4af7-adc7-a99f3bb10905"
+        .to_string()
+}
+
+fn default_ws_exit_check_interval_ms() -> u64 {
+    1_000
+}
+
+fn default_trailing_update_interval_secs() -> u64 {
+    15
+}
+
+fn default_ws_reconnect_delay_secs() -> u64 {
+    5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +171,8 @@ pub struct ShortLadderLiveConfig {
     pub ladder: LadderConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
+    #[serde(default)]
+    pub notifications: NotificationConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,6 +321,23 @@ impl Default for LadderConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_wechat_webhook_url")]
+    pub wechat_webhook_url: String,
+}
+
+impl Default for NotificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            wechat_webhook_url: default_wechat_webhook_url(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     #[serde(default = "default_true")]
     pub use_post_only_entry: bool,
@@ -293,6 +349,22 @@ pub struct ExecutionConfig {
     pub initial_order_taker_fallback_secs: Option<u64>,
     #[serde(default = "default_true")]
     pub close_with_market_order: bool,
+    #[serde(default = "default_true")]
+    pub take_profit_maker_first: bool,
+    #[serde(default = "default_take_profit_maker_timeout_secs")]
+    pub take_profit_maker_timeout_secs: u64,
+    #[serde(default = "default_take_profit_maker_poll_secs")]
+    pub take_profit_maker_poll_secs: u64,
+    #[serde(default = "default_take_profit_maker_timeout_bars")]
+    pub take_profit_maker_timeout_bars: u64,
+    #[serde(default = "default_entry_maker_timeout_secs")]
+    pub entry_maker_timeout_secs: u64,
+    #[serde(default = "default_entry_maker_reprice_attempts")]
+    pub entry_maker_reprice_attempts: u32,
+    #[serde(default = "default_true")]
+    pub initial_entry_market_after_reprice: bool,
+    #[serde(default)]
+    pub websocket: WebSocketExitConfig,
 }
 
 impl Default for ExecutionConfig {
@@ -303,6 +375,37 @@ impl Default for ExecutionConfig {
             order_cooldown_secs: default_order_cooldown_secs(),
             initial_order_taker_fallback_secs: None,
             close_with_market_order: default_true(),
+            take_profit_maker_first: default_true(),
+            take_profit_maker_timeout_secs: default_take_profit_maker_timeout_secs(),
+            take_profit_maker_poll_secs: default_take_profit_maker_poll_secs(),
+            take_profit_maker_timeout_bars: default_take_profit_maker_timeout_bars(),
+            entry_maker_timeout_secs: default_entry_maker_timeout_secs(),
+            entry_maker_reprice_attempts: default_entry_maker_reprice_attempts(),
+            initial_entry_market_after_reprice: default_true(),
+            websocket: WebSocketExitConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSocketExitConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_ws_exit_check_interval_ms")]
+    pub exit_check_interval_ms: u64,
+    #[serde(default = "default_trailing_update_interval_secs")]
+    pub trailing_update_interval_secs: u64,
+    #[serde(default = "default_ws_reconnect_delay_secs")]
+    pub reconnect_delay_secs: u64,
+}
+
+impl Default for WebSocketExitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            exit_check_interval_ms: default_ws_exit_check_interval_ms(),
+            trailing_update_interval_secs: default_trailing_update_interval_secs(),
+            reconnect_delay_secs: default_ws_reconnect_delay_secs(),
         }
     }
 }

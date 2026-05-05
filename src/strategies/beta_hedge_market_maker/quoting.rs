@@ -34,6 +34,7 @@ pub struct QuoteParams {
     pub max_inventory_bias_bps: f64,
     pub level_size_decay: f64,
     pub dual_position_mode: bool,
+    pub independent_dual_side: bool,
 }
 
 pub fn build_quotes(
@@ -56,6 +57,43 @@ pub fn build_quotes(
     let price_bias_bps = gap_ratio * params.max_inventory_bias_bps;
     let size_bias = gap_ratio * 0.8;
     let mut quotes = Vec::new();
+
+    if params.independent_dual_side && params.dual_position_mode {
+        for level in 0..params.levels_per_side {
+            let decay = params.level_size_decay.powi(level as i32);
+            let level_spread_bps = params.base_spread_bps + params.level_spacing_bps * level as f64;
+            let bid_spread_bps = (level_spread_bps - price_bias_bps).max(params.min_spread_bps);
+            let ask_spread_bps = (level_spread_bps + price_bias_bps).max(params.min_spread_bps);
+
+            push_independent_long_quotes(
+                &mut quotes,
+                market,
+                precision,
+                inventory,
+                protection,
+                params,
+                level,
+                decay,
+                bid_spread_bps,
+                ask_spread_bps,
+                size_bias,
+            );
+            push_independent_short_quotes(
+                &mut quotes,
+                market,
+                precision,
+                inventory,
+                protection,
+                params,
+                level,
+                decay,
+                bid_spread_bps,
+                ask_spread_bps,
+                size_bias,
+            );
+        }
+        return quotes;
+    }
 
     for level in 0..params.levels_per_side {
         let decay = params.level_size_decay.powi(level as i32);
@@ -264,6 +302,124 @@ struct QuoteDescriptor {
     reason: String,
 }
 
+#[allow(clippy::too_many_arguments)]
+fn push_independent_long_quotes(
+    quotes: &mut Vec<QuotePlan>,
+    market: MarketQuote,
+    precision: SymbolPrecision,
+    inventory: &HedgeInventoryLedger,
+    protection: &ProtectionDecision,
+    params: &QuoteParams,
+    level: usize,
+    decay: f64,
+    bid_spread_bps: f64,
+    ask_spread_bps: f64,
+    size_bias: f64,
+) {
+    let bid_price = quantize_bid(market.mid * (1.0 - bid_spread_bps / 10_000.0), precision);
+    let long_buy_notional = params.base_order_notional
+        * decay
+        * (1.0 + size_bias).clamp(0.4, 1.8)
+        * protection.same_side_scale.max(0.0);
+    maybe_push_quote(
+        quotes,
+        QuoteDescriptor {
+            side: OrderSide::Buy,
+            price: bid_price,
+            notional_usd: long_buy_notional,
+            reduce_only: false,
+            position_side: dual_side("LONG", params.dual_position_mode),
+            reason: "independent_long_bid".to_string(),
+            level,
+        },
+        precision,
+    );
+
+    if inventory.long_leg.quantity <= precision.step_size {
+        return;
+    }
+
+    let ask_price = quantize_ask(market.mid * (1.0 + ask_spread_bps / 10_000.0), precision);
+    let long_sell_notional = recycle_notional(
+        params.base_order_notional * decay * (1.0 - size_bias).clamp(0.2, 1.2),
+        inventory.long_leg.notional_usd,
+        min_viable_notional(ask_price, precision),
+        level == 0,
+    );
+    maybe_push_quote(
+        quotes,
+        QuoteDescriptor {
+            side: OrderSide::Sell,
+            price: ask_price,
+            notional_usd: long_sell_notional,
+            reduce_only: true,
+            position_side: dual_side("LONG", params.dual_position_mode),
+            reason: "independent_long_ask".to_string(),
+            level,
+        },
+        precision,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_independent_short_quotes(
+    quotes: &mut Vec<QuotePlan>,
+    market: MarketQuote,
+    precision: SymbolPrecision,
+    inventory: &HedgeInventoryLedger,
+    protection: &ProtectionDecision,
+    params: &QuoteParams,
+    level: usize,
+    decay: f64,
+    bid_spread_bps: f64,
+    ask_spread_bps: f64,
+    size_bias: f64,
+) {
+    let ask_price = quantize_ask(market.mid * (1.0 + ask_spread_bps / 10_000.0), precision);
+    let short_sell_notional = params.base_order_notional
+        * decay
+        * (1.0 - size_bias).clamp(0.4, 1.8)
+        * protection.same_side_scale.max(0.0);
+    maybe_push_quote(
+        quotes,
+        QuoteDescriptor {
+            side: OrderSide::Sell,
+            price: ask_price,
+            notional_usd: short_sell_notional,
+            reduce_only: false,
+            position_side: dual_side("SHORT", params.dual_position_mode),
+            reason: "independent_short_ask".to_string(),
+            level,
+        },
+        precision,
+    );
+
+    if inventory.short_leg.quantity <= precision.step_size {
+        return;
+    }
+
+    let bid_price = quantize_bid(market.mid * (1.0 - bid_spread_bps / 10_000.0), precision);
+    let short_buy_notional = recycle_notional(
+        params.base_order_notional * decay * (1.0 + size_bias).clamp(0.2, 1.2),
+        inventory.short_leg.notional_usd,
+        min_viable_notional(bid_price, precision),
+        level == 0,
+    );
+    maybe_push_quote(
+        quotes,
+        QuoteDescriptor {
+            side: OrderSide::Buy,
+            price: bid_price,
+            notional_usd: short_buy_notional,
+            reduce_only: true,
+            position_side: dual_side("SHORT", params.dual_position_mode),
+            reason: "independent_short_bid".to_string(),
+            level,
+        },
+        precision,
+    );
+}
+
 fn maybe_push_quote(
     quotes: &mut Vec<QuotePlan>,
     descriptor: QuoteDescriptor,
@@ -425,6 +581,7 @@ mod tests {
             max_inventory_bias_bps: 4.0,
             level_size_decay: 0.8,
             dual_position_mode: true,
+            independent_dual_side: false,
         }
     }
 
@@ -634,5 +791,86 @@ mod tests {
         assert!(quotes
             .iter()
             .any(|quote| quote.price * quote.quantity >= 30.0));
+    }
+
+    #[test]
+    fn independent_dual_side_quotes_open_long_and_short_legs_together() {
+        let mut params = params();
+        params.independent_dual_side = true;
+        params.inventory_gap_notional_usd = 0.0;
+
+        let quotes = build_quotes(
+            MarketQuote {
+                best_bid: 0.1,
+                best_ask: 0.1001,
+                mid: 0.10005,
+            },
+            precision(),
+            &HedgeInventoryLedger::default(),
+            &ProtectionDecision {
+                phase: HedgePhase::Flat,
+                state: ProtectionState::Normal,
+                same_side_scale: 1.0,
+                reason: "normal".to_string(),
+            },
+            &params,
+        );
+
+        assert!(quotes.iter().any(|quote| {
+            quote.side == OrderSide::Buy
+                && quote.position_side.as_deref() == Some("LONG")
+                && !quote.reduce_only
+        }));
+        assert!(quotes.iter().any(|quote| {
+            quote.side == OrderSide::Sell
+                && quote.position_side.as_deref() == Some("SHORT")
+                && !quote.reduce_only
+        }));
+    }
+
+    #[test]
+    fn independent_dual_side_recycles_existing_legs_independently() {
+        let mut params = params();
+        params.independent_dual_side = true;
+
+        let quotes = build_quotes(
+            MarketQuote {
+                best_bid: 0.1,
+                best_ask: 0.1001,
+                mid: 0.10005,
+            },
+            precision(),
+            &HedgeInventoryLedger {
+                long_leg: super::super::inventory::HedgeLegInventory {
+                    quantity: 200.0,
+                    entry_price: 0.1,
+                    notional_usd: 20.0,
+                },
+                short_leg: super::super::inventory::HedgeLegInventory {
+                    quantity: 200.0,
+                    entry_price: 0.1,
+                    notional_usd: 20.0,
+                },
+                ..HedgeInventoryLedger::default()
+            },
+            &ProtectionDecision {
+                phase: HedgePhase::Flat,
+                state: ProtectionState::Normal,
+                same_side_scale: 1.0,
+                reason: "normal".to_string(),
+            },
+            &params,
+        );
+
+        assert!(quotes.iter().any(|quote| {
+            quote.side == OrderSide::Sell
+                && quote.position_side.as_deref() == Some("LONG")
+                && quote.reduce_only
+        }));
+        assert!(quotes.iter().any(|quote| {
+            quote.side == OrderSide::Buy
+                && quote.position_side.as_deref() == Some("SHORT")
+                && quote.reduce_only
+        }));
     }
 }

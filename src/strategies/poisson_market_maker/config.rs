@@ -37,7 +37,7 @@ pub struct PoissonTradingConfig {
     pub symbol: String,
     /// 每单金额(USDC)
     pub order_size_usdc: f64,
-    /// 最大库存(基础货币数量，如DOGE、LINK的数量)
+    /// 最大库存名义价值(USDC/USDT)
     pub max_inventory: f64,
     /// 最小价差(基点bp)
     pub min_spread_bp: f64,

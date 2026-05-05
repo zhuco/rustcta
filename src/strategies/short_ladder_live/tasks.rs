@@ -59,6 +59,7 @@ impl ShortLadderLiveStrategy {
         });
 
         self.task_handles.lock().await.push(handle);
+        self.spawn_websocket_exit_task().await?;
         Ok(())
     }
 
@@ -89,6 +90,20 @@ impl ShortLadderLiveStrategy {
             .await?;
 
         self.fallback_stale_initial_entry_to_market(symbol).await?;
+        self.fallback_stale_exit_to_market(symbol).await?;
+
+        let has_pending_exit = {
+            let runtime = self.runtime.read().await;
+            runtime
+                .symbols
+                .get(symbol)
+                .and_then(|state| state.pending_exit.as_ref())
+                .is_some()
+        };
+        if has_pending_exit {
+            logging::info(Some(symbol), "存在未成交平仓挂单，本轮不新增订单");
+            return Ok(());
+        }
 
         if self.has_open_orders(symbol).await? {
             logging::info(Some(symbol), "存在未成交挂单，本轮不新增订单");
@@ -224,7 +239,7 @@ impl ShortLadderLiveStrategy {
         Ok(None)
     }
 
-    async fn update_trailing_take_profit_state(
+    pub(super) async fn update_trailing_take_profit_state(
         &self,
         symbol: &str,
         current_price: f64,
@@ -307,7 +322,7 @@ impl ShortLadderLiveStrategy {
             .map_err(|err| anyhow!("get_klines failed for {}: {}", symbol, err))
     }
 
-    fn enabled_symbols(&self) -> Vec<String> {
+    pub(super) fn enabled_symbols(&self) -> Vec<String> {
         self.config
             .symbols
             .iter()
@@ -328,7 +343,7 @@ impl ShortLadderLiveStrategy {
         }
     }
 
-    async fn record_symbol_error(&self, symbol: &str, message: String) {
+    pub(super) async fn record_symbol_error(&self, symbol: &str, message: String) {
         let mut runtime = self.runtime.write().await;
         runtime.last_error = Some(format!("{}: {}", symbol, message));
         if let Some(state) = runtime.symbols.get_mut(symbol) {

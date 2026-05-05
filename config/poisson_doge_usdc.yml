@@ -1,34 +1,34 @@
 # DOGE/USDC 泊松做市策略配置
-# 免手续费优化版 - 永续合约
+# 保守风控版 - 永续合约
 
 name: "POISSON_DOGE_USDC"
 enabled: true
 version: "1.0.0"
 
 account:
-  account_id: "binance_main"
+  account_id: "binance_hcr"
   exchange: "binance"
 
 trading:
   symbol: "DOGE/USDC"
-  order_size_usdc: 6.0       # 每单金6 USDC
-  max_inventory: 345.0        # 最大库存345 USDC - 提升15%         # 最大库存300 USDT价值
-  min_spread_bp: 8.0           # 0.08% 最小价差
-  max_spread_bp: 20.0          # 0.20% 最大价差
-  refresh_interval_secs: 8    # 加快到8秒，提高交易频率
+  order_size_usdc: 5.2         # 接近最小名义价值，降低单笔亏损
+  max_inventory: 120.0         # 限制总库存名义价值，避免快速堆仓
+  min_spread_bp: 8.0           # 提高最小价差，覆盖滑点/队列逆选择
+  max_spread_bp: 25.0          # 波动变大时进一步拉宽报价
+  refresh_interval_secs: 30    # 降低撤换频率，减少追价和状态噪声
   price_precision: 5
   quantity_precision: 0
 
 poisson:
-  observation_window_secs: 240    # 4分钟观察窗口
-  min_samples: 40
-  smoothing_alpha: 0.18
+  observation_window_secs: 600    # 10分钟观察窗口，降低短时噪声
+  min_samples: 120
+  smoothing_alpha: 0.08
   depth_levels: 10
   confidence_interval: 0.95
-  initial_lambda: 12.0             # 初始到达率
+  initial_lambda: 3.0              # 降低启动初期报价激进度
 
 risk:
-  max_unrealized_loss: 10.0       # 10 USDC
-  max_daily_loss: 30.0             # 30 USDC
-  inventory_skew_limit: 0.65
-  stop_loss_pct: 0.008             # 0.8% 止损
+  max_unrealized_loss: 0.3         # 未实现亏损接近单轮点差成本即停
+  max_daily_loss: 0.5              # 日亏损超过 0.5 USDC 即停
+  inventory_skew_limit: 0.25       # 库存占用超过 25% 即进入减仓
+  stop_loss_pct: 0.0015            # 0.15% 价格偏离止损

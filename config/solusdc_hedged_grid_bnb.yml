@@ -11,7 +11,7 @@ engine:
   risk_reference: mark
   grid:
     levels_per_side: 3
-    grid_spacing_abs: 1.2
+    grid_spacing_abs: 0.6
     order_notional: 5.0
     strict_pairing: false
     fill_remaining_slots_with_opens: true
