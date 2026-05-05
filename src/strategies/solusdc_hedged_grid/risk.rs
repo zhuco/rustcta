@@ -51,15 +51,9 @@ impl RiskState {
             flags.block_open_short = true;
         }
         if limits.max_total_notional > 0.0 && total_notional > limits.max_total_notional {
-            // 对冲网格允许在已有双边仓位上继续滚动。总名义超限时不应一刀切阻止所有开仓，
-            // 否则启动时只会保留平仓单，网格无法在成交后恢复形态。这里保留净敞口方向控制，
-            // 只在净敞口同向继续扩张时阻止对应开仓。
-            let net_tolerance = limits.max_net_notional.max(dynamic_net_limit).max(1.0) * 0.001;
-            if net_notional > net_tolerance {
-                flags.block_open_long = true;
-            } else if net_notional < -net_tolerance {
-                flags.block_open_short = true;
-            }
+            // 对冲网格的 total_notional 可能长期高于配置值，因为双边仓位本身会放大总名义。
+            // 不能因此禁止任一侧开仓，否则启动和滚动时会缺少开仓网格。风险扩张由净敞口
+            // max_net_notional 控制；极端保证金风险仍由 margin_ratio 进入 only_close。
         }
         if margin_ratio > limits.margin_ratio_limit {
             flags.block_all_opens = true;
