@@ -213,10 +213,12 @@ symbols:
       funding_cost_limit: 3.0
 polling:
   tick_interval_ms: 2000
-  reconcile_interval_ms: 6000
-  trade_fetch_limit: 50
+  reconcile_interval_ms: 60000
+  trade_fetch_limit: 100
   request_timeout_secs: 15
   watchdog_timeout_secs: 60
+  trade_reconcile_interval_ms: 30000
+  cancel_unknown_interval_ms: 60000
 websocket:
   enabled: true
   keepalive_interval_secs: 1200

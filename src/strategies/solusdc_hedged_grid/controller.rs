@@ -27,17 +27,20 @@ use super::engine::{
 
 const MAX_BATCH_ORDERS: usize = 5;
 const WS_FILL_MICRO_BATCH_MS: u64 = 8;
+const MISSING_ORDER_GRACE_MS: u64 = 5_000;
 
 #[derive(Default)]
 struct OrderMap {
     client_to_exchange: HashMap<String, String>,
     exchange_to_client: HashMap<String, String>,
+    missing_since: HashMap<String, chrono::DateTime<Utc>>,
 }
 
 impl OrderMap {
     fn register(&mut self, client_id: String, exchange_id: String) {
         self.exchange_to_client
             .insert(exchange_id.clone(), client_id.clone());
+        self.missing_since.remove(&client_id);
         self.client_to_exchange.insert(client_id, exchange_id);
     }
 
@@ -50,6 +53,7 @@ impl OrderMap {
     }
 
     fn remove_client(&mut self, client_id: &str) {
+        self.missing_since.remove(client_id);
         if let Some(exchange_id) = self.client_to_exchange.remove(client_id) {
             self.exchange_to_client.remove(&exchange_id);
         }
@@ -57,7 +61,28 @@ impl OrderMap {
 
     fn remove_exchange(&mut self, exchange_id: &str) {
         if let Some(client_id) = self.exchange_to_client.remove(exchange_id) {
+            self.missing_since.remove(&client_id);
             self.client_to_exchange.remove(&client_id);
+        }
+    }
+
+    fn clear_missing(&mut self, client_id: &str) {
+        self.missing_since.remove(client_id);
+    }
+
+    fn mark_missing_if_grace_elapsed(
+        &mut self,
+        client_id: &str,
+        now: chrono::DateTime<Utc>,
+        grace: ChronoDuration,
+    ) -> bool {
+        match self.missing_since.get(client_id).copied() {
+            Some(first_seen) if now - first_seen >= grace => true,
+            Some(_) => false,
+            None => {
+                self.missing_since.insert(client_id.to_string(), now);
+                false
+            }
         }
     }
 
@@ -895,6 +920,7 @@ async fn process_user_stream_event(
             return Ok(None);
         };
 
+        order_map.clear_missing(&client_id);
         if order_map.exchange_id(&client_id).is_none() {
             order_map.register(client_id.clone(), report.order_id.clone());
         }
@@ -1378,6 +1404,9 @@ fn sync_orders(
         }
     }
 
+    let now = snapshot.timestamp;
+    let missing_grace = ChronoDuration::milliseconds(MISSING_ORDER_GRACE_MS as i64);
+
     for client_id in engine.order_ids() {
         let record = match engine.order_record(&client_id) {
             Some(record) => record,
@@ -1395,6 +1424,7 @@ fn sync_orders(
         };
 
         if let Some(open_order) = open_map.get(&exchange_id) {
+            order_map.clear_missing(&client_id);
             if open_order.filled > record.filled_qty + 1e-8 {
                 let delta = open_order.filled - record.filled_qty;
                 let price = open_order.price.unwrap_or(record.price);
@@ -1434,11 +1464,23 @@ fn sync_orders(
                 log_fill_actions("reconcile_trade", &fill, record.price, &fill_actions);
                 actions.extend(fill_actions);
             }
-        } else {
+        } else if order_map.mark_missing_if_grace_elapsed(&client_id, now, missing_grace) {
+            log::warn!(
+                "[solusdc_hedged_grid] 本地订单已连续缺失，按拒单处理 order_id={} exchange_id={} grace_ms={}",
+                client_id,
+                exchange_id,
+                MISSING_ORDER_GRACE_MS
+            );
             engine.handle_order_reject(&client_id);
+            order_map.remove_client(&client_id);
+        } else {
+            log::info!(
+                "[solusdc_hedged_grid] 本地订单从openOrders消失，等待WS成交或trade确认 order_id={} exchange_id={} grace_ms={}",
+                client_id,
+                exchange_id,
+                MISSING_ORDER_GRACE_MS
+            );
         }
-
-        order_map.remove_client(&client_id);
     }
 
     actions
@@ -1975,6 +2017,137 @@ mod tests {
     use super::*;
     use crate::strategies::solusdc_hedged_grid::engine::OrderDraft;
     use crate::strategies::solusdc_hedged_grid::ledger::OrderIntent;
+
+    use crate::strategies::solusdc_hedged_grid::config::{
+        ExecutionConfig, FeeConfig, FollowConfig, GridConfig, PrecisionConfig, PriceReference,
+        RiskLimits, RiskReference,
+    };
+
+    fn test_strategy_config() -> StrategyConfig {
+        StrategyConfig {
+            symbol: "SOLUSDC".to_string(),
+            require_hedge_mode: true,
+            price_reference: PriceReference::Mid,
+            risk_reference: RiskReference::Mark,
+            grid: GridConfig {
+                levels_per_side: 3,
+                grid_spacing_pct: 0.001,
+                grid_spacing_abs: None,
+                order_notional: 10.0,
+                order_qty: None,
+                strict_pairing: false,
+                fill_remaining_slots_with_opens: true,
+            },
+            follow: FollowConfig {
+                max_gap_steps: 1.0,
+                follow_cooldown_ms: 0,
+                max_follow_actions_per_minute: 100,
+            },
+            execution: ExecutionConfig {
+                cooldown_ms: 0,
+                post_only: true,
+                post_only_retries: 3,
+            },
+            precision: PrecisionConfig {
+                tick_size: 0.01,
+                step_size: 0.001,
+                min_qty: Some(0.001),
+                min_notional: Some(5.0),
+                price_digits: Some(2),
+                qty_digits: Some(3),
+            },
+            fees: FeeConfig {
+                maker_fee: 0.0,
+                taker_fee: 0.0004,
+            },
+            risk: RiskLimits {
+                max_net_notional: 1000.0,
+                max_total_notional: 2000.0,
+                margin_ratio_limit: 0.8,
+                funding_rate_limit: 0.003,
+                funding_cost_limit: 5.0,
+            },
+        }
+    }
+
+    #[test]
+    fn sync_orders_should_hold_missing_order_during_grace() {
+        let mut engine = GridEngine::new(test_strategy_config(), true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        });
+        let snap = MarketSnapshot {
+            best_bid: 99.9,
+            best_ask: 100.1,
+            last_price: 100.0,
+            mark_price: 100.0,
+            timestamp: Utc::now(),
+        };
+        let actions = engine.rebuild_grid(&snap);
+        let first_id = match actions.first() {
+            Some(EngineAction::Place(draft)) => draft.id.clone(),
+            _ => panic!("expected place action"),
+        };
+        let mut order_map = OrderMap::default();
+        order_map.register(first_id.clone(), "exchange-1".to_string());
+
+        let actions = sync_orders(&mut engine, &mut order_map, &[], &[], &snap);
+
+        assert!(actions.is_empty());
+        assert!(engine.order_record(&first_id).is_some());
+        assert_eq!(
+            order_map.exchange_id(&first_id).as_deref(),
+            Some("exchange-1")
+        );
+    }
+
+    #[test]
+    fn sync_orders_should_reject_missing_order_after_grace() {
+        let mut engine = GridEngine::new(test_strategy_config(), true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        });
+        let snap = MarketSnapshot {
+            best_bid: 99.9,
+            best_ask: 100.1,
+            last_price: 100.0,
+            mark_price: 100.0,
+            timestamp: Utc::now(),
+        };
+        let actions = engine.rebuild_grid(&snap);
+        let first_id = match actions.first() {
+            Some(EngineAction::Place(draft)) => draft.id.clone(),
+            _ => panic!("expected place action"),
+        };
+        let mut order_map = OrderMap::default();
+        order_map.register(first_id.clone(), "exchange-1".to_string());
+        order_map.missing_since.insert(
+            first_id.clone(),
+            snap.timestamp - ChronoDuration::milliseconds(MISSING_ORDER_GRACE_MS as i64),
+        );
+
+        let actions = sync_orders(&mut engine, &mut order_map, &[], &[], &snap);
+
+        assert!(actions.is_empty());
+        assert!(engine.order_record(&first_id).is_none());
+        assert!(order_map.exchange_id(&first_id).is_none());
+    }
 
     #[test]
     fn enqueue_actions_should_skip_place_canceled_in_same_batch() {
