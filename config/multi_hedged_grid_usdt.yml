@@ -34,7 +34,7 @@ symbols:
       strict_pairing: false
       fill_remaining_slots_with_opens: true
       repair_near_gap_enabled: false
-      grid_spacing_abs: 0.046
+      grid_spacing_abs: 0.029
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -71,7 +71,7 @@ symbols:
       strict_pairing: false
       fill_remaining_slots_with_opens: true
       repair_near_gap_enabled: false
-      grid_spacing_abs: 0.0039
+      grid_spacing_abs: 0.0024
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -141,7 +141,7 @@ symbols:
     risk_reference: mark
     grid:
       levels_per_side: 3
-      grid_spacing_abs: 0.0327
+      grid_spacing_abs: 0.0208
       order_notional: 5.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
