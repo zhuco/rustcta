@@ -36,6 +36,7 @@ mod solusdc_hedged_grid {
                 order_qty: None,
                 strict_pairing: false,
                 fill_remaining_slots_with_opens: true,
+                repair_near_gap_enabled: false,
             },
             follow: FollowConfig {
                 max_gap_steps: 1.0,
@@ -920,6 +921,7 @@ mod solusdc_hedged_grid {
     fn fill_should_repair_near_gap_and_trim_far_orders_with_abs_spacing() {
         let mut config = test_config();
         config.grid.grid_spacing_abs = Some(2.5);
+        config.grid.repair_near_gap_enabled = true;
         config.grid.grid_spacing_pct = 0.0;
         config.grid.levels_per_side = 3;
         config.grid.order_qty = Some(0.011);

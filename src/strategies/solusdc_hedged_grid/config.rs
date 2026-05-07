@@ -137,6 +137,8 @@ pub struct GridConfig {
     pub strict_pairing: bool,
     #[serde(default = "default_fill_remaining_slots_with_opens")]
     pub fill_remaining_slots_with_opens: bool,
+    #[serde(default = "default_repair_near_gap_enabled")]
+    pub repair_near_gap_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +353,10 @@ fn default_market_type() -> MarketType {
 
 fn default_fill_remaining_slots_with_opens() -> bool {
     true
+}
+
+fn default_repair_near_gap_enabled() -> bool {
+    false
 }
 
 fn default_grid_spacing_pct() -> f64 {

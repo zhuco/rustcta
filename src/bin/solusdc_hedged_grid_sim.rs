@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             order_qty: None,
             strict_pairing: false,
             fill_remaining_slots_with_opens: true,
+            repair_near_gap_enabled: false,
         },
         follow: FollowConfig {
             max_gap_steps: 1.0,

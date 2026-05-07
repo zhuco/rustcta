@@ -876,7 +876,9 @@ impl GridEngine {
         }
 
         let mut actions = Vec::new();
-        actions.extend(self.repair_near_gap(snapshot));
+        if self.config.grid.repair_near_gap_enabled {
+            actions.extend(self.repair_near_gap(snapshot));
+        }
         actions.extend(self.trim_far_orders_after_fill(OrderSide::Buy));
         actions.extend(self.trim_far_orders_after_fill(OrderSide::Sell));
         actions

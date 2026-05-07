@@ -17,6 +17,7 @@ symbols:
       order_notional: 8.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -52,6 +53,7 @@ symbols:
       order_qty: 0.1
       strict_pairing: false
       fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -86,6 +88,7 @@ symbols:
       order_notional: 5.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -121,6 +124,7 @@ symbols:
       order_qty: 0.001
       strict_pairing: false
       fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -155,6 +159,7 @@ symbols:
       order_notional: 25.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
@@ -189,6 +194,7 @@ symbols:
       order_notional: 8.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
     follow:
       max_gap_steps: 1.0
       follow_cooldown_ms: 800
