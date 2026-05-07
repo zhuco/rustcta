@@ -1,5 +1,5 @@
 strategy:
-  name: multi_hedged_grid_7pairs
+  name: multi_hedged_grid_8pairs
   log_level: INFO
 account:
   account_id: binance_hcr
@@ -225,7 +225,7 @@ symbols:
     risk_reference: mark
     grid:
       levels_per_side: 3
-      grid_spacing_pct: 0.003
+      grid_spacing_pct: 0.005
       order_notional: 5.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
@@ -245,6 +245,43 @@ symbols:
       min_notional: 5.0
       price_digits: 3
       qty_digits: 1
+    fees:
+      maker_fee: 0.0
+      taker_fee: 0.0004
+    risk:
+      max_net_notional: 600.0
+      max_total_notional: 600.0
+      margin_ratio_limit: 0.75
+      funding_rate_limit: 0.003
+      funding_cost_limit: 3.0
+- enabled: true
+  engine:
+    symbol: JTO/USDT
+    require_hedge_mode: true
+    price_reference: mid
+    risk_reference: mark
+    grid:
+      levels_per_side: 3
+      grid_spacing_pct: 0.005
+      order_notional: 5.0
+      strict_pairing: false
+      fill_remaining_slots_with_opens: true
+      repair_near_gap_enabled: false
+    follow:
+      max_gap_steps: 1.0
+      follow_cooldown_ms: 800
+      max_follow_actions_per_minute: 30
+    execution:
+      cooldown_ms: 500
+      post_only: true
+      post_only_retries: 3
+    precision:
+      tick_size: 0.0001
+      step_size: 1.0
+      min_qty: 1.0
+      min_notional: 5.0
+      price_digits: 4
+      qty_digits: 0
     fees:
       maker_fee: 0.0
       taker_fee: 0.0004
