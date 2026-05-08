@@ -30,7 +30,7 @@ symbols:
     risk_reference: mark
     grid:
       levels_per_side: 3
-      grid_spacing_abs: 0.00043
+      grid_spacing_abs: 0.0006
       order_notional: 5.0
       strict_pairing: false
       fill_remaining_slots_with_opens: true
@@ -44,7 +44,7 @@ symbols:
       post_only: true
       post_only_retries: 3
     precision:
-      tick_size: 0.00001
+      tick_size: 1.0e-05
       step_size: 1.0
       min_qty: 1.0
       min_notional: 5.0
