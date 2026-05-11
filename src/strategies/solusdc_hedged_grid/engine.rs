@@ -335,6 +335,8 @@ impl GridEngine {
             actions.extend(self.enforce_close_limit(OrderSide::Sell));
             actions.extend(self.enforce_close_limit(OrderSide::Buy));
         }
+        actions.extend(self.cancel_orphan_open_orders(OrderSide::Sell));
+        actions.extend(self.cancel_orphan_open_orders(OrderSide::Buy));
         actions.extend(self.enforce_open_limit(OrderSide::Sell));
         actions.extend(self.enforce_open_limit(OrderSide::Buy));
         actions.extend(self.refill_open_slots(OrderSide::Sell, snapshot));
@@ -1039,7 +1041,9 @@ impl GridEngine {
     }
 
     fn follow_buy_side(&mut self, best_buy: f64, mid: f64) -> Vec<EngineAction> {
-        if !self.config.grid.fill_remaining_slots_with_opens {
+        if !self.config.grid.fill_remaining_slots_with_opens
+            || !self.config.grid.follow_open_enabled
+        {
             return Vec::new();
         }
         let mut actions = Vec::new();
@@ -1068,7 +1072,9 @@ impl GridEngine {
     }
 
     fn follow_sell_side(&mut self, best_sell: f64, mid: f64) -> Vec<EngineAction> {
-        if !self.config.grid.fill_remaining_slots_with_opens {
+        if !self.config.grid.fill_remaining_slots_with_opens
+            || !self.config.grid.follow_open_enabled
+        {
             return Vec::new();
         }
         let mut actions = Vec::new();
@@ -1143,12 +1149,44 @@ impl GridEngine {
         actions
     }
 
+    fn cancel_orphan_open_orders(&mut self, side: OrderSide) -> Vec<EngineAction> {
+        let open_intent = Self::open_intent_for_side(side);
+        let close_intent = Self::close_intent_for_side(side);
+        let close_keys: HashSet<i64> = self
+            .book_for_side(side)
+            .slots
+            .iter()
+            .filter(|slot| slot.intent == close_intent)
+            .map(|slot| self.price_key(slot.price))
+            .collect();
+        if close_keys.is_empty() {
+            return Vec::new();
+        }
+
+        let orphan_ids: Vec<String> = self
+            .book_for_side(side)
+            .slots
+            .iter()
+            .filter(|slot| slot.intent == open_intent)
+            .filter(|slot| !close_keys.contains(&self.price_key(slot.price)))
+            .map(|slot| slot.id.clone())
+            .collect();
+
+        let mut actions = Vec::new();
+        for order_id in orphan_ids {
+            actions.extend(self.cancel_order(&order_id, "orphan_open_without_close"));
+        }
+        actions
+    }
+
     fn refill_open_slots(
         &mut self,
         side: OrderSide,
         snapshot: &MarketSnapshot,
     ) -> Vec<EngineAction> {
-        if !self.config.grid.fill_remaining_slots_with_opens {
+        if !self.config.grid.fill_remaining_slots_with_opens
+            || !self.config.grid.refill_open_slots_enabled
+        {
             return Vec::new();
         }
         let desired = self.config.grid.levels_per_side;
@@ -1260,6 +1298,10 @@ impl GridEngine {
             if !target_keys.contains(&key) || !kept_keys.insert(key) {
                 actions.extend(self.cancel_order(&slot.id, "normalize_open_grid"));
             }
+        }
+
+        if !self.config.grid.normalize_open_grid_enabled {
+            return actions;
         }
 
         for price in target_prices {

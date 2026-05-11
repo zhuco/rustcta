@@ -2037,6 +2037,9 @@ mod tests {
                 order_qty: None,
                 strict_pairing: false,
                 fill_remaining_slots_with_opens: true,
+                refill_open_slots_enabled: true,
+                normalize_open_grid_enabled: true,
+                follow_open_enabled: true,
                 repair_near_gap_enabled: false,
             },
             follow: FollowConfig {

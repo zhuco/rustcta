@@ -137,6 +137,12 @@ pub struct GridConfig {
     pub strict_pairing: bool,
     #[serde(default = "default_fill_remaining_slots_with_opens")]
     pub fill_remaining_slots_with_opens: bool,
+    #[serde(default = "default_refill_open_slots_enabled")]
+    pub refill_open_slots_enabled: bool,
+    #[serde(default = "default_normalize_open_grid_enabled")]
+    pub normalize_open_grid_enabled: bool,
+    #[serde(default = "default_follow_open_enabled")]
+    pub follow_open_enabled: bool,
     #[serde(default = "default_repair_near_gap_enabled")]
     pub repair_near_gap_enabled: bool,
 }
@@ -352,6 +358,18 @@ fn default_market_type() -> MarketType {
 }
 
 fn default_fill_remaining_slots_with_opens() -> bool {
+    true
+}
+
+fn default_refill_open_slots_enabled() -> bool {
+    true
+}
+
+fn default_normalize_open_grid_enabled() -> bool {
+    true
+}
+
+fn default_follow_open_enabled() -> bool {
     true
 }
 
