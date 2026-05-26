@@ -1,0 +1,37 @@
+# DOGE/USDC futures beta-hedge market maker.
+# Live profile: this config can place real futures orders.
+strategy:
+  name: "beta_hedge_mm_dogeusdc_500u"
+  log_level: "INFO"
+
+account:
+  account_id: "binance_hcr"
+  market_type: "Futures"
+
+hedge:
+  hedge_symbol: "DOGE/USDC"
+  hedge_ratio: 0.40
+  target_inventory_notional_cap: 500.0
+  soft_inventory_notional: 300.0
+  hard_inventory_notional: 500.0
+  emergency_inventory_notional: 600.0
+  max_portfolio_exposure_multiple: 10.0
+
+quoting:
+  base_order_notional: 5.0
+  levels_per_side: 2
+  refresh_interval_ms: 500
+  order_ttl_ms: 15000
+  min_requote_interval_ms: 8000
+  reprice_threshold_ticks: 4
+  post_only: true
+  time_in_force: "GTX"
+  reduce_risk_taker_enabled: false
+  base_spread_bps: 6.0
+  level_spacing_bps: 4.0
+  min_spread_bps: 2.0
+  max_inventory_bias_bps: 4.0
+  level_size_decay: 0.8
+  independent_dual_side: true
+
+dry_run: false

@@ -1,0 +1,73 @@
+strategy:
+  name: obi_scalper_sui_usdc
+  log_level: INFO
+  dry_run: true
+
+account:
+  account_id: binance_hcr
+  exchange: binance
+  market_type: Futures
+
+global_risk:
+  margin_budget: 800.0
+  max_daily_loss: 20.0
+  max_total_notional: 200.0
+  max_open_symbols: 3
+  emergency_close_on_disconnect_ms: 3000
+
+execution:
+  order_notional: 5.2
+  maker_fee_rate: 0.0
+  taker_fee_rate: 0.0004
+  inventory_mode: true
+  max_inventory_notional: 300.0
+  soft_inventory_notional: 100.0
+  hard_inventory_notional: 200.0
+  take_profit_bps: 4.0
+  min_take_profit_bps: 2.0
+  max_book_latency_ms: 1000
+  post_cancel_cooldown_ms: 1000
+  min_entry_interval_ms: 500
+  allow_taker_entry: false
+  allow_taker_exit: false
+  entry_order_ttl_ms: 700
+  exit_order_ttl_ms: 700
+  max_order_retries: 3
+  poll_interval_ms: 100
+  position_poll_interval_ms: 1000
+  summary_interval_minutes: 30
+
+signal:
+  obi_levels: 10
+  ema_fast_period: 5.0
+  ema_slow_period: 20.0
+  long_entry_threshold: 0.20
+  short_entry_threshold: -0.20
+  exit_threshold: 0.08
+  strong_signal_threshold: 0.50
+  min_signal_hold_ms: 300
+  price_stable_bps: 0.5
+  max_spread_bps: 3.0
+
+logging:
+  max_lines: 20000
+  key_log_every_ms: 1000
+
+notifications:
+  enabled: true
+  wechat_webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=cdd17fb2-5cb3-4712-a658-80d8f3678d78"
+
+symbols:
+  - enabled: false
+    symbol: SUI/USDC
+    tick_size: 0.0001
+    step_size: 0.1
+    min_qty: 0.1
+    min_notional: 5.0
+    order_notional: 5.2
+    max_symbol_notional: 300.0
+    stop_loss_pct: 0.0015
+    max_holding_ms: 60000
+    cooldown_after_loss_ms: 60000
+    max_consecutive_losses: 3
+    consecutive_loss_cooldown_ms: 600000
