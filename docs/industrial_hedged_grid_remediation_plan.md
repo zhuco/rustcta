@@ -405,6 +405,23 @@ git branch -D feature/industrial-hedged-grid
 - 新架构只识别自身前缀订单。
 - 若回退旧架构，旧架构启动前必须先确认或清理新前缀挂单。
 
+## 11. 当前实现状态（feature/industrial-hedged-grid-phase1）
+
+截至当前功能分支，开发任务状态如下：
+
+- Phase 1：已完成成交路径延迟拆分日志，输出 `latency_breakdown`，包含 WS 排队、引擎处理、执行器提交和总耗时。
+- Phase 1.5：已完成近端网格完整性修复，成交后执行 `repair_near_gap` 和 `trim_far_orders_after_fill`，并增加固定价差回归测试。
+- Phase 2：已完成当前多进程模式下的抖动治理，`get_my_trades` 和 `cancel_unknown_orders` 降为低频维护动作，成交 WS 路径保持高优先级。
+- Phase 3：已完成共享用户流路由代码路径，`multi_hedged_grid` 使用账户级共享私有 WebSocket，并按 symbol 分发成交事件。
+- Phase 4：已完成共享订单执行器基础模块 `SharedOrderExecutor`，包含账户级节流接口和统一批量下单构造；实盘旧单 symbol 路径暂未强制切换到该执行器。
+- Phase 5：已完成 `multi_hedged_grid` 多交易对运行入口和配置模型，可在单进程内启动多个 symbol engine。
+
+当前长测策略：
+
+- 已使用功能分支 release binary 重启 `ETH/USDC` 单 symbol 对冲网格。
+- 暂不合并 `master`，等待长测日志确认近端 gap、撤远端、成交延迟均稳定后再考虑合并。
+- `multi_hedged_grid` 虽已编译通过，但建议先在小仓位或模拟配置灰度，不直接替换当前 6 个实盘进程。
+
 ## 11. 推荐执行顺序
 
 推荐先做 Phase 1 和 Phase 2，不立即进入单进程多交易对重构。

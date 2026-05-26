@@ -47,6 +47,10 @@ pub struct PollingConfig {
     pub request_timeout_secs: u64,
     #[serde(default = "default_watchdog_timeout_secs")]
     pub watchdog_timeout_secs: u64,
+    #[serde(default = "default_trade_reconcile_interval_ms")]
+    pub trade_reconcile_interval_ms: u64,
+    #[serde(default = "default_cancel_unknown_interval_ms")]
+    pub cancel_unknown_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +84,8 @@ impl Default for PollingConfig {
             trade_fetch_limit: default_trade_fetch_limit(),
             request_timeout_secs: default_request_timeout_secs(),
             watchdog_timeout_secs: default_watchdog_timeout_secs(),
+            trade_reconcile_interval_ms: default_trade_reconcile_interval_ms(),
+            cancel_unknown_interval_ms: default_cancel_unknown_interval_ms(),
         }
     }
 }
@@ -131,6 +137,14 @@ pub struct GridConfig {
     pub strict_pairing: bool,
     #[serde(default = "default_fill_remaining_slots_with_opens")]
     pub fill_remaining_slots_with_opens: bool,
+    #[serde(default = "default_refill_open_slots_enabled")]
+    pub refill_open_slots_enabled: bool,
+    #[serde(default = "default_normalize_open_grid_enabled")]
+    pub normalize_open_grid_enabled: bool,
+    #[serde(default = "default_follow_open_enabled")]
+    pub follow_open_enabled: bool,
+    #[serde(default = "default_repair_near_gap_enabled")]
+    pub repair_near_gap_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +361,22 @@ fn default_fill_remaining_slots_with_opens() -> bool {
     true
 }
 
+fn default_refill_open_slots_enabled() -> bool {
+    true
+}
+
+fn default_normalize_open_grid_enabled() -> bool {
+    true
+}
+
+fn default_follow_open_enabled() -> bool {
+    true
+}
+
+fn default_repair_near_gap_enabled() -> bool {
+    false
+}
+
 fn default_grid_spacing_pct() -> f64 {
     0.0
 }
@@ -397,6 +427,14 @@ fn default_request_timeout_secs() -> u64 {
 
 fn default_watchdog_timeout_secs() -> u64 {
     60
+}
+
+fn default_trade_reconcile_interval_ms() -> u64 {
+    30000
+}
+
+fn default_cancel_unknown_interval_ms() -> u64 {
+    60000
 }
 
 fn default_ws_enabled() -> bool {

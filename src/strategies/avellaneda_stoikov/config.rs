@@ -13,6 +13,10 @@ pub struct ASConfig {
     pub data_sources: DataSourcesConfig,
     pub monitoring: MonitoringConfig,
     pub perpetual: PerpetualConfig,
+    #[serde(default)]
+    pub market_specific: Option<MarketSpecificConfig>,
+    #[serde(default)]
+    pub debug: Option<DebugConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -236,4 +240,38 @@ pub struct FundingRateConfig {
 pub struct MaintenanceConfig {
     pub stop_before: u64,
     pub resume_after: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MarketSpecificConfig {
+    pub volatility_handling: Option<VolatilityHandlingConfig>,
+    pub liquidity_check: Option<LiquidityCheckConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VolatilityHandlingConfig {
+    pub adaptive_spread: bool,
+    pub volatility_multiplier: VolatilityMultiplierConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VolatilityMultiplierConfig {
+    pub low: f64,
+    pub medium: f64,
+    pub high: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LiquidityCheckConfig {
+    pub enabled: bool,
+    pub min_depth_usd: f64,
+    pub low_liquidity_spread_multiplier: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DebugConfig {
+    pub enabled: bool,
+    pub verbose_logging: bool,
+    pub dry_run: bool,
+    pub save_market_data: bool,
 }

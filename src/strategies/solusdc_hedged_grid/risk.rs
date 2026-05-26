@@ -14,7 +14,7 @@ pub struct RiskState {
 pub struct RiskFlags {
     pub block_open_long: bool,
     pub block_open_short: bool,
-    pub block_all_opens: bool,
+    pub block_risk_opens: bool,
     pub only_close: bool,
 }
 
@@ -38,29 +38,23 @@ impl RiskState {
             1.0
         };
         let expected_funding_cost = funding_rate * total_notional;
-        // 净敞口阈值使用“配置阈值 vs 20x权益”中的较大者，
-        // 以满足资金规模放大时的对冲滚动需求。
-        let dynamic_net_limit = (equity * 20.0).max(0.0);
-        let max_net_notional = limits.max_net_notional.max(dynamic_net_limit);
+        let max_net_notional = limits.max_net_notional;
 
         let mut flags = RiskFlags::default();
-        if net_notional > max_net_notional {
+        if max_net_notional > 0.0 && net_notional > max_net_notional {
             flags.block_open_long = true;
         }
-        if net_notional < -max_net_notional {
+        if max_net_notional > 0.0 && net_notional < -max_net_notional {
             flags.block_open_short = true;
         }
-        if total_notional > limits.max_total_notional {
-            flags.block_all_opens = true;
-        }
         if margin_ratio > limits.margin_ratio_limit {
-            flags.block_all_opens = true;
+            flags.block_risk_opens = true;
             flags.only_close = true;
         }
         if funding_rate.abs() > limits.funding_rate_limit
             || expected_funding_cost.abs() > limits.funding_cost_limit
         {
-            flags.block_all_opens = true;
+            flags.block_risk_opens = true;
         }
 
         RiskState {
@@ -74,10 +68,10 @@ impl RiskState {
     }
 
     pub fn allow_open_long(&self) -> bool {
-        !self.flags.block_all_opens && !self.flags.block_open_long
+        !self.flags.block_risk_opens && !self.flags.block_open_long
     }
 
     pub fn allow_open_short(&self) -> bool {
-        !self.flags.block_all_opens && !self.flags.block_open_short
+        !self.flags.block_risk_opens && !self.flags.block_open_short
     }
 }

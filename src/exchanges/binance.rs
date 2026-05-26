@@ -2597,6 +2597,119 @@ impl Exchange for BinanceExchange {
         Ok(result)
     }
 
+    async fn cancel_multiple_orders(
+        &self,
+        order_ids: Vec<String>,
+        symbol: &str,
+        market_type: MarketType,
+    ) -> Result<Vec<Order>> {
+        if order_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if market_type != MarketType::Futures {
+            let mut results = Vec::new();
+            for order_id in order_ids {
+                match self.cancel_order(&order_id, symbol, market_type).await {
+                    Ok(order) => results.push(order),
+                    Err(err) => {
+                        log::warn!("Binance 逐笔撤单失败 order_id={} err={}", order_id, err)
+                    }
+                }
+            }
+            return Ok(results);
+        }
+
+        let exchange_symbol =
+            self.symbol_converter
+                .to_exchange_symbol(symbol, "binance", market_type)?;
+        let mut canceled_orders = Vec::new();
+
+        for chunk in order_ids.chunks(10) {
+            let order_id_values: Vec<serde_json::Value> = chunk
+                .iter()
+                .map(|order_id| {
+                    order_id
+                        .parse::<i64>()
+                        .map(serde_json::Value::from)
+                        .unwrap_or_else(|_| serde_json::Value::String(order_id.clone()))
+                })
+                .collect();
+            let order_id_list = serde_json::to_string(&order_id_values)?;
+            let mut params = HashMap::new();
+            params.insert("symbol".to_string(), exchange_symbol.clone());
+            params.insert(
+                "orderIdList".to_string(),
+                urlencoding::encode(&order_id_list).to_string(),
+            );
+
+            let response: serde_json::Value = self
+                .send_signed_request("DELETE", "/fapi/v1/batchOrders", params, market_type)
+                .await?;
+
+            let Some(items) = response.as_array() else {
+                log::warn!(
+                    "Binance 批量撤单响应不是数组 symbol={} response={}",
+                    symbol,
+                    response
+                );
+                continue;
+            };
+
+            for (idx, item) in items.iter().enumerate() {
+                if item.get("code").is_some()
+                    && item.get("msg").is_some()
+                    && item.get("orderId").is_none()
+                {
+                    log::warn!(
+                        "Binance 批量撤单部分失败 symbol={} order_id={} response={}",
+                        symbol,
+                        chunk.get(idx).map(String::as_str).unwrap_or("unknown"),
+                        item
+                    );
+                    continue;
+                }
+
+                let amount = Self::first_f64(item, &["origQty", "quantity"]).unwrap_or(0.0);
+                let filled = Self::first_f64(item, &["executedQty", "executedQuantity", "cumQty"])
+                    .unwrap_or(0.0);
+                let status = Self::first_string(item, &["status", "algoStatus"])
+                    .map(|s| Self::parse_binance_order_status(&s))
+                    .unwrap_or(OrderStatus::Canceled);
+                let side = Self::first_string(item, &["side"])
+                    .map(|s| Self::parse_binance_order_side(&s, OrderSide::Buy))
+                    .unwrap_or(OrderSide::Buy);
+                let order_type = Self::first_string(item, &["type", "orderType"])
+                    .map(|s| Self::parse_binance_order_type(&s))
+                    .unwrap_or(OrderType::Limit);
+                let timestamp = Self::first_i64(item, &["updateTime", "time", "createTime"])
+                    .and_then(|t| DateTime::from_timestamp(t / 1000, 0))
+                    .unwrap_or_else(Utc::now);
+                let id = Self::first_string(item, &["orderId", "algoId"])
+                    .or_else(|| chunk.get(idx).cloned())
+                    .unwrap_or_default();
+
+                canceled_orders.push(Order {
+                    id,
+                    symbol: symbol.to_string(),
+                    side,
+                    order_type,
+                    amount,
+                    price: Self::first_f64(item, &["price"]).filter(|p| *p > 0.0),
+                    filled,
+                    remaining: (amount - filled).max(0.0),
+                    status,
+                    market_type,
+                    timestamp,
+                    last_trade_timestamp: None,
+                    info: item.clone(),
+                });
+            }
+        }
+
+        Ok(canceled_orders)
+    }
+
     async fn get_server_time(&self) -> Result<DateTime<chrono::Utc>> {
         #[derive(Deserialize)]
         struct ServerTime {

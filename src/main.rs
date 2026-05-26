@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .short('s')
             .long("strategy")
             .value_name("STRATEGY")
-            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, short_ladder_live, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow, beta_hedge_market_maker")
+            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, short_ladder_live, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow, beta_hedge_market_maker, obi_scalper")
             .required(true))
         .arg(Arg::new("config")
             .short('c')
@@ -376,6 +376,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
+        "multi_hedged_grid" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: MultiHedgedGridRuntimeConfig = serde_yaml::from_str(&file_content)?;
+            let strategy = MultiHedgedGridStrategy::new(config, account_manager.clone());
+            log::info!("多交易对对冲滚动网格策略已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭策略...");
+            strategy.stop().await?;
+        }
         "short_ladder_live" => {
             let file_content = std::fs::read_to_string(config_file)?;
             let config: ShortLadderLiveConfig = serde_yaml::from_str(&file_content)?;
@@ -541,13 +553,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Avellaneda-Stoikov策略已创建，开始运行...");
 
             // 运行策略
-            strategy.start().await?;
-
-            // 等待退出信号
-            tokio::signal::ctrl_c().await?;
-            log::info!("收到退出信号，正在停止A-S策略...");
-
-            strategy.stop().await?;
+            strategy.run_until_shutdown().await?;
             log::info!("A-S策略已停止");
         }
         "market_making" => {
@@ -637,6 +643,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tokio::signal::ctrl_c().await?;
             log::info!("收到停止信号，正在关闭订单流策略...");
+            strategy.stop().await?;
+        }
+        "obi_scalper" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: ObiScalperConfig = serde_yaml::from_str(&file_content)?;
+            let strategy = ObiScalperStrategy::new(config, account_manager.clone());
+            log::info!("OBI 高频剥头皮策略已创建，开始运行...");
+
+            strategy.start().await?;
+
+            tokio::signal::ctrl_c().await?;
+            log::info!("收到停止信号，正在关闭 OBI 高频剥头皮策略...");
             strategy.stop().await?;
         }
         _ => {

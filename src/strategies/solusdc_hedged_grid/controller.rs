@@ -9,7 +9,7 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     Mutex,
 };
-use tokio::time::{interval, sleep, Duration};
+use tokio::time::{interval, sleep, Duration, Instant};
 
 use crate::core::error::ExchangeError;
 use crate::core::types::{
@@ -26,17 +26,21 @@ use super::engine::{
 };
 
 const MAX_BATCH_ORDERS: usize = 5;
+const WS_FILL_MICRO_BATCH_MS: u64 = 8;
+const MISSING_ORDER_GRACE_MS: u64 = 5_000;
 
 #[derive(Default)]
 struct OrderMap {
     client_to_exchange: HashMap<String, String>,
     exchange_to_client: HashMap<String, String>,
+    missing_since: HashMap<String, chrono::DateTime<Utc>>,
 }
 
 impl OrderMap {
     fn register(&mut self, client_id: String, exchange_id: String) {
         self.exchange_to_client
             .insert(exchange_id.clone(), client_id.clone());
+        self.missing_since.remove(&client_id);
         self.client_to_exchange.insert(client_id, exchange_id);
     }
 
@@ -49,6 +53,7 @@ impl OrderMap {
     }
 
     fn remove_client(&mut self, client_id: &str) {
+        self.missing_since.remove(client_id);
         if let Some(exchange_id) = self.client_to_exchange.remove(client_id) {
             self.exchange_to_client.remove(&exchange_id);
         }
@@ -56,7 +61,28 @@ impl OrderMap {
 
     fn remove_exchange(&mut self, exchange_id: &str) {
         if let Some(client_id) = self.exchange_to_client.remove(exchange_id) {
+            self.missing_since.remove(&client_id);
             self.client_to_exchange.remove(&client_id);
+        }
+    }
+
+    fn clear_missing(&mut self, client_id: &str) {
+        self.missing_since.remove(client_id);
+    }
+
+    fn mark_missing_if_grace_elapsed(
+        &mut self,
+        client_id: &str,
+        now: chrono::DateTime<Utc>,
+        grace: ChronoDuration,
+    ) -> bool {
+        match self.missing_since.get(client_id).copied() {
+            Some(first_seen) if now - first_seen >= grace => true,
+            Some(_) => false,
+            None => {
+                self.missing_since.insert(client_id.to_string(), now);
+                false
+            }
         }
     }
 
@@ -66,8 +92,11 @@ impl OrderMap {
 }
 
 #[derive(Debug, Clone)]
-enum UserStreamEvent {
-    ExecutionReport(ExecutionReport),
+pub(super) enum UserStreamEvent {
+    ExecutionReport {
+        report: ExecutionReport,
+        ws_receive_at: Instant,
+    },
 }
 
 pub struct SolusdcHedgedGridStrategy {
@@ -101,7 +130,14 @@ impl SolusdcHedgedGridStrategy {
                 if !running.load(Ordering::SeqCst) {
                     break;
                 }
-                match run_loop(config.clone(), account_manager.clone(), running.clone()).await {
+                match run_loop(
+                    config.clone(),
+                    account_manager.clone(),
+                    running.clone(),
+                    None,
+                )
+                .await
+                {
                     Ok(_) => break,
                     Err(err) => {
                         log::error!("[solusdc_hedged_grid] 运行异常: {}，30秒后重启策略", err);
@@ -150,10 +186,11 @@ impl SolusdcHedgedGridStrategy {
     }
 }
 
-async fn run_loop(
+pub(super) async fn run_loop(
     config: RuntimeConfig,
     account_manager: Arc<AccountManager>,
     running: Arc<AtomicBool>,
+    external_ws_rx: Option<UnboundedReceiver<UserStreamEvent>>,
 ) -> Result<()> {
     let account = account_manager
         .get_account(&config.account.account_id)
@@ -171,6 +208,10 @@ async fn run_loop(
     let zero_position_refresh_interval = ChronoDuration::minutes(2);
     let mut last_hourly_reset = Utc::now();
     let hourly_reset_interval = ChronoDuration::hours(12);
+    let mut last_trade_reconcile = Utc::now()
+        - ChronoDuration::milliseconds(config.polling.trade_reconcile_interval_ms as i64);
+    let mut last_cancel_unknown =
+        Utc::now() - ChronoDuration::milliseconds(config.polling.cancel_unknown_interval_ms as i64);
     let request_timeout = Duration::from_secs(config.polling.request_timeout_secs);
     let watchdog_timeout =
         ChronoDuration::seconds(config.polling.watchdog_timeout_secs.max(10) as i64);
@@ -178,7 +219,13 @@ async fn run_loop(
     let mut failure_count = 0u32;
     let mut restart_requested = false;
     let (ws_tx, mut ws_rx) = unbounded_channel();
-    if config.websocket.enabled {
+    if let Some(external_ws_rx) = external_ws_rx {
+        ws_rx = external_ws_rx;
+        log::info!(
+            "[solusdc_hedged_grid] 使用共享WebSocket用户流 symbol={}",
+            config.engine.symbol
+        );
+    } else if config.websocket.enabled {
         spawn_user_stream_listener(
             config.clone(),
             account_manager.clone(),
@@ -406,33 +453,56 @@ async fn run_loop(
                             return Err(err);
                         }
                     };
-                    let trades = match with_timeout(
-                        "get_my_trades",
-                        request_timeout,
-                        account.exchange.get_my_trades(
-                            Some(&config.engine.symbol),
-                            config.account.market_type,
-                            Some(config.polling.trade_fetch_limit),
-                        ),
-                    )
-                    .await
-                    {
-                        Ok(trades) => trades,
-                        Err(err) => {
-                            log::warn!("[solusdc_hedged_grid] 成交记录拉取失败: {}", err);
-                            Vec::new()
+                    let should_fetch_trades = config.polling.trade_reconcile_interval_ms > 0
+                        && now - last_trade_reconcile
+                            >= ChronoDuration::milliseconds(
+                                config.polling.trade_reconcile_interval_ms as i64,
+                            );
+                    let trades = if should_fetch_trades {
+                        last_trade_reconcile = now;
+                        match with_timeout(
+                            "get_my_trades",
+                            request_timeout,
+                            account.exchange.get_my_trades(
+                                Some(&config.engine.symbol),
+                                config.account.market_type,
+                                Some(config.polling.trade_fetch_limit),
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(trades) => trades,
+                            Err(err) => {
+                                log::warn!("[solusdc_hedged_grid] 成交记录拉取失败: {}", err);
+                                Vec::new()
+                            }
                         }
+                    } else {
+                        Vec::new()
                     };
 
-                    let long_empty = position.long_qty.abs() < 1e-8;
-                    let short_empty = position.short_qty.abs() < 1e-8;
-                    let needs_zero_position_refresh = (long_empty && short_empty)
-                        && now - last_zero_position_refresh >= zero_position_refresh_interval;
                     let needs_hourly_reset = now - last_hourly_reset >= hourly_reset_interval;
+                    let low_inventory_info;
                     let mut actions = Vec::new();
                     {
                         let mut guard = engine.lock().await;
-                        guard.update_position(position);
+                        guard.update_position(position.clone());
+                        let low_inventory_threshold = guard
+                            .low_inventory_threshold_qty(snapshot.mark_price)
+                            .unwrap_or(0.0);
+                        let long_low = position.long_qty.abs() < low_inventory_threshold;
+                        let short_low = position.short_qty.abs() < low_inventory_threshold;
+                        let needs_low_inventory_refresh = low_inventory_threshold > 0.0
+                            && (long_low || short_low)
+                            && now - last_zero_position_refresh >= zero_position_refresh_interval;
+                        low_inventory_info = Some((
+                            low_inventory_threshold,
+                            long_low,
+                            short_low,
+                            position.long_qty,
+                            position.short_qty,
+                        ));
+
                         actions.extend(sync_orders(
                             &mut *guard,
                             &mut order_map,
@@ -442,7 +512,7 @@ async fn run_loop(
                         ));
                         if needs_hourly_reset {
                             actions.extend(guard.rebuild_grid(&snapshot));
-                        } else if needs_zero_position_refresh {
+                        } else if needs_low_inventory_refresh {
                             actions.extend(guard.rebuild_grid(&snapshot));
                         } else {
                             actions.extend(guard.reconcile_inventory(&snapshot));
@@ -485,24 +555,40 @@ async fn run_loop(
                         log::info!("[solusdc_hedged_grid] 定时重置网格 interval=12h");
                     }
 
-                    if needs_zero_position_refresh {
-                        last_zero_position_refresh = now;
-                        log::info!(
-                            "[solusdc_hedged_grid] 零仓刷新订单 long_empty={} short_empty={}",
-                            long_empty,
-                            short_empty
-                        );
+                    if let Some((threshold, long_low, short_low, long_qty, short_qty)) = low_inventory_info {
+                        if threshold > 0.0
+                            && (long_low || short_low)
+                            && now - last_zero_position_refresh >= zero_position_refresh_interval
+                        {
+                            last_zero_position_refresh = now;
+                            log::info!(
+                                "[solusdc_hedged_grid] 低仓刷新订单 threshold_qty={:.6} long_qty={:.6} short_qty={:.6} long_low={} short_low={}",
+                                threshold,
+                                long_qty,
+                                short_qty,
+                                long_low,
+                                short_low
+                            );
+                        }
                     }
 
-                    cancel_unknown_orders(
-                        account.as_ref(),
-                        &config.engine.symbol,
-                        config.account.market_type,
-                        request_timeout,
-                        &order_map,
-                        &open_orders,
-                    )
-                    .await;
+                    if config.polling.cancel_unknown_interval_ms > 0
+                        && now - last_cancel_unknown
+                            >= ChronoDuration::milliseconds(
+                                config.polling.cancel_unknown_interval_ms as i64,
+                            )
+                    {
+                        last_cancel_unknown = now;
+                        cancel_unknown_orders(
+                            account.as_ref(),
+                            &config.engine.symbol,
+                            config.account.market_type,
+                            request_timeout,
+                            &order_map,
+                            &open_orders,
+                        )
+                        .await;
+                    }
                 }
 
                 if failure_count >= config.execution.max_consecutive_failures {
@@ -526,7 +612,8 @@ async fn run_loop(
             }
             ws_event = ws_rx.recv() => {
                 if let Some(event) = ws_event {
-                    handle_user_stream_event(
+                    let events = collect_user_stream_micro_batch(event, &mut ws_rx).await;
+                    handle_user_stream_event_batch(
                         &config,
                         account.as_ref(),
                         engine.as_ref(),
@@ -534,7 +621,7 @@ async fn run_loop(
                         &mut failure_count,
                         &mut restart_requested,
                         &mut last_snapshot,
-                        event,
+                        events,
                     )
                     .await?;
                     last_progress = Utc::now();
@@ -607,6 +694,19 @@ async fn run_loop(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn collect_user_stream_micro_batch(
+    first: UserStreamEvent,
+    ws_rx: &mut UnboundedReceiver<UserStreamEvent>,
+) -> Vec<UserStreamEvent> {
+    let mut events = vec![first];
+    sleep(Duration::from_millis(WS_FILL_MICRO_BATCH_MS)).await;
+    while let Ok(event) = ws_rx.try_recv() {
+        events.push(event);
+    }
+    events
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn drain_user_stream_events(
     config: &RuntimeConfig,
     account: &AccountInfo,
@@ -618,31 +718,145 @@ async fn drain_user_stream_events(
     ws_rx: &mut UnboundedReceiver<UserStreamEvent>,
     last_progress: &mut chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let mut drained = 0usize;
+    let mut events = Vec::new();
     while let Ok(event) = ws_rx.try_recv() {
-        handle_user_stream_event(
+        events.push(event);
+    }
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    let drained = events.len();
+    handle_user_stream_event_batch(
+        config,
+        account,
+        engine,
+        order_map,
+        failure_count,
+        restart_requested,
+        last_snapshot,
+        events,
+    )
+    .await?;
+    *last_progress = Utc::now();
+    log::debug!(
+        "[solusdc_hedged_grid] tick前优先处理WebSocket事件 count={}",
+        drained
+    );
+    Ok(())
+}
+
+struct ProcessedUserStreamEvent {
+    report_symbol: String,
+    report_order_id: String,
+    ws_receive_at: Instant,
+    event_dequeue_at: Instant,
+    engine_start_at: Instant,
+    engine_done_at: Instant,
+    fill_info: Option<FillEvent>,
+    fill_order_price: Option<f64>,
+    actions: Vec<EngineAction>,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_user_stream_event_batch(
+    config: &RuntimeConfig,
+    account: &AccountInfo,
+    engine: &Mutex<GridEngine>,
+    order_map: &mut OrderMap,
+    failure_count: &mut u32,
+    restart_requested: &mut bool,
+    last_snapshot: &mut Option<MarketSnapshot>,
+    events: Vec<UserStreamEvent>,
+) -> Result<()> {
+    let mut processed = Vec::new();
+    let mut actions = Vec::new();
+    let mut place_count = 0usize;
+    let mut cancel_count = 0usize;
+
+    for event in events {
+        let Some(mut item) = process_user_stream_event(
+            config,
+            engine,
+            order_map,
+            restart_requested,
+            last_snapshot,
+            event,
+        )
+        .await?
+        else {
+            continue;
+        };
+
+        if let (Some(fill), Some(order_price)) = (&item.fill_info, item.fill_order_price) {
+            log_fill_actions("ws", fill, order_price, &item.actions);
+        }
+        for action in &item.actions {
+            match action {
+                EngineAction::Place(_) => place_count += 1,
+                EngineAction::Cancel { .. } => cancel_count += 1,
+            }
+        }
+        actions.append(&mut item.actions);
+        processed.push(item);
+
+        if *restart_requested {
+            break;
+        }
+    }
+
+    if processed.is_empty() {
+        return Ok(());
+    }
+
+    let fill_count = processed
+        .iter()
+        .filter(|item| item.fill_info.is_some())
+        .count();
+    let action_count = actions.len();
+    let executor_enqueue_at = Instant::now();
+    if !actions.is_empty() {
+        execute_actions(
             config,
             account,
             engine,
             order_map,
             failure_count,
             restart_requested,
-            last_snapshot,
-            event,
+            actions,
         )
         .await?;
-        *last_progress = Utc::now();
-        drained += 1;
-        if *restart_requested {
-            break;
-        }
     }
-    if drained > 0 {
-        log::debug!(
-            "[solusdc_hedged_grid] tick前优先处理WebSocket事件 count={}",
-            drained
+    let executor_done_at = Instant::now();
+    if fill_count > 1 || action_count > 0 {
+        log::info!(
+            "[solusdc_hedged_grid] ws_micro_batch symbol={} events={} fills={} actions={} places={} cancels={} window_ms={} executor_ms={}",
+            config.engine.symbol,
+            processed.len(),
+            fill_count,
+            action_count,
+            place_count,
+            cancel_count,
+            WS_FILL_MICRO_BATCH_MS,
+            executor_done_at.duration_since(executor_enqueue_at).as_millis()
         );
     }
+
+    for item in processed {
+        if let Some(fill) = &item.fill_info {
+            log::info!(
+                "[solusdc_hedged_grid] latency_breakdown source=ws symbol={} order_id={} client_id={} ws_queue_ms={} engine_ms={} executor_ms={} total_ms={}",
+                item.report_symbol,
+                item.report_order_id,
+                fill.order_id,
+                item.event_dequeue_at.duration_since(item.ws_receive_at).as_millis(),
+                item.engine_done_at.duration_since(item.engine_start_at).as_millis(),
+                executor_done_at.duration_since(executor_enqueue_at).as_millis(),
+                executor_done_at.duration_since(item.ws_receive_at).as_millis()
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -656,19 +870,45 @@ async fn handle_user_stream_event(
     last_snapshot: &mut Option<MarketSnapshot>,
     event: UserStreamEvent,
 ) -> Result<()> {
-    let report = match event {
-        UserStreamEvent::ExecutionReport(report) => report,
+    handle_user_stream_event_batch(
+        config,
+        account,
+        engine,
+        order_map,
+        failure_count,
+        restart_requested,
+        last_snapshot,
+        vec![event],
+    )
+    .await
+}
+
+async fn process_user_stream_event(
+    config: &RuntimeConfig,
+    engine: &Mutex<GridEngine>,
+    order_map: &mut OrderMap,
+    restart_requested: &mut bool,
+    last_snapshot: &mut Option<MarketSnapshot>,
+    event: UserStreamEvent,
+) -> Result<Option<ProcessedUserStreamEvent>> {
+    let event_dequeue_at = Instant::now();
+    let (report, ws_receive_at) = match event {
+        UserStreamEvent::ExecutionReport {
+            report,
+            ws_receive_at,
+        } => (report, ws_receive_at),
     };
 
     let target_symbol = normalize_symbol(&config.engine.symbol);
     if normalize_symbol(&report.symbol) != target_symbol {
-        return Ok(());
+        return Ok(None);
     }
 
     let Some(client_id) = resolve_client_id(order_map, &report) else {
-        return Ok(());
+        return Ok(None);
     };
 
+    let engine_start_at = Instant::now();
     let mut actions = Vec::new();
     let mut fill_info: Option<FillEvent> = None;
     let mut fill_order_price: Option<f64> = None;
@@ -677,9 +917,10 @@ async fn handle_user_stream_event(
         let mut guard = engine.lock().await;
         let Some(record) = guard.order_record(&client_id) else {
             order_map.remove_exchange(&report.order_id);
-            return Ok(());
+            return Ok(None);
         };
 
+        order_map.clear_missing(&client_id);
         if order_map.exchange_id(&client_id).is_none() {
             order_map.register(client_id.clone(), report.order_id.clone());
         }
@@ -738,31 +979,26 @@ async fn handle_user_stream_event(
         }
     }
 
+    let engine_done_at = Instant::now();
+
     if remove_mapping {
         order_map.remove_client(&client_id);
     }
 
-    if let (Some(fill), Some(order_price)) = (&fill_info, fill_order_price) {
-        log_fill_actions("ws", fill, order_price, &actions);
-    }
-
-    if !actions.is_empty() {
-        execute_actions(
-            config,
-            account,
-            engine,
-            order_map,
-            failure_count,
-            restart_requested,
-            actions,
-        )
-        .await?;
-    }
-
-    Ok(())
+    Ok(Some(ProcessedUserStreamEvent {
+        report_symbol: report.symbol,
+        report_order_id: report.order_id,
+        ws_receive_at,
+        event_dequeue_at,
+        engine_start_at,
+        engine_done_at,
+        fill_info,
+        fill_order_price,
+        actions,
+    }))
 }
 
-fn spawn_user_stream_listener(
+pub(super) fn spawn_user_stream_listener(
     config: RuntimeConfig,
     account_manager: Arc<AccountManager>,
     running: Arc<AtomicBool>,
@@ -836,7 +1072,10 @@ fn spawn_user_stream_listener(
                                 Ok(WsMessage::ExecutionReport(report)) => {
                                     if normalize_symbol(&report.symbol) == normalized_symbol {
                                         if event_tx
-                                            .send(UserStreamEvent::ExecutionReport(report))
+                                            .send(UserStreamEvent::ExecutionReport {
+                                                report,
+                                                ws_receive_at: Instant::now(),
+                                            })
                                             .is_err()
                                         {
                                             log::warn!(
@@ -1165,6 +1404,9 @@ fn sync_orders(
         }
     }
 
+    let now = snapshot.timestamp;
+    let missing_grace = ChronoDuration::milliseconds(MISSING_ORDER_GRACE_MS as i64);
+
     for client_id in engine.order_ids() {
         let record = match engine.order_record(&client_id) {
             Some(record) => record,
@@ -1182,6 +1424,7 @@ fn sync_orders(
         };
 
         if let Some(open_order) = open_map.get(&exchange_id) {
+            order_map.clear_missing(&client_id);
             if open_order.filled > record.filled_qty + 1e-8 {
                 let delta = open_order.filled - record.filled_qty;
                 let price = open_order.price.unwrap_or(record.price);
@@ -1221,11 +1464,23 @@ fn sync_orders(
                 log_fill_actions("reconcile_trade", &fill, record.price, &fill_actions);
                 actions.extend(fill_actions);
             }
-        } else {
+        } else if order_map.mark_missing_if_grace_elapsed(&client_id, now, missing_grace) {
+            log::warn!(
+                "[solusdc_hedged_grid] 本地订单已连续缺失，按拒单处理 order_id={} exchange_id={} grace_ms={}",
+                client_id,
+                exchange_id,
+                MISSING_ORDER_GRACE_MS
+            );
             engine.handle_order_reject(&client_id);
+            order_map.remove_client(&client_id);
+        } else {
+            log::info!(
+                "[solusdc_hedged_grid] 本地订单从openOrders消失，等待WS成交或trade确认 order_id={} exchange_id={} grace_ms={}",
+                client_id,
+                exchange_id,
+                MISSING_ORDER_GRACE_MS
+            );
         }
-
-        order_map.remove_client(&client_id);
     }
 
     actions
@@ -1287,24 +1542,140 @@ async fn execute_actions(
                 .await?;
             }
             EngineAction::Cancel { order_id, reason } => {
-                if let Some(exchange_id) = order_map.exchange_id(&order_id) {
-                    let _ = with_timeout(
-                        "cancel_order",
-                        request_timeout,
-                        account.exchange.cancel_order(
-                            &exchange_id,
-                            &config.engine.symbol,
-                            config.account.market_type,
-                        ),
-                    )
-                    .await;
-                    order_map.remove_exchange(&exchange_id);
-                    log::debug!("[solusdc_hedged_grid] 撤单 {} ({})", order_id, reason);
-                }
+                cancel_queue.push_front(EngineAction::Cancel { order_id, reason });
+                execute_cancel_batch(
+                    config,
+                    account,
+                    order_map,
+                    request_timeout,
+                    &mut cancel_queue,
+                )
+                .await;
             }
         }
     }
     Ok(())
+}
+
+async fn execute_cancel_batch(
+    config: &RuntimeConfig,
+    account: &AccountInfo,
+    order_map: &mut OrderMap,
+    request_timeout: Duration,
+    cancel_queue: &mut VecDeque<EngineAction>,
+) {
+    let mut cancel_items = Vec::new();
+    while let Some(action) = cancel_queue.pop_front() {
+        if let EngineAction::Cancel { order_id, reason } = action {
+            if let Some(exchange_id) = order_map.exchange_id(&order_id) {
+                cancel_items.push((order_id, exchange_id, reason));
+            } else {
+                log::warn!(
+                    "[solusdc_hedged_grid] 撤单跳过: 本地订单缺少exchange_id order_id={} reason={}",
+                    order_id,
+                    reason
+                );
+            }
+        }
+    }
+
+    if cancel_items.is_empty() {
+        return;
+    }
+
+    let exchange_ids: Vec<String> = cancel_items
+        .iter()
+        .map(|(_, exchange_id, _)| exchange_id.clone())
+        .collect();
+    log::info!(
+        "[solusdc_hedged_grid] 批量撤单 {} 共{}笔: {}",
+        config.engine.symbol,
+        cancel_items.len(),
+        cancel_items
+            .iter()
+            .map(|(order_id, exchange_id, reason)| format!(
+                "{} exchange_id={} reason={}",
+                order_id, exchange_id, reason
+            ))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    );
+
+    match with_timeout(
+        "cancel_multiple_orders",
+        request_timeout,
+        account.exchange.cancel_multiple_orders(
+            exchange_ids,
+            &config.engine.symbol,
+            config.account.market_type,
+        ),
+    )
+    .await
+    {
+        Ok(canceled_orders) => {
+            let canceled_ids: HashSet<String> = canceled_orders
+                .iter()
+                .map(|order| order.id.clone())
+                .collect();
+            for (order_id, exchange_id, reason) in cancel_items {
+                if canceled_ids.contains(&exchange_id) {
+                    order_map.remove_exchange(&exchange_id);
+                    log::info!(
+                        "[solusdc_hedged_grid] 撤单成功 {} exchange_id={} reason={}",
+                        order_id,
+                        exchange_id,
+                        reason
+                    );
+                } else {
+                    log::warn!(
+                        "[solusdc_hedged_grid] 批量撤单未确认 {} exchange_id={} reason={}",
+                        order_id,
+                        exchange_id,
+                        reason
+                    );
+                }
+            }
+        }
+        Err(err) => {
+            log::warn!(
+                "[solusdc_hedged_grid] 批量撤单失败 count={} err={}",
+                cancel_items.len(),
+                err
+            );
+            for (order_id, exchange_id, reason) in cancel_items {
+                match with_timeout(
+                    "cancel_order_fallback",
+                    request_timeout,
+                    account.exchange.cancel_order(
+                        &exchange_id,
+                        &config.engine.symbol,
+                        config.account.market_type,
+                    ),
+                )
+                .await
+                {
+                    Ok(_) => {
+                        order_map.remove_exchange(&exchange_id);
+                        log::info!(
+                            "[solusdc_hedged_grid] 撤单成功 {} exchange_id={} reason={} fallback=true",
+                            order_id,
+                            exchange_id,
+                            reason
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[solusdc_hedged_grid] 撤单失败 {} exchange_id={} reason={} err={}",
+                            order_id,
+                            exchange_id,
+                            reason,
+                            err
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1619,10 +1990,10 @@ fn pop_next_action(
     cancel_queue: &mut VecDeque<EngineAction>,
     place_queue: &mut VecDeque<EngineAction>,
 ) -> Option<EngineAction> {
-    if let Some(action) = cancel_queue.pop_front() {
+    if let Some(action) = place_queue.pop_front() {
         return Some(action);
     }
-    place_queue.pop_front()
+    cancel_queue.pop_front()
 }
 
 fn drain_place_batch(
@@ -1646,6 +2017,141 @@ mod tests {
     use super::*;
     use crate::strategies::solusdc_hedged_grid::engine::OrderDraft;
     use crate::strategies::solusdc_hedged_grid::ledger::OrderIntent;
+
+    use crate::strategies::solusdc_hedged_grid::config::{
+        ExecutionConfig, FeeConfig, FollowConfig, GridConfig, PrecisionConfig, PriceReference,
+        RiskLimits, RiskReference,
+    };
+
+    fn test_strategy_config() -> StrategyConfig {
+        StrategyConfig {
+            symbol: "SOLUSDC".to_string(),
+            require_hedge_mode: true,
+            price_reference: PriceReference::Mid,
+            risk_reference: RiskReference::Mark,
+            grid: GridConfig {
+                levels_per_side: 3,
+                grid_spacing_pct: 0.001,
+                grid_spacing_abs: None,
+                order_notional: 10.0,
+                order_qty: None,
+                strict_pairing: false,
+                fill_remaining_slots_with_opens: true,
+                refill_open_slots_enabled: true,
+                normalize_open_grid_enabled: true,
+                follow_open_enabled: true,
+                repair_near_gap_enabled: false,
+            },
+            follow: FollowConfig {
+                max_gap_steps: 1.0,
+                follow_cooldown_ms: 0,
+                max_follow_actions_per_minute: 100,
+            },
+            execution: ExecutionConfig {
+                cooldown_ms: 0,
+                post_only: true,
+                post_only_retries: 3,
+            },
+            precision: PrecisionConfig {
+                tick_size: 0.01,
+                step_size: 0.001,
+                min_qty: Some(0.001),
+                min_notional: Some(5.0),
+                price_digits: Some(2),
+                qty_digits: Some(3),
+            },
+            fees: FeeConfig {
+                maker_fee: 0.0,
+                taker_fee: 0.0004,
+            },
+            risk: RiskLimits {
+                max_net_notional: 1000.0,
+                max_total_notional: 2000.0,
+                margin_ratio_limit: 0.8,
+                funding_rate_limit: 0.003,
+                funding_cost_limit: 5.0,
+            },
+        }
+    }
+
+    #[test]
+    fn sync_orders_should_hold_missing_order_during_grace() {
+        let mut engine = GridEngine::new(test_strategy_config(), true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        });
+        let snap = MarketSnapshot {
+            best_bid: 99.9,
+            best_ask: 100.1,
+            last_price: 100.0,
+            mark_price: 100.0,
+            timestamp: Utc::now(),
+        };
+        let actions = engine.rebuild_grid(&snap);
+        let first_id = match actions.first() {
+            Some(EngineAction::Place(draft)) => draft.id.clone(),
+            _ => panic!("expected place action"),
+        };
+        let mut order_map = OrderMap::default();
+        order_map.register(first_id.clone(), "exchange-1".to_string());
+
+        let actions = sync_orders(&mut engine, &mut order_map, &[], &[], &snap);
+
+        assert!(actions.is_empty());
+        assert!(engine.order_record(&first_id).is_some());
+        assert_eq!(
+            order_map.exchange_id(&first_id).as_deref(),
+            Some("exchange-1")
+        );
+    }
+
+    #[test]
+    fn sync_orders_should_reject_missing_order_after_grace() {
+        let mut engine = GridEngine::new(test_strategy_config(), true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        });
+        let snap = MarketSnapshot {
+            best_bid: 99.9,
+            best_ask: 100.1,
+            last_price: 100.0,
+            mark_price: 100.0,
+            timestamp: Utc::now(),
+        };
+        let actions = engine.rebuild_grid(&snap);
+        let first_id = match actions.first() {
+            Some(EngineAction::Place(draft)) => draft.id.clone(),
+            _ => panic!("expected place action"),
+        };
+        let mut order_map = OrderMap::default();
+        order_map.register(first_id.clone(), "exchange-1".to_string());
+        order_map.missing_since.insert(
+            first_id.clone(),
+            snap.timestamp - ChronoDuration::milliseconds(MISSING_ORDER_GRACE_MS as i64),
+        );
+
+        let actions = sync_orders(&mut engine, &mut order_map, &[], &[], &snap);
+
+        assert!(actions.is_empty());
+        assert!(engine.order_record(&first_id).is_none());
+        assert!(order_map.exchange_id(&first_id).is_none());
+    }
 
     #[test]
     fn enqueue_actions_should_skip_place_canceled_in_same_batch() {
@@ -1681,6 +2187,53 @@ mod tests {
             _ => "",
         };
         assert_eq!(placed_id, "grid-2");
+    }
+
+    #[test]
+    fn pop_next_action_should_batch_cancels_after_places() {
+        let mut cancel_queue = VecDeque::new();
+        let mut place_queue = VecDeque::new();
+        cancel_queue.push_back(EngineAction::Cancel {
+            order_id: "grid-old-1".to_string(),
+            reason: "roll".to_string(),
+        });
+        cancel_queue.push_back(EngineAction::Cancel {
+            order_id: "grid-old-2".to_string(),
+            reason: "trim".to_string(),
+        });
+
+        let next = pop_next_action(&mut cancel_queue, &mut place_queue);
+
+        match next {
+            Some(EngineAction::Cancel { order_id, .. }) => assert_eq!(order_id, "grid-old-1"),
+            _ => panic!("expected first cancel when no places remain"),
+        }
+        assert_eq!(cancel_queue.len(), 1);
+    }
+
+    #[test]
+    fn pop_next_action_should_place_before_cancel() {
+        let mut cancel_queue = VecDeque::new();
+        let mut place_queue = VecDeque::new();
+        cancel_queue.push_back(EngineAction::Cancel {
+            order_id: "grid-old".to_string(),
+            reason: "roll".to_string(),
+        });
+        place_queue.push_back(EngineAction::Place(OrderDraft {
+            id: "grid-new".to_string(),
+            intent: OrderIntent::OpenLongBuy,
+            price: 100.0,
+            qty: 1.0,
+            post_only: true,
+        }));
+
+        let next = pop_next_action(&mut cancel_queue, &mut place_queue);
+
+        match next {
+            Some(EngineAction::Place(draft)) => assert_eq!(draft.id, "grid-new"),
+            _ => panic!("expected place action first"),
+        }
+        assert_eq!(cancel_queue.len(), 1);
     }
 
     #[test]
