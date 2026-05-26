@@ -480,33 +480,70 @@ impl Exchange for OkxExchange {
             #[serde(rename = "ordType")]
             ord_type: String,
             sz: String,
+            #[serde(rename = "clOrdId", skip_serializing_if = "Option::is_none")]
+            client_order_id: Option<String>,
+            #[serde(rename = "posSide", skip_serializing_if = "Option::is_none")]
+            position_side: Option<String>,
+            #[serde(rename = "reduceOnly", skip_serializing_if = "Option::is_none")]
+            reduce_only: Option<bool>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             px: Option<String>,
         }
 
+        let position_side = order_request
+            .params
+            .as_ref()
+            .and_then(|params| params.get("positionSide").or_else(|| params.get("posSide")))
+            .map(|side| side.to_ascii_lowercase())
+            .filter(|side| side == "long" || side == "short" || side == "net");
+        let td_mode = order_request
+            .params
+            .as_ref()
+            .and_then(|params| params.get("tdMode").or_else(|| params.get("mgnMode")))
+            .cloned()
+            .unwrap_or_else(|| match order_request.market_type {
+                MarketType::Spot => "cash".to_string(),
+                MarketType::Futures => "isolated".to_string(),
+            });
+        let ord_type = if order_request.post_only.unwrap_or(false) {
+            "post_only".to_string()
+        } else {
+            match order_request
+                .time_in_force
+                .as_deref()
+                .map(str::to_ascii_uppercase)
+                .as_deref()
+            {
+                Some("IOC") => "ioc".to_string(),
+                Some("FOK") => "fok".to_string(),
+                _ => match order_request.order_type {
+                    OrderType::Market => "market".to_string(),
+                    OrderType::Limit => "limit".to_string(),
+                    OrderType::StopLimit => "conditional".to_string(),
+                    OrderType::StopMarket => "market".to_string(),
+                    OrderType::TakeProfitLimit => "limit".to_string(),
+                    OrderType::TakeProfitMarket => "market".to_string(),
+                    OrderType::TrailingStop => "market".to_string(),
+                },
+            }
+        };
+
         let request_body = OkxOrderRequest {
             inst_id: exchange_symbol,
-            td_mode: match order_request.market_type {
-                MarketType::Spot => "cash".to_string(),
-                MarketType::Futures => "isolated".to_string(), // 或 "cross"
-            },
+            td_mode,
             side: match order_request.side {
                 OrderSide::Buy => "buy".to_string(),
                 OrderSide::Sell => "sell".to_string(),
             },
-            ord_type: match order_request.order_type {
-                OrderType::Market => "market".to_string(),
-                OrderType::Limit => "limit".to_string(),
-                OrderType::StopLimit => "conditional".to_string(),
-                OrderType::StopMarket => "market".to_string(), // OKX使用条件单
-                OrderType::TakeProfitLimit => "limit".to_string(), // OKX使用条件单
-                OrderType::TakeProfitMarket => "market".to_string(), // OKX使用条件单
-                OrderType::TrailingStop => "market".to_string(), // OKX使用移动止损
-            },
+            ord_type,
             sz: order_request.amount.to_string(),
+            client_order_id: order_request.client_order_id.clone(),
+            position_side,
+            reduce_only: order_request.reduce_only,
             px: order_request.price.map(|p| p.to_string()),
         };
 
-        let body = serde_json::to_string(&[request_body])?;
+        let body = serde_json::to_string(&request_body)?;
 
         #[derive(Deserialize)]
         struct OkxOrderResponse {
@@ -1423,6 +1460,35 @@ impl Exchange for OkxExchange {
 
         let _responses: Vec<OkxLeverageResponse> = self
             .send_signed_request("POST", "/api/v5/account/set-leverage", &body)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn set_position_mode(&self, dual_side: bool) -> Result<()> {
+        #[derive(Serialize)]
+        struct OkxPositionModeRequest {
+            #[serde(rename = "posMode")]
+            pos_mode: String,
+        }
+
+        #[derive(Deserialize)]
+        struct OkxPositionModeResponse {
+            #[serde(rename = "posMode")]
+            pos_mode: String,
+        }
+
+        let request_body = OkxPositionModeRequest {
+            pos_mode: if dual_side {
+                "long_short_mode".to_string()
+            } else {
+                "net_mode".to_string()
+            },
+        };
+        let body = serde_json::to_string(&request_body)?;
+
+        let _response: Vec<OkxPositionModeResponse> = self
+            .send_signed_request("POST", "/api/v5/account/set-position-mode", &body)
             .await?;
 
         Ok(())

@@ -2502,6 +2502,19 @@ impl Exchange for BinanceExchange {
         Ok(())
     }
 
+    async fn set_position_mode(&self, dual_side: bool) -> Result<()> {
+        let endpoint = "/fapi/v1/positionSide/dual";
+        let mut params = HashMap::new();
+        params.insert("dualSidePosition".to_string(), dual_side.to_string());
+
+        let _response: serde_json::Value = self
+            .send_signed_request("POST", endpoint, params, MarketType::Futures)
+            .await?;
+
+        *self.position_mode_cache.lock().unwrap() = Some(dual_side);
+        Ok(())
+    }
+
     async fn cancel_all_orders(
         &self,
         symbol: Option<&str>,

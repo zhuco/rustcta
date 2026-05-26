@@ -7,6 +7,8 @@ pub mod backtest;
 pub mod core;
 pub mod cta;
 pub mod exchanges;
+pub mod execution;
+pub mod market;
 pub mod strategies;
 pub mod utils;
 

@@ -1,4 +1,5 @@
 // 原有交易所实现
+pub mod adapters;
 pub mod binance;
 pub mod bitmart;
 pub mod mock;

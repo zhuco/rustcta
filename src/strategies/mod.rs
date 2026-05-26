@@ -5,6 +5,7 @@ pub mod avellaneda_stoikov;
 pub mod beta_hedge_market_maker;
 pub mod common;
 pub mod copy_trading;
+pub mod cross_exchange_arbitrage;
 pub mod grid_scale;
 pub mod hedged_grid;
 pub mod market_making;
