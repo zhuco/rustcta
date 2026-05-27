@@ -9,7 +9,8 @@ use rustcta::core::config::{ApiKeys, Config as CoreExchangeConfig};
 use rustcta::core::exchange::Exchange;
 use rustcta::core::types::MarketType;
 use rustcta::exchanges::adapters::{
-    BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter, OkxMarketAdapter,
+    private_trading_support_for, BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter,
+    OkxMarketAdapter,
 };
 use rustcta::exchanges::{BinanceExchange, OkxExchange};
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
@@ -48,7 +49,10 @@ struct PreflightReport {
     config_path: String,
     configured_mode: RuntimeMode,
     private_checks_requested: bool,
+    private_readonly_required_for_live: bool,
     live_orders_allowed_by_mode: bool,
+    live_ready: bool,
+    blocking_reasons: Vec<String>,
     overall_status: CheckStatus,
     checks: Vec<PreflightCheck>,
 }
@@ -108,6 +112,8 @@ async fn main() -> Result<()> {
             )),
         }
 
+        checks.push(check_private_trading_support(exchange));
+
         if args.private {
             checks.extend(check_private_exchange(exchange, &config, args.timeout_ms).await);
         } else {
@@ -140,17 +146,26 @@ async fn main() -> Result<()> {
     }
 
     let overall_status = overall_status(&checks);
+    let live_gate = evaluate_live_gate(&config, args.private, &checks);
     let report = PreflightReport {
         generated_at: Utc::now(),
         config_path: args.config.display().to_string(),
         configured_mode: config.mode,
         private_checks_requested: args.private,
+        private_readonly_required_for_live: live_gate.private_readonly_required_for_live,
         live_orders_allowed_by_mode: config.mode.allows_live_orders(),
+        live_ready: live_gate.live_ready,
+        blocking_reasons: live_gate.blocking_reasons,
         overall_status,
         checks,
     };
 
     println!("{}", serde_json::to_string_pretty(&report)?);
+    if report.live_orders_allowed_by_mode && !report.live_ready {
+        return Err(anyhow!(
+            "live preflight gate blocked; inspect blocking_reasons"
+        ));
+    }
     Ok(())
 }
 
@@ -168,6 +183,23 @@ fn market_adapter(exchange: &ExchangeId) -> Option<Box<dyn MarketDataAdapter + S
         ExchangeId::Bitget => Some(Box::new(BitgetMarketAdapter)),
         ExchangeId::Gate => Some(Box::new(GateMarketAdapter)),
         ExchangeId::Other(_) => None,
+    }
+}
+
+fn check_private_trading_support(exchange: &ExchangeId) -> PreflightCheck {
+    let support = private_trading_support_for(exchange);
+    if support.private_trading_enabled {
+        pass(
+            format!("{}.private.support", exchange.as_str()),
+            "private trading/read-only adapter is registered",
+        )
+    } else {
+        warn(
+            format!("{}.private.support", exchange.as_str()),
+            support
+                .disabled_reason
+                .unwrap_or("private trading/read-only adapter is not registered"),
+        )
     }
 }
 
@@ -530,6 +562,56 @@ fn overall_status(checks: &[PreflightCheck]) -> CheckStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LiveGateDecision {
+    private_readonly_required_for_live: bool,
+    live_ready: bool,
+    blocking_reasons: Vec<String>,
+}
+
+fn evaluate_live_gate(
+    config: &CrossExchangeArbitrageConfig,
+    private_checks_requested: bool,
+    checks: &[PreflightCheck],
+) -> LiveGateDecision {
+    let private_readonly_required_for_live = config.mode.allows_live_orders();
+    let mut blocking_reasons = Vec::new();
+
+    if private_readonly_required_for_live {
+        if !private_checks_requested {
+            blocking_reasons.push(
+                "live-capable mode requires --private-readonly to verify balances, positions, open orders, fees, and recent fills".to_string(),
+            );
+        }
+
+        for exchange in &config.universe.enabled_exchanges {
+            let support = private_trading_support_for(exchange);
+            if !support.private_trading_enabled {
+                blocking_reasons.push(format!(
+                    "{} private trading/read-only adapter disabled: {}",
+                    exchange.as_str(),
+                    support
+                        .disabled_reason
+                        .unwrap_or("private adapter is not registered")
+                ));
+            }
+        }
+
+        for check in checks
+            .iter()
+            .filter(|check| check.status == CheckStatus::Fail)
+        {
+            blocking_reasons.push(format!("{} failed: {}", check.scope, check.message));
+        }
+    }
+
+    LiveGateDecision {
+        private_readonly_required_for_live,
+        live_ready: private_readonly_required_for_live && blocking_reasons.is_empty(),
+        blocking_reasons,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,5 +622,89 @@ mod tests {
             .expect("private-readonly alias should parse");
 
         assert!(args.private);
+    }
+
+    #[test]
+    fn live_gate_should_require_private_readonly_for_live_mode() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Okx];
+
+        let decision = evaluate_live_gate(&config, false, &[]);
+
+        assert!(decision.private_readonly_required_for_live);
+        assert!(!decision.live_ready);
+        assert!(decision
+            .blocking_reasons
+            .iter()
+            .any(|reason| reason.contains("--private-readonly")));
+    }
+
+    #[test]
+    fn live_gate_should_block_exchanges_without_private_adapter() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Bitget];
+
+        let decision = evaluate_live_gate(&config, true, &[]);
+
+        assert!(!decision.live_ready);
+        assert!(decision
+            .blocking_reasons
+            .iter()
+            .any(|reason| reason.contains("bitget private")));
+    }
+
+    #[test]
+    fn live_gate_should_block_failed_checks() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Okx];
+        let checks = vec![fail(
+            "binance.private.balance",
+            "authentication failed for readonly key",
+        )];
+
+        let decision = evaluate_live_gate(&config, true, &checks);
+
+        assert!(!decision.live_ready);
+        assert!(decision
+            .blocking_reasons
+            .iter()
+            .any(|reason| reason.contains("binance.private.balance failed")));
+    }
+
+    #[test]
+    fn live_gate_should_pass_when_live_private_checks_have_no_failures() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Okx];
+        let checks = vec![
+            pass("binance.private.balance", "loaded 1 futures balances"),
+            warn(
+                "binance.private.position_mode",
+                "manual venue-specific readback still required",
+            ),
+        ];
+
+        let decision = evaluate_live_gate(&config, true, &checks);
+
+        assert!(decision.live_ready);
+        assert!(decision.blocking_reasons.is_empty());
+    }
+
+    #[test]
+    fn non_live_gate_should_not_claim_live_ready() {
+        let config = CrossExchangeArbitrageConfig::default();
+
+        let decision = evaluate_live_gate(&config, false, &[]);
+
+        assert!(!decision.private_readonly_required_for_live);
+        assert!(!decision.live_ready);
+        assert!(decision.blocking_reasons.is_empty());
     }
 }

@@ -879,6 +879,68 @@ mod tests {
         assert!(!adapter.capabilities().supports_limit_orders);
     }
 
+    #[tokio::test]
+    async fn trading_adapter_should_query_and_filter_fills() {
+        let now = Utc::now();
+        let exchange = MockExchange::new("binance").with_my_trades(vec![
+            CoreTrade {
+                id: "trade-1".to_string(),
+                symbol: "BTC/USDT".to_string(),
+                side: CoreOrderSide::Buy,
+                amount: 0.01,
+                price: 65_000.0,
+                timestamp: now,
+                order_id: Some("order-1".to_string()),
+                fee: Some(Fee {
+                    currency: "USDT".to_string(),
+                    cost: 0.13,
+                    rate: Some(0.0002),
+                }),
+            },
+            CoreTrade {
+                id: "trade-2".to_string(),
+                symbol: "BTC/USDT".to_string(),
+                side: CoreOrderSide::Sell,
+                amount: 0.02,
+                price: 65_100.0,
+                timestamp: now,
+                order_id: Some("order-2".to_string()),
+                fee: None,
+            },
+            CoreTrade {
+                id: "trade-3".to_string(),
+                symbol: "ETH/USDT".to_string(),
+                side: CoreOrderSide::Buy,
+                amount: 0.5,
+                price: 3_000.0,
+                timestamp: now,
+                order_id: Some("order-1".to_string()),
+                fee: None,
+            },
+        ]);
+        let adapter = ExchangeTradingAdapter::new(ExchangeId::Binance, Arc::new(exchange));
+        let mut query = FillQuery::for_symbol(
+            ExchangeId::Binance,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+        );
+        query.exchange_order_id = Some("order-1".to_string());
+
+        let fills = adapter
+            .get_fills(query)
+            .await
+            .expect("fills should be returned");
+
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].trade_id, "trade-1");
+        assert_eq!(fills[0].exchange_order_id.as_deref(), Some("order-1"));
+        assert_eq!(
+            fills[0].canonical_symbol,
+            CanonicalSymbol::new("BTC", "USDT")
+        );
+        assert_eq!(fills[0].fee, Some(0.13));
+    }
+
     #[test]
     fn trading_adapter_should_normalize_symbols_to_canonical() {
         assert_eq!(symbol_to_canonical("BTC-USDT-SWAP").as_pair(), "BTC/USDT");

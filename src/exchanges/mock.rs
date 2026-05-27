@@ -26,6 +26,7 @@ pub struct MockExchange {
     orders: Arc<Mutex<HashMap<String, Vec<Order>>>>,
     balances: Arc<Mutex<Vec<Balance>>>,
     positions: Arc<Mutex<HashMap<String, Position>>>,
+    my_trades: Arc<Mutex<Vec<Trade>>>,
     order_counter: Arc<AtomicU64>,
 }
 
@@ -42,8 +43,14 @@ impl MockExchange {
                 market_type: MarketType::Spot,
             }])),
             positions: Arc::new(Mutex::new(HashMap::new())),
+            my_trades: Arc::new(Mutex::new(Vec::new())),
             order_counter: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    pub fn with_my_trades(self, trades: impl IntoIterator<Item = Trade>) -> Self {
+        *self.my_trades.lock().unwrap() = trades.into_iter().collect();
+        self
     }
 
     fn next_order_id(&self) -> String {
@@ -312,11 +319,26 @@ impl Exchange for MockExchange {
 
     async fn get_my_trades(
         &self,
-        _symbol: Option<&str>,
+        symbol: Option<&str>,
         _market_type: MarketType,
-        _limit: Option<u32>,
+        limit: Option<u32>,
     ) -> Result<Vec<Trade>> {
-        Ok(vec![])
+        let mut trades = self
+            .my_trades
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|trade| {
+                symbol
+                    .map(|symbol| trade.symbol.eq_ignore_ascii_case(symbol))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(limit) = limit {
+            trades.truncate(limit as usize);
+        }
+        Ok(trades)
     }
 
     async fn get_klines(
