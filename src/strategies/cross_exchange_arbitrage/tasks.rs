@@ -10,7 +10,10 @@ use super::{
     RiskEventReadModel, RiskStateReadModel, RouteReadModel, SimulatedBundleState,
     SimulatedBundleStatus, StorageSink, StrategyRiskState,
 };
-use crate::execution::{ArbitrageBundle, ExchangePosition, FillEvent};
+use crate::execution::{
+    AccountSyncState, ArbitrageBundle, ExchangePosition, FillEvent, PositionSnapshot, PrivateEvent,
+    PrivateEventKind,
+};
 use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use crate::strategies::cross_exchange_arbitrage::{
     FillApplication, PositionError, PositionReconcileDecision,
@@ -25,6 +28,7 @@ pub struct CrossArbRuntimeState {
     pub history: Vec<SimulatedBundleState>,
     pub risk_events: Vec<RiskEventReadModel>,
     pub position_manager: PositionManager,
+    pub account_sync: HashMap<ExchangeId, AccountSyncState>,
     pub risk_state: StrategyRiskState,
     pub paused_new_entries: bool,
     pub close_only: bool,
@@ -42,6 +46,7 @@ impl CrossArbRuntimeState {
             history: Vec::new(),
             risk_events: Vec::new(),
             position_manager: PositionManager::default(),
+            account_sync: HashMap::new(),
             risk_state: StrategyRiskState::new(now),
             paused_new_entries: false,
             close_only: false,
@@ -57,13 +62,14 @@ impl CrossArbRuntimeState {
         now: DateTime<Utc>,
     ) -> Vec<ArbSignal> {
         self.updated_at = now;
+        self.sync_risk_state(now);
         self.opportunities = scan_opportunities(canonical_symbol, snapshots, &self.config, now);
 
         let signals = self
             .opportunities
             .iter()
             .map(|opportunity| {
-                if self.kill_switch || self.close_only || self.paused_new_entries {
+                if !self.risk_state.decision().allow_new_entries {
                     ArbSignal::noop(self.config.mode, now)
                 } else {
                     ArbSignal::from_opportunity(opportunity, self.config.mode, now)
@@ -109,6 +115,39 @@ impl CrossArbRuntimeState {
         self.position_manager.apply_fill_event(bundle_id, fill)
     }
 
+    pub fn ingest_private_event(&mut self, event: PrivateEvent) {
+        let exchange = event.exchange.clone();
+        let received_at = event.received_at;
+        let needs_resync = {
+            let state = self.account_sync.entry(exchange.clone()).or_default();
+            state.apply_private_event(event.clone());
+            state.needs_resync(&exchange, received_at)
+        };
+
+        self.update_private_stream_health(exchange.clone(), received_at, needs_resync);
+        self.record_private_reconciliation_from_account_state(&exchange, received_at);
+
+        if matches!(
+            &event.kind,
+            PrivateEventKind::StreamDisconnected { .. } | PrivateEventKind::Error(_)
+        ) {
+            self.risk_events.push(RiskEventReadModel {
+                event_id: format!(
+                    "private-{}-{}",
+                    exchange.as_str(),
+                    received_at.timestamp_millis()
+                ),
+                canonical_symbol: None,
+                exchange: Some(exchange.clone()),
+                reason: super::risk::RejectReason::RouteUnhealthy,
+                message: format!("private stream event: {:?}", &event.kind),
+                created_at: received_at,
+            });
+        }
+
+        self.updated_at = received_at;
+    }
+
     pub fn reconcile_positions(
         &self,
         exchange_positions: &[ExchangePosition],
@@ -127,6 +166,13 @@ impl CrossArbRuntimeState {
     pub fn position_summary(&self, quantity_tolerance: f64) -> PortfolioExposureSummary {
         self.position_manager
             .portfolio_exposure_summary(quantity_tolerance)
+    }
+
+    pub fn private_positions(&self, exchange: &ExchangeId) -> Vec<PositionSnapshot> {
+        self.account_sync
+            .get(exchange)
+            .map(AccountSyncState::position_snapshots)
+            .unwrap_or_default()
     }
 
     pub fn opportunity_read_models(&self) -> Vec<OpportunityReadModel> {
@@ -151,6 +197,7 @@ impl CrossArbRuntimeState {
     pub fn pause_new_entries(&mut self) {
         self.paused_new_entries = true;
         self.risk_state.pause_new_entries(self.updated_at);
+        self.sync_local_controls();
     }
 
     pub fn resume_new_entries(&mut self) {
@@ -159,11 +206,13 @@ impl CrossArbRuntimeState {
         self.risk_state.paused_new_entries = false;
         self.risk_state.close_only = false;
         self.risk_state.recompute_mode(self.updated_at);
+        self.sync_local_controls();
     }
 
     pub fn set_close_only(&mut self) {
         self.close_only = true;
         self.risk_state.set_close_only(self.updated_at);
+        self.sync_local_controls();
     }
 
     pub fn kill_switch(&mut self) {
@@ -171,6 +220,8 @@ impl CrossArbRuntimeState {
         self.paused_new_entries = true;
         self.close_only = true;
         self.risk_state.kill_switch(self.updated_at);
+        self.sync_local_controls();
+        self.mark_open_bundles_risk_stopped(self.updated_at);
     }
 
     pub fn update_private_stream_health(
@@ -181,14 +232,8 @@ impl CrossArbRuntimeState {
     ) {
         self.risk_state
             .observe_private_event(exchange, received_at, needs_resync);
-        let decision = self.risk_state.decision();
-        self.paused_new_entries = !decision.allow_new_entries;
-        self.close_only = matches!(
-            decision.mode,
-            super::risk::RiskOperatingMode::CloseOnly | super::risk::RiskOperatingMode::Halted
-        );
-        self.kill_switch = matches!(decision.mode, super::risk::RiskOperatingMode::Halted);
         self.updated_at = received_at;
+        self.sync_local_controls();
     }
 
     pub fn record_reconciliation_result(
@@ -200,6 +245,87 @@ impl CrossArbRuntimeState {
     ) {
         self.risk_state
             .record_reconciliation_severity(exchange, symbol, severity, checked_at);
+        self.updated_at = checked_at;
+        self.sync_local_controls();
+    }
+
+    pub fn record_orphan_exposure(&mut self, now: DateTime<Utc>) {
+        let summary = self
+            .position_manager
+            .portfolio_exposure_summary(self.config.reconciliation.quantity_tolerance);
+        self.risk_state.record_orphan_exposure(
+            &summary,
+            self.config.reconciliation.orphan_tolerance,
+            now,
+        );
+        self.updated_at = now;
+        self.sync_local_controls();
+        if self.risk_state.decision().mode == super::risk::RiskOperatingMode::Halted {
+            self.mark_open_bundles_risk_stopped(now);
+        }
+    }
+
+    pub fn refresh_risk_state(&mut self, now: DateTime<Utc>) {
+        self.risk_state.evaluate_private_health(now);
+        self.updated_at = now;
+        self.sync_local_controls();
+        if self.risk_state.decision().mode == super::risk::RiskOperatingMode::Halted {
+            self.mark_open_bundles_risk_stopped(now);
+        }
+    }
+
+    fn sync_risk_state(&mut self, now: DateTime<Utc>) {
+        self.record_orphan_exposure(now);
+        self.refresh_risk_state(now);
+    }
+
+    fn record_private_reconciliation_from_account_state(
+        &mut self,
+        exchange: &ExchangeId,
+        checked_at: DateTime<Utc>,
+    ) {
+        let Some(state) = self.account_sync.get(exchange) else {
+            return;
+        };
+
+        let exchange_positions = state
+            .position_snapshots()
+            .into_iter()
+            .map(|position| ExchangePosition {
+                exchange: position.exchange,
+                canonical_symbol: position.canonical_symbol.clone(),
+                exchange_symbol: position.exchange_symbol.unwrap_or_else(|| {
+                    crate::market::exchange_symbol_for(exchange, &position.canonical_symbol)
+                }),
+                position_side: position.position_side,
+                quantity: position.quantity,
+                entry_price: position.entry_price,
+                mark_price: None,
+                unrealized_pnl: position.unrealized_pnl,
+                updated_at: position.updated_at,
+            })
+            .collect::<Vec<_>>();
+        let decisions = self.reconcile_positions(
+            &exchange_positions,
+            self.config.reconciliation.quantity_tolerance,
+            self.config.reconciliation.orphan_tolerance,
+            checked_at,
+        );
+
+        for decision in decisions
+            .into_iter()
+            .filter(|decision| decision.severity != crate::execution::ReconcileSeverity::Ok)
+        {
+            self.record_reconciliation_result(
+                decision.exchange,
+                decision.canonical_symbol.to_string(),
+                decision.severity,
+                checked_at,
+            );
+        }
+    }
+
+    fn sync_local_controls(&mut self) {
         let decision = self.risk_state.decision();
         self.paused_new_entries = !decision.allow_new_entries;
         self.close_only = matches!(
@@ -207,7 +333,15 @@ impl CrossArbRuntimeState {
             super::risk::RiskOperatingMode::CloseOnly | super::risk::RiskOperatingMode::Halted
         );
         self.kill_switch = matches!(decision.mode, super::risk::RiskOperatingMode::Halted);
-        self.updated_at = checked_at;
+    }
+
+    fn mark_open_bundles_risk_stopped(&mut self, now: DateTime<Utc>) {
+        for bundle in self.open_bundles.values_mut() {
+            if bundle.status != SimulatedBundleStatus::Closed {
+                bundle.status = SimulatedBundleStatus::RiskStopped;
+                bundle.updated_at = now;
+            }
+        }
     }
 
     fn route_read_models(&self) -> Vec<RouteReadModel> {
@@ -265,6 +399,13 @@ impl CrossArbRuntime {
         }
         signals
     }
+
+    pub fn on_private_event(&mut self, event: PrivateEvent) {
+        let recorded_at = event.received_at;
+        self.state.ingest_private_event(event.clone());
+        self.storage
+            .record(CrossArbStorageEvent::PrivateEvent(event), recorded_at);
+    }
 }
 
 impl Default for CrossArbRuntimeState {
@@ -278,6 +419,7 @@ mod tests {
     use super::*;
     use crate::execution::{
         ArbitrageBundle, BundleStatus, FillEvent, FillLiquidity, OrderSide, PositionSide,
+        PrivateEvent, PrivateEventKind,
     };
     use crate::market::{BookLevel, ExchangeSymbol, OrderBook5};
 
@@ -405,5 +547,28 @@ mod tests {
                 .filled_qty,
             2.0
         );
+    }
+
+    #[test]
+    fn runtime_should_record_private_events_and_update_health() {
+        let now = Utc::now();
+        let mut runtime = CrossArbRuntime::new(CrossExchangeArbitrageConfig::default(), now);
+
+        runtime.on_private_event(PrivateEvent::new(
+            ExchangeId::Binance,
+            PrivateEventKind::Heartbeat,
+            now,
+        ));
+
+        assert_eq!(runtime.storage.events().len(), 1);
+        assert!(matches!(
+            runtime.storage.events()[0].event,
+            CrossArbStorageEvent::PrivateEvent(_)
+        ));
+        assert!(runtime
+            .state
+            .risk_state
+            .private_stream_health
+            .contains_key(&ExchangeId::Binance));
     }
 }

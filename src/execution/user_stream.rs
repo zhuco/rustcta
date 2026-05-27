@@ -407,6 +407,14 @@ impl AccountSyncState {
         self.open_orders.values().collect()
     }
 
+    pub fn position_snapshots(&self) -> Vec<PositionSnapshot> {
+        self.positions.values().cloned().collect()
+    }
+
+    pub fn order_snapshots(&self) -> Vec<OrderSnapshot> {
+        self.open_orders.values().cloned().collect()
+    }
+
     pub fn is_stale(&self, exchange: &ExchangeId, now: DateTime<Utc>) -> bool {
         self.last_event_at
             .get(exchange)
@@ -692,8 +700,9 @@ fn map_core_order_type(order_type: crate::core::types::OrderType) -> OrderType {
 }
 
 fn canonical_symbol_from_exchange_symbol(exchange: &ExchangeId, symbol: &str) -> CanonicalSymbol {
-    canonical_from_exchange_symbol(exchange, symbol)
-        .unwrap_or_else(|| CanonicalSymbol::parse(symbol).unwrap_or_else(|| CanonicalSymbol::new(symbol, "USDT")))
+    canonical_from_exchange_symbol(exchange, symbol).unwrap_or_else(|| {
+        CanonicalSymbol::parse(symbol).unwrap_or_else(|| CanonicalSymbol::new(symbol, "USDT"))
+    })
 }
 
 fn parse_position_side(side: &str) -> PositionSide {

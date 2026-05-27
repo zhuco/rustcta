@@ -4,6 +4,8 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::execution::PrivateEvent;
+
 use super::{ArbSignal, FundingSettlement, Opportunity, SimulatedBundleState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,6 +14,7 @@ pub enum CrossArbStorageEvent {
     Signal(ArbSignal),
     Bundle(SimulatedBundleState),
     FundingSettlement(FundingSettlement),
+    PrivateEvent(PrivateEvent),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -153,6 +156,25 @@ mod tests {
         assert!(matches!(
             event.event,
             CrossArbStorageEvent::FundingSettlement(_)
+        ));
+    }
+
+    #[test]
+    fn storage_should_record_private_events_in_memory() {
+        let now = Utc::now();
+        let mut storage = InMemoryStorageSink::default();
+        let event = PrivateEvent::new(
+            ExchangeId::Binance,
+            crate::execution::PrivateEventKind::Heartbeat,
+            now,
+        );
+
+        storage.record(CrossArbStorageEvent::PrivateEvent(event), now);
+
+        assert_eq!(storage.events().len(), 1);
+        assert!(matches!(
+            storage.events()[0].event,
+            CrossArbStorageEvent::PrivateEvent(_)
         ));
     }
 }
