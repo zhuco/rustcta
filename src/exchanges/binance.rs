@@ -3316,6 +3316,198 @@ impl BinanceExchange {
     }
 }
 
+fn parse_binance_account_update_message(
+    json: &serde_json::Value,
+    market_type: MarketType,
+) -> Result<WsMessage> {
+    #[derive(Deserialize)]
+    struct BinanceAccountBalanceUpdate {
+        #[serde(rename = "a")]
+        asset: String,
+        #[serde(rename = "wb")]
+        wallet_balance: String,
+        #[serde(rename = "cw")]
+        cross_wallet_balance: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct BinancePositionUpdate {
+        #[serde(rename = "s")]
+        symbol: String,
+        #[serde(rename = "pa")]
+        position_amount: String,
+        #[serde(rename = "ep")]
+        entry_price: String,
+        #[serde(rename = "up")]
+        unrealized_pnl: String,
+        #[serde(rename = "mt")]
+        margin_type: Option<String>,
+        #[serde(rename = "iw")]
+        isolated_wallet: Option<String>,
+        #[serde(rename = "ps")]
+        position_side: Option<String>,
+        #[serde(rename = "le")]
+        leverage: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct BinanceAccountUpdatePayload {
+        #[serde(rename = "B")]
+        balances: Option<Vec<BinanceAccountBalanceUpdate>>,
+        #[serde(rename = "P")]
+        positions: Option<Vec<BinancePositionUpdate>>,
+    }
+
+    let event_type = json.get("e").and_then(|v| v.as_str()).unwrap_or("");
+
+    match event_type {
+        "outboundAccountPosition" => {
+            let balances = json
+                .get("B")
+                .and_then(|v| {
+                    serde_json::from_value::<Vec<BinanceAccountBalanceUpdate>>(v.clone()).ok()
+                })
+                .unwrap_or_default();
+
+            let balance = balances.into_iter().next().ok_or_else(|| {
+                ExchangeError::ParseError(
+                    "outboundAccountPosition missing balance payload".to_string(),
+                )
+            })?;
+
+            let total = balance.wallet_balance.parse::<f64>().unwrap_or(0.0);
+            let free = balance
+                .cross_wallet_balance
+                .as_ref()
+                .and_then(|value| value.parse::<f64>().ok())
+                .unwrap_or(total);
+            let used = (total - free).max(0.0);
+
+            log::debug!(
+                "📊 Binance outboundAccountPosition -> balance {} total={} free={} used={}",
+                balance.asset,
+                total,
+                free,
+                used
+            );
+
+            Ok(WsMessage::Balance(Balance {
+                currency: balance.asset,
+                total,
+                free,
+                used,
+                market_type,
+            }))
+        }
+        "ACCOUNT_UPDATE" => {
+            let account = json.get("a").ok_or_else(|| {
+                ExchangeError::ParseError("ACCOUNT_UPDATE missing account payload".to_string())
+            })?;
+            let payload: BinanceAccountUpdatePayload = serde_json::from_value(account.clone())?;
+
+            if let Some(position) = payload.positions.and_then(|positions| {
+                positions.into_iter().find(|position| {
+                    position
+                        .position_amount
+                        .parse::<f64>()
+                        .map(|qty| qty.abs() > f64::EPSILON)
+                        .unwrap_or(false)
+                })
+            }) {
+                let signed_quantity = position.position_amount.parse::<f64>().unwrap_or(0.0);
+                let contracts = signed_quantity.abs();
+                let side = match position
+                    .position_side
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_ascii_uppercase()
+                    .as_str()
+                {
+                    "LONG" => "LONG".to_string(),
+                    "SHORT" => "SHORT".to_string(),
+                    _ if signed_quantity < 0.0 => "SHORT".to_string(),
+                    _ => "LONG".to_string(),
+                };
+                let entry_price = position.entry_price.parse::<f64>().unwrap_or(0.0);
+                let unrealized_pnl = position.unrealized_pnl.parse::<f64>().unwrap_or(0.0);
+                let margin = position
+                    .isolated_wallet
+                    .as_ref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+
+                return Ok(WsMessage::Position(Position {
+                    symbol: position.symbol,
+                    side,
+                    contracts,
+                    contract_size: 1.0,
+                    entry_price,
+                    mark_price: entry_price,
+                    unrealized_pnl,
+                    percentage: 0.0,
+                    margin,
+                    margin_ratio: 0.0,
+                    leverage: position
+                        .leverage
+                        .as_ref()
+                        .and_then(|value| value.parse::<u32>().ok()),
+                    margin_type: position.margin_type,
+                    size: contracts,
+                    amount: contracts,
+                    timestamp: Utc::now(),
+                }));
+            }
+
+            if let Some(balance) = payload
+                .balances
+                .and_then(|balances| balances.into_iter().next())
+            {
+                let total = balance.wallet_balance.parse::<f64>().unwrap_or(0.0);
+                let free = balance
+                    .cross_wallet_balance
+                    .as_ref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(total);
+                let used = (total - free).max(0.0);
+
+                return Ok(WsMessage::Balance(Balance {
+                    currency: balance.asset,
+                    total,
+                    free,
+                    used,
+                    market_type,
+                }));
+            }
+
+            Err(ExchangeError::ParseError(
+                "ACCOUNT_UPDATE missing balance and position payloads".to_string(),
+            ))
+        }
+        "balanceUpdate" => {
+            let asset = json.get("a").and_then(|v| v.as_str()).ok_or_else(|| {
+                ExchangeError::ParseError("balanceUpdate missing asset".to_string())
+            })?;
+            let delta = json
+                .get("d")
+                .and_then(|v| v.as_str())
+                .and_then(|value| value.parse::<f64>().ok())
+                .unwrap_or(0.0);
+
+            Ok(WsMessage::Balance(Balance {
+                currency: asset.to_string(),
+                total: delta.abs(),
+                free: delta.abs(),
+                used: 0.0,
+                market_type,
+            }))
+        }
+        _ => Err(ExchangeError::ParseError(format!(
+            "Unsupported account event: {}",
+            event_type
+        ))),
+    }
+}
+
 /// Binance WebSocket客户端实现
 pub struct BinanceWebSocketClient {
     base: Box<dyn WebSocketClient>,
@@ -3347,6 +3539,8 @@ impl BinanceWebSocketClient {
                 "executionReport" => self.parse_execution_report(&json), // 现货用户订单执行报告
                 "ORDER_TRADE_UPDATE" => self.parse_order_trade_update(&json), // 期货用户订单更新
                 "outboundAccountPosition" => self.parse_account_update(&json), // 账户余额更新
+                "ACCOUNT_UPDATE" => self.parse_account_update(&json),    // 期货账户更新
+                "balanceUpdate" => self.parse_account_update(&json),     // 余额变动
                 _ => {
                     log::debug!("Received event type: {}", event_type);
                     Ok(WsMessage::Error(format!(
@@ -3606,10 +3800,7 @@ impl BinanceWebSocketClient {
 
     /// 解析账户余额更新
     fn parse_account_update(&self, json: &serde_json::Value) -> Result<WsMessage> {
-        // 简单返回错误，可以后续实现
-        Ok(WsMessage::Error(
-            "Account update not implemented".to_string(),
-        ))
+        parse_binance_account_update_message(json, self.market_type)
     }
 
     fn parse_ticker_message(&self, json: &serde_json::Value) -> Result<WsMessage> {
@@ -3871,9 +4062,7 @@ impl BinanceMessageHandler {
 
     /// 解析账户更新
     fn parse_account_update(&self, json: &serde_json::Value) -> Result<WsMessage> {
-        // 暂时记录账户更新事件，但不上抛业务错误
-        log::debug!("📈 收到账户更新事件: {}", json);
-        Ok(WsMessage::Error("ACCOUNT_UPDATE".to_string()))
+        parse_binance_account_update_message(json, self.market_type)
     }
 
     /// 解析TRADE_LITE事件（期货轻量级成交事件）
@@ -3956,6 +4145,8 @@ impl BinanceMessageHandler {
                     self.parse_trade_lite(&json)
                 }
                 "ACCOUNT_UPDATE" => self.parse_account_update(&json), // 账户更新
+                "outboundAccountPosition" => self.parse_account_update(&json), // 现货余额更新
+                "balanceUpdate" => self.parse_account_update(&json),  // 余额增量更新
                 "listenKeyExpired" => {
                     log::error!("❌ ListenKey已过期，需要重新创建");
                     // 返回特殊的ListenKey过期消息，让上层处理器处理
@@ -4403,5 +4594,103 @@ impl MessageHandler for ReconnectMessageHandler {
         log::error!("❌ WebSocket错误: {}", error);
         let handler = self.inner_handler.lock().await;
         handler.handle_error(error).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_execution_report_should_return_actionable_order_event() {
+        let client =
+            BinanceWebSocketClient::new("wss://example.invalid".to_string(), MarketType::Spot);
+        let msg = r#"{
+            "e":"executionReport",
+            "s":"BTCUSDT",
+            "i":1234567,
+            "c":"client-1",
+            "S":"BUY",
+            "o":"LIMIT",
+            "X":"PARTIALLY_FILLED",
+            "p":"65000.10",
+            "q":"0.020000",
+            "z":"0.010000",
+            "Z":"650.001000",
+            "n":"0.000100",
+            "N":"USDT",
+            "T":1710000000000,
+            "m":true
+        }"#;
+
+        let message = client
+            .parse_binance_message(msg)
+            .expect("parse execution report");
+        match message {
+            WsMessage::ExecutionReport(report) => {
+                assert_eq!(report.symbol, "BTCUSDT");
+                assert_eq!(report.order_id, "1234567");
+                assert_eq!(report.client_order_id.as_deref(), Some("client-1"));
+                assert_eq!(report.status, OrderStatus::PartiallyFilled);
+                assert_eq!(report.executed_amount, 0.01);
+                assert!((report.executed_price - 65000.1).abs() < 1e-9);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_account_update_should_return_position_for_futures_update() {
+        let client =
+            BinanceWebSocketClient::new("wss://example.invalid".to_string(), MarketType::Futures);
+        let msg = r#"{
+            "e":"ACCOUNT_UPDATE",
+            "E":1710000000000,
+            "a":{
+                "B":[{"a":"USDT","wb":"1200.50","cw":"980.25"}],
+                "P":[{"s":"BTCUSDT","pa":"0.020","ep":"65000.0","up":"12.34","mt":"isolated","iw":"200.0","ps":"LONG","le":"10"}]
+            }
+        }"#;
+
+        let message = client
+            .parse_binance_message(msg)
+            .expect("parse account update");
+        match message {
+            WsMessage::Position(position) => {
+                assert_eq!(position.symbol, "BTCUSDT");
+                assert_eq!(position.side, "LONG");
+                assert_eq!(position.contracts, 0.02);
+                assert_eq!(position.amount, 0.02);
+                assert_eq!(position.margin_type.as_deref(), Some("isolated"));
+                assert_eq!(position.leverage, Some(10));
+                assert!((position.unrealized_pnl - 12.34).abs() < 1e-9);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_outbound_account_position_should_return_balance_update() {
+        let client =
+            BinanceWebSocketClient::new("wss://example.invalid".to_string(), MarketType::Spot);
+        let msg = r#"{
+            "e":"outboundAccountPosition",
+            "E":1710000000000,
+            "B":[{"a":"USDT","wb":"1000.50","cw":"850.25"}]
+        }"#;
+
+        let message = client
+            .parse_binance_message(msg)
+            .expect("parse balance update");
+        match message {
+            WsMessage::Balance(balance) => {
+                assert_eq!(balance.currency, "USDT");
+                assert_eq!(balance.market_type, MarketType::Spot);
+                assert!((balance.total - 1000.50).abs() < 1e-9);
+                assert!((balance.free - 850.25).abs() < 1e-9);
+                assert!((balance.used - 150.25).abs() < 1e-9);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
     }
 }

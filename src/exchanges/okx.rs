@@ -1884,10 +1884,64 @@ impl Exchange for OkxExchange {
     }
 }
 
+impl OkxExchange {
+    pub async fn create_private_websocket_client(
+        &self,
+        market_type: MarketType,
+    ) -> Result<Box<dyn WebSocketClient>> {
+        let ws_url = crate::core::websocket::get_websocket_url("okx", market_type, true);
+        let api_keys = &self.base.api_keys;
+        let passphrase = api_keys.passphrase.clone().ok_or_else(|| {
+            ExchangeError::AuthError("OKX private websocket requires passphrase".to_string())
+        })?;
+
+        let client = OkxWebSocketClient::new_private(
+            ws_url,
+            market_type,
+            api_keys.api_key.clone(),
+            api_keys.api_secret.clone(),
+            passphrase,
+        );
+        Ok(Box::new(client))
+    }
+}
+
+#[derive(Clone)]
+struct OkxPrivateAuth {
+    api_key: String,
+    api_secret: String,
+    passphrase: String,
+}
+
+impl OkxPrivateAuth {
+    fn login_message(&self) -> String {
+        let timestamp = Utc::now().timestamp().to_string();
+        let sign = SignatureHelper::okx_signature(
+            &self.api_secret,
+            &timestamp,
+            "GET",
+            "/users/self/verify",
+            "",
+        );
+
+        serde_json::json!({
+            "op": "login",
+            "args": [{
+                "apiKey": self.api_key,
+                "passphrase": self.passphrase,
+                "timestamp": timestamp,
+                "sign": sign,
+            }]
+        })
+        .to_string()
+    }
+}
+
 /// OKX WebSocket客户端实现
 pub struct OkxWebSocketClient {
     base: Box<dyn WebSocketClient>,
     market_type: MarketType,
+    private_auth: Option<OkxPrivateAuth>,
 }
 
 impl OkxWebSocketClient {
@@ -1898,6 +1952,28 @@ impl OkxWebSocketClient {
                 "okx".to_string(),
             )),
             market_type,
+            private_auth: None,
+        }
+    }
+
+    pub fn new_private(
+        url: String,
+        market_type: MarketType,
+        api_key: String,
+        api_secret: String,
+        passphrase: String,
+    ) -> Self {
+        Self {
+            base: Box::new(crate::core::websocket::BaseWebSocketClient::new(
+                url,
+                "okx".to_string(),
+            )),
+            market_type,
+            private_auth: Some(OkxPrivateAuth {
+                api_key,
+                api_secret,
+                passphrase,
+            }),
         }
     }
 }
@@ -1905,7 +1981,19 @@ impl OkxWebSocketClient {
 #[async_trait]
 impl WebSocketClient for OkxWebSocketClient {
     async fn connect(&mut self) -> Result<()> {
-        self.base.connect().await
+        log::debug!(
+            "OKX WebSocket connect market_type={:?} private={}",
+            self.market_type,
+            self.private_auth.is_some()
+        );
+        self.base.connect().await?;
+
+        if let Some(auth) = &self.private_auth {
+            let login_message = auth.login_message();
+            self.base.send(login_message).await?;
+        }
+
+        Ok(())
     }
 
     async fn disconnect(&mut self) -> Result<()> {
@@ -1946,29 +2034,62 @@ impl OkxMessageHandler {
     fn parse_message(&self, text: &str) -> Result<WsMessage> {
         let json: serde_json::Value = serde_json::from_str(text)?;
 
-        // OKX WebSocket消息格式: {"event":"...", "data":...} 或 {"arg":..., "data":...}
-        if let Some(data_arr) = json.get("data").and_then(|v| v.as_array()) {
-            if let Some(arg) = json.get("arg") {
-                if let Some(channel) = arg.get("channel").and_then(|v| v.as_str()) {
-                    if !data_arr.is_empty() {
-                        let data = &data_arr[0];
-                        match channel {
-                            "tickers" => self.parse_ticker(data),
-                            "books" => self.parse_orderbook(data, arg),
-                            "trades" => self.parse_trade(data),
-                            _ => Ok(WsMessage::Error(format!("Unknown channel: {}", channel))),
-                        }
+        if let Some(event) = json.get("event").and_then(|v| v.as_str()) {
+            return match event {
+                "login" => {
+                    let code = json
+                        .get("code")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    if code == "0" {
+                        Ok(WsMessage::Text(text.to_string()))
                     } else {
-                        Ok(WsMessage::Error("Empty data array".to_string()))
+                        Ok(WsMessage::Error(format!(
+                            "OKX login failed: code={} msg={}",
+                            code,
+                            json.get("msg").and_then(|v| v.as_str()).unwrap_or_default()
+                        )))
                     }
-                } else {
-                    Ok(WsMessage::Error("Missing channel in arg".to_string()))
                 }
-            } else {
-                Ok(WsMessage::Error("Missing arg field".to_string()))
-            }
-        } else {
-            Ok(WsMessage::Error("Invalid message format".to_string()))
+                "error" => Ok(WsMessage::Error(format!(
+                    "OKX websocket error: code={} msg={}",
+                    json.get("code")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default(),
+                    json.get("msg").and_then(|v| v.as_str()).unwrap_or_default()
+                ))),
+                _ => Ok(WsMessage::Text(text.to_string())),
+            };
+        }
+
+        // OKX WebSocket消息格式: {"event":"...", "data":...} 或 {"arg":..., "data":...}
+        let data_arr = json
+            .get("data")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ExchangeError::ParseError("Missing data array".to_string()))?;
+        let arg = json
+            .get("arg")
+            .ok_or_else(|| ExchangeError::ParseError("Missing arg field".to_string()))?;
+        let channel = arg
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ExchangeError::ParseError("Missing channel in arg".to_string()))?;
+
+        if data_arr.is_empty() {
+            return Ok(WsMessage::Error("Empty data array".to_string()));
+        }
+
+        let data = &data_arr[0];
+        match channel {
+            "tickers" => self.parse_ticker(data),
+            "books" => self.parse_orderbook(data, arg),
+            "trades" => self.parse_trade(data),
+            "orders" => self.parse_private_order(data, arg),
+            "fills" => self.parse_private_fill(data, arg),
+            "account" => self.parse_private_account(data, arg),
+            "positions" => self.parse_private_position(data, arg),
+            "balance_and_position" => self.parse_private_balance_and_position(data_arr, arg),
+            _ => Ok(WsMessage::Error(format!("Unknown channel: {}", channel))),
         }
     }
 
@@ -2090,6 +2211,377 @@ impl OkxMessageHandler {
             fee: None,
         }))
     }
+
+    fn parse_private_order(
+        &self,
+        data: &serde_json::Value,
+        _arg: &serde_json::Value,
+    ) -> Result<WsMessage> {
+        #[derive(Deserialize)]
+        struct OkxPrivateOrder {
+            #[serde(rename = "instId")]
+            inst_id: String,
+            #[serde(rename = "ordId")]
+            ord_id: String,
+            #[serde(rename = "clOrdId")]
+            cl_ord_id: Option<String>,
+            side: String,
+            #[serde(rename = "ordType")]
+            ord_type: String,
+            state: String,
+            px: Option<String>,
+            sz: Option<String>,
+            #[serde(rename = "accFillSz")]
+            acc_fill_sz: Option<String>,
+            #[serde(rename = "fillSz")]
+            fill_sz: Option<String>,
+            #[serde(rename = "fillPx")]
+            fill_px: Option<String>,
+            #[serde(rename = "avgPx")]
+            avg_px: Option<String>,
+            #[serde(rename = "fillTime")]
+            fill_time: Option<String>,
+            #[serde(rename = "uTime")]
+            u_time: Option<String>,
+            #[serde(rename = "cTime")]
+            c_time: Option<String>,
+        }
+
+        let order: OkxPrivateOrder = serde_json::from_value(data.clone())?;
+        let amount = order
+            .sz
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let filled = order
+            .acc_fill_sz
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| {
+                order
+                    .fill_sz
+                    .as_ref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(0.0)
+            });
+        let remaining = (amount - filled).max(0.0);
+        let timestamp = order
+            .u_time
+            .as_ref()
+            .or(order.c_time.as_ref())
+            .and_then(|value| value.parse::<i64>().ok())
+            .and_then(DateTime::from_timestamp_millis)
+            .unwrap_or_else(Utc::now);
+        let order_type = match order.ord_type.to_ascii_lowercase().as_str() {
+            "market" => OrderType::Market,
+            "limit" | "post_only" | "ioc" | "fok" => OrderType::Limit,
+            "optimal_limit_ioc" => OrderType::Limit,
+            _ => OrderType::Limit,
+        };
+        let status = match order.state.to_ascii_lowercase().as_str() {
+            "live" => OrderStatus::Open,
+            "partially_filled" => OrderStatus::PartiallyFilled,
+            "filled" => OrderStatus::Closed,
+            "canceled" | "mmp_canceled" => OrderStatus::Canceled,
+            _ => OrderStatus::Pending,
+        };
+        let side = match order.side.to_ascii_lowercase().as_str() {
+            "buy" => OrderSide::Buy,
+            "sell" => OrderSide::Sell,
+            _ => OrderSide::Buy,
+        };
+
+        Ok(WsMessage::Order(Order {
+            id: order.ord_id,
+            symbol: order.inst_id,
+            side,
+            order_type,
+            amount,
+            price: order.px.and_then(|value| value.parse::<f64>().ok()),
+            filled,
+            remaining,
+            status,
+            market_type: self.market_type,
+            timestamp,
+            last_trade_timestamp: order
+                .fill_time
+                .as_ref()
+                .and_then(|value| value.parse::<i64>().ok())
+                .and_then(DateTime::from_timestamp_millis),
+            info: data.clone(),
+        }))
+    }
+
+    fn parse_private_fill(
+        &self,
+        data: &serde_json::Value,
+        _arg: &serde_json::Value,
+    ) -> Result<WsMessage> {
+        #[derive(Deserialize)]
+        struct OkxPrivateFill {
+            #[serde(rename = "instId")]
+            inst_id: String,
+            #[serde(rename = "tradeId")]
+            trade_id: String,
+            #[serde(rename = "ordId")]
+            ord_id: Option<String>,
+            side: String,
+            #[serde(rename = "fillPx")]
+            fill_px: String,
+            #[serde(rename = "fillSz")]
+            fill_sz: String,
+            #[serde(rename = "fillTime")]
+            fill_time: String,
+            #[serde(rename = "fee")]
+            fee: Option<String>,
+            #[serde(rename = "feeCcy")]
+            fee_ccy: Option<String>,
+        }
+
+        let fill: OkxPrivateFill = serde_json::from_value(data.clone())?;
+        let side = match fill.side.to_ascii_lowercase().as_str() {
+            "buy" => OrderSide::Buy,
+            "sell" => OrderSide::Sell,
+            _ => OrderSide::Buy,
+        };
+        let fee = fill
+            .fee
+            .and_then(|value| value.parse::<f64>().ok())
+            .map(|cost| crate::core::types::Fee {
+                currency: fill.fee_ccy.unwrap_or_else(|| "USDT".to_string()),
+                cost,
+                rate: None,
+            });
+
+        Ok(WsMessage::Trade(Trade {
+            id: fill.trade_id,
+            symbol: fill.inst_id,
+            side,
+            amount: fill.fill_sz.parse::<f64>().unwrap_or(0.0),
+            price: fill.fill_px.parse::<f64>().unwrap_or(0.0),
+            timestamp: fill
+                .fill_time
+                .parse::<i64>()
+                .ok()
+                .and_then(DateTime::from_timestamp_millis)
+                .unwrap_or_else(Utc::now),
+            order_id: fill.ord_id,
+            fee,
+        }))
+    }
+
+    fn parse_private_account(
+        &self,
+        data: &serde_json::Value,
+        _arg: &serde_json::Value,
+    ) -> Result<WsMessage> {
+        if let Some(balance) = self.extract_okx_balance(data) {
+            return Ok(WsMessage::Balance(balance));
+        }
+
+        Err(ExchangeError::ParseError(
+            "OKX account channel missing balance payload".to_string(),
+        ))
+    }
+
+    fn parse_private_position(
+        &self,
+        data: &serde_json::Value,
+        _arg: &serde_json::Value,
+    ) -> Result<WsMessage> {
+        if let Some(position) = self.extract_okx_position(data) {
+            return Ok(WsMessage::Position(position));
+        }
+
+        Err(ExchangeError::ParseError(
+            "OKX positions channel missing position payload".to_string(),
+        ))
+    }
+
+    fn parse_private_balance_and_position(
+        &self,
+        data_arr: &[serde_json::Value],
+        _arg: &serde_json::Value,
+    ) -> Result<WsMessage> {
+        for data in data_arr {
+            if let Some(position) = self.extract_okx_position(data) {
+                return Ok(WsMessage::Position(position));
+            }
+        }
+
+        for data in data_arr {
+            if let Some(balance) = self.extract_okx_balance(data) {
+                return Ok(WsMessage::Balance(balance));
+            }
+        }
+
+        Err(ExchangeError::ParseError(
+            "OKX balance_and_position channel missing balance/position payload".to_string(),
+        ))
+    }
+
+    fn extract_okx_balance(&self, data: &serde_json::Value) -> Option<Balance> {
+        #[derive(Deserialize)]
+        struct OkxBalanceItem {
+            ccy: String,
+            #[serde(rename = "cashBal")]
+            cash_bal: Option<String>,
+            #[serde(rename = "availBal")]
+            avail_bal: Option<String>,
+            #[serde(rename = "frozenBal")]
+            frozen_bal: Option<String>,
+            #[serde(rename = "eq")]
+            equity: Option<String>,
+            #[serde(rename = "uTime")]
+            u_time: Option<String>,
+            #[serde(rename = "bal")]
+            bal: Option<String>,
+        }
+
+        let candidate = if let Some(bal_data) = data.get("balData").and_then(|v| v.as_array()) {
+            bal_data.first()
+        } else if let Some(details) = data.get("details").and_then(|v| v.as_array()) {
+            details.first()
+        } else {
+            Some(data)
+        }?;
+
+        let item: OkxBalanceItem = serde_json::from_value(candidate.clone()).ok()?;
+        let total = item
+            .equity
+            .as_ref()
+            .or(item.cash_bal.as_ref())
+            .or(item.bal.as_ref())
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let free = item
+            .avail_bal
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(total);
+        let used = item
+            .frozen_bal
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| (total - free).max(0.0));
+
+        Some(Balance {
+            currency: item.ccy,
+            total,
+            free,
+            used,
+            market_type: self.market_type,
+        })
+    }
+
+    fn extract_okx_position(&self, data: &serde_json::Value) -> Option<Position> {
+        #[derive(Deserialize)]
+        struct OkxPositionItem {
+            #[serde(rename = "instId")]
+            inst_id: String,
+            #[serde(rename = "pos")]
+            pos: String,
+            #[serde(rename = "posSide")]
+            pos_side: Option<String>,
+            #[serde(rename = "avgPx")]
+            avg_px: Option<String>,
+            #[serde(rename = "markPx")]
+            mark_px: Option<String>,
+            #[serde(rename = "upl")]
+            upl: Option<String>,
+            #[serde(rename = "lever")]
+            lever: Option<String>,
+            #[serde(rename = "mgnMode")]
+            mgn_mode: Option<String>,
+            #[serde(rename = "imr")]
+            imr: Option<String>,
+            #[serde(rename = "mmr")]
+            mmr: Option<String>,
+            #[serde(rename = "uTime")]
+            u_time: Option<String>,
+            #[serde(rename = "cTime")]
+            c_time: Option<String>,
+        }
+
+        let candidate = if let Some(pos_data) = data.get("posData").and_then(|v| v.as_array()) {
+            pos_data.first()
+        } else {
+            Some(data)
+        }?;
+
+        let item: OkxPositionItem = serde_json::from_value(candidate.clone()).ok()?;
+        let position = item.pos.parse::<f64>().ok()?;
+        let timestamp = item
+            .u_time
+            .as_ref()
+            .or(item.c_time.as_ref())
+            .and_then(|value| value.parse::<i64>().ok())
+            .and_then(DateTime::from_timestamp_millis)
+            .unwrap_or_else(Utc::now);
+        let side = item
+            .pos_side
+            .clone()
+            .map(|value| value.to_ascii_uppercase())
+            .unwrap_or_else(|| {
+                if position >= 0.0 {
+                    "LONG".to_string()
+                } else {
+                    "SHORT".to_string()
+                }
+            });
+        let mark_price = item
+            .mark_px
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| {
+                item.avg_px
+                    .as_ref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(0.0)
+            });
+        let entry_price = item
+            .avg_px
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(mark_price);
+        let unrealized_pnl = item
+            .upl
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let leverage = item
+            .lever
+            .as_ref()
+            .and_then(|value| value.parse::<u32>().ok());
+        let margin = item
+            .imr
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let maintenance = item
+            .mmr
+            .as_ref()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        Some(Position {
+            symbol: item.inst_id,
+            side,
+            contracts: position.abs(),
+            contract_size: 1.0,
+            entry_price,
+            mark_price,
+            unrealized_pnl,
+            percentage: 0.0,
+            margin,
+            margin_ratio: maintenance,
+            leverage,
+            margin_type: item.mgn_mode,
+            size: position.abs(),
+            amount: position.abs(),
+            timestamp,
+        })
+    }
 }
 
 #[async_trait]
@@ -2102,5 +2594,145 @@ impl MessageHandler for OkxMessageHandler {
 
     async fn handle_error(&self, error: ExchangeError) -> Result<()> {
         self.inner_handler.handle_error(error).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoopHandler;
+
+    #[async_trait]
+    impl MessageHandler for NoopHandler {
+        async fn handle_message(&self, _message: WsMessage) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn okx_private_login_message_should_match_ws_login_shape() {
+        let auth = OkxPrivateAuth {
+            api_key: "api-key".to_string(),
+            api_secret: "secret-key".to_string(),
+            passphrase: "passphrase".to_string(),
+        };
+
+        let login = auth.login_message();
+        let json: serde_json::Value = serde_json::from_str(&login).expect("login json");
+        assert_eq!(json.get("op").and_then(|v| v.as_str()), Some("login"));
+        let args = json
+            .get("args")
+            .and_then(|v| v.as_array())
+            .expect("args array");
+        assert_eq!(args.len(), 1);
+        let first = args[0].as_object().expect("login args object");
+        assert_eq!(
+            first.get("apiKey").and_then(|v| v.as_str()),
+            Some("api-key")
+        );
+        assert_eq!(
+            first.get("passphrase").and_then(|v| v.as_str()),
+            Some("passphrase")
+        );
+        assert!(first.get("timestamp").and_then(|v| v.as_str()).is_some());
+        assert!(first.get("sign").and_then(|v| v.as_str()).is_some());
+    }
+
+    #[test]
+    fn parse_private_order_channel_should_return_order_state() {
+        let handler = OkxMessageHandler::new(Box::new(NoopHandler), MarketType::Futures);
+        let message = r#"{
+            "arg":{"channel":"orders","instType":"SWAP"},
+            "data":[{
+                "instId":"BTC-USDT-SWAP",
+                "ordId":"12345",
+                "clOrdId":"cli-123",
+                "side":"buy",
+                "ordType":"limit",
+                "state":"partially_filled",
+                "px":"65000",
+                "sz":"0.020",
+                "accFillSz":"0.010",
+                "fillSz":"0.010",
+                "fillPx":"65010.5",
+                "avgPx":"65005.25",
+                "fillTime":"1710000000100",
+                "uTime":"1710000000200"
+            }]
+        }"#;
+
+        match handler.parse_message(message).expect("parse order") {
+            WsMessage::Order(order) => {
+                assert_eq!(order.id, "12345");
+                assert_eq!(order.symbol, "BTC-USDT-SWAP");
+                assert_eq!(order.side, OrderSide::Buy);
+                assert_eq!(order.status, OrderStatus::PartiallyFilled);
+                assert_eq!(order.amount, 0.02);
+                assert_eq!(order.filled, 0.01);
+                assert_eq!(order.remaining, 0.01);
+                assert_eq!(order.market_type, MarketType::Futures);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_private_positions_channel_should_return_position_state() {
+        let handler = OkxMessageHandler::new(Box::new(NoopHandler), MarketType::Futures);
+        let message = r#"{
+            "arg":{"channel":"positions","instType":"SWAP"},
+            "data":[{
+                "instId":"BTC-USDT-SWAP",
+                "pos":"0.500",
+                "posSide":"long",
+                "avgPx":"64000",
+                "markPx":"65100",
+                "upl":"550",
+                "lever":"10",
+                "mgnMode":"isolated",
+                "imr":"3200",
+                "mmr":"160",
+                "uTime":"1710000000300"
+            }]
+        }"#;
+
+        match handler.parse_message(message).expect("parse position") {
+            WsMessage::Position(position) => {
+                assert_eq!(position.symbol, "BTC-USDT-SWAP");
+                assert_eq!(position.side, "LONG");
+                assert_eq!(position.contracts, 0.5);
+                assert_eq!(position.leverage, Some(10));
+                assert_eq!(position.margin_type.as_deref(), Some("isolated"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_private_account_channel_should_return_balance_state() {
+        let handler = OkxMessageHandler::new(Box::new(NoopHandler), MarketType::Futures);
+        let message = r#"{
+            "arg":{"channel":"account","ccy":"USDT"},
+            "data":[{
+                "ccy":"USDT",
+                "cashBal":"1200.50",
+                "availBal":"980.25",
+                "frozenBal":"220.25",
+                "eq":"1200.50",
+                "uTime":"1710000000400"
+            }]
+        }"#;
+
+        match handler.parse_message(message).expect("parse balance") {
+            WsMessage::Balance(balance) => {
+                assert_eq!(balance.currency, "USDT");
+                assert_eq!(balance.market_type, MarketType::Futures);
+                assert!((balance.total - 1200.50).abs() < 1e-9);
+                assert!((balance.free - 980.25).abs() < 1e-9);
+                assert!((balance.used - 220.25).abs() < 1e-9);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
     }
 }
