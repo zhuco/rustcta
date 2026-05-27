@@ -6,10 +6,14 @@ use serde::{Deserialize, Serialize};
 use super::{
     scan_opportunities, ArbSignal, BundleReadModel, CrossArbDashboardStatus, CrossArbStorageEvent,
     CrossExchangeArbitrageConfig, InMemoryStorageSink, MarketSnapshot, Opportunity,
-    OpportunityReadModel, RiskEventReadModel, RouteReadModel, SimulatedBundleState,
-    SimulatedBundleStatus, StorageSink,
+    OpportunityReadModel, PortfolioExposureSummary, PositionManager, RiskEventReadModel,
+    RouteReadModel, SimulatedBundleState, SimulatedBundleStatus, StorageSink,
 };
+use crate::execution::{ArbitrageBundle, ExchangePosition, FillEvent};
 use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
+use crate::strategies::cross_exchange_arbitrage::{
+    FillApplication, PositionError, PositionReconcileDecision,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CrossArbRuntimeState {
@@ -19,6 +23,7 @@ pub struct CrossArbRuntimeState {
     pub open_bundles: HashMap<String, SimulatedBundleState>,
     pub history: Vec<SimulatedBundleState>,
     pub risk_events: Vec<RiskEventReadModel>,
+    pub position_manager: PositionManager,
     pub paused_new_entries: bool,
     pub close_only: bool,
     pub kill_switch: bool,
@@ -34,6 +39,7 @@ impl CrossArbRuntimeState {
             open_bundles: HashMap::new(),
             history: Vec::new(),
             risk_events: Vec::new(),
+            position_manager: PositionManager::default(),
             paused_new_entries: false,
             close_only: false,
             kill_switch: false,
@@ -72,8 +78,50 @@ impl CrossArbRuntimeState {
             enabled_symbols: self.config.universe.symbols.len(),
             enabled_exchanges: self.config.universe.enabled_exchanges.len(),
             open_bundles: self.open_bundles.len(),
+            position_summary: self
+                .position_manager
+                .portfolio_exposure_summary(self.config.reconciliation.quantity_tolerance),
             route_health: self.route_read_models(),
         }
+    }
+
+    pub fn register_bundle_position(
+        &mut self,
+        bundle: &ArbitrageBundle,
+        target_qty: f64,
+        entry_edge_pct: f64,
+        now: DateTime<Utc>,
+    ) {
+        self.position_manager
+            .upsert_from_bundle(bundle, target_qty, entry_edge_pct, now);
+    }
+
+    pub fn apply_fill_event(
+        &mut self,
+        bundle_id: &str,
+        fill: &FillEvent,
+    ) -> Result<FillApplication, PositionError> {
+        self.position_manager.apply_fill_event(bundle_id, fill)
+    }
+
+    pub fn reconcile_positions(
+        &self,
+        exchange_positions: &[ExchangePosition],
+        quantity_tolerance: f64,
+        orphan_tolerance: f64,
+        checked_at: DateTime<Utc>,
+    ) -> Vec<PositionReconcileDecision> {
+        self.position_manager.reconcile_exchange_positions(
+            exchange_positions,
+            quantity_tolerance,
+            orphan_tolerance,
+            checked_at,
+        )
+    }
+
+    pub fn position_summary(&self, quantity_tolerance: f64) -> PortfolioExposureSummary {
+        self.position_manager
+            .portfolio_exposure_summary(quantity_tolerance)
     }
 
     pub fn opportunity_read_models(&self) -> Vec<OpportunityReadModel> {
@@ -172,6 +220,9 @@ impl Default for CrossArbRuntimeState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::{
+        ArbitrageBundle, BundleStatus, FillEvent, FillLiquidity, OrderSide, PositionSide,
+    };
     use crate::market::{BookLevel, ExchangeSymbol, OrderBook5};
 
     fn book(exchange: ExchangeId, bid: f64, ask: f64) -> OrderBook5 {
@@ -215,5 +266,88 @@ mod tests {
         assert!(state.close_only);
         state.kill_switch();
         assert!(state.kill_switch);
+    }
+
+    #[test]
+    fn runtime_should_track_position_manager_fills_and_summary() {
+        let now = Utc::now();
+        let mut state = CrossArbRuntimeState::new(CrossExchangeArbitrageConfig::default(), now);
+        let bundle = ArbitrageBundle::new(
+            "bundle-1",
+            RuntimeMode::Simulation,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            100.0,
+            now,
+        );
+
+        state.register_bundle_position(&bundle, 2.0, 0.015, now);
+
+        let fill = FillEvent {
+            exchange: ExchangeId::Binance,
+            canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+            trade_id: "trade-1".to_string(),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("order-1".to_string()),
+            side: OrderSide::Buy,
+            position_side: PositionSide::Long,
+            liquidity: FillLiquidity::Taker,
+            price: 100.0,
+            quantity: 2.0,
+            quote_quantity: 200.0,
+            fee: Some(0.1),
+            fee_asset: Some("USDT".to_string()),
+            fee_rate: Some(0.0005),
+            realized_pnl: None,
+            reduce_only: Some(false),
+            filled_at: now,
+            received_at: now,
+        };
+
+        let short_fill = FillEvent {
+            exchange: ExchangeId::Okx,
+            canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Okx, "BTC-USDT-SWAP"),
+            trade_id: "trade-2".to_string(),
+            client_order_id: Some("client-2".to_string()),
+            exchange_order_id: Some("order-2".to_string()),
+            side: OrderSide::Sell,
+            position_side: PositionSide::Short,
+            liquidity: FillLiquidity::Taker,
+            price: 101.0,
+            quantity: 2.0,
+            quote_quantity: 202.0,
+            fee: Some(0.1),
+            fee_asset: Some("USDT".to_string()),
+            fee_rate: Some(0.0005),
+            realized_pnl: None,
+            reduce_only: Some(false),
+            filled_at: now,
+            received_at: now,
+        };
+
+        let application = state.apply_fill_event("bundle-1", &fill).unwrap();
+        assert_eq!(
+            application.status_after,
+            crate::strategies::cross_exchange_arbitrage::LegStatus::Open
+        );
+        state.apply_fill_event("bundle-1", &short_fill).unwrap();
+
+        let summary = state.position_summary(0.001);
+        assert_eq!(summary.open_bundles, 1);
+        assert_eq!(summary.orphan_bundle_count, 0);
+        assert_eq!(
+            state
+                .position_manager
+                .bundle("bundle-1")
+                .unwrap()
+                .long_leg
+                .filled_qty,
+            2.0
+        );
     }
 }

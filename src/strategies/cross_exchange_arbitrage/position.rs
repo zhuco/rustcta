@@ -1,10 +1,10 @@
 //! Position accounting primitives for cross-exchange arbitrage bundles.
 
 use crate::execution::{
-    recommended_actions_for_severity, BundleStatus, ExchangePosition, FillEvent, OrderSide,
-    PositionSide, ReconcileAction, ReconcileSeverity,
+    recommended_actions_for_severity, ArbitrageBundle, BundleStatus, ExchangePosition, FillEvent,
+    OrderSide, PositionSide, ReconcileAction, ReconcileSeverity,
 };
-use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol};
+use crate::market::{exchange_symbol_for, CanonicalSymbol, ExchangeId, ExchangeSymbol};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -469,7 +469,7 @@ pub enum PositionError {
     FillDoesNotMatchBundle { bundle_id: String, trade_id: String },
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PositionManager {
     bundles: HashMap<String, BundlePosition>,
 }
@@ -477,6 +477,35 @@ pub struct PositionManager {
 impl PositionManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn upsert_from_bundle(
+        &mut self,
+        bundle: &ArbitrageBundle,
+        target_qty: f64,
+        entry_edge_pct: f64,
+        now: DateTime<Utc>,
+    ) {
+        let long_exchange_symbol =
+            exchange_symbol_for(&bundle.long_exchange, &bundle.canonical_symbol);
+        let short_exchange_symbol =
+            exchange_symbol_for(&bundle.short_exchange, &bundle.canonical_symbol);
+        let mut position = BundlePosition::new(
+            bundle.bundle_id.clone(),
+            bundle.canonical_symbol.clone(),
+            bundle.long_exchange.clone(),
+            long_exchange_symbol,
+            bundle.short_exchange.clone(),
+            short_exchange_symbol,
+            target_qty.max(0.0),
+            bundle.target_notional,
+            entry_edge_pct,
+            now,
+        );
+        position.status = bundle.status;
+        position.opened_at = bundle.open_time;
+        position.updated_at = bundle.updated_at;
+        self.upsert_bundle(position);
     }
 
     pub fn upsert_bundle(&mut self, bundle: BundlePosition) {
@@ -1191,5 +1220,37 @@ mod tests {
             manager.bundle("bundle-1").unwrap().status,
             BundleStatus::Hedging
         );
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_position_should_upsert_from_execution_bundle() {
+        let now = Utc::now();
+        let bundle = ArbitrageBundle::new(
+            "bundle-1",
+            crate::market::RuntimeMode::Simulation,
+            CanonicalSymbol::new("ARB", "USDT"),
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            100.0,
+            now,
+        );
+        let mut manager = PositionManager::new();
+
+        manager.upsert_from_bundle(&bundle, 2.5, 0.0125, now);
+
+        let position = manager.bundle("bundle-1").unwrap();
+        assert_eq!(
+            position.canonical_symbol,
+            CanonicalSymbol::new("ARB", "USDT")
+        );
+        assert_eq!(position.status, BundleStatus::Observing);
+        assert_eq!(position.target_notional_usdt, 100.0);
+        assert_eq!(position.entry_edge_pct, 0.0125);
+        assert_eq!(position.long_leg.exchange, ExchangeId::Binance);
+        assert_eq!(position.short_leg.exchange, ExchangeId::Okx);
+        assert_eq!(position.long_leg.intended_qty, 2.5);
+        assert_eq!(position.short_leg.intended_qty, 2.5);
     }
 }

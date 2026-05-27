@@ -27,8 +27,9 @@ use rustcta::market::{
 use rustcta::strategies::cross_exchange_arbitrage::{
     calculate_taker_vwap, scan_opportunities, BundleReadModel, CrossArbDashboardStatus,
     CrossExchangeArbitrageConfig, FeeModel, FeeRole, MakerLegKind, MarketSnapshot, Opportunity,
-    OpportunityReadModel, OrderBookQualityReadModel, OrderSide, ReconcileReadModel, RejectReason,
-    RiskEventReadModel, RouteReadModel, SimulatedBundleState, SimulatedBundleStatus,
+    OpportunityReadModel, OrderBookQualityReadModel, OrderSide, PortfolioExposureSummary,
+    ReconcileReadModel, RejectReason, RiskEventReadModel, RouteReadModel, SimulatedBundleState,
+    SimulatedBundleStatus,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -162,6 +163,7 @@ impl CrossArbReadModel {
                 enabled_symbols: monitored_symbols.len(),
                 enabled_exchanges: config.universe.enabled_exchanges.len().max(2),
                 open_bundles: 0,
+                position_summary: PortfolioExposureSummary::default(),
                 route_health: Vec::new(),
             },
             analytics: AnalyticsSummary::empty(now),
@@ -341,6 +343,7 @@ impl CrossArbReadModel {
             enabled_symbols: self.monitored_symbols.len(),
             enabled_exchanges: exchanges.len(),
             open_bundles: self.shadow_positions.len(),
+            position_summary: PortfolioExposureSummary::default(),
             route_health: self.routes.iter().take(100).cloned().collect(),
         };
     }
@@ -447,6 +450,7 @@ impl CrossArbReadModel {
             enabled_symbols: self.monitored_symbols.len(),
             enabled_exchanges: exchanges.len(),
             open_bundles: self.shadow_positions.len(),
+            position_summary: PortfolioExposureSummary::default(),
             route_health: self.routes.iter().take(100).cloned().collect(),
         };
     }

@@ -1,6 +1,7 @@
 //! Read models for dashboard/API workers. This module has no server side effects.
 
 use super::opportunity::Opportunity;
+use super::position::PortfolioExposureSummary;
 use super::risk::RejectReason;
 use super::state::{SimulatedBundleState, SimulatedBundleStatus};
 use crate::market::{BookQuality, CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
@@ -14,6 +15,7 @@ pub struct CrossArbDashboardStatus {
     pub enabled_symbols: usize,
     pub enabled_exchanges: usize,
     pub open_bundles: usize,
+    pub position_summary: PortfolioExposureSummary,
     pub route_health: Vec<RouteReadModel>,
 }
 
