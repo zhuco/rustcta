@@ -443,6 +443,7 @@ where
     }
 
     async fn place_order(&self, command: OrderCommand) -> Result<OrderAck> {
+        ensure_order_supported(self.exchange(), &command, self.capabilities())?;
         let command = self.normalize_order_command(command)?;
         let value = self
             .transport
@@ -576,6 +577,11 @@ where
     }
 
     async fn set_leverage(&self, command: LeverageCommand) -> Result<LeverageAck> {
+        ensure_capability(
+            self.exchange(),
+            self.capabilities().supports_leverage,
+            "set leverage",
+        )?;
         let value = self
             .transport
             .execute(self.protocol.set_leverage(&command)?)
@@ -592,6 +598,11 @@ where
     }
 
     async fn set_position_mode(&self, command: PositionModeCommand) -> Result<PositionModeAck> {
+        ensure_capability(
+            self.exchange(),
+            self.capabilities().supports_position_mode_change,
+            "set position mode",
+        )?;
         let value = self
             .transport
             .execute(self.protocol.set_position_mode(&command)?)
@@ -606,6 +617,11 @@ where
     }
 
     async fn close_position(&self, command: ClosePositionCommand) -> Result<ClosePositionAck> {
+        ensure_capability(
+            self.exchange(),
+            self.capabilities().supports_close_position,
+            "close position",
+        )?;
         let command = self.normalize_close_command(command)?;
         let value = self
             .transport
@@ -654,6 +670,57 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
         supports_position_mode_change: matches!(exchange, ExchangeId::Bitget),
         supports_close_position: true,
     }
+}
+
+fn ensure_capability(exchange: ExchangeId, supported: bool, action: &str) -> Result<()> {
+    if supported {
+        Ok(())
+    } else {
+        anyhow::bail!("{exchange} private perp adapter does not support {action}")
+    }
+}
+
+fn ensure_order_supported(
+    exchange: ExchangeId,
+    command: &OrderCommand,
+    capabilities: TradingCapabilities,
+) -> Result<()> {
+    match command.order_type {
+        OrderType::Market => ensure_capability(
+            exchange.clone(),
+            capabilities.supports_market_orders,
+            "market orders",
+        )?,
+        OrderType::Limit => ensure_capability(
+            exchange.clone(),
+            capabilities.supports_limit_orders,
+            "limit orders",
+        )?,
+    }
+    if command.post_only {
+        ensure_capability(
+            exchange.clone(),
+            capabilities.supports_post_only,
+            "post-only orders",
+        )?;
+    }
+    match command.time_in_force {
+        TimeInForce::Ioc => {
+            ensure_capability(exchange.clone(), capabilities.supports_ioc, "IOC orders")?;
+        }
+        TimeInForce::Fok => {
+            ensure_capability(exchange.clone(), capabilities.supports_fok, "FOK orders")?;
+        }
+        TimeInForce::Gtc | TimeInForce::PostOnly => {}
+    }
+    if command.reduce_only {
+        ensure_capability(
+            exchange.clone(),
+            capabilities.supports_reduce_only,
+            "reduce-only orders",
+        )?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1396,14 +1463,10 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
     }
 
     fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec> {
-        if command.mode.is_hedge() {
-            anyhow::bail!("gate futures adapter is net-position only in the current contract");
-        }
-        Ok(PrivateRestRequestSpec::new(
-            ExchangeId::Gate,
-            PrivateRestMethod::Get,
-            "/futures/usdt/positions",
-        ))
+        anyhow::bail!(
+            "gate futures adapter does not support position mode changes; requested {:?}",
+            command.mode
+        )
     }
 
     fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest> {
@@ -2399,6 +2462,19 @@ mod tests {
         .unwrap();
         assert_eq!(gate.exchange(), ExchangeId::Gate);
         assert!(gate.capabilities().supports_leverage);
+    }
+
+    #[test]
+    fn gate_position_mode_change_should_be_unsupported() {
+        let err = GatePrivatePerpProtocol
+            .set_position_mode(&PositionModeCommand {
+                exchange: ExchangeId::Gate,
+                mode: PositionMode::OneWay,
+                requested_at: Utc::now(),
+            })
+            .unwrap_err();
+
+        assert!(err.to_string().contains("does not support position mode"));
     }
 
     #[test]
