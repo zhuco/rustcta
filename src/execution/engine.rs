@@ -1,6 +1,6 @@
 use crate::execution::{
-    BundleLeg, ExecutionRouter, OrderAck, OrderCommand, OrderIntent, OrderSide, OrderType,
-    PositionSide, TimeInForce,
+    BundleLeg, ExecutionRouter, HedgePlanner, MakerFill, OrderAck, OrderCommand, OrderIntent,
+    OrderSide, OrderType, PositionSide, TimeInForce,
 };
 use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol, RuntimeMode};
 use chrono::{DateTime, Utc};
@@ -137,10 +137,47 @@ impl ExecutionEngine {
             return decision;
         }
 
-        if !request.mode.allows_live_orders() || self.router.dry_run() {
+        self.submit_plan(request.mode, &mut decision).await;
+        decision
+    }
+
+    pub fn plan_hedge_for_maker_fill(&self, fill: &MakerFill) -> ExecutionPlan {
+        if fill.filled_quantity <= 0.0 || !fill.filled_quantity.is_finite() {
+            return ExecutionPlan {
+                request_id: format!("hedge-{}", fill.bundle_id),
+                mode: fill.mode,
+                commands: Vec::new(),
+                blocked_reason: Some("invalid maker fill quantity".to_string()),
+                requires_reconcile: false,
+                created_at: fill.filled_at,
+            };
+        }
+
+        let command = HedgePlanner::hedge_for_maker_fill(fill);
+        ExecutionPlan {
+            request_id: format!("hedge-{}", fill.bundle_id),
+            mode: fill.mode,
+            commands: command.into_iter().collect(),
+            blocked_reason: None,
+            requires_reconcile: false,
+            created_at: fill.filled_at,
+        }
+    }
+
+    pub async fn execute_hedge_for_maker_fill(&self, fill: MakerFill) -> EngineDecision {
+        let mut decision = EngineDecision::from_plan(self.plan_hedge_for_maker_fill(&fill));
+        if decision.plan.is_blocked() || decision.plan.commands.is_empty() {
             return decision;
         }
 
+        self.submit_plan(fill.mode, &mut decision).await;
+        decision
+    }
+
+    async fn submit_plan(&self, mode: RuntimeMode, decision: &mut EngineDecision) {
+        if !mode.allows_live_orders() || self.router.dry_run() {
+            return;
+        }
         let missing = self.router.missing_adapters_for(
             decision
                 .plan
@@ -159,7 +196,7 @@ impl ExecutionEngine {
             );
             decision.plan.blocked_reason = Some(reason.clone());
             decision.blocked_reason = Some(reason);
-            return decision;
+            return;
         }
 
         for command in decision.plan.commands.clone() {
@@ -174,8 +211,6 @@ impl ExecutionEngine {
                 }
             }
         }
-
-        decision
     }
 
     fn open_maker_command(&self, request: &ExecutionRequest) -> Option<OrderCommand> {
@@ -354,6 +389,21 @@ mod tests {
         }
     }
 
+    fn maker_fill(mode: RuntimeMode) -> MakerFill {
+        MakerFill {
+            bundle_id: "bundle-1".to_string(),
+            mode,
+            canonical_symbol: CanonicalSymbol::new("btc", "usdt"),
+            taker_exchange: ExchangeId::Okx,
+            taker_exchange_symbol: ExchangeSymbol::new(ExchangeId::Okx, "BTC-USDT-SWAP"),
+            maker_side: OrderSide::Sell,
+            filled_quantity: 0.1,
+            hedge_price: Some(101.0),
+            max_slippage_pct: Some(0.001),
+            filled_at: Utc::now(),
+        }
+    }
+
     #[tokio::test]
     async fn engine_should_not_send_orders_in_simulation_or_shadow() {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -420,6 +470,56 @@ mod tests {
 
         let decision = engine
             .execute_request(request(RuntimeMode::LiveSmall))
+            .await;
+
+        assert!(decision.submitted_orders.is_empty());
+        assert!(decision
+            .blocked_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("missing trading adapter"));
+    }
+
+    #[test]
+    fn engine_should_plan_hedge_for_maker_fill() {
+        let engine = ExecutionEngine::new(ExecutionRouter::new(true));
+
+        let plan = engine.plan_hedge_for_maker_fill(&maker_fill(RuntimeMode::LiveSmall));
+
+        assert_eq!(plan.commands.len(), 1);
+        let command = &plan.commands[0];
+        assert_eq!(command.exchange, ExchangeId::Okx);
+        assert_eq!(command.intent, OrderIntent::HedgeLongTaker);
+        assert_eq!(command.side, OrderSide::Buy);
+        assert_eq!(command.time_in_force, TimeInForce::Ioc);
+        assert_eq!(command.quantity, 0.1);
+    }
+
+    #[tokio::test]
+    async fn engine_should_submit_hedge_for_maker_fill_in_live_non_dry_run() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut router = ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Okx,
+            place_calls: calls.clone(),
+        }));
+        let engine = ExecutionEngine::new(router);
+
+        let decision = engine
+            .execute_hedge_for_maker_fill(maker_fill(RuntimeMode::LiveSmall))
+            .await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decision.submitted_orders.len(), 1);
+        assert!(decision.blocked_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn engine_should_block_hedge_when_taker_adapter_is_missing() {
+        let engine = ExecutionEngine::new(ExecutionRouter::new(false));
+
+        let decision = engine
+            .execute_hedge_for_maker_fill(maker_fill(RuntimeMode::LiveSmall))
             .await;
 
         assert!(decision.submitted_orders.is_empty());
