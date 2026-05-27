@@ -2,13 +2,14 @@ use crate::core::exchange::Exchange;
 use crate::core::types::{
     Balance as CoreBalance, MarketType, Order as CoreOrder, OrderRequest,
     OrderSide as CoreOrderSide, OrderStatus as CoreOrderStatus, OrderType as CoreOrderType,
-    Position as CorePosition,
+    Position as CorePosition, Trade as CoreTrade,
 };
 use crate::execution::{
     CancelAck, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
-    ExchangePosition, LeverageAck, LeverageCommand, OrderAck, OrderCommand, OrderCommandStatus,
-    OrderQuery, OrderSide, OrderState, OrderType, PositionMode, PositionModeAck,
-    PositionModeCommand, PositionSide, TimeInForce, TradingAdapter, TradingCapabilities,
+    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand, OrderAck,
+    OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState, OrderType, PositionMode,
+    PositionModeAck, PositionModeCommand, PositionSide, TimeInForce, TradingAdapter,
+    TradingCapabilities,
 };
 use crate::market::{
     canonical_from_exchange_symbol, exchange_symbol_for, CanonicalSymbol, ExchangeId,
@@ -269,6 +270,39 @@ impl TradingAdapter for ExchangeTradingAdapter {
         Ok(balances
             .into_iter()
             .map(|balance| map_balance(self.exchange_id.clone(), balance))
+            .collect())
+    }
+
+    async fn get_fills(&self, query: FillQuery) -> Result<Vec<FillEvent>> {
+        self.ensure_private_trading_enabled("get_fills")?;
+        let symbol = query
+            .canonical_symbol
+            .as_ref()
+            .map(CanonicalSymbol::as_pair)
+            .or_else(|| {
+                query
+                    .exchange_symbol
+                    .as_ref()
+                    .and_then(|symbol| {
+                        canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
+                    })
+                    .map(|canonical| canonical.as_pair())
+            });
+        let trades = self
+            .exchange
+            .get_my_trades(symbol.as_deref(), MarketType::Futures, query.limit)
+            .await?;
+
+        Ok(trades
+            .into_iter()
+            .filter(|trade| {
+                query
+                    .exchange_order_id
+                    .as_ref()
+                    .map(|order_id| trade.order_id.as_deref() == Some(order_id.as_str()))
+                    .unwrap_or(true)
+            })
+            .map(|trade| map_fill_event(self.exchange_id.clone(), trade))
             .collect())
     }
 
@@ -663,7 +697,38 @@ fn map_balance(exchange: ExchangeId, balance: CoreBalance) -> ExchangeBalance {
     }
 }
 
+fn map_fill_event(exchange: ExchangeId, trade: CoreTrade) -> FillEvent {
+    let canonical_symbol = symbol_to_canonical(&trade.symbol);
+    let exchange_symbol = exchange_symbol_for(&exchange, &canonical_symbol);
+    let fee = trade.fee.clone();
+
+    FillEvent {
+        exchange,
+        canonical_symbol,
+        exchange_symbol,
+        trade_id: trade.id,
+        client_order_id: None,
+        exchange_order_id: trade.order_id,
+        side: map_execution_side(trade.side),
+        position_side: PositionSide::Net,
+        liquidity: FillLiquidity::Unknown,
+        price: trade.price,
+        quantity: trade.amount,
+        quote_quantity: trade.price * trade.amount,
+        fee: fee.as_ref().map(|fee| fee.cost),
+        fee_asset: fee.as_ref().map(|fee| fee.currency.clone()),
+        fee_rate: fee.as_ref().and_then(|fee| fee.rate),
+        realized_pnl: None,
+        reduce_only: None,
+        filled_at: trade.timestamp,
+        received_at: Utc::now(),
+    }
+}
+
 fn symbol_to_canonical(symbol: &str) -> CanonicalSymbol {
+    if let Some(canonical) = CanonicalSymbol::parse(symbol) {
+        return canonical;
+    }
     if let Some(canonical) =
         canonical_from_exchange_symbol(&ExchangeId::Other("generic".into()), symbol)
     {
@@ -703,6 +768,7 @@ fn extract_average_fill_price(order: &CoreOrder) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::types::Fee;
     use crate::exchanges::MockExchange;
     use crate::execution::{BundleLeg, OrderIntent};
     use crate::market::{ContractType, InstrumentStatus};
@@ -739,6 +805,42 @@ mod tests {
             CoreOrderType::Market
         );
         assert_eq!(map_time_in_force(TimeInForce::PostOnly), "GTX");
+    }
+
+    #[test]
+    fn trading_adapter_should_map_core_trade_to_fill_event() {
+        let now = Utc::now();
+        let fill = map_fill_event(
+            ExchangeId::Binance,
+            CoreTrade {
+                id: "trade-1".to_string(),
+                symbol: "BTC/USDT".to_string(),
+                side: CoreOrderSide::Buy,
+                amount: 0.01,
+                price: 65_000.0,
+                timestamp: now,
+                order_id: Some("order-1".to_string()),
+                fee: Some(Fee {
+                    currency: "USDT".to_string(),
+                    cost: 0.13,
+                    rate: Some(0.0002),
+                }),
+            },
+        );
+
+        assert_eq!(fill.exchange, ExchangeId::Binance);
+        assert_eq!(fill.canonical_symbol, CanonicalSymbol::new("BTC", "USDT"));
+        assert_eq!(fill.exchange_symbol.symbol, "BTCUSDT");
+        assert_eq!(fill.trade_id, "trade-1");
+        assert_eq!(fill.exchange_order_id.as_deref(), Some("order-1"));
+        assert_eq!(fill.side, OrderSide::Buy);
+        assert_eq!(fill.quantity, 0.01);
+        assert_eq!(fill.quote_quantity, 650.0);
+        assert_eq!(fill.fee, Some(0.13));
+        assert_eq!(fill.fee_asset.as_deref(), Some("USDT"));
+        assert_eq!(fill.fee_rate, Some(0.0002));
+        assert_eq!(fill.liquidity, FillLiquidity::Unknown);
+        assert_eq!(fill.filled_at, now);
     }
 
     #[test]
