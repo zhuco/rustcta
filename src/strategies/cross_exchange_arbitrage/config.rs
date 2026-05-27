@@ -159,6 +159,16 @@ impl CrossExchangeArbitrageConfig {
                         exchange: exchange.clone(),
                     });
                 }
+                if self
+                    .exchanges
+                    .get(exchange)
+                    .map(|runtime| !runtime.private_ws_enabled)
+                    .unwrap_or(true)
+                {
+                    return Err(ConfigValidationError::LivePrivateWsDisabled {
+                        exchange: exchange.clone(),
+                    });
+                }
             }
             for (exchange, runtime) in &self.exchanges {
                 if runtime.private_ws_enabled
@@ -211,6 +221,8 @@ pub enum ConfigValidationError {
     LiveExchangeDisabled { exchange: ExchangeId },
     #[error("live mode with dry_run=false requires private REST for exchange {exchange}")]
     LivePrivateRestDisabled { exchange: ExchangeId },
+    #[error("live mode requires private websocket for exchange {exchange}")]
+    LivePrivateWsDisabled { exchange: ExchangeId },
     #[error("private websocket runtime for exchange {exchange} must use positive durations")]
     InvalidPrivateWsRuntime { exchange: ExchangeId },
     #[error("risk values must be positive and internally consistent")]
@@ -655,6 +667,16 @@ impl Default for AlertConfig {
 mod tests {
     use super::*;
 
+    fn enable_private_ws_for_live_universe(config: &mut CrossExchangeArbitrageConfig) {
+        for exchange in config.universe.enabled_exchanges.clone() {
+            config
+                .exchanges
+                .entry(exchange)
+                .or_default()
+                .private_ws_enabled = true;
+        }
+    }
+
     #[test]
     fn config_validate_should_accept_default_simulation() {
         CrossExchangeArbitrageConfig::default().validate().unwrap();
@@ -678,6 +700,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_private_ws_for_live_universe(&mut config);
         config
             .exchanges
             .entry(ExchangeId::Gate)
@@ -697,7 +720,15 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_private_ws_for_live_universe(&mut config);
         config.execution.dry_run = false;
+        for exchange in config.universe.enabled_exchanges.clone() {
+            config
+                .exchanges
+                .entry(exchange)
+                .or_default()
+                .private_rest_enabled = true;
+        }
         config
             .exchanges
             .entry(ExchangeId::Bitget)
@@ -708,6 +739,25 @@ mod tests {
             config.validate().unwrap_err(),
             ConfigValidationError::LivePrivateRestDisabled {
                 exchange: ExchangeId::Bitget
+            }
+        );
+    }
+
+    #[test]
+    fn config_validate_should_reject_live_without_private_ws() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config
+            .exchanges
+            .entry(ExchangeId::Binance)
+            .or_default()
+            .private_ws_enabled = false;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LivePrivateWsDisabled {
+                exchange: ExchangeId::Binance
             }
         );
     }
@@ -759,6 +809,15 @@ mod tests {
         assert_eq!(config.sizing.max_notional_usdt, 10.0);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.execution.dry_run);
+        for exchange in &config.universe.enabled_exchanges {
+            assert!(
+                config
+                    .exchanges
+                    .get(exchange)
+                    .is_some_and(|runtime| runtime.private_ws_enabled),
+                "{exchange} should enable private websocket"
+            );
+        }
         assert_eq!(
             config
                 .exchanges

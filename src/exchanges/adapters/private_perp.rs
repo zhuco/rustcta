@@ -372,10 +372,70 @@ where
         self.instruments.get(canonical_symbol)
     }
 
+    fn instrument_for_exchange_symbol(&self, symbol: &ExchangeSymbol) -> Option<&InstrumentMeta> {
+        canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
+            .and_then(|canonical| self.instruments.get(&canonical))
+            .or_else(|| {
+                self.instruments
+                    .values()
+                    .find(|instrument| instrument.exchange_symbol == *symbol)
+            })
+    }
+
+    fn gate_contract_size_for_symbol(&self, symbol: &ExchangeSymbol) -> Option<f64> {
+        if self.exchange != ExchangeId::Gate || symbol.exchange != ExchangeId::Gate {
+            return None;
+        }
+        self.instrument_for_exchange_symbol(symbol)
+            .map(instrument_contract_size)
+    }
+
+    fn gate_contract_size_for_item(
+        &self,
+        item: &Value,
+        fallback_symbol: Option<&ExchangeSymbol>,
+    ) -> Option<f64> {
+        if self.exchange != ExchangeId::Gate {
+            return None;
+        }
+        str_field(item, &["contract"])
+            .and_then(|symbol| {
+                self.gate_contract_size_for_symbol(&ExchangeSymbol::new(ExchangeId::Gate, symbol))
+            })
+            .or_else(|| {
+                fallback_symbol.and_then(|symbol| self.gate_contract_size_for_symbol(symbol))
+            })
+    }
+
+    fn order_command_for_protocol(&self, command: &OrderCommand) -> OrderCommand {
+        let mut command = command.clone();
+        if self.exchange == ExchangeId::Gate {
+            if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+                command.quantity = gate_base_to_contract_quantity(command.quantity, instrument);
+            }
+        }
+        command
+    }
+
+    fn close_command_for_protocol(&self, command: &ClosePositionCommand) -> ClosePositionCommand {
+        let mut command = command.clone();
+        if self.exchange == ExchangeId::Gate {
+            if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+                command.quantity = gate_base_to_contract_quantity(command.quantity, instrument);
+            }
+        }
+        command
+    }
+
     fn normalize_order_command(&self, mut command: OrderCommand) -> Result<OrderCommand> {
         if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+            let quantity = if self.exchange == ExchangeId::Gate {
+                gate_base_to_contract_quantity(command.quantity, instrument)
+            } else {
+                command.quantity
+            };
             let normalized = instrument.normalize_order_input(
-                command.quantity,
+                quantity,
                 command.price,
                 RoundingMode::Floor,
                 RoundingMode::Nearest,
@@ -389,7 +449,14 @@ where
                     normalized.violations
                 );
             }
-            command.quantity = normalized.quantity;
+            command.quantity = if self.exchange == ExchangeId::Gate {
+                gate_contract_to_base_quantity(
+                    normalized.quantity,
+                    instrument_contract_size(instrument),
+                )
+            } else {
+                normalized.quantity
+            };
             command.price = normalized.price;
         }
         if matches!(command.order_type, OrderType::Limit) && command.price.is_none() {
@@ -403,8 +470,13 @@ where
         mut command: ClosePositionCommand,
     ) -> Result<ClosePositionCommand> {
         if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+            let quantity = if self.exchange == ExchangeId::Gate {
+                gate_base_to_contract_quantity(command.quantity, instrument)
+            } else {
+                command.quantity
+            };
             let normalized = instrument.normalize_order_input(
-                command.quantity,
+                quantity,
                 command.price,
                 RoundingMode::Floor,
                 RoundingMode::Nearest,
@@ -418,7 +490,14 @@ where
                     normalized.violations
                 );
             }
-            command.quantity = normalized.quantity;
+            command.quantity = if self.exchange == ExchangeId::Gate {
+                gate_contract_to_base_quantity(
+                    normalized.quantity,
+                    instrument_contract_size(instrument),
+                )
+            } else {
+                normalized.quantity
+            };
             command.price = normalized.price;
         }
         if matches!(command.order_type, OrderType::Limit) && command.price.is_none() {
@@ -445,9 +524,13 @@ where
     async fn place_order(&self, command: OrderCommand) -> Result<OrderAck> {
         ensure_order_supported(self.exchange(), &command, self.capabilities())?;
         let command = self.normalize_order_command(command)?;
+        let protocol_command = self.order_command_for_protocol(&command);
         let value = self
             .transport
-            .execute(self.protocol.place_order(&command, self.position_mode)?)
+            .execute(
+                self.protocol
+                    .place_order(&protocol_command, self.position_mode)?,
+            )
             .await?;
         let order_id = response_string(&value, &["orderId", "id"])
             .or_else(|| response_string(&value, &["clientOid", "text"]))
@@ -486,8 +569,15 @@ where
             .transport
             .execute(self.protocol.get_order(&query)?)
             .await?;
-        parse_rest_order(self.exchange(), &query.exchange_symbol, &value, Utc::now())
-            .ok_or_else(|| anyhow!("{} order response could not be normalized", self.exchange()))
+        let gate_contract_size = self.gate_contract_size_for_symbol(&query.exchange_symbol);
+        parse_rest_order_with_gate_contract_size(
+            self.exchange(),
+            &query.exchange_symbol,
+            &value,
+            Utc::now(),
+            gate_contract_size,
+        )
+        .ok_or_else(|| anyhow!("{} order response could not be normalized", self.exchange()))
     }
 
     async fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<Vec<OrderState>> {
@@ -506,7 +596,15 @@ where
                         str_field(&item, &["symbol", "instId", "contract"]).unwrap_or_default(),
                     )
                 });
-                parse_rest_order(exchange.clone(), &symbol, &item, Utc::now())
+                let gate_contract_size =
+                    self.gate_contract_size_for_item(&item, fallback_symbol.as_ref());
+                parse_rest_order_with_gate_contract_size(
+                    exchange.clone(),
+                    &symbol,
+                    &item,
+                    Utc::now(),
+                    gate_contract_size,
+                )
             })
             .collect())
     }
@@ -526,7 +624,13 @@ where
                 ExchangeId::Bitget => {
                     parse_bitget_position(&item, Utc::now()).and_then(event_position)
                 }
-                ExchangeId::Gate => parse_gate_position(&item, Utc::now()).and_then(event_position),
+                ExchangeId::Gate => {
+                    let contract_size = self
+                        .gate_contract_size_for_item(&item, symbol)
+                        .unwrap_or_else(|| gate_contract_size_from_item(&item));
+                    parse_gate_position_with_contract_size(&item, Utc::now(), contract_size)
+                        .and_then(event_position)
+                }
                 _ => None,
             })
             .collect())
@@ -563,7 +667,13 @@ where
             .into_iter()
             .filter_map(|item| match exchange {
                 ExchangeId::Bitget => parse_bitget_fill(&item, Utc::now()).and_then(event_fill),
-                ExchangeId::Gate => parse_gate_fill(&item, Utc::now()).and_then(event_fill),
+                ExchangeId::Gate => {
+                    let contract_size = self
+                        .gate_contract_size_for_item(&item, query.exchange_symbol.as_ref())
+                        .unwrap_or_else(|| gate_contract_size_from_item(&item));
+                    parse_gate_fill_with_contract_size(&item, Utc::now(), contract_size)
+                        .and_then(event_fill)
+                }
                 _ => None,
             })
             .filter(|fill| {
@@ -623,11 +733,12 @@ where
             "close position",
         )?;
         let command = self.normalize_close_command(command)?;
+        let protocol_command = self.close_command_for_protocol(&command);
         let value = self
             .transport
             .execute(close_position_spec(
                 self.exchange(),
-                &command,
+                &protocol_command,
                 self.position_mode,
             )?)
             .await?;
@@ -1747,11 +1858,12 @@ fn response_string(value: &Value, keys: &[&str]) -> Option<String> {
     str_field(&data, keys).or_else(|| str_field(value, keys))
 }
 
-fn parse_rest_order(
+fn parse_rest_order_with_gate_contract_size(
     exchange: ExchangeId,
     fallback_symbol: &ExchangeSymbol,
     value: &Value,
     received_at: DateTime<Utc>,
+    gate_contract_size: Option<f64>,
 ) -> Option<OrderState> {
     let data = response_data(value);
     let item = match data {
@@ -1761,7 +1873,11 @@ fn parse_rest_order(
     };
     let event = match exchange {
         ExchangeId::Bitget => parse_bitget_order_or_fill(&item, received_at),
-        ExchangeId::Gate => parse_gate_order_or_fill(&item, received_at),
+        ExchangeId::Gate => parse_gate_order_or_fill_with_contract_size(
+            &item,
+            received_at,
+            gate_contract_size.unwrap_or_else(|| gate_contract_size_from_item(&item)),
+        ),
         _ => None,
     }?;
     match event.kind {
@@ -1975,13 +2091,29 @@ fn parse_bitget_balance(item: &Value, received_at: DateTime<Utc>) -> Option<Priv
 }
 
 fn parse_gate_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    parse_gate_order_or_fill_with_contract_size(
+        item,
+        received_at,
+        gate_contract_size_from_item(item),
+    )
+}
+
+fn parse_gate_order_or_fill_with_contract_size(
+    item: &Value,
+    received_at: DateTime<Utc>,
+    contract_size: f64,
+) -> Option<PrivateEvent> {
     if item.get("trade_id").or_else(|| item.get("id")).is_some() && item.get("order_id").is_some() {
-        return parse_gate_fill(item, received_at);
+        return parse_gate_fill_with_contract_size(item, received_at, contract_size);
     }
     let symbol = str_field(item, &["contract"])?;
-    let signed_size = f64_field(item, &["size"]).unwrap_or_default();
-    let left = f64_field(item, &["left"]).unwrap_or_default().abs();
-    let quantity = signed_size.abs();
+    let signed_size = gate_signed_contracts(item);
+    let left = gate_contract_to_base_quantity(
+        f64_field(item, &["left"]).unwrap_or_default().abs(),
+        contract_size,
+    );
+    let quantity = gate_contract_to_base_quantity(signed_size.abs(), contract_size);
+    let side = gate_side_from_contracts(item, signed_size);
     Some(PrivateEvent::order(
         OrderState {
             exchange: ExchangeId::Gate,
@@ -1989,16 +2121,8 @@ fn parse_gate_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<
             exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, symbol),
             client_order_id: str_field(item, &["text"]),
             exchange_order_id: str_field(item, &["id"]),
-            side: if signed_size < 0.0 {
-                OrderSide::Sell
-            } else {
-                OrderSide::Buy
-            },
-            position_side: if signed_size < 0.0 {
-                PositionSide::Short
-            } else {
-                PositionSide::Long
-            },
+            side,
+            position_side: gate_position_side_from_contracts(item, signed_size, side),
             order_type: if item.get("price").is_some() {
                 OrderType::Limit
             } else {
@@ -2018,10 +2142,19 @@ fn parse_gate_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<
 }
 
 fn parse_gate_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    parse_gate_fill_with_contract_size(item, received_at, gate_contract_size_from_item(item))
+}
+
+fn parse_gate_fill_with_contract_size(
+    item: &Value,
+    received_at: DateTime<Utc>,
+    contract_size: f64,
+) -> Option<PrivateEvent> {
     let symbol = str_field(item, &["contract"])?;
-    let signed_size = f64_field(item, &["size"]).unwrap_or_default();
+    let signed_size = gate_signed_contracts(item);
     let price = f64_field(item, &["price"]).unwrap_or_default();
-    let quantity = signed_size.abs();
+    let quantity = gate_contract_to_base_quantity(signed_size.abs(), contract_size);
+    let side = gate_side_from_contracts(item, signed_size);
     Some(PrivateEvent::fill(
         FillEvent {
             exchange: ExchangeId::Gate,
@@ -2031,16 +2164,8 @@ fn parse_gate_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEv
                 .unwrap_or_else(|| format!("gate-fill-{}", received_at.timestamp_millis())),
             client_order_id: str_field(item, &["text"]),
             exchange_order_id: str_field(item, &["order_id", "order"]),
-            side: if signed_size < 0.0 {
-                OrderSide::Sell
-            } else {
-                OrderSide::Buy
-            },
-            position_side: if signed_size < 0.0 {
-                PositionSide::Short
-            } else {
-                PositionSide::Long
-            },
+            side,
+            position_side: gate_position_side_from_contracts(item, signed_size, side),
             liquidity: liquidity(str_field(item, &["role"]).as_deref()),
             price,
             quantity,
@@ -2058,19 +2183,24 @@ fn parse_gate_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEv
 }
 
 fn parse_gate_position(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    parse_gate_position_with_contract_size(item, received_at, gate_contract_size_from_item(item))
+}
+
+fn parse_gate_position_with_contract_size(
+    item: &Value,
+    received_at: DateTime<Utc>,
+    contract_size: f64,
+) -> Option<PrivateEvent> {
     let symbol = str_field(item, &["contract"])?;
-    let signed_size = f64_field(item, &["size"]).unwrap_or_default();
+    let signed_size = gate_signed_contracts(item);
+    let side = gate_side_from_contracts(item, signed_size);
     Some(PrivateEvent::position(
         ExchangePosition {
             exchange: ExchangeId::Gate,
             canonical_symbol: canonical(&ExchangeId::Gate, &symbol),
             exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, symbol),
-            position_side: if signed_size < 0.0 {
-                PositionSide::Short
-            } else {
-                PositionSide::Long
-            },
-            quantity: signed_size.abs(),
+            position_side: gate_position_side_from_contracts(item, signed_size, side),
+            quantity: gate_contract_to_base_quantity(signed_size.abs(), contract_size),
             entry_price: f64_field(item, &["entry_price"]),
             mark_price: f64_field(item, &["mark_price"]),
             unrealized_pnl: f64_field(item, &["unrealised_pnl", "unrealized_pnl"]),
@@ -2142,6 +2272,81 @@ fn bitget_trade_side(reduce_only: bool) -> &'static str {
     } else {
         "open"
     }
+}
+
+fn instrument_contract_size(instrument: &InstrumentMeta) -> f64 {
+    valid_contract_size(instrument.contract_size)
+}
+
+fn valid_contract_size(contract_size: f64) -> f64 {
+    if contract_size.is_finite() && contract_size > 0.0 {
+        contract_size
+    } else {
+        1.0
+    }
+}
+
+fn gate_base_to_contract_quantity(quantity: f64, instrument: &InstrumentMeta) -> f64 {
+    normalize_number(quantity / instrument_contract_size(instrument))
+}
+
+fn gate_contract_to_base_quantity(quantity: f64, contract_size: f64) -> f64 {
+    normalize_number(quantity * valid_contract_size(contract_size))
+}
+
+fn gate_contract_size_from_item(item: &Value) -> f64 {
+    valid_contract_size(
+        f64_field(item, &["contract_size", "quanto_multiplier", "multiplier"]).unwrap_or(1.0),
+    )
+}
+
+fn gate_signed_contracts(item: &Value) -> f64 {
+    let quantity = f64_field(item, &["size", "contracts"]).unwrap_or_default();
+    if quantity < 0.0 {
+        return quantity;
+    }
+    match str_field(item, &["side"]).as_deref() {
+        Some(side) if parse_order_side(Some(side)) == OrderSide::Sell => -quantity.abs(),
+        _ => quantity,
+    }
+}
+
+fn gate_side_from_contracts(item: &Value, signed_contracts: f64) -> OrderSide {
+    str_field(item, &["side"])
+        .as_deref()
+        .map(|side| parse_order_side(Some(side)))
+        .unwrap_or_else(|| {
+            if signed_contracts < 0.0 {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            }
+        })
+}
+
+fn gate_position_side_from_contracts(
+    item: &Value,
+    signed_contracts: f64,
+    side: OrderSide,
+) -> PositionSide {
+    str_field(item, &["position_side", "pos_side", "mode"])
+        .as_deref()
+        .map(parse_position_side)
+        .filter(|position_side| *position_side != PositionSide::Net)
+        .unwrap_or_else(|| {
+            if signed_contracts < 0.0 || side == OrderSide::Sell {
+                PositionSide::Short
+            } else {
+                PositionSide::Long
+            }
+        })
+}
+
+fn normalize_number(value: f64) -> f64 {
+    if !value.is_finite() {
+        return value;
+    }
+    number_string(value).parse().unwrap_or(value)
 }
 
 fn gate_signed_size(side: OrderSide, quantity: f64) -> f64 {
@@ -2374,6 +2579,26 @@ mod tests {
             10.0,
             1,
             3,
+            crate::market::InstrumentStatus::Trading,
+        )
+    }
+
+    fn gate_contract_instrument(contract_size: f64) -> InstrumentMeta {
+        InstrumentMeta::new(
+            ExchangeId::Gate,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+            "BTC",
+            "USDT",
+            "USDT",
+            crate::market::ContractType::LinearPerpetual,
+            contract_size,
+            0.5,
+            1.0,
+            1.0,
+            10.0,
+            1,
+            0,
             crate::market::InstrumentStatus::Trading,
         )
     }
@@ -2643,6 +2868,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gate_adapter_should_send_contract_count_for_non_unit_contract_size() {
+        let transport = MockTransport::new(json!({"id": "gate-order-1"}));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport.clone())
+            .with_instruments([gate_contract_instrument(0.0001)]);
+        let mut cmd = command(ExchangeId::Gate, "BTC_USDT");
+        cmd.side = OrderSide::Sell;
+        cmd.quantity = 0.01234;
+        cmd.price = Some(65_000.24);
+
+        adapter.place_order(cmd).await.unwrap();
+
+        let seen = transport.seen.lock().unwrap();
+        let body = seen[0].body.as_ref().unwrap();
+        assert_eq!(body["size"], -123.0);
+        assert_eq!(body["price"], "65000");
+    }
+
+    #[tokio::test]
     async fn private_perp_trading_adapter_should_reject_below_min_notional() {
         let transport = MockTransport::new(json!({
             "code": "00000",
@@ -2705,6 +2948,110 @@ mod tests {
         assert_eq!(orders[0].position_side, PositionSide::Short);
         assert_eq!(orders[0].status, OrderCommandStatus::Accepted);
         assert_eq!(orders[0].filled_quantity, 1.0);
+    }
+
+    #[tokio::test]
+    async fn gate_adapter_should_normalize_open_order_contracts_to_base_quantity() {
+        let transport = MockTransport::new(json!({
+            "result": [{
+                "id": "gate-order-1",
+                "contract": "BTC_USDT",
+                "size": "-25",
+                "left": "5",
+                "price": "65000",
+                "status": "open",
+                "text": "t-client-1",
+                "create_time_ms": "1700000000000"
+            }]
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport)
+            .with_instruments([gate_contract_instrument(0.0001)]);
+
+        let orders = adapter
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")))
+            .await
+            .unwrap();
+
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].quantity, 0.0025);
+        assert_eq!(orders[0].filled_quantity, 0.002);
+    }
+
+    #[tokio::test]
+    async fn gate_adapter_should_normalize_fill_contracts_to_base_quantity() {
+        let transport = MockTransport::new(json!({
+            "result": [{
+                "id": "trade-1",
+                "order_id": "gate-order-1",
+                "contract": "BTC_USDT",
+                "size": "25",
+                "price": "65000",
+                "fee": "0.1",
+                "fee_currency": "USDT",
+                "role": "maker",
+                "create_time_ms": "1700000000000"
+            }]
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport)
+            .with_instruments([gate_contract_instrument(0.0001)]);
+
+        let mut query = FillQuery::new(ExchangeId::Gate);
+        query.exchange_symbol = Some(ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"));
+        let fills = adapter.get_fills(query).await.unwrap();
+
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].quantity, 0.0025);
+        assert_eq!(fills[0].quote_quantity, 162.5);
+    }
+
+    #[tokio::test]
+    async fn gate_adapter_should_normalize_position_contracts_to_base_quantity() {
+        let transport = MockTransport::new(json!({
+            "result": [{
+                "contract": "BTC_USDT",
+                "size": "-25",
+                "entry_price": "64000",
+                "mark_price": "65000",
+                "unrealised_pnl": "2.5",
+                "update_time_ms": "1700000000000"
+            }]
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport)
+            .with_instruments([gate_contract_instrument(0.0001)]);
+
+        let positions = adapter
+            .get_positions(Some(&ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")))
+            .await
+            .unwrap();
+
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].position_side, PositionSide::Short);
+        assert_eq!(positions[0].quantity, 0.0025);
+    }
+
+    #[test]
+    fn gate_protocol_should_use_payload_contract_size_when_present() {
+        let now = Utc::now();
+        let raw = r#"{
+          "channel":"futures.usertrades","event":"update",
+          "result":[{
+            "id":"t1","order_id":"o1","contract":"BTC_USDT","contracts":"25",
+            "contract_size":"0.0001","price":"65000","fee":"0.1",
+            "fee_currency":"USDT","role":"taker","create_time_ms":"1700000000000"
+          }]
+        }"#;
+
+        let events = GatePrivatePerpProtocol
+            .parse_private_ws_message(raw, now)
+            .unwrap();
+
+        match &events[0].kind {
+            PrivateEventKind::Fill(fill) => {
+                assert_eq!(fill.quantity, 0.0025);
+                assert_eq!(fill.quote_quantity, 162.5);
+            }
+            other => panic!("expected fill event, got {other:?}"),
+        }
     }
 
     #[test]

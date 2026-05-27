@@ -6,13 +6,18 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::exchanges::adapters::{BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter};
+use rustcta::execution::{
+    ExecutionEngine, ExecutionRouter, LeverageCommand, PositionMode, PositionModeCommand,
+    TradingAdapter,
+};
 use rustcta::market::{exchange_symbol_for, ExchangeId, InstrumentMeta, MarketDataAdapter};
 use rustcta::strategies::cross_exchange_arbitrage::{
-    build_cross_arb_live_runtime_parts, live_enabled_exchanges, CrossArbRuntime,
-    CrossExchangeArbitrageConfig, PrivateRestAuditPlan, PrivateRuntimeSync,
+    build_cross_arb_live_runtime_parts, live_enabled_exchanges, CrossArbExecutionCoordinator,
+    CrossArbRuntime, CrossExchangeArbitrageConfig, PrivateRestAuditPlan, PrivateRuntimeSync,
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
+use tokio::time::{interval, Duration as TokioDuration};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -29,6 +34,8 @@ struct Args {
     #[arg(long, default_value_t = false)]
     execute: bool,
     #[arg(long, default_value_t = false)]
+    run: bool,
+    #[arg(long, default_value_t = false)]
     skip_private_audit: bool,
 }
 
@@ -37,6 +44,7 @@ struct LiveBootstrapReport {
     generated_at: DateTime<Utc>,
     config_path: String,
     execute_requested: bool,
+    run_requested: bool,
     dry_run: bool,
     live_ready: bool,
     blocking_reasons: Vec<String>,
@@ -45,6 +53,8 @@ struct LiveBootstrapReport {
     instruments_loaded: usize,
     router_adapters: Vec<String>,
     private_ws_specs: Vec<PrivateWsSpecSummary>,
+    binance_private_ws_specs: usize,
+    account_preparation: Vec<AccountPrepSummary>,
     rest_audits: Vec<RestAuditSummary>,
 }
 
@@ -66,6 +76,16 @@ struct RestAuditSummary {
     error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct AccountPrepSummary {
+    exchange: String,
+    symbol: Option<String>,
+    action: String,
+    ok: bool,
+    dry_run: bool,
+    message: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -85,13 +105,28 @@ async fn main() -> Result<()> {
             "--execute was requested but execution.dry_run=true; switch dry_run=false only after preflight passes"
         ));
     }
+    if !args.execute && !config.execution.dry_run {
+        return Err(anyhow!(
+            "execution.dry_run=false requires --execute so account writes and orders are explicit"
+        ));
+    }
 
-    let report = bootstrap_live(args.config, config, args.execute, args.skip_private_audit).await?;
+    let report = bootstrap_live(
+        args.config,
+        config.clone(),
+        args.execute,
+        args.run,
+        args.skip_private_audit,
+    )
+    .await?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.live_ready {
         return Err(anyhow!(
             "live bootstrap is not ready; inspect blocking_reasons"
         ));
+    }
+    if args.run {
+        run_live(config, args.skip_private_audit).await?;
     }
     Ok(())
 }
@@ -100,6 +135,7 @@ async fn bootstrap_live(
     config_path: PathBuf,
     config: CrossExchangeArbitrageConfig,
     execute_requested: bool,
+    run_requested: bool,
     skip_private_audit: bool,
 ) -> Result<LiveBootstrapReport> {
     let enabled_exchanges = live_enabled_exchanges(&config);
@@ -110,6 +146,8 @@ async fn bootstrap_live(
         Utc::now(),
     )));
     let private_sync = PrivateRuntimeSync::new(runtime, parts.adapters.clone());
+    let account_preparation =
+        prepare_live_accounts(&parts.router, &parts.adapters, &config, &instruments).await;
 
     let rest_audits = if skip_private_audit {
         Vec::new()
@@ -122,6 +160,14 @@ async fn bootstrap_live(
             if !audit.ok {
                 blocking_reasons.push(format!("{} private REST audit failed", audit.exchange));
             }
+        }
+    }
+    for prep in &account_preparation {
+        if !prep.ok {
+            blocking_reasons.push(format!(
+                "{} {} account preparation failed",
+                prep.exchange, prep.action
+            ));
         }
     }
     for exchange in &enabled_exchanges {
@@ -137,6 +183,7 @@ async fn bootstrap_live(
         generated_at: Utc::now(),
         config_path: config_path.display().to_string(),
         execute_requested,
+        run_requested,
         dry_run: config.execution.dry_run,
         live_ready: blocking_reasons.is_empty(),
         blocking_reasons,
@@ -165,8 +212,225 @@ async fn bootstrap_live(
                 account_id_configured: spec.auth.account_id.is_some(),
             })
             .collect(),
+        binance_private_ws_specs: parts.binance_private_ws_specs.len(),
+        account_preparation,
         rest_audits,
     })
+}
+
+async fn run_live(config: CrossExchangeArbitrageConfig, skip_private_audit: bool) -> Result<()> {
+    let enabled_exchanges = live_enabled_exchanges(&config);
+    let instruments = load_live_instruments(&config, &enabled_exchanges).await?;
+    let parts = build_cross_arb_live_runtime_parts(&config, instruments.clone())?;
+    let account_preparation =
+        prepare_live_accounts(&parts.router, &parts.adapters, &config, &instruments).await;
+    let failed_prep = account_preparation
+        .iter()
+        .filter(|summary| !summary.ok)
+        .map(|summary| format!("{} {}", summary.exchange, summary.action))
+        .collect::<Vec<_>>();
+    if !failed_prep.is_empty() {
+        return Err(anyhow!(
+            "account preparation failed before live loop: {}",
+            failed_prep.join(", ")
+        ));
+    }
+
+    let runtime = Arc::new(RwLock::new(CrossArbRuntime::new(
+        config.clone(),
+        Utc::now(),
+    )));
+    let execution = Arc::new(RwLock::new(CrossArbExecutionCoordinator::new(
+        ExecutionEngine::new(parts.router),
+    )));
+    let private_sync = Arc::new(PrivateRuntimeSync::with_execution(
+        runtime,
+        parts.adapters.clone(),
+        Some(execution),
+    ));
+
+    if !skip_private_audit {
+        let audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
+        let failures = audits
+            .iter()
+            .filter(|summary| !summary.ok)
+            .map(|summary| summary.exchange.clone())
+            .collect::<Vec<_>>();
+        if !failures.is_empty() {
+            return Err(anyhow!(
+                "initial private REST audit failed before live loop: {}",
+                failures.join(", ")
+            ));
+        }
+    }
+
+    let mut perp_rx = private_sync.start_private_ws_supervisors(parts.private_ws_specs, 256);
+    let private_sync_for_perp = private_sync.clone();
+    tokio::spawn(async move {
+        private_sync_for_perp
+            .pump_private_events(&mut perp_rx)
+            .await;
+    });
+
+    let mut binance_rx =
+        private_sync.start_binance_private_ws_supervisors(parts.binance_private_ws_specs, 256);
+    let private_sync_for_binance = private_sync.clone();
+    tokio::spawn(async move {
+        private_sync_for_binance
+            .pump_private_events(&mut binance_rx)
+            .await;
+    });
+
+    let private_sync_for_audit = private_sync.clone();
+    tokio::spawn(periodic_rest_audit_loop(
+        private_sync_for_audit,
+        config.clone(),
+        enabled_exchanges.clone(),
+    ));
+
+    futures_util::future::pending::<()>().await;
+    Ok(())
+}
+
+async fn periodic_rest_audit_loop(
+    private_sync: Arc<PrivateRuntimeSync>,
+    config: CrossExchangeArbitrageConfig,
+    exchanges: Vec<ExchangeId>,
+) {
+    let mut ticker = interval(TokioDuration::from_secs(
+        config.reconciliation.full_audit_interval_secs.max(1),
+    ));
+    loop {
+        ticker.tick().await;
+        let _ = run_initial_rest_audits(&private_sync, &config, &exchanges).await;
+    }
+}
+
+async fn prepare_live_accounts(
+    router: &ExecutionRouter,
+    adapters: &[Arc<dyn TradingAdapter>],
+    config: &CrossExchangeArbitrageConfig,
+    instruments: &[InstrumentMeta],
+) -> Vec<AccountPrepSummary> {
+    let mut summaries = Vec::new();
+    let leverage = config.sizing.leverage.round().max(1.0) as u32;
+    for adapter in adapters {
+        let exchange = adapter.exchange();
+        let capabilities = adapter.capabilities();
+        let mode = configured_position_mode_for_config(config, &exchange);
+        if capabilities.supports_position_mode_change {
+            let action = "set_position_mode".to_string();
+            match router
+                .route_set_position_mode(PositionModeCommand {
+                    exchange: exchange.clone(),
+                    mode,
+                    requested_at: Utc::now(),
+                })
+                .await
+            {
+                Ok(ack) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: None,
+                    action,
+                    ok: config.execution.dry_run || ack.accepted,
+                    dry_run: config.execution.dry_run,
+                    message: ack.message,
+                }),
+                Err(err) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: None,
+                    action,
+                    ok: false,
+                    dry_run: config.execution.dry_run,
+                    message: Some(err.to_string()),
+                }),
+            }
+        } else if mode.is_hedge() {
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                action: "set_position_mode".to_string(),
+                ok: false,
+                dry_run: config.execution.dry_run,
+                message: Some(format!(
+                    "{exchange} does not support position mode changes but hedge was requested"
+                )),
+            });
+        } else {
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                action: "set_position_mode".to_string(),
+                ok: true,
+                dry_run: config.execution.dry_run,
+                message: Some(
+                    "skipped: one-way mode and adapter does not change account mode".to_string(),
+                ),
+            });
+        }
+
+        if !capabilities.supports_leverage {
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                action: "set_leverage".to_string(),
+                ok: false,
+                dry_run: config.execution.dry_run,
+                message: Some(format!("{exchange} does not support leverage changes")),
+            });
+            continue;
+        }
+
+        for instrument in instruments.iter().filter(|item| item.exchange == exchange) {
+            let command = LeverageCommand {
+                exchange: exchange.clone(),
+                canonical_symbol: instrument.canonical_symbol.clone(),
+                exchange_symbol: instrument.exchange_symbol.clone(),
+                leverage,
+                requested_at: Utc::now(),
+            };
+            match router.route_set_leverage(command).await {
+                Ok(ack) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(ack.canonical_symbol.to_string()),
+                    action: "set_leverage".to_string(),
+                    ok: config.execution.dry_run || ack.accepted,
+                    dry_run: config.execution.dry_run,
+                    message: ack.message,
+                }),
+                Err(err) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(instrument.canonical_symbol.to_string()),
+                    action: "set_leverage".to_string(),
+                    ok: false,
+                    dry_run: config.execution.dry_run,
+                    message: Some(err.to_string()),
+                }),
+            }
+        }
+    }
+    summaries
+}
+
+fn configured_position_mode_for_config(
+    config: &CrossExchangeArbitrageConfig,
+    exchange: &ExchangeId,
+) -> PositionMode {
+    config
+        .exchanges
+        .get(exchange)
+        .and_then(|runtime| runtime.position_mode.as_deref())
+        .map(|mode| {
+            if matches!(
+                mode.to_ascii_lowercase().as_str(),
+                "hedge" | "hedged" | "long_short"
+            ) {
+                PositionMode::Hedge
+            } else {
+                PositionMode::OneWay
+            }
+        })
+        .unwrap_or(PositionMode::OneWay)
 }
 
 async fn load_live_instruments(
@@ -285,5 +549,11 @@ mod tests {
             live_enabled_exchanges(&config),
             vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
         );
+        for exchange in live_enabled_exchanges(&config) {
+            assert!(config
+                .exchanges
+                .get(&exchange)
+                .is_some_and(|runtime| runtime.private_ws_enabled));
+        }
     }
 }

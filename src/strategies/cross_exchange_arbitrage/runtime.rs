@@ -24,10 +24,17 @@ pub struct PrivateWsRuntimeSpec {
     pub config: PrivateWsRunConfig,
 }
 
+#[derive(Clone)]
+pub struct BinancePrivateWsRuntimeSpec {
+    pub exchange: Arc<dyn Exchange>,
+    pub config: PrivateWsRunConfig,
+}
+
 pub struct CrossArbLiveRuntimeParts {
     pub router: ExecutionRouter,
     pub adapters: Vec<Arc<dyn TradingAdapter>>,
     pub private_ws_specs: Vec<PrivateWsRuntimeSpec>,
+    pub binance_private_ws_specs: Vec<BinancePrivateWsRuntimeSpec>,
 }
 
 pub fn build_cross_arb_execution_router(
@@ -63,6 +70,7 @@ pub fn build_cross_arb_live_runtime_parts(
     let instruments = instruments.into_iter().collect::<Vec<_>>();
     let mut router = ExecutionRouter::new(config.execution.dry_run);
     let mut adapters = Vec::new();
+    let mut binance_private_ws_specs = Vec::new();
     for exchange in live_enabled_exchanges(config) {
         let adapter = build_trading_adapter_for_exchange_with_instruments(
             config,
@@ -74,6 +82,23 @@ pub fn build_cross_arb_live_runtime_parts(
         )?;
         router.register_adapter(adapter.clone());
         adapters.push(adapter);
+        if exchange == ExchangeId::Binance
+            && config
+                .exchanges
+                .get(&exchange)
+                .map(|runtime| runtime.private_ws_enabled)
+                .unwrap_or(false)
+        {
+            binance_private_ws_specs.push(BinancePrivateWsRuntimeSpec {
+                exchange: build_core_exchange(config, &exchange)?,
+                config: config
+                    .exchanges
+                    .get(&exchange)
+                    .map(|runtime| runtime.private_ws_run.clone())
+                    .unwrap_or_default()
+                    .into(),
+            });
+        }
     }
     let private_ws_specs = build_private_ws_runtime_specs(
         config,
@@ -91,6 +116,7 @@ pub fn build_cross_arb_live_runtime_parts(
         router,
         adapters,
         private_ws_specs,
+        binance_private_ws_specs,
     })
 }
 
@@ -108,9 +134,10 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
 ) -> Result<Arc<dyn TradingAdapter>> {
     match exchange {
         ExchangeId::Binance | ExchangeId::Okx => {
-            let core_exchange = build_core_exchange(exchange)?;
+            let core_exchange = build_core_exchange(config, exchange)?;
             Ok(Arc::new(
                 ExchangeTradingAdapter::new(exchange.clone(), core_exchange)
+                    .with_position_mode(configured_position_mode(config, exchange))
                     .with_instruments(instruments),
             ))
         }
@@ -236,8 +263,11 @@ fn api_keys_for_exchange(
     ApiKeys::from_env(prefix).map_err(|err| anyhow!(err.to_string()))
 }
 
-fn build_core_exchange(exchange: &ExchangeId) -> Result<Arc<dyn Exchange>> {
-    let api_keys = ApiKeys::from_env(exchange.as_str()).map_err(|err| anyhow!(err.to_string()))?;
+fn build_core_exchange(
+    config: &CrossExchangeArbitrageConfig,
+    exchange: &ExchangeId,
+) -> Result<Arc<dyn Exchange>> {
+    let api_keys = api_keys_for_exchange(config, exchange)?;
     match exchange {
         ExchangeId::Binance => Ok(Arc::new(BinanceExchange::new(
             crate::core::config::Config {
@@ -415,8 +445,13 @@ mod tests {
     #[test]
     fn runtime_should_build_live_parts_with_router_adapters_and_private_ws_specs() {
         let mut config = CrossExchangeArbitrageConfig::default();
-        config.universe.enabled_exchanges = vec![ExchangeId::Bitget, ExchangeId::Gate];
+        config.universe.enabled_exchanges =
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
         config.universe.symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+        let binance = config.exchanges.entry(ExchangeId::Binance).or_default();
+        binance.enabled = Some(true);
+        binance.private_ws_enabled = true;
+        binance.env_prefix = Some("BINANCE_LIVE_PARTS_TEST".to_string());
         let bitget = config.exchanges.entry(ExchangeId::Bitget).or_default();
         bitget.enabled = Some(true);
         bitget.private_ws_enabled = true;
@@ -431,19 +466,25 @@ mod tests {
         std::env::set_var("BITGET_LIVE_PARTS_TEST_PASSPHRASE", "pass");
         std::env::set_var("GATE_LIVE_PARTS_TEST_API_KEY", "key");
         std::env::set_var("GATE_LIVE_PARTS_TEST_API_SECRET", "secret");
+        std::env::set_var("BINANCE_LIVE_PARTS_TEST_API_KEY", "key");
+        std::env::set_var("BINANCE_LIVE_PARTS_TEST_API_SECRET", "secret");
 
         let parts = build_cross_arb_live_runtime_parts(&config, Vec::new()).unwrap();
 
+        assert!(parts.router.has_adapter(&ExchangeId::Binance));
         assert!(parts.router.has_adapter(&ExchangeId::Bitget));
         assert!(parts.router.has_adapter(&ExchangeId::Gate));
-        assert_eq!(parts.adapters.len(), 2);
+        assert_eq!(parts.adapters.len(), 3);
         assert_eq!(parts.private_ws_specs.len(), 2);
+        assert_eq!(parts.binance_private_ws_specs.len(), 1);
 
         std::env::remove_var("BITGET_LIVE_PARTS_TEST_API_KEY");
         std::env::remove_var("BITGET_LIVE_PARTS_TEST_API_SECRET");
         std::env::remove_var("BITGET_LIVE_PARTS_TEST_PASSPHRASE");
         std::env::remove_var("GATE_LIVE_PARTS_TEST_API_KEY");
         std::env::remove_var("GATE_LIVE_PARTS_TEST_API_SECRET");
+        std::env::remove_var("BINANCE_LIVE_PARTS_TEST_API_KEY");
+        std::env::remove_var("BINANCE_LIVE_PARTS_TEST_API_SECRET");
     }
 
     #[test]

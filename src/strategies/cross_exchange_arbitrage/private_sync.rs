@@ -1,20 +1,25 @@
 //! Private account stream and REST reconciliation helpers for cross-arb runtime.
 
 use super::{
-    maker_fill_from_tracked_private_event, CrossArbExecutionCoordinator, CrossArbRuntime,
-    PrivateWsRuntimeSpec,
+    maker_fill_from_tracked_private_event, BinancePrivateWsRuntimeSpec,
+    CrossArbExecutionCoordinator, CrossArbRuntime, PrivateWsRuntimeSpec,
 };
+use crate::core::types::MarketType;
 use crate::exchanges::adapters::run_private_ws;
 use crate::execution::{
-    ExchangeBalance, ExchangePosition, FillEvent, FillQuery, OrderState, PrivateEvent,
-    PrivateEventKind, ReconcileSeverity, TradingAdapter,
+    parse_binance_futures_user_data_event, ExchangeBalance, ExchangeErrorClass, ExchangePosition,
+    FillEvent, FillQuery, OrderState, PrivateErrorEvent, PrivateEvent, PrivateEventKind,
+    ReconcileSeverity, TradingAdapter,
 };
 use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
+use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
+use tokio::time::{sleep, timeout, Duration as TokioDuration};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateRestSnapshot {
@@ -218,6 +223,22 @@ impl PrivateRuntimeSync {
         rx
     }
 
+    pub fn start_binance_private_ws_supervisors(
+        &self,
+        specs: impl IntoIterator<Item = BinancePrivateWsRuntimeSpec>,
+        channel_capacity: usize,
+    ) -> mpsc::Receiver<PrivateEvent> {
+        let (tx, rx) = mpsc::channel(channel_capacity.max(1));
+        for spec in specs {
+            tokio::spawn(run_binance_futures_private_ws(
+                spec.exchange,
+                spec.config,
+                tx.clone(),
+            ));
+        }
+        rx
+    }
+
     pub async fn pump_private_events(&self, rx: &mut mpsc::Receiver<PrivateEvent>) {
         while let Some(event) = rx.recv().await {
             self.ingest_private_event(event).await;
@@ -319,6 +340,189 @@ pub fn disconnected_event(
         },
         now,
     )
+}
+
+pub async fn run_binance_futures_private_ws(
+    exchange: Arc<dyn crate::core::exchange::Exchange>,
+    config: crate::exchanges::adapters::PrivateWsRunConfig,
+    tx: mpsc::Sender<PrivateEvent>,
+) -> Result<()> {
+    loop {
+        if tx.is_closed() {
+            return Ok(());
+        }
+
+        let result =
+            run_binance_futures_private_ws_once(exchange.clone(), config, tx.clone()).await;
+        if tx.is_closed() {
+            return Ok(());
+        }
+        if let Err(err) = result {
+            emit_private_ws_error(
+                &tx,
+                ExchangeId::Binance,
+                ExchangeErrorClass::Network,
+                Some("binance futures private websocket".to_string()),
+                err.to_string(),
+            )
+            .await;
+            emit_private_ws_disconnected(&tx, ExchangeId::Binance, Some(err.to_string())).await;
+        }
+        sleep(TokioDuration::from_millis(config.reconnect_delay_ms.max(1))).await;
+    }
+}
+
+async fn run_binance_futures_private_ws_once(
+    exchange: Arc<dyn crate::core::exchange::Exchange>,
+    config: crate::exchanges::adapters::PrivateWsRunConfig,
+    tx: mpsc::Sender<PrivateEvent>,
+) -> Result<()> {
+    let listen_key = exchange
+        .create_user_data_stream(MarketType::Futures)
+        .await?;
+    let url = format!("wss://fstream.binance.com/ws/{listen_key}");
+    let connect = timeout(
+        TokioDuration::from_millis(config.connect_timeout_ms.max(1)),
+        connect_async(&url),
+    )
+    .await
+    .map_err(|_| anyhow!("binance futures private websocket connect timed out"))??;
+    let (ws, _) = connect;
+    let (mut write, mut read) = ws.split();
+    let mut keepalive = tokio::time::interval(TokioDuration::from_millis(
+        config.heartbeat_interval_ms.max(1_000),
+    ));
+
+    loop {
+        tokio::select! {
+            _ = keepalive.tick() => {
+                exchange.keepalive_user_data_stream(&listen_key, MarketType::Futures).await?;
+                write.send(Message::Ping(Vec::new())).await?;
+                if !publish_private_event(&tx, PrivateEvent::new(ExchangeId::Binance, PrivateEventKind::Heartbeat, Utc::now())).await {
+                    return Ok(());
+                }
+            }
+            message = read.next() => {
+                match message {
+                    Some(Ok(Message::Text(raw))) => {
+                        publish_binance_raw_private_event(&tx, &raw, &url).await;
+                    }
+                    Some(Ok(Message::Binary(raw))) => {
+                        match String::from_utf8(raw) {
+                            Ok(text) => publish_binance_raw_private_event(&tx, &text, &url).await,
+                            Err(err) => {
+                                emit_private_ws_error(
+                                    &tx,
+                                    ExchangeId::Binance,
+                                    ExchangeErrorClass::Decode,
+                                    Some(url.clone()),
+                                    err.to_string(),
+                                ).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        write.send(Message::Pong(payload)).await?;
+                    }
+                    Some(Ok(Message::Pong(_))) => {
+                        if !publish_private_event(&tx, PrivateEvent::new(ExchangeId::Binance, PrivateEventKind::Heartbeat, Utc::now())).await {
+                            return Ok(());
+                        }
+                    }
+                    Some(Ok(Message::Close(frame))) => {
+                        let reason = frame.map(|frame| frame.reason.to_string());
+                        emit_private_ws_disconnected(&tx, ExchangeId::Binance, reason).await;
+                        return Ok(());
+                    }
+                    Some(Err(err)) => {
+                        emit_private_ws_disconnected(&tx, ExchangeId::Binance, Some(err.to_string())).await;
+                        return Err(err.into());
+                    }
+                    None => {
+                        emit_private_ws_disconnected(
+                            &tx,
+                            ExchangeId::Binance,
+                            Some("binance futures private websocket stream ended".to_string()),
+                        ).await;
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+async fn publish_binance_raw_private_event(
+    tx: &mpsc::Sender<PrivateEvent>,
+    raw: &str,
+    endpoint: &str,
+) {
+    let received_at = Utc::now();
+    match parse_binance_futures_user_data_event(raw, received_at) {
+        Ok(events) => {
+            for event in events {
+                if !publish_private_event(tx, event).await {
+                    return;
+                }
+            }
+        }
+        Err(err) => {
+            emit_private_ws_error(
+                tx,
+                ExchangeId::Binance,
+                ExchangeErrorClass::Decode,
+                Some(endpoint.to_string()),
+                err.to_string(),
+            )
+            .await;
+        }
+    }
+}
+
+async fn publish_private_event(tx: &mpsc::Sender<PrivateEvent>, event: PrivateEvent) -> bool {
+    tx.send(event).await.is_ok()
+}
+
+async fn emit_private_ws_error(
+    tx: &mpsc::Sender<PrivateEvent>,
+    exchange: ExchangeId,
+    class: ExchangeErrorClass,
+    endpoint: Option<String>,
+    message: String,
+) {
+    let now = Utc::now();
+    let _ = tx
+        .send(PrivateEvent::new(
+            exchange,
+            PrivateEventKind::Error(PrivateErrorEvent {
+                class,
+                endpoint,
+                code: None,
+                message,
+                client_order_id: None,
+                exchange_order_id: None,
+                retry_after_ms: None,
+                occurred_at: now,
+            }),
+            now,
+        ))
+        .await;
+}
+
+async fn emit_private_ws_disconnected(
+    tx: &mpsc::Sender<PrivateEvent>,
+    exchange: ExchangeId,
+    reason: Option<String>,
+) {
+    let now = Utc::now();
+    let _ = tx
+        .send(disconnected_event(
+            exchange,
+            reason.unwrap_or_else(|| "private websocket disconnected".to_string()),
+            now,
+        ))
+        .await;
 }
 
 #[cfg(test)]

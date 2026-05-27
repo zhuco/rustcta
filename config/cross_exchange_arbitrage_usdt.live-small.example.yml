@@ -61,7 +61,12 @@ exchanges:
     ws_batch_size: 80
     env_prefix: BINANCE
     private_rest_enabled: true
-    private_ws_enabled: false
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
     routes:
       market_ws:
         - wss://fstream.binance.com/ws
