@@ -234,6 +234,22 @@ mod tests {
     }
 
     #[test]
+    fn cross_exchange_arbitrage_close_long_should_sell_to_bids() {
+        let book = book(ExchangeId::Binance, 100.0, 101.0, 1.0);
+        let result = calculate_taker_vwap(&book, OrderSide::Sell, 100.0);
+
+        assert_eq!(result.vwap_price, Some(100.0));
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_close_short_should_buy_from_asks() {
+        let book = book(ExchangeId::Binance, 100.0, 101.0, 1.0);
+        let result = calculate_taker_vwap(&book, OrderSide::Buy, 101.0);
+
+        assert_eq!(result.vwap_price, Some(101.0));
+    }
+
+    #[test]
     fn cross_exchange_arbitrage_vwap_should_reject_insufficient_depth() {
         let book = book(ExchangeId::Binance, 100.0, 101.0, 0.1);
         let result = calculate_taker_vwap(&book, OrderSide::Buy, 1_000.0);

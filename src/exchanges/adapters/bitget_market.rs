@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use std::collections::HashSet;
 
 use crate::market::{
     BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
@@ -72,18 +73,22 @@ impl MarketDataAdapter for BitgetMarketAdapter {
         symbols: &[CanonicalSymbol],
     ) -> anyhow::Result<Vec<MarketFundingSnapshot>> {
         let recv_ts = Utc::now();
-        let mut snapshots = Vec::new();
 
-        if symbols.is_empty() {
+        if symbols.is_empty() || symbols.len() > 20 {
             let url = format!(
                 "{BITGET_REST_BASE}/api/v2/mix/market/current-fund-rate?productType={BITGET_PRODUCT_TYPE}"
             );
             let value = get_json(&url, "bitget funding").await?;
             ensure_bitget_success(&value, "bitget funding")?;
-            snapshots.extend(parse_funding_response(&value, recv_ts));
+            let wanted = symbols.iter().cloned().collect::<HashSet<_>>();
+            let snapshots = parse_funding_response(&value, recv_ts)
+                .into_iter()
+                .filter(|snapshot| wanted.is_empty() || wanted.contains(&snapshot.canonical_symbol))
+                .collect();
             return Ok(snapshots);
         }
 
+        let mut snapshots = Vec::new();
         for canonical in symbols {
             let exchange_symbol = self.to_exchange_symbol(canonical);
             let url = format!(
@@ -119,14 +124,14 @@ impl MarketDataAdapter for BitgetMarketAdapter {
 
         if let Some(data) = value.get("data").and_then(Value::as_array) {
             for item in data {
-                if let Some(book) = parse_orderbook_payload(&value, item, recv_ts)? {
+                if let Some(book) = parse_orderbook_payload(&value, item, recv_ts, None)? {
                     events.push(MarketEvent::OrderBook(book));
                 }
             }
             return Ok(events);
         }
 
-        if let Some(book) = parse_orderbook_payload(&value, &value, recv_ts)? {
+        if let Some(book) = parse_orderbook_payload(&value, &value, recv_ts, None)? {
             events.push(MarketEvent::OrderBook(book));
         }
 
@@ -156,12 +161,14 @@ impl MarketDataAdapter for BitgetMarketAdapter {
             .get("data")
             .ok_or_else(|| anyhow!("bitget orderbook response missing data"))?;
 
-        parse_orderbook_payload(&value, data, Utc::now())?.ok_or_else(|| {
-            anyhow!(
-                "bitget orderbook response missing bids/asks for {}",
-                symbol.symbol
-            )
-        })
+        parse_orderbook_payload(&value, data, Utc::now(), Some(symbol.symbol.as_str()))?.ok_or_else(
+            || {
+                anyhow!(
+                    "bitget orderbook response missing bids/asks for {}",
+                    symbol.symbol
+                )
+            },
+        )
     }
 }
 
@@ -200,6 +207,7 @@ fn parse_orderbook_payload(
     root: &Value,
     payload: &Value,
     recv_ts: DateTime<Utc>,
+    fallback_symbol: Option<&str>,
 ) -> anyhow::Result<Option<OrderBook5>> {
     let bids_value = payload
         .get("bids")
@@ -218,6 +226,7 @@ fn parse_orderbook_payload(
 
     let symbol = extract_symbol(root)
         .or_else(|| extract_symbol(payload))
+        .or(fallback_symbol)
         .ok_or_else(|| anyhow!("bitget orderbook message missing symbol/instId/contract"))?;
     let canonical_symbol = bitget_symbol_to_canonical(symbol)
         .ok_or_else(|| anyhow!("bitget orderbook message has unsupported symbol: {symbol}"))?;
@@ -522,5 +531,29 @@ mod tests {
             DateTime::<Utc>::from_timestamp_millis(1746698732562).unwrap()
         );
         assert_eq!(book.sequence, Some(1304314508780744705));
+    }
+
+    #[test]
+    fn bitget_should_parse_rest_merge_depth_with_request_symbol() {
+        let raw = r#"{
+            "code":"00000",
+            "msg":"success",
+            "data":{
+                "asks":[[0.1081,49092.27]],
+                "bids":[[0.1080,283614.47]],
+                "ts":"1779821773645",
+                "scale":"0.0001"
+            }
+        }"#;
+        let value: Value = serde_json::from_str(raw).expect("valid bitget rest depth json");
+        let data = value.get("data").expect("data");
+
+        let book = parse_orderbook_payload(&value, data, Utc::now(), Some("ARBUSDT"))
+            .expect("parse should succeed")
+            .expect("book should exist");
+
+        assert_eq!(book.exchange_symbol.symbol, "ARBUSDT");
+        assert_eq!(book.canonical_symbol, CanonicalSymbol::new("ARB", "USDT"));
+        assert!(book.is_usable());
     }
 }

@@ -19,6 +19,10 @@ pub enum RejectReason {
     NotionalOverLimit,
     SlippageTooHigh,
     BadOrderBook,
+    PrecisionInvalid,
+    AbnormalCrossExchangeSpread,
+    ExchangeCapacityExceeded,
+    ExchangePositionLimitExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

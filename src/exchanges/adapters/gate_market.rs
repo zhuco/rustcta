@@ -119,13 +119,13 @@ impl MarketDataAdapter for GateMarketAdapter {
         let mut events = Vec::new();
 
         if let Some(result) = value.get("result") {
-            if let Some(book) = parse_orderbook_payload(&value, result, recv_ts)? {
+            if let Some(book) = parse_orderbook_payload(&value, result, recv_ts, None)? {
                 events.push(MarketEvent::OrderBook(book));
             }
             return Ok(events);
         }
 
-        if let Some(book) = parse_orderbook_payload(&value, &value, recv_ts)? {
+        if let Some(book) = parse_orderbook_payload(&value, &value, recv_ts, None)? {
             events.push(MarketEvent::OrderBook(book));
         }
 
@@ -151,12 +151,13 @@ impl MarketDataAdapter for GateMarketAdapter {
         );
         let value = get_json(&url, "gate orderbook").await?;
 
-        parse_orderbook_payload(&value, &value, Utc::now())?.ok_or_else(|| {
-            anyhow!(
-                "gate orderbook response missing bids/asks for {}",
-                symbol.symbol
-            )
-        })
+        parse_orderbook_payload(&value, &value, Utc::now(), Some(symbol.symbol.as_str()))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "gate orderbook response missing bids/asks for {}",
+                    symbol.symbol
+                )
+            })
     }
 }
 
@@ -181,6 +182,7 @@ fn parse_orderbook_payload(
     root: &Value,
     payload: &Value,
     recv_ts: DateTime<Utc>,
+    fallback_symbol: Option<&str>,
 ) -> anyhow::Result<Option<OrderBook5>> {
     let bids_value = payload
         .get("bids")
@@ -199,6 +201,7 @@ fn parse_orderbook_payload(
 
     let symbol = extract_symbol(root)
         .or_else(|| extract_symbol(payload))
+        .or(fallback_symbol)
         .ok_or_else(|| anyhow!("gate orderbook message missing symbol/instId/contract"))?;
     let canonical_symbol = compact_symbol_to_canonical(symbol)
         .ok_or_else(|| anyhow!("gate orderbook message has unsupported symbol: {symbol}"))?;
@@ -506,5 +509,26 @@ mod tests {
             DateTime::<Utc>::from_timestamp_millis(1615366381417).unwrap()
         );
         assert_eq!(book.sequence, Some(2517661113));
+    }
+
+    #[test]
+    fn gate_should_parse_rest_orderbook_with_request_symbol() {
+        let raw = r#"{
+            "id":6440317516,
+            "current":1779821773.897,
+            "update":1779821773.863,
+            "asks":[{"s":2710,"p":"0.10802"}],
+            "bids":[{"s":76,"p":"0.108"}]
+        }"#;
+        let value: Value = serde_json::from_str(raw).expect("valid gate rest book json");
+
+        let book = parse_orderbook_payload(&value, &value, Utc::now(), Some("ARB_USDT"))
+            .expect("parse should succeed")
+            .expect("book should exist");
+
+        assert_eq!(book.exchange_symbol.symbol, "ARB_USDT");
+        assert_eq!(book.canonical_symbol, CanonicalSymbol::new("ARB", "USDT"));
+        assert_eq!(book.sequence, Some(6440317516));
+        assert!(book.is_usable());
     }
 }

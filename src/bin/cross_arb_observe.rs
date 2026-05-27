@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -9,8 +9,8 @@ use rustcta::exchanges::adapters::{
     OkxMarketAdapter,
 };
 use rustcta::market::{
-    CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketDataAdapter, MarketStateCache, RouteStatus,
-    RuntimeMode,
+    CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta, MarketDataAdapter,
+    MarketStateCache, RouteStatus, RuntimeMode,
 };
 use rustcta::strategies::cross_exchange_arbitrage::{
     scan_opportunities, CrossExchangeArbitrageConfig, MarketSnapshot, Opportunity,
@@ -80,10 +80,50 @@ async fn observe_once(
     let mut exchanges_seen = BTreeSet::new();
     let mut books_loaded = 0usize;
     let mut funding_loaded = 0usize;
+    let mut coverage_by_symbol: HashMap<CanonicalSymbol, HashSet<ExchangeId>> = HashMap::new();
+    let mut instruments_by_exchange_symbol: HashMap<(ExchangeId, CanonicalSymbol), InstrumentMeta> =
+        HashMap::new();
 
     for adapter in &adapters {
         let exchange = adapter.exchange();
-        for canonical in &config.universe.symbols {
+        let supported_symbols = match adapter.load_instruments().await {
+            Ok(instruments) => {
+                let mut supported = HashSet::new();
+                for instrument in instruments
+                    .into_iter()
+                    .filter(|instrument| instrument.is_tradeable_usdt_perpetual())
+                {
+                    supported.insert(instrument.canonical_symbol.clone());
+                    instruments_by_exchange_symbol.insert(
+                        (exchange.clone(), instrument.canonical_symbol.clone()),
+                        instrument,
+                    );
+                }
+                supported
+            }
+            Err(err) => {
+                errors.push(ObserveError {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: None,
+                    kind: "instruments",
+                    message: err.to_string(),
+                });
+                HashSet::new()
+            }
+        };
+        let symbols_for_exchange = config
+            .universe
+            .symbols
+            .iter()
+            .filter(|symbol| supported_symbols.contains(*symbol))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for canonical in &symbols_for_exchange {
+            coverage_by_symbol
+                .entry(canonical.clone())
+                .or_default()
+                .insert(exchange.clone());
             let symbol = exchange_symbol_for(&exchange, canonical);
 
             match adapter.fetch_orderbook_snapshot(&symbol, 5).await {
@@ -99,22 +139,40 @@ async fn observe_once(
                     message: err.to_string(),
                 }),
             }
+        }
 
-            match adapter.load_funding(std::slice::from_ref(canonical)).await {
-                Ok(snapshots) => {
-                    for snapshot in snapshots {
-                        cache.upsert_funding(snapshot);
-                        funding_loaded += 1;
-                        exchanges_seen.insert(exchange.as_str().to_string());
-                    }
+        match adapter.load_funding(&symbols_for_exchange).await {
+            Ok(snapshots) => {
+                for snapshot in snapshots {
+                    cache.upsert_funding(snapshot);
+                    funding_loaded += 1;
+                    exchanges_seen.insert(exchange.as_str().to_string());
                 }
-                Err(err) => errors.push(ObserveError {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(canonical.to_string()),
-                    kind: "funding",
-                    message: err.to_string(),
-                }),
             }
+            Err(err) => errors.push(ObserveError {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                kind: "funding",
+                message: err.to_string(),
+            }),
+        }
+    }
+
+    for canonical in &config.universe.symbols {
+        let venues = coverage_by_symbol
+            .get(canonical)
+            .map(HashSet::len)
+            .unwrap_or_default();
+        if venues < config.market.min_common_exchanges {
+            errors.push(ObserveError {
+                exchange: "universe".to_string(),
+                symbol: Some(canonical.to_string()),
+                kind: "coverage",
+                message: format!(
+                    "available on {venues} exchange(s), requires at least {}",
+                    config.market.min_common_exchanges
+                ),
+            });
         }
     }
 
@@ -126,8 +184,12 @@ async fn observe_once(
             .filter_map(|snapshot| {
                 let book = snapshot.orderbook?;
                 let funding = snapshot.funding;
+                let instrument = instruments_by_exchange_symbol
+                    .get(&(book.exchange.clone(), canonical.clone()))
+                    .cloned();
                 Some(MarketSnapshot {
                     book,
+                    instrument,
                     route_status: RouteStatus::Healthy,
                     funding_rate: funding
                         .as_ref()

@@ -50,7 +50,7 @@ impl ArbSignal {
             action,
             confidence: confidence_from_edge(opportunity.maker_taker_net_edge),
             expected_edge: opportunity.maker_taker_net_edge,
-            max_notional_usdt: opportunity.target_notional_usdt,
+            max_notional_usdt: opportunity.executable_notional_usdt,
             risk_flags: opportunity.reject_reasons.clone(),
             generated_at,
         }

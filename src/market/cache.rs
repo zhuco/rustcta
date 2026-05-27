@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    mark_book_freshness, mark_sequence_gap, CanonicalSymbol, ExchangeId, InstrumentMeta,
-    MarketFundingSnapshot, OrderBook5, RouteHealth, RouteType,
+    mark_book_freshness, CanonicalSymbol, ExchangeId, InstrumentMeta, MarketFundingSnapshot,
+    OrderBook5, RouteHealth, RouteType,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -58,8 +58,6 @@ impl MarketStateCache {
         checked_at: DateTime<Utc>,
     ) -> OrderBook5 {
         let key = (book.exchange.clone(), book.canonical_symbol.clone());
-        let previous_sequence = self.orderbooks.get(&key).and_then(|book| book.sequence);
-        let (book, _) = mark_sequence_gap(book, previous_sequence);
         let book = mark_book_freshness(book, checked_at, self.stale_quote_ms);
         self.orderbooks.insert(key, book.clone());
         book
@@ -232,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_should_update_book_and_mark_sequence_gap_and_stale() {
+    fn cache_should_update_book_and_mark_freshness_without_strict_sequence_gap() {
         let now = Utc::now();
         let mut cache = MarketStateCache::new(500);
 
@@ -240,7 +238,7 @@ mod tests {
         let second = cache.upsert_orderbook_at(book(Some(3), now - Duration::seconds(2)), now);
 
         assert!(!first.quality.sequence_gap);
-        assert!(second.quality.sequence_gap);
+        assert!(!second.quality.sequence_gap);
         assert!(second.quality.stale);
         assert!(!second.is_usable());
     }

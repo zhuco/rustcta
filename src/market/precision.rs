@@ -75,7 +75,12 @@ impl InstrumentMeta {
     ) -> NormalizedOrderInput {
         let quantity = self.quantize_quantity(quantity, quantity_mode);
         let price = price.map(|price| self.quantize_price(price, price_mode));
-        let notional = price.map(|price| price * quantity * self.contract_size.max(1.0));
+        let contract_size = if self.contract_size.is_finite() && self.contract_size > 0.0 {
+            self.contract_size
+        } else {
+            1.0
+        };
+        let notional = price.map(|price| price * quantity * contract_size);
         let mut violations = Vec::new();
 
         if !quantity.is_finite() || quantity <= 0.0 {

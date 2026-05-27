@@ -15,6 +15,7 @@ use rustcta::exchanges::{BinanceExchange, OkxExchange};
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
 use rustcta::strategies::cross_exchange_arbitrage::CrossExchangeArbitrageConfig;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use tokio::time::{timeout, Duration};
 
 #[derive(Parser, Debug)]
@@ -87,11 +88,18 @@ async fn main() -> Result<()> {
         },
     );
 
+    let mut coverage_by_symbol: HashMap<String, HashSet<ExchangeId>> = HashMap::new();
     for exchange in &config.universe.enabled_exchanges {
         match market_adapter(exchange) {
             Some(adapter) => {
                 checks.extend(
-                    check_public_market_adapter(adapter.as_ref(), &config, args.timeout_ms).await,
+                    check_public_market_adapter(
+                        adapter.as_ref(),
+                        &config,
+                        args.timeout_ms,
+                        &mut coverage_by_symbol,
+                    )
+                    .await,
                 );
             }
             None => checks.push(fail(
@@ -106,6 +114,27 @@ async fn main() -> Result<()> {
             checks.push(skipped(
                 format!("{}.private", exchange.as_str()),
                 "private checks skipped; pass --private to read account state",
+            ));
+        }
+    }
+
+    for symbol in &config.universe.symbols {
+        let venues = coverage_by_symbol
+            .get(&symbol.to_string())
+            .map(HashSet::len)
+            .unwrap_or_default();
+        if venues >= config.market.min_common_exchanges {
+            checks.push(pass(
+                format!("universe.{}.coverage", symbol),
+                format!("available on {venues} exchange(s)"),
+            ));
+        } else {
+            checks.push(fail(
+                format!("universe.{}.coverage", symbol),
+                format!(
+                    "available on {venues} exchange(s), requires at least {}",
+                    config.market.min_common_exchanges
+                ),
             ));
         }
     }
@@ -146,9 +175,11 @@ async fn check_public_market_adapter(
     adapter: &(dyn MarketDataAdapter + Send + Sync),
     config: &CrossExchangeArbitrageConfig,
     timeout_ms: u64,
+    coverage_by_symbol: &mut HashMap<String, HashSet<ExchangeId>>,
 ) -> Vec<PreflightCheck> {
     let exchange = adapter.exchange();
     let mut checks = Vec::new();
+    let mut supported_symbols = HashSet::new();
 
     checks.push(
         timed(
@@ -157,10 +188,42 @@ async fn check_public_market_adapter(
             adapter.load_instruments(),
         )
         .await
-        .map_message(|instruments| format!("loaded {} instruments", instruments.len())),
+        .map_message(|instruments| {
+            for instrument in instruments {
+                if instrument.is_tradeable_usdt_perpetual() {
+                    supported_symbols.insert(instrument.canonical_symbol);
+                }
+            }
+            format!(
+                "loaded {} tradeable USDT perpetual instruments",
+                supported_symbols.len()
+            )
+        }),
     );
 
-    for symbol in &config.universe.symbols {
+    let symbols_for_exchange = config
+        .universe
+        .symbols
+        .iter()
+        .filter(|symbol| supported_symbols.contains(*symbol))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    checks.push(pass(
+        format!("{}.public.symbol_filter", exchange.as_str()),
+        format!(
+            "{} of {} configured symbols are listed on {}",
+            symbols_for_exchange.len(),
+            config.universe.symbols.len(),
+            exchange.as_str()
+        ),
+    ));
+
+    for symbol in &symbols_for_exchange {
+        coverage_by_symbol
+            .entry(symbol.to_string())
+            .or_default()
+            .insert(exchange.clone());
         let exchange_symbol = exchange_symbol_for(&exchange, symbol);
         checks.push(
             timed(
@@ -184,7 +247,7 @@ async fn check_public_market_adapter(
         timed(
             format!("{}.public.funding", exchange.as_str()),
             timeout_ms,
-            adapter.load_funding(&config.universe.symbols),
+            adapter.load_funding(&symbols_for_exchange),
         )
         .await
         .map_message(|funding| format!("loaded {} funding snapshots", funding.len())),

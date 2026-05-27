@@ -3,7 +3,7 @@
 use super::opportunity::Opportunity;
 use super::risk::RejectReason;
 use super::state::{SimulatedBundleState, SimulatedBundleStatus};
-use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
+use crate::market::{BookQuality, CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +37,11 @@ pub struct OpportunityReadModel {
     pub raw_open_spread: f64,
     pub maker_taker_net_edge: f64,
     pub target_notional_usdt: f64,
+    pub executable_notional_usdt: f64,
+    pub maker_quantity: Option<f64>,
+    pub taker_quantity: Option<f64>,
+    pub maker_notional_usdt: Option<f64>,
+    pub taker_notional_usdt: Option<f64>,
     pub open_fee_est_usdt: f64,
     pub close_fee_est_usdt: f64,
     pub expected_funding_usdt: f64,
@@ -60,6 +65,11 @@ impl From<&Opportunity> for OpportunityReadModel {
             raw_open_spread: opportunity.raw_open_spread,
             maker_taker_net_edge: opportunity.maker_taker_net_edge,
             target_notional_usdt: opportunity.target_notional_usdt,
+            executable_notional_usdt: opportunity.executable_notional_usdt,
+            maker_quantity: opportunity.maker_quantity,
+            taker_quantity: opportunity.taker_quantity,
+            maker_notional_usdt: opportunity.maker_notional_usdt,
+            taker_notional_usdt: opportunity.taker_notional_usdt,
             open_fee_est_usdt: opportunity.open_fee_est_usdt,
             close_fee_est_usdt: opportunity.close_fee_est_usdt,
             expected_funding_usdt: opportunity.expected_funding_usdt,
@@ -110,4 +120,18 @@ pub struct RiskEventReadModel {
     pub reason: RejectReason,
     pub message: String,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderBookQualityReadModel {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub best_bid: Option<f64>,
+    pub best_ask: Option<f64>,
+    pub bid_levels: usize,
+    pub ask_levels: usize,
+    pub book_age_ms: i64,
+    pub source_route: Option<String>,
+    pub quality: BookQuality,
+    pub usable: bool,
 }

@@ -249,7 +249,12 @@ async fn run_public_ws_endpoint(
                 loop {
                     tokio::select! {
                         _ = heartbeat.tick() => {
-                            if let Err(err) = ws.send(Message::Ping(Vec::new())).await {
+                            let heartbeat = if exchange == ExchangeId::Bitget {
+                                Message::Text("ping".to_string())
+                            } else {
+                                Message::Ping(Vec::new())
+                            };
+                            if let Err(err) = ws.send(heartbeat).await {
                                 let _ = tx.send(PublicWsUpdate::Error(ws_error(
                                     exchange.clone(),
                                     "ws_heartbeat",
@@ -349,6 +354,11 @@ async fn handle_ws_text(
     raw: &str,
     tx: &mpsc::Sender<PublicWsUpdate>,
 ) {
+    let trimmed = raw.trim();
+    if trimmed == "pong" || trimmed == "ping" {
+        return;
+    }
+
     match adapter
         .parse_public_ws_message(raw, Utc::now())
         .with_context(|| format!("parse {exchange} public ws message"))

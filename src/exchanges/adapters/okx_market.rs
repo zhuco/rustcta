@@ -176,7 +176,7 @@ impl MarketDataAdapter for OkxMarketAdapter {
         recv_ts: DateTime<Utc>,
     ) -> anyhow::Result<Vec<MarketEvent>> {
         let value: Value = serde_json::from_str(raw)?;
-        let Some(events) = parse_okx_books(&value, recv_ts, "okx.books5") else {
+        let Some(events) = parse_okx_books(&value, recv_ts, "okx.books5", None) else {
             return Ok(Vec::new());
         };
         Ok(events.into_iter().map(MarketEvent::OrderBook).collect())
@@ -197,13 +197,23 @@ impl MarketDataAdapter for OkxMarketAdapter {
             .json()
             .await?;
 
-        parse_okx_books(&value, Utc::now(), "okx.rest.books")
-            .and_then(|mut books| books.pop())
-            .ok_or_else(|| anyhow!("okx books response could not be converted to OrderBook5"))
+        parse_okx_books(
+            &value,
+            Utc::now(),
+            "okx.rest.books",
+            Some(symbol.symbol.as_str()),
+        )
+        .and_then(|mut books| books.pop())
+        .ok_or_else(|| anyhow!("okx books response could not be converted to OrderBook5"))
     }
 }
 
-fn parse_okx_books(value: &Value, recv_ts: DateTime<Utc>, route: &str) -> Option<Vec<OrderBook5>> {
+fn parse_okx_books(
+    value: &Value,
+    recv_ts: DateTime<Utc>,
+    route: &str,
+    fallback_symbol: Option<&str>,
+) -> Option<Vec<OrderBook5>> {
     let inst_id = value
         .get("arg")
         .and_then(|arg| arg.get("instId"))
@@ -215,7 +225,8 @@ fn parse_okx_books(value: &Value, recv_ts: DateTime<Utc>, route: &str) -> Option
                 .and_then(|data| data.first())
                 .and_then(|first| first.get("instId"))
                 .and_then(Value::as_str)
-        })?;
+        })
+        .or(fallback_symbol)?;
     let canonical = okx_symbol_to_canonical(inst_id)?;
     let exchange_symbol = ExchangeSymbol::new(ExchangeId::Okx, inst_id);
     let data = value.get("data")?.as_array()?;
@@ -254,15 +265,15 @@ fn parse_levels(value: &Value) -> Vec<crate::market::BookLevel> {
 }
 
 fn parse_okx_instrument(value: &Value) -> Option<InstrumentMeta> {
-    if value.get("instType")?.as_str()? != "SWAP"
-        || value.get("quoteCcy")?.as_str()? != "USDT"
-        || value.get("settleCcy")?.as_str()? != "USDT"
-    {
+    if value.get("instType")?.as_str()? != "SWAP" || value.get("settleCcy")?.as_str()? != "USDT" {
         return None;
     }
 
     let inst_id = value.get("instId")?.as_str()?;
     let canonical = okx_symbol_to_canonical(inst_id)?;
+    if !inst_id.ends_with("-USDT-SWAP") || canonical.quote() != "USDT" {
+        return None;
+    }
     let status = match value.get("state").and_then(Value::as_str) {
         Some("live") => InstrumentStatus::Trading,
         Some("suspend") | Some("preopen") | Some("test") => InstrumentStatus::Paused,
@@ -418,6 +429,59 @@ mod tests {
             book.exchange_ts,
             DateTime::<Utc>::from_timestamp_millis(1710000001000).unwrap()
         );
+        assert!(book.is_usable());
+    }
+
+    #[test]
+    fn adapters_should_parse_okx_usdt_swap_instrument_with_empty_quote_ccy() {
+        let raw = r#"{
+            "instType":"SWAP",
+            "instId":"ARB-USDT-SWAP",
+            "baseCcy":"",
+            "quoteCcy":"",
+            "settleCcy":"USDT",
+            "ctType":"linear",
+            "state":"live",
+            "tickSz":"0.0001",
+            "lotSz":"0.1",
+            "minSz":"0.1",
+            "ctVal":"1"
+        }"#;
+        let value: Value = serde_json::from_str(raw).expect("valid okx instrument json");
+
+        let instrument = parse_okx_instrument(&value).expect("instrument should parse");
+
+        assert_eq!(instrument.exchange_symbol.symbol, "ARB-USDT-SWAP");
+        assert_eq!(
+            instrument.canonical_symbol,
+            CanonicalSymbol::new("ARB", "USDT")
+        );
+        assert_eq!(instrument.quote, "USDT");
+        assert_eq!(instrument.settle_asset, "USDT");
+        assert_eq!(instrument.price_tick, 0.0001);
+        assert_eq!(instrument.quantity_step, 0.1);
+    }
+
+    #[test]
+    fn adapters_should_parse_okx_rest_books_with_request_symbol() {
+        let raw = r#"{
+            "code":"0",
+            "msg":"",
+            "data":[{
+                "asks":[["0.10804","291.6","0","15"]],
+                "bids":[["0.10803","805.3","0","5"]],
+                "ts":"1779821773651",
+                "seqId":26663809551
+            }]
+        }"#;
+        let value: Value = serde_json::from_str(raw).expect("valid okx rest books json");
+
+        let books = parse_okx_books(&value, Utc::now(), "okx.rest.books", Some("ARB-USDT-SWAP"))
+            .expect("rest books should parse with fallback symbol");
+        let book = books.first().expect("one orderbook");
+
+        assert_eq!(book.exchange_symbol.symbol, "ARB-USDT-SWAP");
+        assert_eq!(book.canonical_symbol, CanonicalSymbol::new("ARB", "USDT"));
         assert!(book.is_usable());
     }
 }

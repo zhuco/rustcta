@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BinanceMarketAdapter;
@@ -107,6 +108,40 @@ impl MarketDataAdapter for BinanceMarketAdapter {
         let client = reqwest::Client::new();
         let mut snapshots = Vec::with_capacity(symbols.len());
 
+        if symbols.is_empty() || symbols.len() > 20 {
+            let values: Vec<Value> = client
+                .get(format!("{BINANCE_FAPI_BASE}/fapi/v1/premiumIndex"))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+                .context("decode binance premiumIndex")?;
+            let wanted = symbols.iter().cloned().collect::<HashSet<_>>();
+            for value in values {
+                let Some(symbol) = value
+                    .get("symbol")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                let Some(canonical) = compact_symbol_to_canonical(&symbol) else {
+                    continue;
+                };
+                if !wanted.is_empty() && !wanted.contains(&canonical) {
+                    continue;
+                }
+                snapshots.push(binance_funding_snapshot(
+                    value,
+                    canonical,
+                    &symbol,
+                    Utc::now(),
+                ));
+            }
+            return Ok(snapshots);
+        }
+
         for canonical in symbols {
             let exchange_symbol = self.to_exchange_symbol(canonical);
             let value: Value = client
@@ -121,29 +156,12 @@ impl MarketDataAdapter for BinanceMarketAdapter {
                     format!("decode binance premiumIndex for {}", exchange_symbol.symbol)
                 })?;
 
-            let recv_ts = Utc::now();
-            let funding_rate = value
-                .get("lastFundingRate")
-                .and_then(parse_json_f64)
-                .unwrap_or_default();
-            let next_funding_time = datetime_from_millis(
-                value.get("nextFundingTime").and_then(parse_json_u64),
-                recv_ts,
-            );
-            let mut snapshot = MarketFundingSnapshot::new(
-                ExchangeId::Binance,
+            snapshots.push(binance_funding_snapshot(
+                value,
                 canonical.clone(),
-                Some(exchange_symbol),
-                funding_rate,
-                Some(next_funding_time),
-                recv_ts,
-            )
-            .with_prices(
-                value.get("markPrice").and_then(parse_json_f64),
-                value.get("indexPrice").and_then(parse_json_f64),
-            );
-            snapshot.predicted_funding_rate = value.get("interestRate").and_then(parse_json_f64);
-            snapshots.push(snapshot);
+                &exchange_symbol.symbol,
+                Utc::now(),
+            ));
         }
 
         Ok(snapshots)
@@ -172,7 +190,7 @@ impl MarketDataAdapter for BinanceMarketAdapter {
             .get("data")
             .filter(|data| data.is_object())
             .unwrap_or(&value);
-        let Some(book) = parse_binance_book(data, recv_ts, "binance.depth5") else {
+        let Some(book) = parse_binance_book(data, recv_ts, "binance.depth5", None) else {
             return Ok(Vec::new());
         };
         Ok(vec![MarketEvent::OrderBook(book)])
@@ -195,13 +213,27 @@ impl MarketDataAdapter for BinanceMarketAdapter {
             .error_for_status()?
             .json()
             .await?;
-        parse_binance_book(&value, Utc::now(), "binance.rest.depth")
-            .ok_or_else(|| anyhow!("binance depth response could not be converted to OrderBook5"))
+        parse_binance_book(
+            &value,
+            Utc::now(),
+            "binance.rest.depth",
+            Some(symbol.symbol.as_str()),
+        )
+        .ok_or_else(|| anyhow!("binance depth response could not be converted to OrderBook5"))
     }
 }
 
-fn parse_binance_book(value: &Value, recv_ts: DateTime<Utc>, route: &str) -> Option<OrderBook5> {
-    let symbol = value.get("s").or_else(|| value.get("symbol"))?.as_str()?;
+fn parse_binance_book(
+    value: &Value,
+    recv_ts: DateTime<Utc>,
+    route: &str,
+    fallback_symbol: Option<&str>,
+) -> Option<OrderBook5> {
+    let symbol = value
+        .get("s")
+        .or_else(|| value.get("symbol"))
+        .and_then(Value::as_str)
+        .or(fallback_symbol)?;
     let canonical = compact_symbol_to_canonical(symbol)?;
     let exchange_symbol = ExchangeSymbol::new(ExchangeId::Binance, symbol);
     let bids = parse_levels(value.get("b").or_else(|| value.get("bids"))?);
@@ -291,6 +323,36 @@ fn parse_binance_instrument(value: &Value) -> Option<InstrumentMeta> {
         quantity_precision,
         status,
     ))
+}
+
+fn binance_funding_snapshot(
+    value: Value,
+    canonical: CanonicalSymbol,
+    exchange_symbol: &str,
+    recv_ts: DateTime<Utc>,
+) -> MarketFundingSnapshot {
+    let funding_rate = value
+        .get("lastFundingRate")
+        .and_then(parse_json_f64)
+        .unwrap_or_default();
+    let next_funding_time = datetime_from_millis(
+        value.get("nextFundingTime").and_then(parse_json_u64),
+        recv_ts,
+    );
+    let mut snapshot = MarketFundingSnapshot::new(
+        ExchangeId::Binance,
+        canonical,
+        Some(ExchangeSymbol::new(ExchangeId::Binance, exchange_symbol)),
+        funding_rate,
+        Some(next_funding_time),
+        recv_ts,
+    )
+    .with_prices(
+        value.get("markPrice").and_then(parse_json_f64),
+        value.get("indexPrice").and_then(parse_json_f64),
+    );
+    snapshot.predicted_funding_rate = value.get("interestRate").and_then(parse_json_f64);
+    snapshot
 }
 
 fn filter_number(value: &Value, filter_type: &str, field: &str) -> Option<f64> {
@@ -389,6 +451,26 @@ mod tests {
         };
         assert_eq!(book.canonical_symbol, CanonicalSymbol::new("BTC", "USDT"));
         assert_eq!(book.sequence, Some(105));
+        assert!(book.is_usable());
+    }
+
+    #[test]
+    fn adapters_should_parse_binance_rest_depth_with_request_symbol() {
+        let raw = r#"{
+            "lastUpdateId":10636757896518,
+            "E":1779821773594,
+            "T":1779821773586,
+            "bids":[["0.108000","255723.7"]],
+            "asks":[["0.108100","303653.7"]]
+        }"#;
+        let value: Value = serde_json::from_str(raw).expect("valid rest depth json");
+
+        let book = parse_binance_book(&value, Utc::now(), "binance.rest.depth", Some("ARBUSDT"))
+            .expect("rest book should parse with fallback symbol");
+
+        assert_eq!(book.exchange_symbol.symbol, "ARBUSDT");
+        assert_eq!(book.canonical_symbol, CanonicalSymbol::new("ARB", "USDT"));
+        assert_eq!(book.sequence, Some(10636757896518));
         assert!(book.is_usable());
     }
 }

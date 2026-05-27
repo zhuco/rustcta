@@ -1,5 +1,7 @@
 # 跨所 USDT 永续 Maker+Taker 套利模拟工具设计文档
 
+后续实盘级开发实施规范见 `docs/cross_exchange_arbitrage_industrial_implementation.md`。本文主要描述策略模拟、机会计算和页面设计；交易所私有交易补全、仓位管理、风控、对账恢复和上线门禁以实施文档为准。
+
 ## 1. 背景与目标
 
 本工具用于在多个中心化交易所之间监控 USDT 本位永续合约价差，先进行一段时间模拟交易，再决定是否进入小资金实盘。当前目标交易所为 Binance、OKX、Bitget、Gate，后续保留新增交易所能力。
