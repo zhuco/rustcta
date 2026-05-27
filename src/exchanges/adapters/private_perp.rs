@@ -6,6 +6,7 @@
 //! this layer instead of encoding exchange-specific fields in strategy code.
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -16,10 +17,11 @@ use std::collections::BTreeMap;
 
 use crate::core::types::{Fee, MarketType, OrderStatus as CoreOrderStatus};
 use crate::execution::{
-    CancelCommand, ExchangeBalance, ExchangePosition, FillEvent, FillLiquidity, LeverageCommand,
+    CancelAck, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
+    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand, OrderAck,
     OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState, OrderType, PositionMode,
-    PositionModeCommand, PositionSide, PrivateErrorEvent, PrivateEvent, PrivateEventKind,
-    TimeInForce,
+    PositionModeAck, PositionModeCommand, PositionSide, PrivateErrorEvent, PrivateEvent,
+    PrivateEventKind, TimeInForce, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol};
 
@@ -177,6 +179,255 @@ pub trait PrivatePerpProtocol {
         raw: &str,
         received_at: DateTime<Utc>,
     ) -> Result<Vec<PrivateEvent>>;
+}
+
+#[async_trait]
+pub trait PrivateRestTransport: Send + Sync {
+    async fn execute(&self, request: PrivateRestRequestSpec) -> Result<Value>;
+}
+
+#[derive(Clone)]
+pub struct PrivatePerpTradingAdapter<P, T> {
+    exchange: ExchangeId,
+    protocol: P,
+    transport: T,
+    position_mode: PositionMode,
+}
+
+impl<P, T> PrivatePerpTradingAdapter<P, T>
+where
+    P: PrivatePerpProtocol + Send + Sync + Clone,
+    T: PrivateRestTransport + Send + Sync + Clone,
+{
+    pub fn new(protocol: P, transport: T) -> Self {
+        Self {
+            exchange: protocol.exchange().exchange_id(),
+            protocol,
+            transport,
+            position_mode: PositionMode::OneWay,
+        }
+    }
+
+    pub fn with_position_mode(mut self, position_mode: PositionMode) -> Self {
+        self.position_mode = position_mode;
+        self
+    }
+}
+
+#[async_trait]
+impl<P, T> TradingAdapter for PrivatePerpTradingAdapter<P, T>
+where
+    P: PrivatePerpProtocol + Send + Sync + Clone,
+    T: PrivateRestTransport + Send + Sync + Clone,
+{
+    fn exchange(&self) -> ExchangeId {
+        self.exchange.clone()
+    }
+
+    fn capabilities(&self) -> TradingCapabilities {
+        private_perp_trading_capabilities(self.exchange())
+    }
+
+    async fn place_order(&self, command: OrderCommand) -> Result<OrderAck> {
+        let value = self
+            .transport
+            .execute(self.protocol.place_order(&command, self.position_mode)?)
+            .await?;
+        let order_id = response_string(&value, &["orderId", "id"])
+            .or_else(|| response_string(&value, &["clientOid", "text"]))
+            .unwrap_or_else(|| command.client_order_id.clone());
+        Ok(OrderAck {
+            exchange: command.exchange,
+            client_order_id: command.client_order_id,
+            exchange_order_id: Some(order_id),
+            accepted: true,
+            status: OrderCommandStatus::Accepted,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn cancel_order(&self, command: CancelCommand) -> Result<CancelAck> {
+        let value = self
+            .transport
+            .execute(self.protocol.cancel_order(&command)?)
+            .await?;
+        Ok(CancelAck {
+            exchange: command.exchange,
+            client_order_id: command.client_order_id,
+            exchange_order_id: command
+                .exchange_order_id
+                .or_else(|| response_string(&value, &["orderId", "id"])),
+            accepted: true,
+            status: OrderCommandStatus::Cancelled,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn get_order(&self, query: OrderQuery) -> Result<OrderState> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_order(&query)?)
+            .await?;
+        parse_rest_order(self.exchange(), &query.exchange_symbol, &value, Utc::now())
+            .ok_or_else(|| anyhow!("{} order response could not be normalized", self.exchange()))
+    }
+
+    async fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<Vec<OrderState>> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_open_orders(symbol)?)
+            .await?;
+        let exchange = self.exchange();
+        let fallback_symbol = symbol.cloned();
+        Ok(response_items(&value)
+            .into_iter()
+            .filter_map(|item| {
+                let symbol = fallback_symbol.clone().unwrap_or_else(|| {
+                    ExchangeSymbol::new(
+                        exchange.clone(),
+                        str_field(&item, &["symbol", "instId", "contract"]).unwrap_or_default(),
+                    )
+                });
+                parse_rest_order(exchange.clone(), &symbol, &item, Utc::now())
+            })
+            .collect())
+    }
+
+    async fn get_positions(
+        &self,
+        symbol: Option<&ExchangeSymbol>,
+    ) -> Result<Vec<ExchangePosition>> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_positions(symbol)?)
+            .await?;
+        let exchange = self.exchange();
+        Ok(response_items(&value)
+            .into_iter()
+            .filter_map(|item| match exchange {
+                ExchangeId::Bitget => {
+                    parse_bitget_position(&item, Utc::now()).and_then(event_position)
+                }
+                ExchangeId::Gate => parse_gate_position(&item, Utc::now()).and_then(event_position),
+                _ => None,
+            })
+            .collect())
+    }
+
+    async fn get_balances(&self) -> Result<Vec<ExchangeBalance>> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_balances()?)
+            .await?;
+        let exchange = self.exchange();
+        Ok(response_items(&value)
+            .into_iter()
+            .filter_map(|item| match exchange {
+                ExchangeId::Bitget => {
+                    parse_bitget_balance(&item, Utc::now()).and_then(event_balance)
+                }
+                ExchangeId::Gate => parse_gate_balance(&item, Utc::now()).and_then(event_balance),
+                _ => None,
+            })
+            .collect())
+    }
+
+    async fn get_fills(&self, query: FillQuery) -> Result<Vec<FillEvent>> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_fills(
+                query.exchange_symbol.as_ref(),
+                query.exchange_order_id.as_deref(),
+            )?)
+            .await?;
+        let exchange = self.exchange();
+        Ok(response_items(&value)
+            .into_iter()
+            .filter_map(|item| match exchange {
+                ExchangeId::Bitget => parse_bitget_fill(&item, Utc::now()).and_then(event_fill),
+                ExchangeId::Gate => parse_gate_fill(&item, Utc::now()).and_then(event_fill),
+                _ => None,
+            })
+            .filter(|fill| {
+                query
+                    .client_order_id
+                    .as_ref()
+                    .map(|id| fill.client_order_id.as_deref() == Some(id.as_str()))
+                    .unwrap_or(true)
+            })
+            .collect())
+    }
+
+    async fn set_leverage(&self, command: LeverageCommand) -> Result<LeverageAck> {
+        let value = self
+            .transport
+            .execute(self.protocol.set_leverage(&command)?)
+            .await?;
+        Ok(LeverageAck {
+            exchange: command.exchange,
+            canonical_symbol: command.canonical_symbol,
+            exchange_symbol: command.exchange_symbol,
+            leverage: command.leverage,
+            accepted: true,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn set_position_mode(&self, command: PositionModeCommand) -> Result<PositionModeAck> {
+        let value = self
+            .transport
+            .execute(self.protocol.set_position_mode(&command)?)
+            .await?;
+        Ok(PositionModeAck {
+            exchange: command.exchange,
+            mode: command.mode,
+            accepted: true,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn close_position(&self, command: ClosePositionCommand) -> Result<ClosePositionAck> {
+        let value = self
+            .transport
+            .execute(close_position_spec(
+                self.exchange(),
+                &command,
+                self.position_mode,
+            )?)
+            .await?;
+        let order_id = response_string(&value, &["orderId", "id"])
+            .or_else(|| response_string(&value, &["clientOid", "text"]))
+            .unwrap_or_else(|| command.client_order_id.clone());
+        Ok(ClosePositionAck {
+            exchange: command.exchange,
+            client_order_id: command.client_order_id,
+            exchange_order_id: Some(order_id),
+            accepted: true,
+            status: OrderCommandStatus::Accepted,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+}
+
+pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabilities {
+    TradingCapabilities {
+        supports_market_orders: true,
+        supports_limit_orders: true,
+        supports_post_only: true,
+        supports_ioc: true,
+        supports_fok: true,
+        supports_reduce_only: true,
+        supports_hedge_mode: matches!(exchange, ExchangeId::Bitget),
+        supports_client_order_id: true,
+        supports_leverage: true,
+        supports_position_mode_change: matches!(exchange, ExchangeId::Bitget),
+        supports_close_position: true,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -635,6 +886,139 @@ pub fn gate_ws_signature(secret: &str, channel: &str, event: &str, timestamp: i6
         HmacSha512::new_from_slice(secret.as_bytes()).expect("HMAC accepts arbitrary key length");
     mac.update(prehash.as_bytes());
     hex::encode(mac.finalize().into_bytes())
+}
+
+fn response_data(value: &Value) -> Value {
+    value
+        .get("data")
+        .or_else(|| value.get("result"))
+        .cloned()
+        .unwrap_or_else(|| value.clone())
+}
+
+fn close_position_spec(
+    exchange: ExchangeId,
+    command: &ClosePositionCommand,
+    position_mode: PositionMode,
+) -> Result<PrivateRestRequestSpec> {
+    match exchange {
+        ExchangeId::Bitget => {
+            let mut body = json!({
+                "productType": "USDT-FUTURES",
+                "symbol": command.exchange_symbol.symbol,
+                "marginCoin": "USDT",
+                "size": number_string(command.quantity),
+                "side": bitget_side(command.order_side()),
+                "orderType": bitget_order_type(command.order_type),
+                "clientOid": command.client_order_id,
+                "reduceOnly": "yes",
+            });
+            set_optional_str(
+                &mut body,
+                "force",
+                bitget_force(command.time_in_force, false),
+            );
+            if let Some(price) = command.price {
+                set_str(&mut body, "price", number_string(price));
+            }
+            if position_mode.is_hedge() {
+                set_str(&mut body, "tradeSide", "close");
+            }
+            Ok(PrivateRestRequestSpec::new(
+                ExchangeId::Bitget,
+                PrivateRestMethod::Post,
+                "/api/v2/mix/order/place-order",
+            )
+            .with_body(body))
+        }
+        ExchangeId::Gate => {
+            let mut body = json!({
+                "contract": command.exchange_symbol.symbol,
+                "size": gate_signed_size(command.order_side(), command.quantity),
+                "tif": gate_tif(command.time_in_force, false),
+                "text": gate_client_text(&command.client_order_id),
+                "reduce_only": true,
+            });
+            if let Some(price) = command.price {
+                set_str(&mut body, "price", number_string(price));
+            }
+            Ok(PrivateRestRequestSpec::new(
+                ExchangeId::Gate,
+                PrivateRestMethod::Post,
+                "/futures/usdt/orders",
+            )
+            .with_body(body))
+        }
+        other => anyhow::bail!("{other} private perp close_position is not supported"),
+    }
+}
+
+fn response_items(value: &Value) -> Vec<Value> {
+    match response_data(value) {
+        Value::Array(items) => items,
+        Value::Object(map) => {
+            if let Some(Value::Array(items)) = map.get("list").or_else(|| map.get("orders")) {
+                items.clone()
+            } else {
+                vec![Value::Object(map)]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn response_string(value: &Value, keys: &[&str]) -> Option<String> {
+    let data = response_data(value);
+    str_field(&data, keys).or_else(|| str_field(value, keys))
+}
+
+fn parse_rest_order(
+    exchange: ExchangeId,
+    fallback_symbol: &ExchangeSymbol,
+    value: &Value,
+    received_at: DateTime<Utc>,
+) -> Option<OrderState> {
+    let data = response_data(value);
+    let item = match data {
+        Value::Array(items) => items.into_iter().next()?,
+        Value::Object(_) => data,
+        _ => return None,
+    };
+    let event = match exchange {
+        ExchangeId::Bitget => parse_bitget_order_or_fill(&item, received_at),
+        ExchangeId::Gate => parse_gate_order_or_fill(&item, received_at),
+        _ => None,
+    }?;
+    match event.kind {
+        PrivateEventKind::Order(mut order) => {
+            if order.exchange_symbol.symbol.is_empty() {
+                order.exchange_symbol = fallback_symbol.clone();
+            }
+            Some(order)
+        }
+        _ => None,
+    }
+}
+
+fn event_position(event: PrivateEvent) -> Option<ExchangePosition> {
+    match event.kind {
+        PrivateEventKind::Position(position) => Some(position),
+        _ => None,
+    }
+}
+
+fn event_balance(event: PrivateEvent) -> Option<ExchangeBalance> {
+    match event.kind {
+        PrivateEventKind::Balance(balance) => Some(balance),
+        _ => None,
+    }
+}
+
+fn event_fill(event: PrivateEvent) -> Option<FillEvent> {
+    match event.kind {
+        PrivateEventKind::Fill(fill) => Some(fill),
+        _ => None,
+    }
 }
 
 fn parse_bitget_private_message(
@@ -1134,6 +1518,30 @@ mod tests {
     use super::*;
     use crate::execution::{BundleLeg, OrderIntent};
     use crate::market::RuntimeMode;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct MockTransport {
+        response: Value,
+        seen: Arc<Mutex<Vec<PrivateRestRequestSpec>>>,
+    }
+
+    impl MockTransport {
+        fn new(response: Value) -> Self {
+            Self {
+                response,
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl PrivateRestTransport for MockTransport {
+        async fn execute(&self, request: PrivateRestRequestSpec) -> Result<Value> {
+            self.seen.lock().unwrap().push(request);
+            Ok(self.response.clone())
+        }
+    }
 
     fn command(exchange: ExchangeId, symbol: &str) -> OrderCommand {
         OrderCommand::new(
@@ -1268,6 +1676,55 @@ mod tests {
             }
             other => panic!("expected fill event, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn private_perp_trading_adapter_should_place_order_via_protocol() {
+        let transport = MockTransport::new(json!({
+            "code": "00000",
+            "data": {"orderId": "exchange-1", "clientOid": "client-1"}
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(BitgetPrivatePerpProtocol, transport.clone())
+            .with_position_mode(PositionMode::Hedge);
+
+        let ack = adapter
+            .place_order(command(ExchangeId::Bitget, "BTCUSDT"))
+            .await
+            .unwrap();
+
+        assert_eq!(ack.exchange, ExchangeId::Bitget);
+        assert_eq!(ack.exchange_order_id.as_deref(), Some("exchange-1"));
+        let seen = transport.seen.lock().unwrap();
+        assert_eq!(seen[0].path, "/api/v2/mix/order/place-order");
+    }
+
+    #[tokio::test]
+    async fn private_perp_trading_adapter_should_normalize_open_orders() {
+        let transport = MockTransport::new(json!({
+            "result": [{
+                "id": "gate-order-1",
+                "contract": "BTC_USDT",
+                "size": "-2",
+                "left": "1",
+                "price": "65000",
+                "status": "open",
+                "text": "t-client-1",
+                "create_time_ms": "1700000000000"
+            }]
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport);
+
+        let orders = adapter
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")))
+            .await
+            .unwrap();
+
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].exchange, ExchangeId::Gate);
+        assert_eq!(orders[0].side, OrderSide::Sell);
+        assert_eq!(orders[0].position_side, PositionSide::Short);
+        assert_eq!(orders[0].status, OrderCommandStatus::Accepted);
+        assert_eq!(orders[0].filled_quantity, 1.0);
     }
 
     trait BoolNot {
