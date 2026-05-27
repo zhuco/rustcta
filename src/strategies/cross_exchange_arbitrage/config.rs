@@ -136,6 +136,42 @@ impl CrossExchangeArbitrageConfig {
         {
             return Err(ConfigValidationError::LiveModeRequiresWhitelist);
         }
+        if self.mode.allows_live_orders() {
+            for exchange in &self.universe.enabled_exchanges {
+                if self
+                    .exchanges
+                    .get(exchange)
+                    .and_then(|runtime| runtime.enabled)
+                    == Some(false)
+                {
+                    return Err(ConfigValidationError::LiveExchangeDisabled {
+                        exchange: exchange.clone(),
+                    });
+                }
+                if self.execution.dry_run == false
+                    && self
+                        .exchanges
+                        .get(exchange)
+                        .map(|runtime| !runtime.private_rest_enabled)
+                        .unwrap_or(false)
+                {
+                    return Err(ConfigValidationError::LivePrivateRestDisabled {
+                        exchange: exchange.clone(),
+                    });
+                }
+            }
+            for (exchange, runtime) in &self.exchanges {
+                if runtime.private_ws_enabled
+                    && (runtime.private_ws_run.connect_timeout_ms == 0
+                        || runtime.private_ws_run.reconnect_delay_ms == 0
+                        || runtime.private_ws_run.heartbeat_interval_ms == 0)
+                {
+                    return Err(ConfigValidationError::InvalidPrivateWsRuntime {
+                        exchange: exchange.clone(),
+                    });
+                }
+            }
+        }
         if self.risk.max_open_bundles == 0 {
             return Err(ConfigValidationError::InvalidRisk);
         }
@@ -171,6 +207,12 @@ pub enum ConfigValidationError {
         top_level: RuntimeMode,
         strategy: RuntimeMode,
     },
+    #[error("live mode universe enables {exchange}, but exchanges.{exchange}.enabled=false")]
+    LiveExchangeDisabled { exchange: ExchangeId },
+    #[error("live mode with dry_run=false requires private REST for exchange {exchange}")]
+    LivePrivateRestDisabled { exchange: ExchangeId },
+    #[error("private websocket runtime for exchange {exchange} must use positive durations")]
+    InvalidPrivateWsRuntime { exchange: ExchangeId },
     #[error("risk values must be positive and internally consistent")]
     InvalidRisk,
 }
@@ -628,6 +670,45 @@ mod tests {
         assert_eq!(
             config.validate().unwrap_err(),
             ConfigValidationError::LiveModeRequiresWhitelist
+        );
+    }
+
+    #[test]
+    fn config_validate_should_reject_live_universe_exchange_disabled_in_runtime() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config
+            .exchanges
+            .entry(ExchangeId::Gate)
+            .or_default()
+            .enabled = Some(false);
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LiveExchangeDisabled {
+                exchange: ExchangeId::Gate
+            }
+        );
+    }
+
+    #[test]
+    fn config_validate_should_reject_live_trading_without_private_rest() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.execution.dry_run = false;
+        config
+            .exchanges
+            .entry(ExchangeId::Bitget)
+            .or_default()
+            .private_rest_enabled = false;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LivePrivateRestDisabled {
+                exchange: ExchangeId::Bitget
+            }
         );
     }
 
