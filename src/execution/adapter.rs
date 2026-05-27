@@ -162,6 +162,201 @@ pub struct ExchangeBalance {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FillQuery {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub from_trade_id: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub limit: Option<u32>,
+}
+
+impl FillQuery {
+    pub fn new(exchange: ExchangeId) -> Self {
+        Self {
+            exchange,
+            canonical_symbol: None,
+            exchange_symbol: None,
+            client_order_id: None,
+            exchange_order_id: None,
+            from_trade_id: None,
+            start_time: None,
+            end_time: None,
+            limit: None,
+        }
+    }
+
+    pub fn for_symbol(
+        exchange: ExchangeId,
+        canonical_symbol: CanonicalSymbol,
+        exchange_symbol: ExchangeSymbol,
+    ) -> Self {
+        Self {
+            canonical_symbol: Some(canonical_symbol),
+            exchange_symbol: Some(exchange_symbol),
+            ..Self::new(exchange)
+        }
+    }
+
+    pub fn for_order(
+        exchange: ExchangeId,
+        exchange_symbol: ExchangeSymbol,
+        client_order_id: Option<String>,
+        exchange_order_id: Option<String>,
+    ) -> Self {
+        Self {
+            exchange,
+            exchange_symbol: Some(exchange_symbol),
+            client_order_id,
+            exchange_order_id,
+            canonical_symbol: None,
+            from_trade_id: None,
+            start_time: None,
+            end_time: None,
+            limit: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FillLiquidity {
+    Maker,
+    Taker,
+    Unknown,
+}
+
+impl FillLiquidity {
+    pub fn is_maker(self) -> Option<bool> {
+        match self {
+            Self::Maker => Some(true),
+            Self::Taker => Some(false),
+            Self::Unknown => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FillEvent {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: ExchangeSymbol,
+    pub trade_id: String,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub side: OrderSide,
+    pub position_side: PositionSide,
+    pub liquidity: FillLiquidity,
+    pub price: f64,
+    pub quantity: f64,
+    pub quote_quantity: f64,
+    pub fee: Option<f64>,
+    pub fee_asset: Option<String>,
+    pub fee_rate: Option<f64>,
+    pub realized_pnl: Option<f64>,
+    pub reduce_only: Option<bool>,
+    pub filled_at: DateTime<Utc>,
+    pub received_at: DateTime<Utc>,
+}
+
+impl FillEvent {
+    pub fn notional(&self) -> f64 {
+        if self.quote_quantity > 0.0 {
+            self.quote_quantity
+        } else {
+            self.price * self.quantity
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExchangeErrorClass {
+    Unsupported,
+    Authentication,
+    Permission,
+    RateLimited,
+    Network,
+    Timeout,
+    ExchangeUnavailable,
+    Maintenance,
+    InvalidRequest,
+    Precision,
+    InsufficientBalance,
+    InsufficientPosition,
+    DuplicateClientOrderId,
+    OrderNotFound,
+    OrderRejected,
+    RiskRejected,
+    UnknownOrderState,
+    Decode,
+    Internal,
+    Unknown,
+}
+
+impl ExchangeErrorClass {
+    pub fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            Self::RateLimited
+                | Self::Network
+                | Self::Timeout
+                | Self::ExchangeUnavailable
+                | Self::Maintenance
+                | Self::UnknownOrderState
+        )
+    }
+
+    pub fn requires_reconciliation(self) -> bool {
+        matches!(
+            self,
+            Self::UnknownOrderState
+                | Self::DuplicateClientOrderId
+                | Self::OrderNotFound
+                | Self::OrderRejected
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RateLimitScope {
+    Rest,
+    WebSocket,
+    Orders,
+    Cancels,
+    UserStream,
+    Global,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RateLimitState {
+    pub exchange: ExchangeId,
+    pub scope: RateLimitScope,
+    pub endpoint: Option<String>,
+    pub limit: Option<u32>,
+    pub used: Option<u32>,
+    pub remaining: Option<u32>,
+    pub window_ms: Option<u64>,
+    pub reset_at: Option<DateTime<Utc>>,
+    pub retry_after_ms: Option<u64>,
+    pub banned_until: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl RateLimitState {
+    pub fn is_limited(&self, now: DateTime<Utc>) -> bool {
+        self.remaining == Some(0)
+            || self
+                .retry_after_ms
+                .is_some_and(|retry_after| retry_after > 0)
+            || self
+                .banned_until
+                .is_some_and(|banned_until| banned_until > now)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PositionMode {
     OneWay,
@@ -328,6 +523,12 @@ pub trait TradingAdapter: Send + Sync {
         symbol: Option<&ExchangeSymbol>,
     ) -> anyhow::Result<Vec<ExchangePosition>>;
     async fn get_balances(&self) -> anyhow::Result<Vec<ExchangeBalance>>;
+    async fn get_fills(&self, _query: FillQuery) -> anyhow::Result<Vec<FillEvent>> {
+        anyhow::bail!(
+            "unsupported: trading adapter {} does not support fill queries",
+            self.exchange()
+        )
+    }
 
     async fn set_leverage(&self, _command: LeverageCommand) -> anyhow::Result<LeverageAck> {
         anyhow::bail!(
@@ -361,5 +562,71 @@ pub trait TradingAdapter: Send + Sync {
         _symbol: &ExchangeSymbol,
     ) -> anyhow::Result<Option<InstrumentMeta>> {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    struct NoFillTradingAdapter;
+
+    #[async_trait]
+    impl TradingAdapter for NoFillTradingAdapter {
+        fn exchange(&self) -> ExchangeId {
+            ExchangeId::Binance
+        }
+
+        fn capabilities(&self) -> TradingCapabilities {
+            TradingCapabilities::default()
+        }
+
+        async fn place_order(&self, _command: OrderCommand) -> anyhow::Result<OrderAck> {
+            anyhow::bail!("not used")
+        }
+
+        async fn cancel_order(&self, _command: CancelCommand) -> anyhow::Result<CancelAck> {
+            anyhow::bail!("not used")
+        }
+
+        async fn get_order(&self, _query: OrderQuery) -> anyhow::Result<OrderState> {
+            anyhow::bail!("not used")
+        }
+
+        async fn get_open_orders(
+            &self,
+            _symbol: Option<&ExchangeSymbol>,
+        ) -> anyhow::Result<Vec<OrderState>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_positions(
+            &self,
+            _symbol: Option<&ExchangeSymbol>,
+        ) -> anyhow::Result<Vec<ExchangePosition>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_balances(&self) -> anyhow::Result<Vec<ExchangeBalance>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn default_get_fills_should_report_unsupported() {
+        let adapter = NoFillTradingAdapter;
+        let err = adapter
+            .get_fills(FillQuery::for_symbol(
+                ExchangeId::Binance,
+                CanonicalSymbol::new("BTC", "USDT"),
+                ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+            ))
+            .await
+            .expect_err("default get_fills should be unsupported");
+
+        let message = err.to_string();
+        assert!(message.contains("unsupported"));
+        assert!(message.contains("binance"));
     }
 }

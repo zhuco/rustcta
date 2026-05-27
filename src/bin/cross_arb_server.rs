@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::SocketAddr;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,9 +20,9 @@ use rustcta::exchanges::adapters::{
     BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter, OkxMarketAdapter,
 };
 use rustcta::market::{
-    exchange_symbol_for, mark_book_freshness, BookLevel, CanonicalSymbol, ContractType,
-    ExchangeId, InstrumentMeta, InstrumentStatus, MarketDataAdapter, MarketFundingSnapshot,
-    MarketStateCache, OrderBook5, RouteStatus, RuntimeMode,
+    exchange_symbol_for, mark_book_freshness, BookLevel, CanonicalSymbol, ContractType, ExchangeId,
+    InstrumentMeta, InstrumentStatus, MarketDataAdapter, MarketFundingSnapshot, MarketStateCache,
+    OrderBook5, RouteStatus, RuntimeMode,
 };
 use rustcta::strategies::cross_exchange_arbitrage::{
     calculate_taker_vwap, scan_opportunities, BundleReadModel, CrossArbDashboardStatus,
@@ -88,15 +88,15 @@ impl AppState {
         symbol_count: usize,
         data_source: DataSource,
         shadow_store_dir: impl Into<PathBuf>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        Ok(Self {
             read_model: Arc::new(RwLock::new(CrossArbReadModel::new(
                 config_path.as_ref(),
                 symbol_count,
                 data_source,
                 shadow_store_dir.into(),
-            ))),
-        }
+            )?)),
+        })
     }
 }
 
@@ -146,9 +146,9 @@ impl CrossArbReadModel {
         symbol_count: usize,
         data_source: DataSource,
         shadow_store_dir: PathBuf,
-    ) -> Self {
+    ) -> Result<Self> {
         let now = Utc::now();
-        let (config_summary, mut config) = ConfigSummaryReadModel::load_config(config_path);
+        let (config_summary, mut config) = ConfigSummaryReadModel::load_config(config_path)?;
         config.mode = RuntimeMode::Simulation;
         config.execution.dry_run = true;
         let stale_quote_ms = config.risk.stale_quote_ms;
@@ -197,7 +197,7 @@ impl CrossArbReadModel {
         if data_source == DataSource::Synthetic {
             model.simulate_synthetic_tick(now);
         }
-        model
+        Ok(model)
     }
 
     fn touch(&mut self) {
@@ -540,12 +540,8 @@ impl CrossArbReadModel {
             if !self.shadow_fill_cooldown_elapsed(&opportunity.canonical_symbol, now) {
                 continue;
             }
-            if exchange_capacity_reject_reason(
-                &self.config,
-                &self.shadow_positions,
-                opportunity,
-            )
-            .is_some()
+            if exchange_capacity_reject_reason(&self.config, &self.shadow_positions, opportunity)
+                .is_some()
             {
                 continue;
             }
@@ -1531,7 +1527,7 @@ struct ConfigSummaryReadModel {
 }
 
 impl ConfigSummaryReadModel {
-    fn load_config(path: &Path) -> (Self, CrossExchangeArbitrageConfig) {
+    fn load_config(path: &Path) -> Result<(Self, CrossExchangeArbitrageConfig)> {
         let mut summary = Self {
             config_path: path.display().to_string(),
             effective_mode: RuntimeMode::Simulation,
@@ -1547,36 +1543,23 @@ impl ConfigSummaryReadModel {
             ],
         };
 
-        let config = match std::fs::read_to_string(path) {
-            Ok(raw) => match serde_yaml::from_str::<CrossExchangeArbitrageConfig>(&raw) {
-                Ok(config) => {
-                    summary.loaded_from_file = true;
-                    summary.configured_mode = Some(config.mode);
-                    summary.enabled_symbols = config.universe.symbols.len();
-                    summary.enabled_exchanges = config.universe.enabled_exchanges.len();
-                    summary.notes.push(
-                        "配置模式仅展示；看板服务强制使用 Simulation 防止实盘下单。".to_string(),
-                    );
-                    config
-                }
-                Err(err) => {
-                    summary.parse_error = Some(err.to_string());
-                    CrossExchangeArbitrageConfig::default()
-                }
-            },
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                summary
-                    .notes
-                    .push("未找到配置文件；当前使用内置默认配置。".to_string());
-                CrossExchangeArbitrageConfig::default()
-            }
-            Err(err) => {
-                summary.parse_error = Some(err.to_string());
-                CrossExchangeArbitrageConfig::default()
-            }
-        };
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read config {}", path.display()))?;
+        let config: CrossExchangeArbitrageConfig = serde_yaml::from_str(&raw)
+            .with_context(|| format!("failed to parse config {}", path.display()))?;
+        config
+            .validate()
+            .with_context(|| format!("invalid config {}", path.display()))?;
 
-        (summary, config)
+        summary.loaded_from_file = true;
+        summary.configured_mode = Some(config.mode);
+        summary.enabled_symbols = config.universe.symbols.len();
+        summary.enabled_exchanges = config.universe.enabled_exchanges.len();
+        summary
+            .notes
+            .push("配置模式仅展示；看板服务强制使用 Simulation 防止实盘下单。".to_string());
+
+        Ok((summary, config))
     }
 }
 
@@ -1899,7 +1882,7 @@ async fn main() -> Result<()> {
         args.symbol_count,
         args.data_source,
         args.shadow_store_dir.clone(),
-    );
+    )?;
     if args.simulate {
         spawn_shadow_loop(
             state.clone(),
@@ -2026,10 +2009,8 @@ fn spawn_public_ws_ingestion(state: AppState, request_timeout_ms: u64) {
                 continue;
             }
             let ws_config = cross_arb_server_ws::PublicWsConfig {
-                max_symbols_per_connection: config.ws_batch_size_for(
-                    &exchange,
-                    base_ws_config.max_symbols_per_connection,
-                ),
+                max_symbols_per_connection: config
+                    .ws_batch_size_for(&exchange, base_ws_config.max_symbols_per_connection),
                 ..base_ws_config
             };
             tokio::spawn(cross_arb_server_ws::run_public_ws_adapter(
@@ -2862,7 +2843,9 @@ fn best_open_opportunities_by_symbol(opportunities: &[Opportunity]) -> Vec<&Oppo
         .collect()
 }
 
-fn best_opportunity_by_symbol(opportunities: &[Opportunity]) -> HashMap<CanonicalSymbol, &Opportunity> {
+fn best_opportunity_by_symbol(
+    opportunities: &[Opportunity],
+) -> HashMap<CanonicalSymbol, &Opportunity> {
     let mut best = HashMap::new();
     for opportunity in opportunities {
         best.entry(opportunity.canonical_symbol.clone())
@@ -2902,8 +2885,7 @@ fn exchange_capacity_reject_reason(
         if max_positions > 0 && used.position_count >= max_positions {
             return Some(RejectReason::ExchangePositionLimitExceeded);
         }
-        if used.notional_usdt + opportunity.executable_notional_usdt > max_notional + f64::EPSILON
-        {
+        if used.notional_usdt + opportunity.executable_notional_usdt > max_notional + f64::EPSILON {
             return Some(RejectReason::ExchangeCapacityExceeded);
         }
     }
@@ -2916,7 +2898,9 @@ fn exchange_usage_from_shadow_positions(
     let mut usage = HashMap::new();
     for position in positions.values() {
         for exchange in [&position.long_exchange, &position.short_exchange] {
-            let entry = usage.entry(exchange.clone()).or_insert_with(ExchangeUsage::default);
+            let entry = usage
+                .entry(exchange.clone())
+                .or_insert_with(ExchangeUsage::default);
             entry.notional_usdt += position.executable_notional_usdt;
             entry.position_count += 1;
         }
@@ -2991,7 +2975,6 @@ fn fee_schedule_models(config: &CrossExchangeArbitrageConfig) -> Vec<FeeSchedule
     rows.sort_by(|left, right| left.exchange.as_str().cmp(right.exchange.as_str()));
     rows
 }
-
 
 fn estimate_shadow_close(
     position: &ShadowOpenPosition,
@@ -3804,22 +3787,36 @@ mod tests {
             config_path,
             symbol_count,
             data_source,
-            std::env::temp_dir().join(format!(
-                "rustcta-cross-arb-test-{}",
-                uuid::Uuid::new_v4()
-            )),
+            std::env::temp_dir().join(format!("rustcta-cross-arb-test-{}", uuid::Uuid::new_v4())),
         )
+        .expect("test app state should load config")
+    }
+
+    fn test_config_path() -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "rustcta-cross-arb-config-{}.yml",
+            uuid::Uuid::new_v4()
+        ));
+        let config = CrossExchangeArbitrageConfig::default();
+        std::fs::write(
+            &path,
+            serde_yaml::to_string(&config).expect("config should serialize"),
+        )
+        .expect("config should be written");
+        path
     }
 
     #[test]
     fn cross_arb_server_router_should_build() {
-        let state = test_app_state("missing-cross-arb-config.yml", 100, DataSource::Synthetic);
+        let config_path = test_config_path();
+        let state = test_app_state(&config_path, 100, DataSource::Synthetic);
         let _router = build_router(state);
     }
 
     #[test]
     fn cross_arb_server_should_seed_one_hundred_symbols() {
-        let state = test_app_state("missing-cross-arb-config.yml", 100, DataSource::Synthetic);
+        let config_path = test_config_path();
+        let state = test_app_state(&config_path, 100, DataSource::Synthetic);
         let read_model = state.read_model.blocking_read();
 
         assert_eq!(read_model.analytics.monitored_symbols, 100);
@@ -3917,6 +3914,7 @@ mod tests {
     fn cross_arb_server_dashboard_should_force_simulation_without_live_orders() {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
         config.execution.dry_run = false;
         config.universe.symbols = vec![CanonicalSymbol::new("ARB", "USDT")];
 
@@ -3944,7 +3942,8 @@ mod tests {
 
     #[tokio::test]
     async fn cross_arb_server_control_should_pause_and_resume_new_entries() {
-        let state = test_app_state("missing-cross-arb-config.yml", 100, DataSource::Synthetic);
+        let config_path = test_config_path();
+        let state = test_app_state(&config_path, 100, DataSource::Synthetic);
 
         let Json(paused) = pause_new_entries(State(state.clone())).await;
         assert!(paused.new_entries_paused);
@@ -3959,7 +3958,8 @@ mod tests {
 
     #[tokio::test]
     async fn cross_arb_server_kill_switch_should_block_entries_without_live_orders() {
-        let state = test_app_state("missing-cross-arb-config.yml", 100, DataSource::Synthetic);
+        let config_path = test_config_path();
+        let state = test_app_state(&config_path, 100, DataSource::Synthetic);
 
         let Json(control) = kill_switch(State(state)).await;
         assert!(control.kill_switch);

@@ -1,0 +1,90 @@
+{
+  "timezone": "UTC",
+  "serverTime": 1743054548000,
+  "exchangeFilters": [],
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 2400
+    },
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 1200
+    }
+  ],
+  "assets": [
+    {
+      "asset": "USDT",
+      "marginAvailable": true,
+      "autoAssetExchange": "0"
+    }
+  ],
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "pair": "BTCUSDT",
+      "contractType": "PERPETUAL",
+      "deliveryDate": 4133404800000,
+      "onboardDate": 1569398400000,
+      "status": "TRADING",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "marginAsset": "USDT",
+      "pricePrecision": 2,
+      "quantityPrecision": 3,
+      "baseAssetPrecision": 8,
+      "quotePrecision": 8,
+      "underlyingType": "COIN",
+      "underlyingSubType": [
+        "POW"
+      ],
+      "settlePlan": 0,
+      "triggerProtect": "0.0500",
+      "filters": [
+        {
+          "filterType": "PRICE_FILTER",
+          "minPrice": "0.10",
+          "maxPrice": "1000000",
+          "tickSize": "0.10"
+        },
+        {
+          "filterType": "LOT_SIZE",
+          "minQty": "0.001",
+          "maxQty": "1000",
+          "stepSize": "0.001"
+        },
+        {
+          "filterType": "MARKET_LOT_SIZE",
+          "minQty": "0.001",
+          "maxQty": "120",
+          "stepSize": "0.001"
+        },
+        {
+          "filterType": "MIN_NOTIONAL",
+          "notional": "5.0"
+        }
+      ],
+      "orderTypes": [
+        "LIMIT",
+        "MARKET",
+        "STOP",
+        "STOP_MARKET",
+        "TAKE_PROFIT",
+        "TAKE_PROFIT_MARKET",
+        "TRAILING_STOP_MARKET"
+      ],
+      "timeInForce": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "GTX"
+      ],
+      "liquidationFee": "0.012500",
+      "marketTakeBound": "0.30"
+    }
+  ]
+}

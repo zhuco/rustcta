@@ -1,0 +1,29 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1743054551000,
+  "data": [
+    {
+      "marginCoin": "USDT",
+      "symbol": "BTCUSDT",
+      "holdSide": "long",
+      "openDelegateSize": "0",
+      "marginSize": "65.20",
+      "available": "0.010",
+      "locked": "0",
+      "total": "0.010",
+      "leverage": "10",
+      "achievedProfits": "0",
+      "averageOpenPrice": "65000.1",
+      "marginMode": "isolated",
+      "holdMode": "hedge_mode",
+      "unrealizedPL": "0.1224",
+      "liquidationPrice": "58500.0",
+      "keepMarginRate": "0.004",
+      "markPrice": "65012.34",
+      "breakEvenPrice": "65013.10002",
+      "cTime": "1743054550000",
+      "uTime": "1743054551000"
+    }
+  ]
+}

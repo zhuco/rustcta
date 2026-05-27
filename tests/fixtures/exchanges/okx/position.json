@@ -1,0 +1,30 @@
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {
+      "instType": "SWAP",
+      "mgnMode": "isolated",
+      "posId": "10983718273",
+      "posSide": "long",
+      "pos": "1",
+      "baseBal": "",
+      "quoteBal": "",
+      "posCcy": "",
+      "availPos": "1",
+      "avgPx": "65000.1",
+      "upl": "0.1224",
+      "uplRatio": "0.0018",
+      "liqPx": "58500.0",
+      "lever": "10",
+      "margin": "65.2",
+      "imr": "65.2",
+      "mmr": "3.26",
+      "instId": "BTC-USDT-SWAP",
+      "ccy": "USDT",
+      "last": "65012.3",
+      "markPx": "65012.34",
+      "uTime": "1743054551000"
+    }
+  ]
+}

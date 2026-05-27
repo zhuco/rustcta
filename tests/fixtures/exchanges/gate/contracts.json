@@ -1,0 +1,31 @@
+[
+  {
+    "name": "BTC_USDT",
+    "type": "direct",
+    "quanto_multiplier": "0.0001",
+    "ref_discount_rate": "0",
+    "order_price_deviate": "0.5",
+    "maintenance_rate": "0.004",
+    "mark_type": "index",
+    "last_price": "65012.3",
+    "mark_price": "65012.34",
+    "index_price": "65010.0",
+    "funding_rate_indicative": "0.0001",
+    "funding_next_apply": 1743062400,
+    "funding_interval": 28800,
+    "order_price_round": "0.1",
+    "mark_price_round": "0.1",
+    "basis_rate": "0.00002",
+    "interest_rate": "0.0003",
+    "order_size_min": 1,
+    "order_size_max": 1000000,
+    "risk_limit_base": "1000000",
+    "risk_limit_step": "1000000",
+    "risk_limit_max": "8000000",
+    "maker_fee_rate": "-0.00025",
+    "taker_fee_rate": "0.00075",
+    "in_delisting": false,
+    "config_change_time": 1743050000,
+    "trade_status": "tradable"
+  }
+]

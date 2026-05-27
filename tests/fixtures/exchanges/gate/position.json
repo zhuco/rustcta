@@ -1,0 +1,25 @@
+[
+  {
+    "user": 100000,
+    "contract": "BTC_USDT",
+    "size": 100,
+    "leverage": "10",
+    "risk_limit": "1000000",
+    "leverage_max": "100",
+    "maintenance_rate": "0.004",
+    "value": "650.1234",
+    "margin": "65.20",
+    "entry_price": "65000.1",
+    "liq_price": "58500.0",
+    "mark_price": "65012.34",
+    "unrealised_pnl": "0.1224",
+    "realised_pnl": "0",
+    "pnl_fund": "0",
+    "pnl_fee": "-0.16250025",
+    "history_point": "0",
+    "history_pnl": "0",
+    "last_close_pnl": "0",
+    "mode": "single",
+    "update_time": 1743054551
+  }
+]

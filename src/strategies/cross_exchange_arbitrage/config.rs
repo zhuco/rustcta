@@ -6,8 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CrossExchangeArbitrageConfig {
     pub mode: RuntimeMode,
+    #[serde(default)]
+    pub strategy: StrategyConfig,
     #[serde(default)]
     pub market: MarketConfig,
     pub thresholds: ThresholdConfig,
@@ -16,6 +19,8 @@ pub struct CrossExchangeArbitrageConfig {
     pub funding: FundingConfig,
     #[serde(default)]
     pub exchanges: HashMap<ExchangeId, ExchangeRuntimeConfig>,
+    #[serde(default)]
+    pub routing: RoutingConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
     #[serde(default)]
@@ -34,12 +39,14 @@ impl Default for CrossExchangeArbitrageConfig {
     fn default() -> Self {
         Self {
             mode: RuntimeMode::Simulation,
+            strategy: StrategyConfig::default(),
             market: MarketConfig::default(),
             thresholds: ThresholdConfig::default(),
             sizing: SizingConfig::default(),
             fees: FeeConfig::default(),
             funding: FundingConfig::default(),
             exchanges: HashMap::new(),
+            routing: RoutingConfig::default(),
             execution: ExecutionConfig::default(),
             reconciliation: ReconciliationConfig::default(),
             risk: RiskConfig::default(),
@@ -52,6 +59,26 @@ impl Default for CrossExchangeArbitrageConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrategyConfig {
+    pub name: String,
+    #[serde(default)]
+    pub mode: Option<RuntimeMode>,
+    pub log_level: String,
+}
+
+impl Default for StrategyConfig {
+    fn default() -> Self {
+        Self {
+            name: "cross_exchange_arbitrage_usdt_perp".to_string(),
+            mode: Some(RuntimeMode::Simulation),
+            log_level: "INFO".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MarketConfig {
     pub quote_asset: String,
     pub market_type: String,
@@ -87,11 +114,30 @@ impl CrossExchangeArbitrageConfig {
             || self.sizing.exchange_equity_usdt <= 0.0
             || self.sizing.leverage <= 0.0
             || self.sizing.max_positions_per_exchange == 0
+            || self.sizing.capital_fraction_of_smaller_equity <= 0.0
+            || self.sizing.capital_fraction_of_smaller_equity > 1.0
+            || self.sizing.max_symbol_notional_usdt <= 0.0
+            || self.sizing.max_exchange_usage_pct <= 0.0
+            || self.sizing.max_exchange_usage_pct > 1.0
         {
             return Err(ConfigValidationError::InvalidSizing);
         }
-        if self.mode.allows_live_orders() && self.universe.symbols.is_empty() {
+        if let Some(strategy_mode) = self.strategy.mode {
+            if strategy_mode != self.mode {
+                return Err(ConfigValidationError::ModeMismatch {
+                    top_level: self.mode,
+                    strategy: strategy_mode,
+                });
+            }
+        }
+        if self.mode.allows_live_orders()
+            && self.risk.symbol_whitelist_required_live
+            && self.universe.symbols.is_empty()
+        {
             return Err(ConfigValidationError::LiveModeRequiresWhitelist);
+        }
+        if self.risk.max_open_bundles == 0 {
+            return Err(ConfigValidationError::InvalidRisk);
         }
         for exchange in &self.universe.enabled_exchanges {
             if !self.fees.per_exchange.contains_key(exchange) {
@@ -120,9 +166,17 @@ pub enum ConfigValidationError {
     LiveModeRequiresWhitelist,
     #[error("missing fee config for exchange {0}")]
     MissingFee(ExchangeId),
+    #[error("top-level mode {top_level:?} does not match strategy.mode {strategy:?}")]
+    ModeMismatch {
+        top_level: RuntimeMode,
+        strategy: RuntimeMode,
+    },
+    #[error("risk values must be positive and internally consistent")]
+    InvalidRisk,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThresholdConfig {
     pub min_display_raw_spread: f64,
     pub min_open_maker_taker_net_edge: f64,
@@ -149,6 +203,7 @@ fn default_max_open_raw_spread() -> f64 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SizingConfig {
     pub min_notional_usdt: f64,
     pub target_notional_usdt: f64,
@@ -159,6 +214,12 @@ pub struct SizingConfig {
     pub leverage: f64,
     #[serde(default = "default_max_positions_per_exchange")]
     pub max_positions_per_exchange: usize,
+    #[serde(default = "default_capital_fraction_of_smaller_equity")]
+    pub capital_fraction_of_smaller_equity: f64,
+    #[serde(default = "default_max_symbol_notional_usdt")]
+    pub max_symbol_notional_usdt: f64,
+    #[serde(default = "default_max_exchange_usage_pct")]
+    pub max_exchange_usage_pct: f64,
 }
 
 impl Default for SizingConfig {
@@ -170,6 +231,9 @@ impl Default for SizingConfig {
             exchange_equity_usdt: default_exchange_equity_usdt(),
             leverage: default_leverage(),
             max_positions_per_exchange: default_max_positions_per_exchange(),
+            capital_fraction_of_smaller_equity: default_capital_fraction_of_smaller_equity(),
+            max_symbol_notional_usdt: default_max_symbol_notional_usdt(),
+            max_exchange_usage_pct: default_max_exchange_usage_pct(),
         }
     }
 }
@@ -186,10 +250,25 @@ fn default_max_positions_per_exchange() -> usize {
     50
 }
 
+fn default_capital_fraction_of_smaller_equity() -> f64 {
+    0.10
+}
+
+fn default_max_symbol_notional_usdt() -> f64 {
+    200.0
+}
+
+fn default_max_exchange_usage_pct() -> f64 {
+    0.35
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FeeConfig {
     pub default_maker_fee_rate: f64,
     pub default_taker_fee_rate: f64,
+    #[serde(default)]
+    pub use_account_fee_api: bool,
     pub per_exchange: HashMap<ExchangeId, ExchangeFeeRates>,
 }
 
@@ -228,20 +307,29 @@ impl Default for FeeConfig {
         Self {
             default_maker_fee_rate: 0.0002,
             default_taker_fee_rate: 0.0005,
+            use_account_fee_api: false,
             per_exchange,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FundingConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_funding_mode")]
+    pub mode: String,
     pub expected_holding_hours: f64,
+    #[serde(default = "default_funding_refresh_secs")]
+    pub refresh_secs: u64,
     pub no_open_before_funding_mins: i64,
     pub block_if_expected_funding_negative_pct: f64,
     pub max_adverse_funding_rate: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionConfig {
     pub dry_run: bool,
     pub max_hedge_retries: u32,
@@ -261,6 +349,7 @@ impl Default for ExecutionConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReconciliationConfig {
     pub open_orders_interval_secs: u64,
     pub positions_interval_secs: u64,
@@ -284,7 +373,10 @@ impl Default for ReconciliationConfig {
 impl Default for FundingConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
+            mode: default_funding_mode(),
             expected_holding_hours: 8.0,
+            refresh_secs: default_funding_refresh_secs(),
             no_open_before_funding_mins: 5,
             block_if_expected_funding_negative_pct: 0.001,
             max_adverse_funding_rate: 0.001,
@@ -292,7 +384,20 @@ impl Default for FundingConfig {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_funding_mode() -> String {
+    "settlement".to_string()
+}
+
+fn default_funding_refresh_secs() -> u64 {
+    30
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ExchangeRuntimeConfig {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -305,6 +410,7 @@ pub struct ExchangeRuntimeConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ExchangeRouteConfig {
     #[serde(default)]
     pub market_ws: Vec<String>,
@@ -317,6 +423,29 @@ pub struct ExchangeRouteConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutingConfig {
+    pub ws_stale_limit_ms: i64,
+    pub order_latency_p95_degrade_ms: i64,
+    pub order_error_rate_degrade: f64,
+    pub auto_failover: bool,
+    pub degraded_mode_blocks_new_entries: bool,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            ws_stale_limit_ms: 30_000,
+            order_latency_p95_degrade_ms: 1_200,
+            order_error_rate_degrade: 0.05,
+            auto_failover: true,
+            degraded_mode_blocks_new_entries: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RiskConfig {
     pub stale_quote_ms: i64,
     pub max_book_age_ms: i64,
@@ -325,6 +454,10 @@ pub struct RiskConfig {
     pub maker_non_fill_penalty: f64,
     pub safety_buffer: f64,
     pub max_notional_per_symbol_usdt: f64,
+    #[serde(default = "default_max_open_bundles")]
+    pub max_open_bundles: usize,
+    #[serde(default = "default_true")]
+    pub symbol_whitelist_required_live: bool,
 }
 
 impl Default for RiskConfig {
@@ -337,14 +470,33 @@ impl Default for RiskConfig {
             maker_non_fill_penalty: 0.001,
             safety_buffer: 0.001,
             max_notional_per_symbol_usdt: 2_000.0,
+            max_open_bundles: default_max_open_bundles(),
+            symbol_whitelist_required_live: true,
         }
     }
 }
 
+fn default_max_open_bundles() -> usize {
+    3
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UniverseConfig {
     pub enabled_exchanges: Vec<ExchangeId>,
     pub symbols: Vec<CanonicalSymbol>,
+    #[serde(default = "default_universe_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub target_symbol_count: Option<usize>,
+    #[serde(default)]
+    pub max_symbol_count: Option<usize>,
+    #[serde(default)]
+    pub include_symbols: Vec<CanonicalSymbol>,
+    #[serde(default)]
+    pub exclude_symbols: Vec<CanonicalSymbol>,
+    #[serde(default)]
+    pub min_24h_quote_volume: Option<f64>,
 }
 
 impl Default for UniverseConfig {
@@ -357,11 +509,22 @@ impl Default for UniverseConfig {
                 ExchangeId::Gate,
             ],
             symbols: vec![CanonicalSymbol::new("BTC", "USDT")],
+            mode: default_universe_mode(),
+            target_symbol_count: None,
+            max_symbol_count: None,
+            include_symbols: Vec::new(),
+            exclude_symbols: Vec::new(),
+            min_24h_quote_volume: None,
         }
     }
 }
 
+fn default_universe_mode() -> String {
+    "static".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PersistenceConfig {
     pub enabled: bool,
     pub jsonl_dir: String,
@@ -379,6 +542,7 @@ impl Default for PersistenceConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DashboardConfig {
     pub enabled: bool,
     pub bind_host: String,
@@ -396,6 +560,7 @@ impl Default for DashboardConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AlertConfig {
     pub enabled: bool,
     pub orphan_alert: bool,
@@ -427,6 +592,7 @@ mod tests {
     fn config_validate_should_reject_live_without_symbol_whitelist() {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
         config.universe.symbols.clear();
 
         assert_eq!(
@@ -455,5 +621,59 @@ mod tests {
             .universe
             .symbols
             .contains(&CanonicalSymbol::new("BTC", "USDT")));
+        assert_eq!(config.universe.mode, "curated_long_tail");
+        assert_eq!(config.sizing.capital_fraction_of_smaller_equity, 0.10);
+        assert_eq!(config.risk.max_open_bundles, 3);
+        assert!(config.routing.auto_failover);
+        assert!(config.funding.enabled);
+    }
+
+    #[test]
+    fn config_template_should_reject_unknown_fields() {
+        let raw = r#"
+mode: simulation
+unknown_top_level: true
+thresholds:
+  min_display_raw_spread: 0.001
+  min_open_maker_taker_net_edge: 0.005
+  lock_profit_dual_taker_pct: 0.003
+  strong_lock_profit_dual_taker_pct: 0.005
+sizing:
+  min_notional_usdt: 20.0
+  target_notional_usdt: 100.0
+  max_notional_usdt: 500.0
+  exchange_equity_usdt: 500.0
+  leverage: 10.0
+  max_positions_per_exchange: 50
+fees:
+  default_maker_fee_rate: 0.0002
+  default_taker_fee_rate: 0.0005
+  per_exchange:
+    binance:
+      maker: 0.0002
+      taker: 0.0005
+funding:
+  expected_holding_hours: 8.0
+  no_open_before_funding_mins: 5
+  block_if_expected_funding_negative_pct: 0.001
+  max_adverse_funding_rate: 0.001
+risk:
+  stale_quote_ms: 1500
+  max_book_age_ms: 2000
+  taker_slippage_buffer: 0.0005
+  max_taker_slippage_pct: 0.003
+  maker_non_fill_penalty: 0.001
+  safety_buffer: 0.001
+  max_notional_per_symbol_usdt: 2000.0
+universe:
+  enabled_exchanges:
+    - binance
+  symbols:
+    - ARB/USDT
+"#;
+
+        let err = serde_yaml::from_str::<CrossExchangeArbitrageConfig>(raw)
+            .expect_err("unknown fields should be rejected");
+        assert!(err.to_string().contains("unknown_top_level"));
     }
 }

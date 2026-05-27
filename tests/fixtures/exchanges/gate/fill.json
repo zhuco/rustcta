@@ -1,0 +1,15 @@
+[
+  {
+    "id": 121234231,
+    "create_time": 1743054550,
+    "contract": "BTC_USDT",
+    "order_id": 15675394,
+    "size": 100,
+    "price": "65000.1",
+    "role": "maker",
+    "fee": "-0.16250025",
+    "fee_currency": "USDT",
+    "point_fee": "0",
+    "text": "t-xca-bundle-0001-maker-0"
+  }
+]

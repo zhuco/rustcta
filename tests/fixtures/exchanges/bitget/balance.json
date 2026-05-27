@@ -1,0 +1,20 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1743054552000,
+  "data": [
+    {
+      "marginCoin": "USDT",
+      "locked": "0",
+      "available": "934.9224",
+      "crossedMaxAvailable": "934.9224",
+      "fixedMaxAvailable": "934.9224",
+      "maxTransferOut": "934.9224",
+      "equity": "1000.1224",
+      "usdtEquity": "1000.1224",
+      "btcEquity": "0.015383",
+      "unrealizedPL": "0.1224",
+      "bonus": "0"
+    }
+  ]
+}

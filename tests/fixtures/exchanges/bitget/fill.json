@@ -1,0 +1,27 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1743054550123,
+  "data": {
+    "fillList": [
+      {
+        "tradeId": "130049501",
+        "orderId": "121211212122",
+        "clientOid": "xca-bundle-0001-maker-0",
+        "symbol": "BTCUSDT",
+        "productType": "USDT-FUTURES",
+        "marginCoin": "USDT",
+        "price": "65000.1",
+        "size": "0.010",
+        "fee": "-0.1300002",
+        "feeCcy": "USDT",
+        "side": "buy",
+        "tradeSide": "open",
+        "execType": "maker",
+        "tradeScope": "taker",
+        "cTime": "1743054550123"
+      }
+    ],
+    "endId": "130049501"
+  }
+}

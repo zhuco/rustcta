@@ -1,0 +1,20 @@
+{
+  "user": 100000,
+  "currency": "USDT",
+  "total": "1000.1224",
+  "unrealised_pnl": "0.1224",
+  "position_margin": "65.20",
+  "order_margin": "0",
+  "available": "934.9224",
+  "point": "0",
+  "bonus": "0",
+  "in_dual_mode": false,
+  "cross_initial_margin": "65.20",
+  "cross_maintenance_margin": "3.26",
+  "cross_order_margin": "0",
+  "cross_unrealised_pnl": "0.1224",
+  "cross_available": "934.9224",
+  "cross_margin_balance": "1000.1224",
+  "enable_tiered_mm": true,
+  "position_mode": "single"
+}

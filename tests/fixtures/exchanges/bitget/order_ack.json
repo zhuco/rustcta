@@ -1,0 +1,22 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1743054549000,
+  "request": {
+    "symbol": "BTCUSDT",
+    "productType": "USDT-FUTURES",
+    "marginMode": "isolated",
+    "marginCoin": "USDT",
+    "size": "0.010",
+    "price": "65000.1",
+    "side": "buy",
+    "tradeSide": "open",
+    "orderType": "limit",
+    "force": "post_only",
+    "clientOid": "xca-bundle-0001-maker-0"
+  },
+  "data": {
+    "clientOid": "xca-bundle-0001-maker-0",
+    "orderId": "121211212122"
+  }
+}

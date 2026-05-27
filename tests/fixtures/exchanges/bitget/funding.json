@@ -1,0 +1,19 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1743054548200,
+  "request": {
+    "productType": "USDT-FUTURES",
+    "symbol": "BTCUSDT"
+  },
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "fundingRate": "0.000068",
+      "fundingRateInterval": "8",
+      "nextUpdate": "1743062400000",
+      "minFundingRate": "-0.003",
+      "maxFundingRate": "0.003"
+    }
+  ]
+}

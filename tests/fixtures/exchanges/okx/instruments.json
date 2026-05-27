@@ -1,0 +1,29 @@
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {
+      "instType": "SWAP",
+      "instId": "BTC-USDT-SWAP",
+      "uly": "BTC-USDT",
+      "baseCcy": "",
+      "quoteCcy": "",
+      "settleCcy": "USDT",
+      "ctVal": "0.01",
+      "ctMult": "1",
+      "ctValCcy": "BTC",
+      "optType": "",
+      "stk": "",
+      "listTime": "1597026383085",
+      "expTime": "",
+      "lever": "100",
+      "tickSz": "0.1",
+      "lotSz": "1",
+      "minSz": "1",
+      "ctType": "linear",
+      "alias": "",
+      "state": "live",
+      "ruleType": "normal"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": 15675394,
+  "user": 100000,
+  "contract": "BTC_USDT",
+  "create_time": 1743054549,
+  "size": 100,
+  "iceberg": 0,
+  "left": 100,
+  "price": "65000.1",
+  "fill_price": "0",
+  "mkfr": "-0.00025",
+  "tkfr": "0.00075",
+  "tif": "poc",
+  "refu": 0,
+  "is_reduce_only": false,
+  "is_close": false,
+  "is_liq": false,
+  "text": "t-xca-bundle-0001-maker-0",
+  "status": "open",
+  "finish_as": "",
+  "stp_act": "-",
+  "pos_margin_mode": "isolated"
+}

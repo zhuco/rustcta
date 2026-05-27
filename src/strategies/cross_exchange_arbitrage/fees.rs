@@ -12,6 +12,7 @@ pub enum FeeRole {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExchangeFeeRates {
     pub maker: f64,
     pub taker: f64,

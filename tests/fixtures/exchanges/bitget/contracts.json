@@ -1,0 +1,49 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1743054548000,
+  "request": {
+    "productType": "USDT-FUTURES",
+    "symbol": "BTCUSDT"
+  },
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "baseCoin": "BTC",
+      "quoteCoin": "USDT",
+      "buyLimitPriceRatio": "0.9",
+      "sellLimitPriceRatio": "0.9",
+      "feeRateUpRatio": "0.1",
+      "makerFeeRate": "0.0002",
+      "takerFeeRate": "0.0006",
+      "openCostUpRatio": "0.1",
+      "supportMarginCoins": [
+        "USDT"
+      ],
+      "minTradeNum": "0.001",
+      "priceEndStep": "1",
+      "volumePlace": "3",
+      "pricePlace": "1",
+      "sizeMultiplier": "0.001",
+      "symbolType": "perpetual",
+      "minTradeUSDT": "5",
+      "maxSymbolOrderNum": "999999",
+      "maxProductOrderNum": "999999",
+      "maxPositionNum": "150",
+      "symbolStatus": "normal",
+      "offTime": "-1",
+      "limitOpenTime": "-1",
+      "deliveryTime": "",
+      "deliveryStartTime": "",
+      "launchTime": "1597026383085",
+      "fundInterval": "8",
+      "minLever": "1",
+      "maxLever": "125",
+      "posLimit": "0.05",
+      "maintainTime": "1680165535278",
+      "maxMarketOrderQty": "220",
+      "maxOrderQty": "1200",
+      "isRwa": "NO"
+    }
+  ]
+}

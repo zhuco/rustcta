@@ -1,0 +1,23 @@
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {
+      "instType": "SWAP",
+      "instId": "BTC-USDT-SWAP",
+      "tradeId": "130049501",
+      "ordId": "2510789768709120",
+      "clOrdId": "xca-bundle-0001-maker-0",
+      "billId": "209823731",
+      "tag": "rustcta",
+      "fillPx": "65000.1",
+      "fillSz": "1",
+      "side": "buy",
+      "posSide": "long",
+      "execType": "M",
+      "feeCcy": "USDT",
+      "fee": "-0.01300002",
+      "ts": "1743054550123"
+    }
+  ]
+}

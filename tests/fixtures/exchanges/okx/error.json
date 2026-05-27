@@ -1,0 +1,12 @@
+{
+  "code": "51008",
+  "msg": "Order failed. Insufficient USDT balance in account.",
+  "data": [
+    {
+      "clOrdId": "xca-bundle-0001-maker-0",
+      "ordId": "",
+      "sCode": "51008",
+      "sMsg": "Order failed. Insufficient USDT balance in account."
+    }
+  ]
+}
