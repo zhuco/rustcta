@@ -2,7 +2,9 @@
 
 use super::opportunity::Opportunity;
 use super::position::PortfolioExposureSummary;
-use super::risk::RejectReason;
+use super::risk::{
+    PrivateStreamHealth, RejectReason, RiskDecision, RiskOperatingMode, StrategyRiskState,
+};
 use super::state::{SimulatedBundleState, SimulatedBundleStatus};
 use crate::market::{BookQuality, CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use chrono::{DateTime, Utc};
@@ -17,6 +19,8 @@ pub struct CrossArbDashboardStatus {
     pub open_bundles: usize,
     pub position_summary: PortfolioExposureSummary,
     pub route_health: Vec<RouteReadModel>,
+    pub risk_state: RiskStateReadModel,
+    pub private_stream_health: Vec<PrivateStreamHealthReadModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,4 +140,52 @@ pub struct OrderBookQualityReadModel {
     pub source_route: Option<String>,
     pub quality: BookQuality,
     pub usable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiskStateReadModel {
+    pub mode: RiskOperatingMode,
+    pub allow_new_entries: bool,
+    pub allow_closes: bool,
+    pub needs_reconciliation: bool,
+    pub needs_private_resync: bool,
+    pub trigger_count: usize,
+}
+
+impl From<&RiskDecision> for RiskStateReadModel {
+    fn from(decision: &RiskDecision) -> Self {
+        Self {
+            mode: decision.mode.clone(),
+            allow_new_entries: decision.allow_new_entries,
+            allow_closes: decision.allow_closes,
+            needs_reconciliation: decision.needs_reconciliation,
+            needs_private_resync: decision.needs_private_resync,
+            trigger_count: decision.trigger_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrivateStreamHealthReadModel {
+    pub exchange: ExchangeId,
+    pub last_event_at: Option<DateTime<Utc>>,
+    pub last_disconnect_at: Option<DateTime<Utc>>,
+    pub stale_after_ms: i64,
+    pub needs_resync: bool,
+    pub consecutive_stale_checks: u32,
+    pub resync_requested_at: Option<DateTime<Utc>>,
+}
+
+impl From<&PrivateStreamHealth> for PrivateStreamHealthReadModel {
+    fn from(health: &PrivateStreamHealth) -> Self {
+        Self {
+            exchange: health.exchange.clone(),
+            last_event_at: health.last_event_at,
+            last_disconnect_at: health.last_disconnect_at,
+            stale_after_ms: health.stale_after_ms,
+            needs_resync: health.needs_resync,
+            consecutive_stale_checks: health.consecutive_stale_checks,
+            resync_requested_at: health.resync_requested_at,
+        }
+    }
 }

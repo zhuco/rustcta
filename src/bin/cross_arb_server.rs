@@ -28,7 +28,8 @@ use rustcta::strategies::cross_exchange_arbitrage::{
     calculate_taker_vwap, scan_opportunities, BundleReadModel, CrossArbDashboardStatus,
     CrossExchangeArbitrageConfig, FeeModel, FeeRole, MakerLegKind, MarketSnapshot, Opportunity,
     OpportunityReadModel, OrderBookQualityReadModel, OrderSide, PortfolioExposureSummary,
-    ReconcileReadModel, RejectReason, RiskEventReadModel, RouteReadModel, SimulatedBundleState,
+    PrivateStreamHealthReadModel, ReconcileReadModel, RejectReason, RiskEventReadModel,
+    RiskOperatingMode, RiskStateReadModel, RouteReadModel, SimulatedBundleState,
     SimulatedBundleStatus,
 };
 use serde::{Deserialize, Serialize};
@@ -165,6 +166,15 @@ impl CrossArbReadModel {
                 open_bundles: 0,
                 position_summary: PortfolioExposureSummary::default(),
                 route_health: Vec::new(),
+                risk_state: RiskStateReadModel {
+                    mode: RiskOperatingMode::Normal,
+                    allow_new_entries: true,
+                    allow_closes: true,
+                    needs_reconciliation: false,
+                    needs_private_resync: false,
+                    trigger_count: 0,
+                },
+                private_stream_health: Vec::<PrivateStreamHealthReadModel>::new(),
             },
             analytics: AnalyticsSummary::empty(now),
             data_source,
@@ -345,6 +355,15 @@ impl CrossArbReadModel {
             open_bundles: self.shadow_positions.len(),
             position_summary: PortfolioExposureSummary::default(),
             route_health: self.routes.iter().take(100).cloned().collect(),
+            risk_state: RiskStateReadModel {
+                mode: RiskOperatingMode::Normal,
+                allow_new_entries: true,
+                allow_closes: true,
+                needs_reconciliation: false,
+                needs_private_resync: false,
+                trigger_count: 0,
+            },
+            private_stream_health: Vec::<PrivateStreamHealthReadModel>::new(),
         };
     }
 
@@ -452,6 +471,15 @@ impl CrossArbReadModel {
             open_bundles: self.shadow_positions.len(),
             position_summary: PortfolioExposureSummary::default(),
             route_health: self.routes.iter().take(100).cloned().collect(),
+            risk_state: RiskStateReadModel {
+                mode: RiskOperatingMode::Normal,
+                allow_new_entries: true,
+                allow_closes: true,
+                needs_reconciliation: false,
+                needs_private_resync: false,
+                trigger_count: 0,
+            },
+            private_stream_health: Vec::<PrivateStreamHealthReadModel>::new(),
         };
     }
 

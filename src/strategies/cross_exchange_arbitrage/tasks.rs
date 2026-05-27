@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     scan_opportunities, ArbSignal, BundleReadModel, CrossArbDashboardStatus, CrossArbStorageEvent,
     CrossExchangeArbitrageConfig, InMemoryStorageSink, MarketSnapshot, Opportunity,
-    OpportunityReadModel, PortfolioExposureSummary, PositionManager, RiskEventReadModel,
-    RouteReadModel, SimulatedBundleState, SimulatedBundleStatus, StorageSink,
+    OpportunityReadModel, PortfolioExposureSummary, PositionManager, PrivateStreamHealthReadModel,
+    RiskEventReadModel, RiskStateReadModel, RouteReadModel, SimulatedBundleState,
+    SimulatedBundleStatus, StorageSink, StrategyRiskState,
 };
 use crate::execution::{ArbitrageBundle, ExchangePosition, FillEvent};
 use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
@@ -24,6 +25,7 @@ pub struct CrossArbRuntimeState {
     pub history: Vec<SimulatedBundleState>,
     pub risk_events: Vec<RiskEventReadModel>,
     pub position_manager: PositionManager,
+    pub risk_state: StrategyRiskState,
     pub paused_new_entries: bool,
     pub close_only: bool,
     pub kill_switch: bool,
@@ -40,6 +42,7 @@ impl CrossArbRuntimeState {
             history: Vec::new(),
             risk_events: Vec::new(),
             position_manager: PositionManager::default(),
+            risk_state: StrategyRiskState::new(now),
             paused_new_entries: false,
             close_only: false,
             kill_switch: false,
@@ -82,6 +85,8 @@ impl CrossArbRuntimeState {
                 .position_manager
                 .portfolio_exposure_summary(self.config.reconciliation.quantity_tolerance),
             route_health: self.route_read_models(),
+            risk_state: RiskStateReadModel::from(&self.risk_state.decision()),
+            private_stream_health: self.private_stream_health_read_models(),
         }
     }
 
@@ -145,21 +150,64 @@ impl CrossArbRuntimeState {
 
     pub fn pause_new_entries(&mut self) {
         self.paused_new_entries = true;
+        self.risk_state.pause_new_entries(self.updated_at);
     }
 
     pub fn resume_new_entries(&mut self) {
         self.paused_new_entries = false;
         self.close_only = false;
+        self.risk_state.paused_new_entries = false;
+        self.risk_state.close_only = false;
+        self.risk_state.recompute_mode(self.updated_at);
     }
 
     pub fn set_close_only(&mut self) {
         self.close_only = true;
+        self.risk_state.set_close_only(self.updated_at);
     }
 
     pub fn kill_switch(&mut self) {
         self.kill_switch = true;
         self.paused_new_entries = true;
         self.close_only = true;
+        self.risk_state.kill_switch(self.updated_at);
+    }
+
+    pub fn update_private_stream_health(
+        &mut self,
+        exchange: ExchangeId,
+        received_at: DateTime<Utc>,
+        needs_resync: bool,
+    ) {
+        self.risk_state
+            .observe_private_event(exchange, received_at, needs_resync);
+        let decision = self.risk_state.decision();
+        self.paused_new_entries = !decision.allow_new_entries;
+        self.close_only = matches!(
+            decision.mode,
+            super::risk::RiskOperatingMode::CloseOnly | super::risk::RiskOperatingMode::Halted
+        );
+        self.kill_switch = matches!(decision.mode, super::risk::RiskOperatingMode::Halted);
+        self.updated_at = received_at;
+    }
+
+    pub fn record_reconciliation_result(
+        &mut self,
+        exchange: ExchangeId,
+        symbol: String,
+        severity: crate::execution::ReconcileSeverity,
+        checked_at: DateTime<Utc>,
+    ) {
+        self.risk_state
+            .record_reconciliation_severity(exchange, symbol, severity, checked_at);
+        let decision = self.risk_state.decision();
+        self.paused_new_entries = !decision.allow_new_entries;
+        self.close_only = matches!(
+            decision.mode,
+            super::risk::RiskOperatingMode::CloseOnly | super::risk::RiskOperatingMode::Halted
+        );
+        self.kill_switch = matches!(decision.mode, super::risk::RiskOperatingMode::Halted);
+        self.updated_at = checked_at;
     }
 
     fn route_read_models(&self) -> Vec<RouteReadModel> {
@@ -172,6 +220,14 @@ impl CrossArbRuntimeState {
                 last_book_age_ms: opportunity.book_age_ms,
                 reject_reasons: opportunity.reject_reasons.clone(),
             })
+            .collect()
+    }
+
+    fn private_stream_health_read_models(&self) -> Vec<PrivateStreamHealthReadModel> {
+        self.risk_state
+            .private_stream_health
+            .values()
+            .map(PrivateStreamHealthReadModel::from)
             .collect()
     }
 }
