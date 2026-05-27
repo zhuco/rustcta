@@ -1,6 +1,9 @@
 //! Private account stream and REST reconciliation helpers for cross-arb runtime.
 
-use super::{CrossArbRuntime, PrivateWsRuntimeSpec};
+use super::{
+    maker_fill_from_tracked_private_event, CrossArbExecutionCoordinator, CrossArbRuntime,
+    PrivateWsRuntimeSpec,
+};
 use crate::exchanges::adapters::run_private_ws;
 use crate::execution::{
     ExchangeBalance, ExchangePosition, FillEvent, FillQuery, OrderState, PrivateEvent,
@@ -62,6 +65,7 @@ pub struct PrivateRestAuditPlan {
 pub struct PrivateRuntimeSync {
     runtime: Arc<RwLock<CrossArbRuntime>>,
     adapters: HashMap<ExchangeId, Arc<dyn TradingAdapter>>,
+    execution: Option<Arc<RwLock<CrossArbExecutionCoordinator>>>,
 }
 
 impl PrivateRuntimeSync {
@@ -69,16 +73,75 @@ impl PrivateRuntimeSync {
         runtime: Arc<RwLock<CrossArbRuntime>>,
         adapters: impl IntoIterator<Item = Arc<dyn TradingAdapter>>,
     ) -> Self {
+        Self::with_execution(runtime, adapters, None)
+    }
+
+    pub fn with_execution(
+        runtime: Arc<RwLock<CrossArbRuntime>>,
+        adapters: impl IntoIterator<Item = Arc<dyn TradingAdapter>>,
+        execution: Option<Arc<RwLock<CrossArbExecutionCoordinator>>>,
+    ) -> Self {
         let adapters = adapters
             .into_iter()
             .map(|adapter| (adapter.exchange(), adapter))
             .collect();
-        Self { runtime, adapters }
+        Self {
+            runtime,
+            adapters,
+            execution,
+        }
     }
 
     pub async fn ingest_private_event(&self, event: PrivateEvent) {
-        let mut runtime = self.runtime.write().await;
-        runtime.on_private_event(event);
+        let hedge = if let Some(execution) = &self.execution {
+            let tracked = if let PrivateEventKind::Fill(fill) = &event.kind {
+                execution.read().await.tracked_order_for_fill(fill)
+            } else {
+                None
+            };
+            let mut runtime = self.runtime.write().await;
+            runtime.on_private_event(event.clone());
+            tracked.as_ref().and_then(|tracked| {
+                maker_fill_from_tracked_private_event(&mut runtime, tracked, &event)
+            })
+        } else {
+            let mut runtime = self.runtime.write().await;
+            runtime.on_private_event(event);
+            None
+        };
+
+        if let (Some(execution), Some(fill)) = (&self.execution, hedge) {
+            let decision = execution
+                .write()
+                .await
+                .execute_hedge_for_maker_fill(fill)
+                .await;
+            if decision.blocked_reason.is_some() || decision.requires_reconcile {
+                let mut runtime = self.runtime.write().await;
+                runtime.state.risk_events.push(super::RiskEventReadModel {
+                    event_id: format!(
+                        "hedge-decision-{}",
+                        decision.plan.created_at.timestamp_millis()
+                    ),
+                    canonical_symbol: decision
+                        .plan
+                        .commands
+                        .first()
+                        .map(|command| command.canonical_symbol.clone()),
+                    exchange: decision
+                        .plan
+                        .commands
+                        .first()
+                        .map(|command| command.exchange.clone()),
+                    reason: super::RejectReason::RouteUnhealthy,
+                    message: decision
+                        .blocked_reason
+                        .clone()
+                        .unwrap_or_else(|| "hedge requires reconciliation".to_string()),
+                    created_at: decision.plan.created_at,
+                });
+            }
+        }
     }
 
     pub async fn ingest_private_events(&self, events: impl IntoIterator<Item = PrivateEvent>) {

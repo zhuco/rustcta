@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod dashboard;
+pub mod execution;
 pub mod fees;
 pub mod funding;
 pub mod opportunity;
@@ -26,6 +27,7 @@ pub use crate::market::{
 };
 pub use config::*;
 pub use dashboard::*;
+pub use execution::*;
 pub use fees::*;
 pub use funding::*;
 pub use opportunity::*;
