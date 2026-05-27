@@ -11,12 +11,14 @@ pub mod binance_market;
 pub mod bitget_market;
 pub mod gate_market;
 pub mod okx_market;
+pub mod private_perp;
 pub mod trading;
 
 pub use binance_market::BinanceMarketAdapter;
 pub use bitget_market::BitgetMarketAdapter;
 pub use gate_market::GateMarketAdapter;
 pub use okx_market::OkxMarketAdapter;
+pub use private_perp::*;
 pub use trading::{private_trading_support_for, ExchangeTradingAdapter, PrivateTradingSupport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
