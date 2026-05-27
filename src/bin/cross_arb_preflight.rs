@@ -27,7 +27,7 @@ use tokio::time::{timeout, Duration};
 struct Args {
     #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
     config: PathBuf,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, alias = "private-readonly", default_value_t = false)]
     private: bool,
     #[arg(long, default_value_t = 5_000)]
     timeout_ms: u64,
@@ -360,6 +360,21 @@ async fn check_private_exchange(
                 )
             }),
         );
+        let symbol_pair = symbol.as_pair();
+        checks.push(
+            timed(
+                format!("{}.{}.private.fills", exchange.as_str(), symbol),
+                timeout_ms,
+                async {
+                    private_exchange
+                        .get_my_trades(Some(&symbol_pair), MarketType::Futures, Some(5))
+                        .await
+                        .map_err(|err| anyhow!(err.to_string()))
+                },
+            )
+            .await
+            .map_message(|trades| format!("loaded {} recent fills", trades.len())),
+        );
     }
 
     checks.push(warn(
@@ -512,5 +527,18 @@ fn overall_status(checks: &[PreflightCheck]) -> CheckStatus {
         CheckStatus::Warn
     } else {
         CheckStatus::Pass
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preflight_cli_should_accept_private_readonly_alias() {
+        let args = Args::try_parse_from(["cross_arb_preflight", "--private-readonly"])
+            .expect("private-readonly alias should parse");
+
+        assert!(args.private);
     }
 }
