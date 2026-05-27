@@ -9,20 +9,25 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
+use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::{sleep, timeout, Duration as TokioDuration};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::core::types::{Fee, MarketType, OrderStatus as CoreOrderStatus};
 use crate::execution::{
     CancelAck, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
-    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand, OrderAck,
-    OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState, OrderType, PositionMode,
-    PositionModeAck, PositionModeCommand, PositionSide, PrivateErrorEvent, PrivateEvent,
-    PrivateEventKind, TimeInForce, TradingAdapter, TradingCapabilities,
+    ExchangeErrorClass, ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck,
+    LeverageCommand, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState,
+    OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide, PrivateErrorEvent,
+    PrivateEvent, PrivateEventKind, TimeInForce, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol};
 
@@ -138,6 +143,8 @@ pub struct PrivateWsAuth {
     pub api_key: String,
     pub api_secret: String,
     pub passphrase: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -556,6 +563,383 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivateWsRunConfig {
+    pub connect_timeout_ms: u64,
+    pub reconnect_delay_ms: u64,
+    pub heartbeat_interval_ms: u64,
+    pub subscribe_interval_ms: u64,
+}
+
+impl Default for PrivateWsRunConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout_ms: 10_000,
+            reconnect_delay_ms: 2_000,
+            heartbeat_interval_ms: 15_000,
+            subscribe_interval_ms: 50,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivateWsEndpoint {
+    pub exchange: ExchangeId,
+    pub url: String,
+    pub login_message: Option<String>,
+    pub subscribe_messages: Vec<String>,
+    pub send_interval_ms: u64,
+}
+
+pub fn bitget_private_trading_adapter(auth: PrivateRestAuth) -> Result<Arc<dyn TradingAdapter>> {
+    private_perp_trading_adapter_for(PrivatePerpExchange::Bitget, auth, PositionMode::OneWay)
+}
+
+pub fn gate_private_trading_adapter(auth: PrivateRestAuth) -> Result<Arc<dyn TradingAdapter>> {
+    private_perp_trading_adapter_for(PrivatePerpExchange::Gate, auth, PositionMode::OneWay)
+}
+
+pub fn private_perp_trading_adapter_for(
+    exchange: PrivatePerpExchange,
+    auth: PrivateRestAuth,
+    position_mode: PositionMode,
+) -> Result<Arc<dyn TradingAdapter>> {
+    match exchange {
+        PrivatePerpExchange::Bitget => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                BitgetPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::new(exchange, auth)?,
+            )
+            .with_position_mode(position_mode),
+        )),
+        PrivatePerpExchange::Gate => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                GatePrivatePerpProtocol,
+                ReqwestPrivateRestTransport::new(exchange, auth)?,
+            )
+            .with_position_mode(position_mode),
+        )),
+    }
+}
+
+pub fn build_private_ws_endpoint(
+    exchange: PrivatePerpExchange,
+    auth: PrivateWsAuth,
+    symbols: &[ExchangeSymbol],
+    timestamp: i64,
+) -> Result<PrivateWsEndpoint> {
+    match exchange {
+        PrivatePerpExchange::Bitget => {
+            build_private_ws_endpoint_for(BitgetPrivatePerpProtocol, auth, symbols, timestamp)
+        }
+        PrivatePerpExchange::Gate => {
+            build_private_ws_endpoint_for(GatePrivatePerpProtocol, auth, symbols, timestamp)
+        }
+    }
+}
+
+fn build_private_ws_endpoint_for<P>(
+    protocol: P,
+    auth: PrivateWsAuth,
+    symbols: &[ExchangeSymbol],
+    timestamp: i64,
+) -> Result<PrivateWsEndpoint>
+where
+    P: PrivatePerpProtocol,
+{
+    let exchange = protocol.exchange();
+    let subscribe_messages = match exchange {
+        PrivatePerpExchange::Bitget => ["orders", "positions", "account"]
+            .into_iter()
+            .map(|channel| {
+                protocol
+                    .ws_subscribe(
+                        &PrivateWsSubscription {
+                            channel: channel.to_string(),
+                            symbols: Vec::new(),
+                            auth: None,
+                        },
+                        timestamp,
+                    )
+                    .map(|request| request.message)
+            })
+            .collect::<Result<Vec<_>>>()?,
+        PrivatePerpExchange::Gate => [
+            "futures.orders",
+            "futures.usertrades",
+            "futures.positions",
+            "futures.balances",
+        ]
+        .into_iter()
+        .map(|channel| {
+            protocol
+                .ws_subscribe(
+                    &PrivateWsSubscription {
+                        channel: channel.to_string(),
+                        symbols: symbols.to_vec(),
+                        auth: Some(auth.clone()),
+                    },
+                    timestamp,
+                )
+                .map(|request| request.message)
+        })
+        .collect::<Result<Vec<_>>>()?,
+    };
+
+    let login_message = match exchange {
+        PrivatePerpExchange::Bitget => Some(protocol.ws_login(&auth, timestamp)?.message),
+        PrivatePerpExchange::Gate => None,
+    };
+
+    Ok(PrivateWsEndpoint {
+        exchange: exchange.exchange_id(),
+        url: exchange.private_ws_url().to_string(),
+        login_message,
+        subscribe_messages,
+        send_interval_ms: PrivateWsRunConfig::default().subscribe_interval_ms,
+    })
+}
+
+pub async fn run_private_ws(
+    exchange: PrivatePerpExchange,
+    auth: PrivateWsAuth,
+    symbols: Vec<ExchangeSymbol>,
+    config: PrivateWsRunConfig,
+    tx: mpsc::Sender<PrivateEvent>,
+) -> Result<()> {
+    loop {
+        if tx.is_closed() {
+            return Ok(());
+        }
+
+        let result = match exchange {
+            PrivatePerpExchange::Bitget => {
+                run_private_ws_protocol(
+                    BitgetPrivatePerpProtocol,
+                    auth.clone(),
+                    symbols.clone(),
+                    config,
+                    tx.clone(),
+                )
+                .await
+            }
+            PrivatePerpExchange::Gate => {
+                run_private_ws_protocol(
+                    GatePrivatePerpProtocol,
+                    auth.clone(),
+                    symbols.clone(),
+                    config,
+                    tx.clone(),
+                )
+                .await
+            }
+        };
+
+        if tx.is_closed() {
+            return Ok(());
+        }
+        if let Err(err) = result {
+            emit_private_ws_error(
+                &tx,
+                exchange.exchange_id(),
+                ExchangeErrorClass::Network,
+                Some(exchange.private_ws_url().to_string()),
+                err.to_string(),
+            )
+            .await;
+            emit_private_ws_disconnected(&tx, exchange.exchange_id(), Some(err.to_string())).await;
+        }
+        sleep(TokioDuration::from_millis(config.reconnect_delay_ms)).await;
+    }
+}
+
+pub async fn run_private_ws_protocol<P>(
+    protocol: P,
+    auth: PrivateWsAuth,
+    symbols: Vec<ExchangeSymbol>,
+    config: PrivateWsRunConfig,
+    tx: mpsc::Sender<PrivateEvent>,
+) -> Result<()>
+where
+    P: PrivatePerpProtocol + Send + Sync + Copy + 'static,
+{
+    let exchange = protocol.exchange();
+    let timestamp = Utc::now().timestamp();
+    let mut endpoint = build_private_ws_endpoint(exchange, auth, &symbols, timestamp)?;
+    endpoint.send_interval_ms = config.subscribe_interval_ms;
+
+    let connect = timeout(
+        TokioDuration::from_millis(config.connect_timeout_ms),
+        connect_async(&endpoint.url),
+    )
+    .await
+    .map_err(|_| anyhow!("{} private websocket connect timed out", endpoint.exchange))??;
+    let (ws, _) = connect;
+    let (mut write, mut read) = ws.split();
+
+    if let Some(login_message) = endpoint.login_message {
+        write.send(Message::Text(login_message)).await?;
+        sleep(TokioDuration::from_millis(endpoint.send_interval_ms)).await;
+    }
+    for message in endpoint.subscribe_messages {
+        write.send(Message::Text(message)).await?;
+        sleep(TokioDuration::from_millis(endpoint.send_interval_ms)).await;
+    }
+
+    let mut heartbeat = tokio::time::interval(TokioDuration::from_millis(
+        config.heartbeat_interval_ms.max(1_000),
+    ));
+    loop {
+        tokio::select! {
+            _ = heartbeat.tick() => {
+                write.send(Message::Ping(Vec::new())).await?;
+                if !publish_private_event(
+                    &tx,
+                    PrivateEvent::new(endpoint.exchange.clone(), PrivateEventKind::Heartbeat, Utc::now()),
+                ).await {
+                    return Ok(());
+                }
+            }
+            message = read.next() => {
+                match message {
+                    Some(Ok(Message::Text(raw))) => {
+                        let received_at = Utc::now();
+                        match protocol.parse_private_ws_message(&raw, received_at) {
+                            Ok(events) => {
+                                for event in events {
+                                    if !publish_private_event(&tx, event).await {
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                emit_private_ws_error(
+                                    &tx,
+                                    endpoint.exchange.clone(),
+                                    ExchangeErrorClass::Decode,
+                                    Some(endpoint.url.clone()),
+                                    err.to_string(),
+                                ).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Binary(raw))) => {
+                        match String::from_utf8(raw) {
+                            Ok(text) => {
+                                let received_at = Utc::now();
+                                match protocol.parse_private_ws_message(&text, received_at) {
+                                    Ok(events) => {
+                                        for event in events {
+                                            if !publish_private_event(&tx, event).await {
+                                                return Ok(());
+                                            }
+                                        }
+                                    }
+                                    Err(err) => {
+                                        emit_private_ws_error(
+                                            &tx,
+                                            endpoint.exchange.clone(),
+                                            ExchangeErrorClass::Decode,
+                                            Some(endpoint.url.clone()),
+                                            err.to_string(),
+                                        ).await;
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                emit_private_ws_error(
+                                    &tx,
+                                    endpoint.exchange.clone(),
+                                    ExchangeErrorClass::Decode,
+                                    Some(endpoint.url.clone()),
+                                    err.to_string(),
+                                ).await;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        write.send(Message::Pong(payload)).await?;
+                    }
+                    Some(Ok(Message::Pong(_))) => {
+                        if !publish_private_event(
+                            &tx,
+                            PrivateEvent::new(endpoint.exchange.clone(), PrivateEventKind::Heartbeat, Utc::now()),
+                        ).await {
+                            return Ok(());
+                        }
+                    }
+                    Some(Ok(Message::Close(frame))) => {
+                        let reason = frame.map(|frame| frame.reason.to_string());
+                        emit_private_ws_disconnected(&tx, endpoint.exchange.clone(), reason).await;
+                        return Ok(());
+                    }
+                    Some(Err(err)) => {
+                        emit_private_ws_disconnected(&tx, endpoint.exchange.clone(), Some(err.to_string())).await;
+                        return Err(err.into());
+                    }
+                    None => {
+                        emit_private_ws_disconnected(
+                            &tx,
+                            endpoint.exchange.clone(),
+                            Some("private websocket stream ended".to_string()),
+                        ).await;
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+async fn publish_private_event(tx: &mpsc::Sender<PrivateEvent>, event: PrivateEvent) -> bool {
+    tx.send(event).await.is_ok()
+}
+
+async fn emit_private_ws_error(
+    tx: &mpsc::Sender<PrivateEvent>,
+    exchange: ExchangeId,
+    class: ExchangeErrorClass,
+    endpoint: Option<String>,
+    message: String,
+) {
+    let now = Utc::now();
+    let _ = tx
+        .send(PrivateEvent::new(
+            exchange,
+            PrivateEventKind::Error(PrivateErrorEvent {
+                class,
+                endpoint,
+                code: None,
+                message,
+                client_order_id: None,
+                exchange_order_id: None,
+                retry_after_ms: None,
+                occurred_at: now,
+            }),
+            now,
+        ))
+        .await;
+}
+
+async fn emit_private_ws_disconnected(
+    tx: &mpsc::Sender<PrivateEvent>,
+    exchange: ExchangeId,
+    reason: Option<String>,
+) {
+    let now = Utc::now();
+    let _ = tx
+        .send(PrivateEvent::new(
+            exchange,
+            PrivateEventKind::StreamDisconnected {
+                reason,
+                disconnected_at: now,
+            },
+            now,
+        ))
+        .await;
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BitgetPrivatePerpProtocol;
 
@@ -755,8 +1139,12 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         subscription: &PrivateWsSubscription,
         _timestamp: i64,
     ) -> Result<PrivateWsRequest> {
-        let args = subscription
-            .symbols
+        let symbols = if subscription.symbols.is_empty() {
+            vec![ExchangeSymbol::new(ExchangeId::Bitget, "default")]
+        } else {
+            subscription.symbols.clone()
+        };
+        let args = symbols
             .iter()
             .map(|symbol| {
                 json!({
@@ -940,12 +1328,18 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
             .auth
             .as_ref()
             .ok_or_else(|| anyhow!("gate private websocket subscriptions require auth"))?;
+        let account_id = auth
+            .account_id
+            .as_ref()
+            .ok_or_else(|| anyhow!("gate private websocket subscriptions require account_id"))?;
         let sign = gate_ws_signature(
             &auth.api_secret,
             &subscription.channel,
             "subscribe",
             timestamp,
         );
+        let payload =
+            gate_private_ws_payload(&subscription.channel, account_id, &subscription.symbols);
         Ok(PrivateWsRequest {
             exchange: ExchangeId::Gate,
             url: PrivatePerpExchange::Gate.private_ws_url().to_string(),
@@ -953,7 +1347,7 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
                 "time": timestamp,
                 "channel": subscription.channel,
                 "event": "subscribe",
-                "payload": subscription.symbols.iter().map(|s| s.symbol.clone()).collect::<Vec<_>>(),
+                "payload": payload,
                 "auth": {"method": "api_key", "KEY": auth.api_key, "SIGN": sign}
             })
             .to_string(),
@@ -1607,6 +2001,23 @@ fn gate_client_text(client_order_id: &str) -> String {
     }
 }
 
+fn gate_private_ws_payload(
+    channel: &str,
+    account_id: &str,
+    symbols: &[ExchangeSymbol],
+) -> Vec<String> {
+    if channel == "futures.balances" {
+        return vec![account_id.to_string()];
+    }
+    if symbols.is_empty() {
+        return vec![account_id.to_string(), "!all".to_string()];
+    }
+    let mut payload = Vec::with_capacity(symbols.len() + 1);
+    payload.push(account_id.to_string());
+    payload.extend(symbols.iter().map(|symbol| symbol.symbol.clone()));
+    payload
+}
+
 fn str_field(value: &Value, keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| {
         value.get(*key).and_then(|v| match v {
@@ -1823,6 +2234,7 @@ mod tests {
             api_key: "key".to_string(),
             api_secret: "secret".to_string(),
             passphrase: Some("pass".to_string()),
+            account_id: Some("20011".to_string()),
         };
 
         let bitget = BitgetPrivatePerpProtocol
@@ -1838,6 +2250,104 @@ mod tests {
         assert_eq!(gate.exchange, ExchangeId::Gate);
         assert!(gate.message.contains("\"channel\":\"futures.orders\""));
         assert!(gate.message.contains("\"auth\""));
+    }
+
+    #[test]
+    fn private_trading_adapter_factories_should_return_registered_exchanges() {
+        let bitget = bitget_private_trading_adapter(PrivateRestAuth {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            passphrase: Some("pass".to_string()),
+        })
+        .unwrap();
+        assert_eq!(bitget.exchange(), ExchangeId::Bitget);
+        assert!(bitget.capabilities().supports_close_position);
+
+        let gate = private_perp_trading_adapter_for(
+            PrivatePerpExchange::Gate,
+            PrivateRestAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+            },
+            PositionMode::OneWay,
+        )
+        .unwrap();
+        assert_eq!(gate.exchange(), ExchangeId::Gate);
+        assert!(gate.capabilities().supports_leverage);
+    }
+
+    #[test]
+    fn bitget_private_ws_endpoint_should_login_and_subscribe_all_private_channels() {
+        let endpoint = build_private_ws_endpoint(
+            PrivatePerpExchange::Bitget,
+            PrivateWsAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: Some("pass".to_string()),
+                account_id: None,
+            },
+            &[ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT")],
+            1_700_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(endpoint.exchange, ExchangeId::Bitget);
+        assert!(endpoint.login_message.is_some());
+        assert_eq!(endpoint.subscribe_messages.len(), 3);
+
+        let orders: Value = serde_json::from_str(&endpoint.subscribe_messages[0]).unwrap();
+        assert_eq!(orders["op"], "subscribe");
+        assert_eq!(orders["args"][0]["channel"], "orders");
+        assert_eq!(orders["args"][0]["instId"], "default");
+    }
+
+    #[test]
+    fn gate_private_ws_endpoint_should_authenticate_every_subscription() {
+        let endpoint = build_private_ws_endpoint(
+            PrivatePerpExchange::Gate,
+            PrivateWsAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+                account_id: Some("20011".to_string()),
+            },
+            &[],
+            1_700_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(endpoint.exchange, ExchangeId::Gate);
+        assert!(endpoint.login_message.is_none());
+        assert_eq!(endpoint.subscribe_messages.len(), 4);
+
+        let orders: Value = serde_json::from_str(&endpoint.subscribe_messages[0]).unwrap();
+        assert_eq!(orders["channel"], "futures.orders");
+        assert_eq!(orders["payload"][0], "20011");
+        assert_eq!(orders["payload"][1], "!all");
+        assert_eq!(orders["auth"]["KEY"], "key");
+
+        let balances: Value = serde_json::from_str(&endpoint.subscribe_messages[3]).unwrap();
+        assert_eq!(balances["channel"], "futures.balances");
+        assert_eq!(balances["payload"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn gate_private_ws_subscription_should_require_account_id() {
+        let err = build_private_ws_endpoint(
+            PrivatePerpExchange::Gate,
+            PrivateWsAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+                account_id: None,
+            },
+            &[],
+            1_700_000_000,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("account_id"));
     }
 
     #[test]
