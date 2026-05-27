@@ -5,9 +5,10 @@ use super::{
     SimulatedBundleState, SimulatedBundleStatus, StorageSink,
 };
 use crate::execution::{
-    deterministic_client_order_id, ArbitrageBundle, BundleLeg, BundleStatus, EngineDecision,
-    ExecutionAction, ExecutionEngine, ExecutionLedger, ExecutionRequest, FillEvent, MakerFill,
-    OrderCommand, OrderSide, PrivateEvent, PrivateEventKind,
+    deterministic_client_order_id, ArbitrageBundle, BundleLeg, BundleStatus, CancelAck,
+    CancelCommand, EngineDecision, ExecutionAction, ExecutionEngine, ExecutionLedger,
+    ExecutionRequest, FillEvent, MakerFill, OrderCommand, OrderSide, PrivateEvent,
+    PrivateEventKind,
 };
 use crate::market::{exchange_symbol_for, ExchangeId, ExchangeSymbol};
 use anyhow::{anyhow, Result};
@@ -73,6 +74,7 @@ pub struct CrossArbExecutionCoordinator {
     engine: ExecutionEngine,
     ledger: ExecutionLedger,
     order_index: CrossArbOrderIndex,
+    pending_maker_orders: HashMap<String, OrderCommand>,
 }
 
 impl CrossArbExecutionCoordinator {
@@ -81,6 +83,7 @@ impl CrossArbExecutionCoordinator {
             engine,
             ledger: ExecutionLedger::default(),
             order_index: CrossArbOrderIndex::default(),
+            pending_maker_orders: HashMap::new(),
         }
     }
 
@@ -94,6 +97,10 @@ impl CrossArbExecutionCoordinator {
 
     pub fn tracked_order_for_fill(&self, fill: &FillEvent) -> Option<TrackedCrossArbOrder> {
         self.order_index.resolve_fill(fill).cloned()
+    }
+
+    pub fn pending_maker_count(&self) -> usize {
+        self.pending_maker_orders.len()
     }
 
     pub fn prepare_open_request(
@@ -148,9 +155,87 @@ impl CrossArbExecutionCoordinator {
     }
 
     pub async fn execute_hedge_for_maker_fill(&mut self, fill: MakerFill) -> EngineDecision {
+        self.pending_maker_orders.remove(&fill.bundle_id);
         let decision = self.engine.execute_hedge_for_maker_fill(fill).await;
         self.record_decision_with(&decision, tracked_order);
         decision
+    }
+
+    pub async fn cancel_expired_maker_orders(
+        &mut self,
+        runtime: &mut CrossArbRuntime,
+        now: DateTime<Utc>,
+    ) -> Vec<CancelAck> {
+        let ttl_ms = runtime.state.config.execution.maker_order_ttl_ms.max(1) as i64;
+        let expired = self
+            .pending_maker_orders
+            .iter()
+            .filter_map(|(bundle_id, command)| {
+                let age_ms = now
+                    .signed_duration_since(command.created_at)
+                    .num_milliseconds();
+                let still_pending = runtime
+                    .state
+                    .open_bundles
+                    .get(bundle_id)
+                    .map(|bundle| bundle.status == SimulatedBundleStatus::MakerPending)
+                    .unwrap_or(false);
+                (still_pending && age_ms >= ttl_ms).then(|| (bundle_id.clone(), command.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        let mut acks = Vec::new();
+        for (bundle_id, command) in expired {
+            let cancel = CancelCommand {
+                exchange: command.exchange.clone(),
+                canonical_symbol: command.canonical_symbol.clone(),
+                exchange_symbol: command.exchange_symbol.clone(),
+                client_order_id: Some(command.client_order_id.clone()),
+                exchange_order_id: None,
+                reason: Some("maker TTL expired".to_string()),
+                requested_at: now,
+            };
+            match self.engine.router().route_cancel(cancel).await {
+                Ok(ack) => {
+                    self.pending_maker_orders.remove(&bundle_id);
+                    if let Some(bundle) = runtime.state.open_bundles.get_mut(&bundle_id) {
+                        bundle.status = SimulatedBundleStatus::RiskStopped;
+                        bundle.updated_at = now;
+                    }
+                    let _ = runtime.state.position_manager.mark_bundle_status(
+                        &bundle_id,
+                        BundleStatus::RiskStopped,
+                        now,
+                    );
+                    runtime.state.risk_events.push(super::RiskEventReadModel {
+                        event_id: format!("maker-ttl-cancel-{}", now.timestamp_millis()),
+                        canonical_symbol: Some(command.canonical_symbol.clone()),
+                        exchange: Some(command.exchange.clone()),
+                        reason: super::RejectReason::RouteUnhealthy,
+                        message: format!(
+                            "maker order {} cancelled after TTL {}ms",
+                            command.client_order_id, ttl_ms
+                        ),
+                        created_at: now,
+                    });
+                    acks.push(ack);
+                }
+                Err(error) => {
+                    runtime.state.risk_events.push(super::RiskEventReadModel {
+                        event_id: format!("maker-ttl-cancel-failed-{}", now.timestamp_millis()),
+                        canonical_symbol: Some(command.canonical_symbol.clone()),
+                        exchange: Some(command.exchange.clone()),
+                        reason: super::RejectReason::RouteUnhealthy,
+                        message: format!(
+                            "maker order {} TTL cancel failed: {error}",
+                            command.client_order_id
+                        ),
+                        created_at: now,
+                    });
+                }
+            }
+        }
+        acks
     }
 
     fn record_decision_with(
@@ -162,6 +247,10 @@ impl CrossArbExecutionCoordinator {
             self.ledger
                 .record_order(command.clone(), decision.plan.created_at);
             self.order_index.record_command(command, tracker(command));
+            if command_leg(command) == BundleLeg::Maker {
+                self.pending_maker_orders
+                    .insert(command.bundle_id.clone(), command.clone());
+            }
         }
         for ack in &decision.submitted_orders {
             if let Some(exchange_order_id) = &ack.exchange_order_id {
@@ -488,6 +577,7 @@ mod tests {
     struct MockTradingAdapter {
         exchange: ExchangeId,
         place_calls: Arc<AtomicUsize>,
+        cancel_calls: Arc<AtomicUsize>,
     }
 
     #[async_trait]
@@ -514,6 +604,7 @@ mod tests {
         }
 
         async fn cancel_order(&self, command: CancelCommand) -> anyhow::Result<CancelAck> {
+            self.cancel_calls.fetch_add(1, Ordering::SeqCst);
             Ok(CancelAck {
                 exchange: command.exchange,
                 client_order_id: command.client_order_id,
@@ -594,10 +685,12 @@ mod tests {
         router.register_adapter(Arc::new(MockTradingAdapter {
             exchange: ExchangeId::Okx,
             place_calls: calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
         }));
         router.register_adapter(Arc::new(MockTradingAdapter {
             exchange: ExchangeId::Binance,
             place_calls: calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
         }));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
@@ -633,10 +726,12 @@ mod tests {
         router.register_adapter(Arc::new(MockTradingAdapter {
             exchange: ExchangeId::Okx,
             place_calls: place_calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
         }));
         router.register_adapter(Arc::new(MockTradingAdapter {
             exchange: ExchangeId::Binance,
             place_calls: place_calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
         }));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
@@ -664,6 +759,49 @@ mod tests {
         assert_eq!(
             hedge_decision.plan.commands[0].time_in_force,
             TimeInForce::Ioc
+        );
+    }
+
+    #[tokio::test]
+    async fn cross_arb_execution_should_cancel_expired_maker_order() {
+        let now = Utc::now();
+        let (mut runtime, signal) = runtime_with_signal(now);
+        runtime.state.config.execution.maker_order_ttl_ms = 1;
+        let place_calls = Arc::new(AtomicUsize::new(0));
+        let cancel_calls = Arc::new(AtomicUsize::new(0));
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Okx,
+            place_calls: place_calls.clone(),
+            cancel_calls: cancel_calls.clone(),
+        }));
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Binance,
+            place_calls,
+            cancel_calls: cancel_calls.clone(),
+        }));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+        let open = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("open decision");
+
+        let acks = coordinator
+            .cancel_expired_maker_orders(&mut runtime, now + chrono::Duration::milliseconds(2))
+            .await;
+
+        assert_eq!(acks.len(), 1);
+        assert_eq!(cancel_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(coordinator.pending_maker_count(), 0);
+        assert_eq!(
+            runtime
+                .state
+                .open_bundles
+                .get(&open.plan.commands[0].bundle_id)
+                .map(|bundle| bundle.status),
+            Some(SimulatedBundleStatus::RiskStopped)
         );
     }
 

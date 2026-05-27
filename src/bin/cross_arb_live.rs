@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,10 +10,14 @@ use rustcta::execution::{
     ExecutionEngine, ExecutionRouter, LeverageCommand, PositionMode, PositionModeCommand,
     TradingAdapter,
 };
-use rustcta::market::{exchange_symbol_for, ExchangeId, InstrumentMeta, MarketDataAdapter};
+use rustcta::market::{
+    exchange_symbol_for, CanonicalSymbol, ExchangeId, InstrumentMeta, MarketDataAdapter,
+    MarketFundingSnapshot, RouteStatus,
+};
 use rustcta::strategies::cross_exchange_arbitrage::{
-    build_cross_arb_live_runtime_parts, live_enabled_exchanges, CrossArbExecutionCoordinator,
-    CrossArbRuntime, CrossExchangeArbitrageConfig, PrivateRestAuditPlan, PrivateRuntimeSync,
+    build_cross_arb_live_runtime_parts, live_enabled_exchanges, ArbSignalAction,
+    CrossArbExecutionCoordinator, CrossArbRuntime, CrossExchangeArbitrageConfig, MarketSnapshot,
+    PrivateRestAuditPlan, PrivateRuntimeSync, SimulatedBundleStatus,
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -244,9 +248,9 @@ async fn run_live(config: CrossExchangeArbitrageConfig, skip_private_audit: bool
         ExecutionEngine::new(parts.router),
     )));
     let private_sync = Arc::new(PrivateRuntimeSync::with_execution(
-        runtime,
+        runtime.clone(),
         parts.adapters.clone(),
-        Some(execution),
+        Some(execution.clone()),
     ));
 
     if !skip_private_audit {
@@ -288,6 +292,14 @@ async fn run_live(config: CrossExchangeArbitrageConfig, skip_private_audit: bool
         enabled_exchanges.clone(),
     ));
 
+    tokio::spawn(rest_market_execution_loop(
+        runtime.clone(),
+        execution.clone(),
+        config.clone(),
+        enabled_exchanges,
+        instruments,
+    ));
+
     futures_util::future::pending::<()>().await;
     Ok(())
 }
@@ -304,6 +316,197 @@ async fn periodic_rest_audit_loop(
         ticker.tick().await;
         let _ = run_initial_rest_audits(&private_sync, &config, &exchanges).await;
     }
+}
+
+async fn rest_market_execution_loop(
+    runtime: Arc<RwLock<CrossArbRuntime>>,
+    execution: Arc<RwLock<CrossArbExecutionCoordinator>>,
+    config: CrossExchangeArbitrageConfig,
+    exchanges: Vec<ExchangeId>,
+    instruments: Vec<InstrumentMeta>,
+) {
+    let mut adapters = Vec::new();
+    for exchange in &exchanges {
+        if let Some(adapter) = market_adapter(exchange) {
+            adapters.push((exchange.clone(), adapter));
+        }
+    }
+    let instruments_by_symbol = instruments
+        .into_iter()
+        .map(|instrument| {
+            (
+                (
+                    instrument.exchange.clone(),
+                    instrument.canonical_symbol.clone(),
+                ),
+                instrument,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut ticker = interval(TokioDuration::from_millis(
+        (config.market.stale_quote_ms / 2).max(1_000) as u64,
+    ));
+
+    loop {
+        ticker.tick().await;
+        let now = Utc::now();
+        let funding = fetch_live_funding(&adapters, &config.universe.symbols).await;
+        let snapshots_by_symbol =
+            fetch_live_orderbooks(&adapters, &config, &funding, &instruments_by_symbol, now).await;
+
+        let mut runtime_guard = runtime.write().await;
+        let mut execution_guard = execution.write().await;
+        let _ = execution_guard
+            .cancel_expired_maker_orders(&mut runtime_guard, now)
+            .await;
+        if has_active_bundle(&runtime_guard) || execution_guard.pending_maker_count() > 0 {
+            continue;
+        }
+
+        for symbol in &config.universe.symbols {
+            let Some(snapshots) = snapshots_by_symbol.get(symbol) else {
+                continue;
+            };
+            if snapshots.len() < config.market.min_common_exchanges {
+                continue;
+            }
+            let signals = runtime_guard.on_market_snapshots(symbol, snapshots, now);
+            for signal in signals
+                .iter()
+                .filter(|signal| signal.action == ArbSignalAction::Open)
+                .take(1)
+            {
+                let signal_canonical_symbol = signal.opportunity_id.as_ref().and_then(|id| {
+                    runtime_guard
+                        .state
+                        .opportunities
+                        .iter()
+                        .find(|opportunity| opportunity.opportunity_id == *id)
+                        .map(|opportunity| opportunity.canonical_symbol.clone())
+                });
+                match execution_guard
+                    .execute_open_signal(&mut runtime_guard, signal)
+                    .await
+                {
+                    Ok(Some(_)) | Ok(None) => {}
+                    Err(error) => runtime_guard
+                        .state
+                        .risk_events
+                        .push(rustcta::strategies::cross_exchange_arbitrage::RiskEventReadModel {
+                            event_id: format!("live-open-exec-{}", now.timestamp_millis()),
+                            canonical_symbol: signal_canonical_symbol,
+                            exchange: None,
+                            reason: rustcta::strategies::cross_exchange_arbitrage::RejectReason::RouteUnhealthy,
+                            message: error.to_string(),
+                            created_at: now,
+                        }),
+                }
+                break;
+            }
+            if execution_guard.pending_maker_count() > 0 || has_active_bundle(&runtime_guard) {
+                break;
+            }
+        }
+    }
+}
+
+async fn fetch_live_funding(
+    adapters: &[(ExchangeId, Box<dyn MarketDataAdapter + Send + Sync>)],
+    symbols: &[CanonicalSymbol],
+) -> HashMap<(ExchangeId, CanonicalSymbol), MarketFundingSnapshot> {
+    let mut snapshots = HashMap::new();
+    for (exchange, adapter) in adapters {
+        if !adapter.capabilities().supports_funding {
+            continue;
+        }
+        match adapter.load_funding(symbols).await {
+            Ok(items) => {
+                for item in items {
+                    snapshots.insert((exchange.clone(), item.canonical_symbol.clone()), item);
+                }
+            }
+            Err(error) => {
+                log::warn!(
+                    "cross_arb_live funding fetch failed exchange={} error={}",
+                    exchange,
+                    error
+                );
+            }
+        }
+    }
+    snapshots
+}
+
+async fn fetch_live_orderbooks(
+    adapters: &[(ExchangeId, Box<dyn MarketDataAdapter + Send + Sync>)],
+    config: &CrossExchangeArbitrageConfig,
+    funding: &HashMap<(ExchangeId, CanonicalSymbol), MarketFundingSnapshot>,
+    instruments: &HashMap<(ExchangeId, CanonicalSymbol), InstrumentMeta>,
+    now: DateTime<Utc>,
+) -> HashMap<CanonicalSymbol, Vec<MarketSnapshot>> {
+    let mut snapshots_by_symbol: HashMap<CanonicalSymbol, Vec<MarketSnapshot>> = HashMap::new();
+    for (exchange, adapter) in adapters {
+        if !adapter.capabilities().supports_rest_snapshot {
+            continue;
+        }
+        for symbol in &config.universe.symbols {
+            let exchange_symbol = exchange_symbol_for(exchange, symbol);
+            match adapter
+                .fetch_orderbook_snapshot(&exchange_symbol, config.market.depth_levels)
+                .await
+            {
+                Ok(book) => {
+                    let funding = funding.get(&(exchange.clone(), symbol.clone()));
+                    snapshots_by_symbol
+                        .entry(symbol.clone())
+                        .or_default()
+                        .push(MarketSnapshot {
+                            book,
+                            instrument: instruments
+                                .get(&(exchange.clone(), symbol.clone()))
+                                .cloned(),
+                            route_status: RouteStatus::Healthy,
+                            funding_rate: funding
+                                .map(|snapshot| snapshot.funding_rate)
+                                .unwrap_or(0.0),
+                            next_funding_time: funding
+                                .and_then(|snapshot| snapshot.next_funding_time),
+                        });
+                }
+                Err(error) => {
+                    log::warn!(
+                        "cross_arb_live orderbook fetch failed exchange={} symbol={} error={}",
+                        exchange,
+                        symbol,
+                        error
+                    );
+                }
+            }
+        }
+    }
+    for snapshots in snapshots_by_symbol.values_mut() {
+        for snapshot in snapshots {
+            snapshot.book.quality.stale = now
+                .signed_duration_since(snapshot.book.recv_ts)
+                .num_milliseconds()
+                > config.market.stale_quote_ms;
+        }
+    }
+    snapshots_by_symbol
+}
+
+fn has_active_bundle(runtime: &CrossArbRuntime) -> bool {
+    runtime.state.open_bundles.values().any(|bundle| {
+        matches!(
+            bundle.status,
+            SimulatedBundleStatus::MakerPending
+                | SimulatedBundleStatus::MakerFilled
+                | SimulatedBundleStatus::Hedging
+                | SimulatedBundleStatus::OpenSimulated
+                | SimulatedBundleStatus::ClosingSimulated
+                | SimulatedBundleStatus::OrphanLeg
+        )
+    })
 }
 
 async fn prepare_live_accounts(
