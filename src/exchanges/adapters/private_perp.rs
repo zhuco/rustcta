@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::core::types::{Fee, MarketType, OrderStatus as CoreOrderStatus};
 use crate::execution::{
@@ -184,6 +185,131 @@ pub trait PrivatePerpProtocol {
 #[async_trait]
 pub trait PrivateRestTransport: Send + Sync {
     async fn execute(&self, request: PrivateRestRequestSpec) -> Result<Value>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivateRestAuth {
+    pub api_key: String,
+    pub api_secret: String,
+    pub passphrase: Option<String>,
+}
+
+impl From<PrivateWsAuth> for PrivateRestAuth {
+    fn from(value: PrivateWsAuth) -> Self {
+        Self {
+            api_key: value.api_key,
+            api_secret: value.api_secret,
+            passphrase: value.passphrase,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReqwestPrivateRestTransport {
+    exchange: PrivatePerpExchange,
+    auth: PrivateRestAuth,
+    base_url: String,
+    client: reqwest::Client,
+}
+
+impl ReqwestPrivateRestTransport {
+    pub fn new(exchange: PrivatePerpExchange, auth: PrivateRestAuth) -> Result<Self> {
+        Self::with_base_url(exchange, auth, exchange.rest_base_url())
+    }
+
+    pub fn with_base_url(
+        exchange: PrivatePerpExchange,
+        auth: PrivateRestAuth,
+        base_url: impl Into<String>,
+    ) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .user_agent("RustCTA/0.3 private-perp")
+            .timeout(Duration::from_secs(15))
+            .build()?;
+        Ok(Self {
+            exchange,
+            auth,
+            base_url: base_url.into().trim_end_matches('/').to_string(),
+            client,
+        })
+    }
+
+    pub fn signed_headers(
+        &self,
+        request: &PrivateRestRequestSpec,
+        timestamp: i64,
+    ) -> Result<BTreeMap<String, String>> {
+        match self.exchange {
+            PrivatePerpExchange::Bitget => bitget_rest_headers(&self.auth, request, timestamp),
+            PrivatePerpExchange::Gate => gate_rest_headers(&self.auth, request, timestamp),
+        }
+    }
+
+    fn url(&self, request: &PrivateRestRequestSpec) -> String {
+        let query = request.query_string();
+        if query.is_empty() {
+            format!("{}{}", self.base_url, request.path)
+        } else {
+            format!("{}{}?{}", self.base_url, request.path, query)
+        }
+    }
+}
+
+#[async_trait]
+impl PrivateRestTransport for ReqwestPrivateRestTransport {
+    async fn execute(&self, request: PrivateRestRequestSpec) -> Result<Value> {
+        if request.exchange != self.exchange.exchange_id() {
+            anyhow::bail!(
+                "private transport for {} received {} request",
+                self.exchange.exchange_id(),
+                request.exchange
+            );
+        }
+
+        let timestamp = match self.exchange {
+            PrivatePerpExchange::Bitget => Utc::now().timestamp_millis(),
+            PrivatePerpExchange::Gate => Utc::now().timestamp(),
+        };
+        let mut builder = match request.method {
+            PrivateRestMethod::Get => self.client.get(self.url(&request)),
+            PrivateRestMethod::Post => self.client.post(self.url(&request)),
+            PrivateRestMethod::Delete => self.client.delete(self.url(&request)),
+        };
+
+        if request.requires_auth {
+            for (key, value) in self.signed_headers(&request, timestamp)? {
+                builder = builder.header(key, value);
+            }
+        }
+        if let Some(body) = &request.body {
+            builder = builder.json(body);
+        }
+
+        let response = builder.send().await?;
+        let status = response.status();
+        let raw = response.text().await?;
+        let value = if raw.trim().is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_str::<Value>(&raw).map_err(|err| {
+                anyhow!(
+                    "{} private REST JSON decode failed: {err}; raw={raw}",
+                    request.exchange
+                )
+            })?
+        };
+        if !status.is_success() {
+            anyhow::bail!(
+                "{} private REST {} {} failed: http={} body={}",
+                request.exchange,
+                request.method.as_str(),
+                request.path,
+                status.as_u16(),
+                value
+            );
+        }
+        normalize_private_rest_response(request.exchange, value)
+    }
 }
 
 #[derive(Clone)]
@@ -857,6 +983,39 @@ pub fn bitget_signature(
     general_purpose::STANDARD.encode(mac.finalize().into_bytes())
 }
 
+fn bitget_rest_headers(
+    auth: &PrivateRestAuth,
+    request: &PrivateRestRequestSpec,
+    timestamp_ms: i64,
+) -> Result<BTreeMap<String, String>> {
+    let passphrase = auth
+        .passphrase
+        .as_ref()
+        .ok_or_else(|| anyhow!("bitget private REST requires passphrase"))?;
+    let query = request.query_string();
+    let path = if query.is_empty() {
+        request.path.clone()
+    } else {
+        format!("{}?{}", request.path, query)
+    };
+    let timestamp = timestamp_ms.to_string();
+    let sign = bitget_signature(
+        &auth.api_secret,
+        &timestamp,
+        request.method.as_str(),
+        &path,
+        &request.body_string(),
+    );
+    Ok(BTreeMap::from([
+        ("ACCESS-KEY".to_string(), auth.api_key.clone()),
+        ("ACCESS-SIGN".to_string(), sign),
+        ("ACCESS-TIMESTAMP".to_string(), timestamp),
+        ("ACCESS-PASSPHRASE".to_string(), passphrase.clone()),
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("locale".to_string(), "en-US".to_string()),
+    ]))
+}
+
 pub fn gate_rest_signature(
     secret: &str,
     method: &str,
@@ -880,12 +1039,67 @@ pub fn gate_rest_signature(
     hex::encode(mac.finalize().into_bytes())
 }
 
+fn gate_rest_headers(
+    auth: &PrivateRestAuth,
+    request: &PrivateRestRequestSpec,
+    timestamp_secs: i64,
+) -> Result<BTreeMap<String, String>> {
+    let query = request.query_string();
+    let sign_path = if request.path.starts_with("/api/v4/") {
+        request.path.clone()
+    } else {
+        format!("/api/v4{}", request.path)
+    };
+    let sign = gate_rest_signature(
+        &auth.api_secret,
+        request.method.as_str(),
+        &sign_path,
+        &query,
+        &request.body_string(),
+        timestamp_secs,
+    );
+    Ok(BTreeMap::from([
+        ("KEY".to_string(), auth.api_key.clone()),
+        ("Timestamp".to_string(), timestamp_secs.to_string()),
+        ("SIGN".to_string(), sign),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ]))
+}
+
 pub fn gate_ws_signature(secret: &str, channel: &str, event: &str, timestamp: i64) -> String {
     let prehash = format!("channel={channel}&event={event}&time={timestamp}");
     let mut mac =
         HmacSha512::new_from_slice(secret.as_bytes()).expect("HMAC accepts arbitrary key length");
     mac.update(prehash.as_bytes());
     hex::encode(mac.finalize().into_bytes())
+}
+
+fn normalize_private_rest_response(exchange: ExchangeId, value: Value) -> Result<Value> {
+    match exchange {
+        ExchangeId::Bitget => {
+            let code = value.get("code").and_then(Value::as_str).unwrap_or("00000");
+            if code != "00000" {
+                let msg = value
+                    .get("msg")
+                    .or_else(|| value.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("bitget private REST error");
+                anyhow::bail!("bitget private REST error code={code} msg={msg}");
+            }
+            Ok(value)
+        }
+        ExchangeId::Gate => {
+            if let Some(label) = value.get("label").and_then(Value::as_str) {
+                let message = value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("gate private REST error");
+                anyhow::bail!("gate private REST error label={label} message={message}");
+            }
+            Ok(value)
+        }
+        _ => Ok(value),
+    }
 }
 
 fn response_data(value: &Value) -> Value {
@@ -1725,6 +1939,77 @@ mod tests {
         assert_eq!(orders[0].position_side, PositionSide::Short);
         assert_eq!(orders[0].status, OrderCommandStatus::Accepted);
         assert_eq!(orders[0].filled_quantity, 1.0);
+    }
+
+    #[test]
+    fn reqwest_transport_should_build_bitget_headers() {
+        let transport = ReqwestPrivateRestTransport::new(
+            PrivatePerpExchange::Bitget,
+            PrivateRestAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: Some("pass".to_string()),
+            },
+        )
+        .unwrap();
+        let spec = BitgetPrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT")))
+            .unwrap();
+
+        let headers = transport.signed_headers(&spec, 1_700_000_000_000).unwrap();
+
+        assert_eq!(headers.get("ACCESS-KEY").map(String::as_str), Some("key"));
+        assert_eq!(
+            headers.get("ACCESS-PASSPHRASE").map(String::as_str),
+            Some("pass")
+        );
+        assert!(headers.get("ACCESS-SIGN").is_some_and(|v| !v.is_empty()));
+        assert_eq!(
+            headers.get("ACCESS-TIMESTAMP").map(String::as_str),
+            Some("1700000000000")
+        );
+    }
+
+    #[test]
+    fn reqwest_transport_should_build_gate_headers_with_api_v4_sign_path() {
+        let transport = ReqwestPrivateRestTransport::new(
+            PrivatePerpExchange::Gate,
+            PrivateRestAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+            },
+        )
+        .unwrap();
+        let spec = GatePrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")))
+            .unwrap();
+
+        let headers = transport.signed_headers(&spec, 1_700_000_000).unwrap();
+
+        assert_eq!(headers.get("KEY").map(String::as_str), Some("key"));
+        assert_eq!(
+            headers.get("Timestamp").map(String::as_str),
+            Some("1700000000")
+        );
+        assert!(headers.get("SIGN").is_some_and(|v| !v.is_empty()));
+    }
+
+    #[test]
+    fn private_rest_response_should_reject_error_envelopes() {
+        let bitget = normalize_private_rest_response(
+            ExchangeId::Bitget,
+            json!({"code":"40010","msg":"bad request"}),
+        )
+        .unwrap_err();
+        assert!(bitget.to_string().contains("40010"));
+
+        let gate = normalize_private_rest_response(
+            ExchangeId::Gate,
+            json!({"label":"INVALID_KEY","message":"bad key"}),
+        )
+        .unwrap_err();
+        assert!(gate.to_string().contains("INVALID_KEY"));
     }
 
     trait BoolNot {
