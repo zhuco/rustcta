@@ -12,7 +12,7 @@ use crate::exchanges::adapters::{
 };
 use crate::exchanges::{BinanceExchange, OkxExchange};
 use crate::execution::{ExecutionRouter, PositionMode, TradingAdapter};
-use crate::market::{ExchangeId, ExchangeSymbol, InstrumentMeta};
+use crate::market::{exchange_symbol_for, ExchangeId, ExchangeSymbol, InstrumentMeta};
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 
@@ -22,6 +22,12 @@ pub struct PrivateWsRuntimeSpec {
     pub auth: PrivateWsAuth,
     pub symbols: Vec<ExchangeSymbol>,
     pub config: PrivateWsRunConfig,
+}
+
+pub struct CrossArbLiveRuntimeParts {
+    pub router: ExecutionRouter,
+    pub adapters: Vec<Arc<dyn TradingAdapter>>,
+    pub private_ws_specs: Vec<PrivateWsRuntimeSpec>,
 }
 
 pub fn build_cross_arb_execution_router(
@@ -48,6 +54,44 @@ pub fn build_cross_arb_execution_router_with_instruments(
         router.register_adapter(adapter);
     }
     Ok(router)
+}
+
+pub fn build_cross_arb_live_runtime_parts(
+    config: &CrossExchangeArbitrageConfig,
+    instruments: impl IntoIterator<Item = InstrumentMeta>,
+) -> Result<CrossArbLiveRuntimeParts> {
+    let instruments = instruments.into_iter().collect::<Vec<_>>();
+    let mut router = ExecutionRouter::new(config.execution.dry_run);
+    let mut adapters = Vec::new();
+    for exchange in live_enabled_exchanges(config) {
+        let adapter = build_trading_adapter_for_exchange_with_instruments(
+            config,
+            &exchange,
+            instruments
+                .iter()
+                .filter(|item| item.exchange == exchange)
+                .cloned(),
+        )?;
+        router.register_adapter(adapter.clone());
+        adapters.push(adapter);
+    }
+    let private_ws_specs = build_private_ws_runtime_specs(
+        config,
+        live_enabled_exchanges(config).into_iter().map(|exchange| {
+            let symbols = config
+                .universe
+                .symbols
+                .iter()
+                .map(|symbol| exchange_symbol_for(&exchange, symbol))
+                .collect::<Vec<_>>();
+            (exchange, symbols)
+        }),
+    )?;
+    Ok(CrossArbLiveRuntimeParts {
+        router,
+        adapters,
+        private_ws_specs,
+    })
 }
 
 pub fn build_trading_adapter_for_exchange(
@@ -366,6 +410,40 @@ mod tests {
         std::env::remove_var("BITGET_ROUTER_TEST_API_KEY");
         std::env::remove_var("BITGET_ROUTER_TEST_API_SECRET");
         std::env::remove_var("BITGET_ROUTER_TEST_PASSPHRASE");
+    }
+
+    #[test]
+    fn runtime_should_build_live_parts_with_router_adapters_and_private_ws_specs() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.enabled_exchanges = vec![ExchangeId::Bitget, ExchangeId::Gate];
+        config.universe.symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+        let bitget = config.exchanges.entry(ExchangeId::Bitget).or_default();
+        bitget.enabled = Some(true);
+        bitget.private_ws_enabled = true;
+        bitget.env_prefix = Some("BITGET_LIVE_PARTS_TEST".to_string());
+        let gate = config.exchanges.entry(ExchangeId::Gate).or_default();
+        gate.enabled = Some(true);
+        gate.private_ws_enabled = true;
+        gate.account_id = Some("20011".to_string());
+        gate.env_prefix = Some("GATE_LIVE_PARTS_TEST".to_string());
+        std::env::set_var("BITGET_LIVE_PARTS_TEST_API_KEY", "key");
+        std::env::set_var("BITGET_LIVE_PARTS_TEST_API_SECRET", "secret");
+        std::env::set_var("BITGET_LIVE_PARTS_TEST_PASSPHRASE", "pass");
+        std::env::set_var("GATE_LIVE_PARTS_TEST_API_KEY", "key");
+        std::env::set_var("GATE_LIVE_PARTS_TEST_API_SECRET", "secret");
+
+        let parts = build_cross_arb_live_runtime_parts(&config, Vec::new()).unwrap();
+
+        assert!(parts.router.has_adapter(&ExchangeId::Bitget));
+        assert!(parts.router.has_adapter(&ExchangeId::Gate));
+        assert_eq!(parts.adapters.len(), 2);
+        assert_eq!(parts.private_ws_specs.len(), 2);
+
+        std::env::remove_var("BITGET_LIVE_PARTS_TEST_API_KEY");
+        std::env::remove_var("BITGET_LIVE_PARTS_TEST_API_SECRET");
+        std::env::remove_var("BITGET_LIVE_PARTS_TEST_PASSPHRASE");
+        std::env::remove_var("GATE_LIVE_PARTS_TEST_API_KEY");
+        std::env::remove_var("GATE_LIVE_PARTS_TEST_API_SECRET");
     }
 
     #[test]

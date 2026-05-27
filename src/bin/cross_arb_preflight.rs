@@ -16,7 +16,7 @@ use rustcta::exchanges::{BinanceExchange, OkxExchange};
 use rustcta::execution::FillQuery;
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
 use rustcta::strategies::cross_exchange_arbitrage::{
-    build_trading_adapter_for_exchange, CrossExchangeArbitrageConfig,
+    build_trading_adapter_for_exchange, live_enabled_exchanges, CrossExchangeArbitrageConfig,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -96,7 +96,8 @@ async fn main() -> Result<()> {
     );
 
     let mut coverage_by_symbol: HashMap<String, HashSet<ExchangeId>> = HashMap::new();
-    for exchange in &config.universe.enabled_exchanges {
+    let active_exchanges = live_enabled_exchanges(&config);
+    for exchange in &active_exchanges {
         match market_adapter(exchange) {
             Some(adapter) => {
                 checks.extend(
@@ -125,6 +126,18 @@ async fn main() -> Result<()> {
                 "private checks skipped; pass --private to read account state",
             ));
         }
+    }
+
+    for exchange in config
+        .universe
+        .enabled_exchanges
+        .iter()
+        .filter(|exchange| !active_exchanges.contains(exchange))
+    {
+        checks.push(warn(
+            format!("{}.runtime.disabled", exchange.as_str()),
+            "exchange is present in universe.enabled_exchanges but disabled in exchanges.<venue>; runtime will not register it",
+        ));
     }
 
     for symbol in &config.universe.symbols {

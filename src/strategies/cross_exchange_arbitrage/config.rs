@@ -740,6 +740,46 @@ mod tests {
     }
 
     #[test]
+    fn live_small_example_should_use_three_non_okx_exchanges_and_ten_usdt_orders() {
+        let raw =
+            include_str!("../../../config/cross_exchange_arbitrage_usdt.live-small.example.yml");
+        let config: CrossExchangeArbitrageConfig =
+            serde_yaml::from_str(raw).expect("live-small example should parse");
+
+        config
+            .validate()
+            .expect("live-small example should validate");
+        assert_eq!(config.mode, RuntimeMode::LiveSmall);
+        assert_eq!(
+            config.universe.enabled_exchanges,
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
+        );
+        assert!(!config.universe.enabled_exchanges.contains(&ExchangeId::Okx));
+        assert_eq!(config.sizing.target_notional_usdt, 10.0);
+        assert_eq!(config.sizing.max_notional_usdt, 10.0);
+        assert_eq!(config.risk.max_open_bundles, 50);
+        assert!(config.execution.dry_run);
+        assert_eq!(
+            config
+                .exchanges
+                .get(&ExchangeId::Bitget)
+                .unwrap()
+                .position_mode
+                .as_deref(),
+            Some("hedge")
+        );
+        assert_eq!(
+            config
+                .exchanges
+                .get(&ExchangeId::Gate)
+                .unwrap()
+                .position_mode
+                .as_deref(),
+            Some("one_way")
+        );
+    }
+
+    #[test]
     fn config_template_should_reject_unknown_fields() {
         let raw = r#"
 mode: simulation

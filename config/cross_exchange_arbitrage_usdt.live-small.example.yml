@@ -1,0 +1,181 @@
+mode: live_small
+
+strategy:
+  name: cross_exchange_arbitrage_usdt_perp
+  mode: live_small
+  log_level: INFO
+
+market:
+  quote_asset: USDT
+  market_type: futures
+  depth_levels: 5
+  stale_quote_ms: 5000
+  min_common_exchanges: 2
+
+thresholds:
+  min_display_raw_spread: 0.001
+  min_open_maker_taker_net_edge: 0.005
+  max_open_raw_spread: 0.10
+  lock_profit_dual_taker_pct: 0.003
+  strong_lock_profit_dual_taker_pct: 0.005
+
+sizing:
+  min_notional_usdt: 10.0
+  target_notional_usdt: 10.0
+  max_notional_usdt: 10.0
+  exchange_equity_usdt: 500.0
+  leverage: 2.0
+  max_positions_per_exchange: 50
+  capital_fraction_of_smaller_equity: 0.10
+  max_symbol_notional_usdt: 500.0
+  max_exchange_usage_pct: 0.35
+
+fees:
+  default_maker_fee_rate: 0.0002
+  default_taker_fee_rate: 0.0006
+  use_account_fee_api: false
+  per_exchange:
+    binance:
+      maker: 0.0002
+      taker: 0.0005
+    bitget:
+      maker: 0.0002
+      taker: 0.0006
+    gate:
+      maker: 0.0002
+      taker: 0.0005
+
+funding:
+  enabled: true
+  mode: settlement
+  refresh_secs: 30
+  expected_holding_hours: 8.0
+  no_open_before_funding_mins: 5
+  block_if_expected_funding_negative_pct: 0.001
+  max_adverse_funding_rate: 0.001
+
+exchanges:
+  binance:
+    enabled: true
+    position_mode: hedge
+    ws_batch_size: 80
+    env_prefix: BINANCE
+    private_rest_enabled: true
+    private_ws_enabled: false
+    routes:
+      market_ws:
+        - wss://fstream.binance.com/ws
+        - wss://fstream.binance.com/stream
+      private_ws:
+        - wss://fstream.binance.com/ws
+      rest_public:
+        - https://fapi.binance.com
+      rest_private:
+        - https://fapi.binance.com
+  bitget:
+    enabled: true
+    position_mode: hedge
+    ws_batch_size: 50
+    env_prefix: BITGET
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
+    routes:
+      market_ws:
+        - wss://ws.bitget.com/v2/ws/public
+      private_ws:
+        - wss://ws.bitget.com/v2/ws/private
+      rest_public:
+        - https://api.bitget.com
+      rest_private:
+        - https://api.bitget.com
+  gate:
+    enabled: true
+    position_mode: one_way
+    ws_batch_size: 80
+    env_prefix: GATE
+    account_id: "REPLACE_WITH_GATE_ACCOUNT_ID"
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
+    routes:
+      market_ws:
+        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      private_ws:
+        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      rest_public:
+        - https://api.gateio.ws/api/v4
+      rest_private:
+        - https://api.gateio.ws/api/v4
+
+routing:
+  ws_stale_limit_ms: 30000
+  order_latency_p95_degrade_ms: 1200
+  order_error_rate_degrade: 0.05
+  auto_failover: true
+  degraded_mode_blocks_new_entries: true
+
+execution:
+  dry_run: true
+  max_hedge_retries: 1
+  maker_order_ttl_ms: 5000
+  taker_ioc_slippage_limit_pct: 0.003
+
+reconciliation:
+  open_orders_interval_secs: 5
+  positions_interval_secs: 10
+  full_audit_interval_secs: 60
+  quantity_tolerance: 0.00000001
+  orphan_tolerance: 0.000001
+
+risk:
+  stale_quote_ms: 5000
+  max_book_age_ms: 5000
+  taker_slippage_buffer: 0.0005
+  max_taker_slippage_pct: 0.003
+  maker_non_fill_penalty: 0.001
+  safety_buffer: 0.001
+  max_notional_per_symbol_usdt: 500.0
+  max_open_bundles: 50
+  symbol_whitelist_required_live: true
+
+persistence:
+  enabled: true
+  jsonl_dir: logs/cross_exchange_arbitrage/live-small
+  clickhouse_enabled: false
+
+dashboard:
+  enabled: true
+  bind_host: 0.0.0.0
+  port: 8091
+
+alerts:
+  enabled: true
+  orphan_alert: true
+  route_offline_alert: true
+  reconcile_critical_alert: true
+
+universe:
+  enabled_exchanges:
+    - binance
+    - bitget
+    - gate
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+  mode: static
+  target_symbol_count: 2
+  max_symbol_count: 2
+  include_symbols:
+    - BTC/USDT
+    - ETH/USDT
+  exclude_symbols: []
+  min_24h_quote_volume: 10000000.0
