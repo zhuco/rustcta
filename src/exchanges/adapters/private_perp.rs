@@ -23,11 +23,13 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::core::types::{Fee, MarketType, OrderStatus as CoreOrderStatus};
 use crate::execution::{
-    CancelAck, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
+    AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
+    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
     ExchangeErrorClass, ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck,
-    LeverageCommand, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState,
-    OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide, PrivateErrorEvent,
-    PrivateEvent, PrivateEventKind, TimeInForce, TradingAdapter, TradingCapabilities,
+    LeverageCommand, MarginMode, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide,
+    OrderState, OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide,
+    PrivateErrorEvent, PrivateEvent, PrivateEventKind, SymbolAccountConfig, TimeInForce,
+    TradeFeeSnapshot, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
     canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
@@ -70,6 +72,7 @@ impl PrivatePerpExchange {
 pub enum PrivateRestMethod {
     Get,
     Post,
+    Patch,
     Delete,
 }
 
@@ -78,6 +81,7 @@ impl PrivateRestMethod {
         match self {
             Self::Get => "GET",
             Self::Post => "POST",
+            Self::Patch => "PATCH",
             Self::Delete => "DELETE",
         }
     }
@@ -167,15 +171,16 @@ pub trait PrivatePerpProtocol {
         position_mode: PositionMode,
     ) -> Result<PrivateRestRequestSpec>;
     fn cancel_order(&self, command: &CancelCommand) -> Result<PrivateRestRequestSpec>;
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec>;
+    fn cancel_batch_orders(&self, command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec>;
     fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec>;
     fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec>;
-    fn get_fills(
-        &self,
-        symbol: Option<&ExchangeSymbol>,
-        order_id: Option<&str>,
-    ) -> Result<PrivateRestRequestSpec>;
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec>;
     fn get_positions(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec>;
     fn get_balances(&self) -> Result<PrivateRestRequestSpec>;
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec>;
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec>;
+    fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec>;
     fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec>;
     fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec>;
 
@@ -283,6 +288,7 @@ impl PrivateRestTransport for ReqwestPrivateRestTransport {
         let mut builder = match request.method {
             PrivateRestMethod::Get => self.client.get(self.url(&request)),
             PrivateRestMethod::Post => self.client.post(self.url(&request)),
+            PrivateRestMethod::Patch => self.client.patch(self.url(&request)),
             PrivateRestMethod::Delete => self.client.delete(self.url(&request)),
         };
 
@@ -505,6 +511,46 @@ where
         }
         Ok(command)
     }
+
+    fn normalize_amend_command(&self, mut command: AmendOrderCommand) -> Result<AmendOrderCommand> {
+        if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+            let quantity = command.new_quantity.map(|quantity| {
+                if self.exchange == ExchangeId::Gate {
+                    gate_base_to_contract_quantity(quantity, instrument)
+                } else {
+                    quantity
+                }
+            });
+            let normalized = instrument.normalize_order_input(
+                quantity.unwrap_or(instrument.min_qty.max(instrument.quantity_step)),
+                command.new_price,
+                RoundingMode::Floor,
+                RoundingMode::Nearest,
+            );
+            if command.new_quantity.is_some() && !normalized.is_valid() {
+                anyhow::bail!(
+                    "{} amend violates precision rules for {}: {:?}",
+                    self.exchange,
+                    instrument.exchange_symbol.symbol,
+                    normalized.violations
+                );
+            }
+            if command.new_quantity.is_some() {
+                command.new_quantity = Some(if self.exchange == ExchangeId::Gate {
+                    gate_contract_to_base_quantity(
+                        normalized.quantity,
+                        instrument_contract_size(instrument),
+                    )
+                } else {
+                    normalized.quantity
+                });
+            }
+            if command.new_price.is_some() {
+                command.new_price = normalized.price;
+            }
+        }
+        Ok(command)
+    }
 }
 
 #[async_trait]
@@ -559,6 +605,68 @@ where
                 .or_else(|| response_string(&value, &["orderId", "id"])),
             accepted: true,
             status: OrderCommandStatus::Cancelled,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn cancel_all_orders(&self, command: CancelAllCommand) -> Result<CancelAllAck> {
+        let value = self
+            .transport
+            .execute(self.protocol.cancel_all_orders(&command)?)
+            .await?;
+        Ok(CancelAllAck {
+            exchange: command.exchange,
+            canonical_symbol: command.canonical_symbol,
+            exchange_symbol: command.exchange_symbol,
+            accepted: true,
+            cancelled_orders: cancelled_count(&value),
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn cancel_batch_orders(&self, command: CancelBatchCommand) -> Result<CancelBatchAck> {
+        if command.orders.is_empty() {
+            return Ok(CancelBatchAck {
+                exchange: command.exchange,
+                accepted: true,
+                cancelled_orders: 0,
+                order_acks: Vec::new(),
+                message: Some("empty cancel batch".to_string()),
+                acknowledged_at: Utc::now(),
+            });
+        }
+        if self.exchange() == ExchangeId::Gate {
+            let mut order_acks = Vec::new();
+            for order in &command.orders {
+                order_acks.push(self.cancel_order(order.clone()).await?);
+            }
+            return Ok(CancelBatchAck {
+                exchange: command.exchange,
+                accepted: true,
+                cancelled_orders: order_acks.len(),
+                order_acks,
+                message: Some("gate cancel-batch executed as per-order cancels".to_string()),
+                acknowledged_at: Utc::now(),
+            });
+        }
+
+        let value = self
+            .transport
+            .execute(self.protocol.cancel_batch_orders(&command)?)
+            .await?;
+        let order_acks = parse_cancel_batch_acks(self.exchange(), &value, Utc::now());
+        let cancelled_orders = if order_acks.is_empty() {
+            cancelled_count(&value)
+        } else {
+            order_acks.len()
+        };
+        Ok(CancelBatchAck {
+            exchange: command.exchange,
+            accepted: true,
+            cancelled_orders,
+            order_acks,
             message: response_string(&value, &["msg", "message"]),
             acknowledged_at: Utc::now(),
         })
@@ -654,13 +762,46 @@ where
             .collect())
     }
 
+    async fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<TradeFeeSnapshot> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_trade_fee(symbol)?)
+            .await?;
+        parse_trade_fee_snapshot(self.exchange(), symbol, &value, Utc::now()).ok_or_else(|| {
+            anyhow!(
+                "{} trade fee response could not be normalized",
+                self.exchange()
+            )
+        })
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        symbol: &ExchangeSymbol,
+    ) -> Result<SymbolAccountConfig> {
+        let value = self
+            .transport
+            .execute(self.protocol.get_symbol_account_config(symbol)?)
+            .await?;
+        parse_symbol_account_config(
+            self.exchange(),
+            symbol,
+            &value,
+            Utc::now(),
+            self.position_mode,
+        )
+        .ok_or_else(|| {
+            anyhow!(
+                "{} symbol account config could not be normalized",
+                self.exchange()
+            )
+        })
+    }
+
     async fn get_fills(&self, query: FillQuery) -> Result<Vec<FillEvent>> {
         let value = self
             .transport
-            .execute(self.protocol.get_fills(
-                query.exchange_symbol.as_ref(),
-                query.exchange_order_id.as_deref(),
-            )?)
+            .execute(self.protocol.get_fills(&query)?)
             .await?;
         let exchange = self.exchange();
         Ok(response_items(&value)
@@ -677,13 +818,36 @@ where
                 _ => None,
             })
             .filter(|fill| {
-                query
-                    .client_order_id
-                    .as_ref()
-                    .map(|id| fill.client_order_id.as_deref() == Some(id.as_str()))
-                    .unwrap_or(true)
+                query.client_order_id.as_ref().is_none_or(|id| {
+                    fill.client_order_id.as_deref() == Some(id.as_str())
+                        || (self.exchange() == ExchangeId::Gate
+                            && fill.client_order_id.as_deref()
+                                == Some(gate_client_text(id).as_str()))
+                })
             })
             .collect())
+    }
+
+    async fn amend_order(&self, command: AmendOrderCommand) -> Result<AmendOrderAck> {
+        let command = self.normalize_amend_command(command)?;
+        let value = self
+            .transport
+            .execute(self.protocol.amend_order(&command)?)
+            .await?;
+        Ok(AmendOrderAck {
+            exchange: command.exchange,
+            client_order_id: command
+                .new_client_order_id
+                .or(command.client_order_id)
+                .or_else(|| response_string(&value, &["clientOid", "text"])),
+            exchange_order_id: command
+                .exchange_order_id
+                .or_else(|| response_string(&value, &["orderId", "id"])),
+            accepted: true,
+            status: OrderCommandStatus::Accepted,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
     }
 
     async fn set_leverage(&self, command: LeverageCommand) -> Result<LeverageAck> {
@@ -1074,7 +1238,10 @@ where
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                write.send(Message::Ping(Vec::new())).await?;
+                match exchange {
+                    PrivatePerpExchange::Bitget => write.send(Message::Text("ping".to_string())).await?,
+                    PrivatePerpExchange::Gate => write.send(Message::Ping(Vec::new())).await?,
+                }
                 if !publish_private_event(
                     &tx,
                     PrivateEvent::new(endpoint.exchange.clone(), PrivateEventKind::Heartbeat, Utc::now()),
@@ -1238,12 +1405,17 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         command: &OrderCommand,
         position_mode: PositionMode,
     ) -> Result<PrivateRestRequestSpec> {
+        let side = if position_mode.is_hedge() {
+            bitget_position_side(command.position_side, command.side)
+        } else {
+            bitget_side(command.side)
+        };
         let mut body = json!({
             "productType": "USDT-FUTURES",
             "symbol": command.exchange_symbol.symbol,
             "marginCoin": "USDT",
             "size": number_string(command.quantity),
-            "side": bitget_side(command.side),
+            "side": side,
             "orderType": bitget_order_type(command.order_type),
             "clientOid": command.client_order_id,
         });
@@ -1261,8 +1433,7 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
                 "tradeSide",
                 bitget_trade_side(command.reduce_only),
             );
-        }
-        if command.reduce_only {
+        } else if command.reduce_only {
             set_str(&mut body, "reduceOnly", "yes");
         }
 
@@ -1294,7 +1465,61 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         .with_body(body))
     }
 
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "productType": "USDT-FUTURES",
+            "marginCoin": "USDT",
+        });
+        if let Some(symbol) = &command.exchange_symbol {
+            set_str(&mut body, "symbol", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bitget,
+            PrivateRestMethod::Post,
+            "/api/v2/mix/order/cancel-all-orders",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_batch_orders(&self, command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec> {
+        let first = command
+            .orders
+            .first()
+            .ok_or_else(|| anyhow!("bitget batch cancel requires at least one order"))?;
+        let mut seen_symbol = first.exchange_symbol.symbol.clone();
+        let order_id_list = command
+            .orders
+            .iter()
+            .map(|order| {
+                if order.exchange_symbol.symbol != seen_symbol {
+                    seen_symbol.clear();
+                }
+                json!({
+                    "orderId": order.exchange_order_id,
+                    "clientOid": order.client_order_id,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut body = json!({
+            "productType": "USDT-FUTURES",
+            "marginCoin": "USDT",
+            "orderIdList": order_id_list,
+        });
+        if !seen_symbol.is_empty() {
+            set_str(&mut body, "symbol", seen_symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bitget,
+            PrivateRestMethod::Post,
+            "/api/v2/mix/order/batch-cancel-orders",
+        )
+        .with_body(body))
+    }
+
     fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec> {
+        if query.exchange_order_id.is_none() && query.client_order_id.is_none() {
+            anyhow::bail!("bitget order detail requires orderId or clientOid");
+        }
         let mut spec = PrivateRestRequestSpec::new(
             ExchangeId::Bitget,
             PrivateRestMethod::Get,
@@ -1324,22 +1549,27 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         Ok(spec)
     }
 
-    fn get_fills(
-        &self,
-        symbol: Option<&ExchangeSymbol>,
-        order_id: Option<&str>,
-    ) -> Result<PrivateRestRequestSpec> {
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec> {
         let mut spec = PrivateRestRequestSpec::new(
             ExchangeId::Bitget,
             PrivateRestMethod::Get,
             "/api/v2/mix/order/fills",
         )
         .with_query("productType", "USDT-FUTURES");
-        if let Some(symbol) = symbol {
+        if let Some(symbol) = &query.exchange_symbol {
             spec = spec.with_query("symbol", &symbol.symbol);
         }
-        if let Some(order_id) = order_id {
+        if let Some(order_id) = &query.exchange_order_id {
             spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(start_time) = query.start_time {
+            spec = spec.with_query("startTime", start_time.timestamp_millis());
+        }
+        if let Some(end_time) = query.end_time {
+            spec = spec.with_query("endTime", end_time.timestamp_millis());
+        }
+        if let Some(limit) = query.limit {
+            spec = spec.with_query("limit", limit);
         }
         Ok(spec)
     }
@@ -1365,6 +1595,62 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
             "/api/v2/mix/account/accounts",
         )
         .with_query("productType", "USDT-FUTURES"))
+    }
+
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bitget,
+            PrivateRestMethod::Get,
+            "/api/v2/mix/market/contracts",
+        )
+        .with_query("productType", "USDT-FUTURES")
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bitget,
+            PrivateRestMethod::Get,
+            "/api/v2/mix/position/single-position",
+        )
+        .with_query("productType", "USDT-FUTURES")
+        .with_query("marginCoin", "USDT")
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "productType": "USDT-FUTURES",
+            "symbol": command.exchange_symbol.symbol,
+            "marginCoin": "USDT",
+        });
+        if let Some(order_id) = &command.exchange_order_id {
+            set_str(&mut body, "orderId", order_id);
+        }
+        if let Some(client_oid) = &command.client_order_id {
+            set_str(&mut body, "clientOid", client_oid);
+        }
+        if let Some(new_client_oid) = &command.new_client_order_id {
+            set_str(&mut body, "newClientOid", new_client_oid);
+        }
+        if let Some(quantity) = command.new_quantity {
+            set_str(&mut body, "newSize", number_string(quantity));
+        }
+        if let Some(price) = command.new_price {
+            set_str(&mut body, "newPrice", number_string(price));
+        }
+        if command.exchange_order_id.is_none() && command.client_order_id.is_none() {
+            anyhow::bail!("bitget amend requires orderId or clientOid");
+        }
+        if command.new_quantity.is_none() && command.new_price.is_none() {
+            anyhow::bail!("bitget amend requires new quantity or new price");
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bitget,
+            PrivateRestMethod::Post,
+            "/api/v2/mix/order/modify-order",
+        )
+        .with_body(body))
     }
 
     fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
@@ -1464,7 +1750,7 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
     ) -> Result<PrivateRestRequestSpec> {
         let mut body = json!({
             "contract": command.exchange_symbol.symbol,
-            "size": gate_signed_size(command.side, command.quantity),
+            "size": gate_signed_size(command.side, command.quantity)?,
             "tif": gate_tif(command.time_in_force, command.post_only),
             "text": gate_client_text(&command.client_order_id),
             "reduce_only": command.reduce_only,
@@ -1481,31 +1767,45 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
     }
 
     fn cancel_order(&self, command: &CancelCommand) -> Result<PrivateRestRequestSpec> {
-        let order_id = command
-            .exchange_order_id
-            .as_deref()
-            .or(command.client_order_id.as_deref())
-            .ok_or_else(|| anyhow!("gate cancel requires exchange_order_id or client_order_id"))?;
+        let order_id = gate_order_lookup_id(
+            command.exchange_order_id.as_deref(),
+            command.client_order_id.as_deref(),
+        )?;
         Ok(PrivateRestRequestSpec::new(
             ExchangeId::Gate,
             PrivateRestMethod::Delete,
-            format!("/futures/usdt/orders/{order_id}"),
+            gate_order_path(order_id),
         )
         .with_query("contract", &command.exchange_symbol.symbol))
     }
 
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Gate,
+            PrivateRestMethod::Delete,
+            "/futures/usdt/orders",
+        );
+        if let Some(symbol) = &command.exchange_symbol {
+            spec = spec.with_query("contract", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn cancel_batch_orders(&self, _command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!(
+            "gate native cancel-batch is not wired; adapter falls back to per-order cancel"
+        )
+    }
+
     fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec> {
-        let order_id = query
-            .exchange_order_id
-            .as_deref()
-            .or(query.client_order_id.as_deref())
-            .ok_or_else(|| {
-                anyhow!("gate order query requires exchange_order_id or client_order_id")
-            })?;
+        let order_id = gate_order_lookup_id(
+            query.exchange_order_id.as_deref(),
+            query.client_order_id.as_deref(),
+        )?;
         Ok(PrivateRestRequestSpec::new(
             ExchangeId::Gate,
             PrivateRestMethod::Get,
-            format!("/futures/usdt/orders/{order_id}"),
+            gate_order_path(order_id),
         )
         .with_query("contract", &query.exchange_symbol.symbol))
     }
@@ -1523,21 +1823,23 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
         Ok(spec)
     }
 
-    fn get_fills(
-        &self,
-        symbol: Option<&ExchangeSymbol>,
-        order_id: Option<&str>,
-    ) -> Result<PrivateRestRequestSpec> {
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec> {
         let mut spec = PrivateRestRequestSpec::new(
             ExchangeId::Gate,
             PrivateRestMethod::Get,
             "/futures/usdt/my_trades",
         );
-        if let Some(symbol) = symbol {
+        if let Some(symbol) = &query.exchange_symbol {
             spec = spec.with_query("contract", &symbol.symbol);
         }
-        if let Some(order_id) = order_id {
+        if let Some(order_id) = &query.exchange_order_id {
             spec = spec.with_query("order", order_id);
+        }
+        if let Some(last_id) = &query.from_trade_id {
+            spec = spec.with_query("last_id", last_id);
+        }
+        if let Some(limit) = query.limit {
+            spec = spec.with_query("limit", limit);
         }
         Ok(spec)
     }
@@ -1559,6 +1861,26 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
             PrivateRestMethod::Get,
             "/futures/usdt/accounts",
         ))
+    }
+
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Gate,
+            PrivateRestMethod::Get,
+            format!("/futures/usdt/contracts/{}", symbol.symbol),
+        ))
+    }
+
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Gate,
+            PrivateRestMethod::Get,
+            format!("/futures/usdt/positions/{}", symbol.symbol),
+        ))
+    }
+
+    fn amend_order(&self, _command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!("gate order amendment is not wired in the private perp adapter")
     }
 
     fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
@@ -1789,15 +2111,19 @@ fn close_position_spec(
 ) -> Result<PrivateRestRequestSpec> {
     match exchange {
         ExchangeId::Bitget => {
+            let side = if position_mode.is_hedge() {
+                bitget_position_side(command.position_side, command.order_side())
+            } else {
+                bitget_side(command.order_side())
+            };
             let mut body = json!({
                 "productType": "USDT-FUTURES",
                 "symbol": command.exchange_symbol.symbol,
                 "marginCoin": "USDT",
                 "size": number_string(command.quantity),
-                "side": bitget_side(command.order_side()),
+                "side": side,
                 "orderType": bitget_order_type(command.order_type),
                 "clientOid": command.client_order_id,
-                "reduceOnly": "yes",
             });
             set_optional_str(
                 &mut body,
@@ -1809,6 +2135,8 @@ fn close_position_spec(
             }
             if position_mode.is_hedge() {
                 set_str(&mut body, "tradeSide", "close");
+            } else {
+                set_str(&mut body, "reduceOnly", "yes");
             }
             Ok(PrivateRestRequestSpec::new(
                 ExchangeId::Bitget,
@@ -1820,7 +2148,7 @@ fn close_position_spec(
         ExchangeId::Gate => {
             let mut body = json!({
                 "contract": command.exchange_symbol.symbol,
-                "size": gate_signed_size(command.order_side(), command.quantity),
+                "size": gate_signed_size(command.order_side(), command.quantity)?,
                 "tif": gate_tif(command.time_in_force, false),
                 "text": gate_client_text(&command.client_order_id),
                 "reduce_only": true,
@@ -1843,7 +2171,15 @@ fn response_items(value: &Value) -> Vec<Value> {
     match response_data(value) {
         Value::Array(items) => items,
         Value::Object(map) => {
-            if let Some(Value::Array(items)) = map.get("list").or_else(|| map.get("orders")) {
+            if let Some(Value::Array(items)) = map
+                .get("list")
+                .or_else(|| map.get("orders"))
+                .or_else(|| map.get("fillList"))
+                .or_else(|| map.get("entrustedList"))
+                .or_else(|| map.get("orderList"))
+                .or_else(|| map.get("successList"))
+                .or_else(|| map.get("failureList"))
+            {
                 items.clone()
             } else {
                 vec![Value::Object(map)]
@@ -1856,6 +2192,160 @@ fn response_items(value: &Value) -> Vec<Value> {
 fn response_string(value: &Value, keys: &[&str]) -> Option<String> {
     let data = response_data(value);
     str_field(&data, keys).or_else(|| str_field(value, keys))
+}
+
+fn cancelled_count(value: &Value) -> usize {
+    let data = response_data(value);
+    match data {
+        Value::Array(items) => items.len(),
+        Value::Object(map) => map
+            .get("successList")
+            .or_else(|| map.get("success"))
+            .or_else(|| map.get("cancelled"))
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .or_else(|| {
+                map.get("count")
+                    .or_else(|| map.get("cancelled_count"))
+                    .and_then(Value::as_u64)
+                    .map(|count| count as usize)
+            })
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn parse_cancel_batch_acks(
+    exchange: ExchangeId,
+    value: &Value,
+    acknowledged_at: DateTime<Utc>,
+) -> Vec<CancelAck> {
+    response_items(value)
+        .into_iter()
+        .filter_map(|item| {
+            let exchange_order_id = str_field(&item, &["orderId", "id"]);
+            let client_order_id = str_field(&item, &["clientOid", "clientOrderId", "text"]);
+            if exchange_order_id.is_none() && client_order_id.is_none() {
+                return None;
+            }
+            Some(CancelAck {
+                exchange: exchange.clone(),
+                client_order_id,
+                exchange_order_id,
+                accepted: true,
+                status: OrderCommandStatus::Cancelled,
+                message: response_string(&item, &["msg", "message"]),
+                acknowledged_at,
+            })
+        })
+        .collect()
+}
+
+fn private_error_event(
+    exchange: ExchangeId,
+    class: ExchangeErrorClass,
+    code: Option<String>,
+    message: String,
+    occurred_at: DateTime<Utc>,
+) -> PrivateEvent {
+    PrivateEvent::new(
+        exchange,
+        PrivateEventKind::Error(PrivateErrorEvent {
+            class,
+            endpoint: None,
+            code,
+            message,
+            client_order_id: None,
+            exchange_order_id: None,
+            retry_after_ms: None,
+            occurred_at,
+        }),
+        occurred_at,
+    )
+}
+
+fn parse_trade_fee_snapshot(
+    exchange: ExchangeId,
+    fallback_symbol: &ExchangeSymbol,
+    value: &Value,
+    received_at: DateTime<Utc>,
+) -> Option<TradeFeeSnapshot> {
+    let data = response_data(value);
+    let item = match data {
+        Value::Array(items) => items
+            .iter()
+            .cloned()
+            .find(|item| symbol_matches(item, fallback_symbol))
+            .or_else(|| items.first().cloned())?,
+        Value::Object(_) => data,
+        _ => return None,
+    };
+    let symbol = str_field(&item, &["symbol", "instId", "contract", "name"])
+        .unwrap_or_else(|| fallback_symbol.symbol.clone());
+    let maker = f64_field(
+        &item,
+        &["makerFeeRate", "maker_fee_rate", "maker", "makerFee"],
+    )?;
+    let taker = f64_field(
+        &item,
+        &["takerFeeRate", "taker_fee_rate", "taker", "takerFee"],
+    )?;
+    Some(TradeFeeSnapshot {
+        exchange: exchange.clone(),
+        canonical_symbol: canonical(&exchange, &symbol),
+        exchange_symbol: ExchangeSymbol::new(exchange, symbol),
+        maker,
+        taker,
+        source: "private_perp_readback".to_string(),
+        updated_at: received_at,
+    })
+}
+
+fn parse_symbol_account_config(
+    exchange: ExchangeId,
+    fallback_symbol: &ExchangeSymbol,
+    value: &Value,
+    received_at: DateTime<Utc>,
+    configured_position_mode: PositionMode,
+) -> Option<SymbolAccountConfig> {
+    let data = response_data(value);
+    let item = match data {
+        Value::Array(items) => items
+            .iter()
+            .cloned()
+            .find(|item| symbol_matches(item, fallback_symbol))
+            .or_else(|| items.first().cloned())?,
+        Value::Object(_) => data,
+        _ => return None,
+    };
+    let symbol = str_field(&item, &["symbol", "instId", "contract", "name"])
+        .unwrap_or_else(|| fallback_symbol.symbol.clone());
+    let position_mode = str_field(&item, &["posMode", "pos_mode", "positionMode"])
+        .as_deref()
+        .map(parse_position_mode_text)
+        .or(Some(configured_position_mode));
+    Some(SymbolAccountConfig {
+        exchange: exchange.clone(),
+        canonical_symbol: canonical(&exchange, &symbol),
+        exchange_symbol: ExchangeSymbol::new(exchange, symbol),
+        position_mode,
+        margin_mode: str_field(&item, &["marginMode", "margin_mode", "marginModeName"])
+            .as_deref()
+            .map(parse_margin_mode_text),
+        leverage: f64_field(
+            &item,
+            &["leverage", "lever", "crossedLeverage", "isolatedLeverage"],
+        )
+        .map(|leverage| leverage.round().max(0.0) as u32),
+        max_leverage: f64_field(&item, &["maxLever", "maxLeverage", "max_leverage"])
+            .map(|leverage| leverage.round().max(0.0) as u32),
+        updated_at: received_at,
+    })
+}
+
+fn symbol_matches(item: &Value, symbol: &ExchangeSymbol) -> bool {
+    str_field(item, &["symbol", "instId", "contract", "name"])
+        .is_some_and(|value| value.eq_ignore_ascii_case(&symbol.symbol))
 }
 
 fn parse_rest_order_with_gate_contract_size(
@@ -1916,7 +2406,25 @@ fn parse_bitget_private_message(
     raw: &str,
     received_at: DateTime<Utc>,
 ) -> Result<Vec<PrivateEvent>> {
+    if raw == "pong" {
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Bitget,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )]);
+    }
     let value: Value = serde_json::from_str(raw)?;
+    if value.get("event").and_then(Value::as_str) == Some("error") {
+        return Ok(vec![private_error_event(
+            ExchangeId::Bitget,
+            ExchangeErrorClass::InvalidRequest,
+            str_field(&value, &["code"]),
+            str_field(&value, &["msg", "message"])
+                .unwrap_or_else(|| "bitget websocket error".to_string()),
+            received_at,
+        )
+        .with_raw(value)]);
+    }
     if value.get("event").and_then(Value::as_str) == Some("login")
         || value.get("event").and_then(Value::as_str) == Some("subscribe")
     {
@@ -1954,6 +2462,19 @@ fn parse_bitget_private_message(
 fn parse_gate_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<Vec<PrivateEvent>> {
     let value: Value = serde_json::from_str(raw)?;
     if value.get("event").and_then(Value::as_str) == Some("subscribe") {
+        if let Some(status) = value.pointer("/result/status").and_then(Value::as_str) {
+            if status != "success" {
+                return Ok(vec![private_error_event(
+                    ExchangeId::Gate,
+                    ExchangeErrorClass::InvalidRequest,
+                    None,
+                    str_field(value.get("result").unwrap_or(&value), &["message", "error"])
+                        .unwrap_or_else(|| format!("gate websocket subscribe status={status}")),
+                    received_at,
+                )
+                .with_raw(value)]);
+            }
+        }
         return Ok(vec![PrivateEvent::new(
             ExchangeId::Gate,
             PrivateEventKind::Heartbeat,
@@ -2119,7 +2640,8 @@ fn parse_gate_order_or_fill_with_contract_size(
             exchange: ExchangeId::Gate,
             canonical_symbol: canonical(&ExchangeId::Gate, &symbol),
             exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, symbol),
-            client_order_id: str_field(item, &["text"]),
+            client_order_id: str_field(item, &["text"])
+                .map(|text| gate_client_text_to_local(&text)),
             exchange_order_id: str_field(item, &["id"]),
             side,
             position_side: gate_position_side_from_contracts(item, signed_size, side),
@@ -2162,7 +2684,8 @@ fn parse_gate_fill_with_contract_size(
             exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, symbol),
             trade_id: str_field(item, &["trade_id", "id"])
                 .unwrap_or_else(|| format!("gate-fill-{}", received_at.timestamp_millis())),
-            client_order_id: str_field(item, &["text"]),
+            client_order_id: str_field(item, &["text"])
+                .map(|text| gate_client_text_to_local(&text)),
             exchange_order_id: str_field(item, &["order_id", "order"]),
             side,
             position_side: gate_position_side_from_contracts(item, signed_size, side),
@@ -2247,6 +2770,14 @@ fn bitget_side(side: OrderSide) -> &'static str {
     match side {
         OrderSide::Buy => "buy",
         OrderSide::Sell => "sell",
+    }
+}
+
+fn bitget_position_side(position_side: PositionSide, fallback_side: OrderSide) -> &'static str {
+    match position_side {
+        PositionSide::Long => "buy",
+        PositionSide::Short => "sell",
+        PositionSide::Net => bitget_side(fallback_side),
     }
 }
 
@@ -2349,11 +2880,23 @@ fn normalize_number(value: f64) -> f64 {
     number_string(value).parse().unwrap_or(value)
 }
 
-fn gate_signed_size(side: OrderSide, quantity: f64) -> f64 {
-    match side {
-        OrderSide::Buy => quantity.abs(),
-        OrderSide::Sell => -quantity.abs(),
+fn gate_signed_size(side: OrderSide, quantity: f64) -> Result<i64> {
+    let contracts = quantity.abs();
+    if !contracts.is_finite() || contracts <= 0.0 {
+        anyhow::bail!("gate order size must be a positive finite contract count");
     }
+    let rounded = contracts.round();
+    if (contracts - rounded).abs() > 1e-9 {
+        anyhow::bail!("gate order size must be an integer contract count, got {contracts}");
+    }
+    if rounded > i64::MAX as f64 {
+        anyhow::bail!("gate order size exceeds i64 range, got {contracts}");
+    }
+    let signed = match side {
+        OrderSide::Buy => rounded as i64,
+        OrderSide::Sell => -(rounded as i64),
+    };
+    Ok(signed)
 }
 
 fn gate_tif(tif: TimeInForce, post_only: bool) -> &'static str {
@@ -2366,11 +2909,48 @@ fn gate_tif(tif: TimeInForce, post_only: bool) -> &'static str {
 }
 
 fn gate_client_text(client_order_id: &str) -> String {
-    if client_order_id.starts_with("t-") {
-        client_order_id.to_string()
-    } else {
-        format!("t-{client_order_id}")
+    const MAX_BODY_LEN: usize = 28;
+    let raw = client_order_id
+        .strip_prefix("t-")
+        .unwrap_or(client_order_id);
+    let mut sanitized = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        sanitized = "order".to_string();
     }
+    if sanitized.len() > MAX_BODY_LEN {
+        let digest = hex::encode(Sha256::digest(raw.as_bytes()));
+        let suffix = &digest[..8];
+        let prefix_len = MAX_BODY_LEN - 1 - suffix.len();
+        sanitized = format!("{}-{suffix}", &sanitized[..prefix_len]);
+    }
+    format!("t-{sanitized}")
+}
+
+fn gate_client_text_to_local(text: &str) -> String {
+    text.strip_prefix("t-").unwrap_or(text).to_string()
+}
+
+fn gate_order_lookup_id<'a>(
+    exchange_order_id: Option<&'a str>,
+    client_order_id: Option<&'a str>,
+) -> Result<String> {
+    exchange_order_id
+        .map(ToString::to_string)
+        .or_else(|| client_order_id.map(gate_client_text))
+        .ok_or_else(|| anyhow!("gate order lookup requires exchange_order_id or client_order_id"))
+}
+
+fn gate_order_path(order_id: String) -> String {
+    format!("/futures/usdt/orders/{}", urlencoding::encode(&order_id))
 }
 
 fn gate_private_ws_payload(
@@ -2455,6 +3035,25 @@ fn parse_position_side(side: &str) -> PositionSide {
         "short" | "sell" => PositionSide::Short,
         "long" | "buy" => PositionSide::Long,
         _ => PositionSide::Net,
+    }
+}
+
+fn parse_position_mode_text(value: &str) -> PositionMode {
+    if matches!(
+        value.to_ascii_lowercase().as_str(),
+        "hedge" | "hedge_mode" | "long_short"
+    ) {
+        PositionMode::Hedge
+    } else {
+        PositionMode::OneWay
+    }
+}
+
+fn parse_margin_mode_text(value: &str) -> MarginMode {
+    match value.to_ascii_lowercase().as_str() {
+        "cross" | "crossed" => MarginMode::Cross,
+        "isolated" | "fixed" => MarginMode::Isolated,
+        _ => MarginMode::Unknown,
     }
 }
 
@@ -2622,10 +3221,31 @@ mod tests {
     }
 
     #[test]
+    fn bitget_hedge_close_should_use_position_side_without_reduce_only() {
+        let cmd = ClosePositionCommand::market(
+            ExchangeId::Bitget,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            PositionSide::Long,
+            0.01,
+            "close-long-1",
+            Utc::now(),
+        );
+
+        let spec = close_position_spec(ExchangeId::Bitget, &cmd, PositionMode::Hedge).unwrap();
+        let body = spec.body.unwrap();
+
+        assert_eq!(body["side"], "buy");
+        assert_eq!(body["tradeSide"], "close");
+        assert!(body.get("reduceOnly").is_none());
+    }
+
+    #[test]
     fn gate_should_build_signed_size_place_order_spec() {
         let mut cmd = command(ExchangeId::Gate, "BTC_USDT");
         cmd.side = OrderSide::Sell;
         cmd.reduce_only = true;
+        cmd.quantity = 25.0;
 
         let spec = GatePrivatePerpProtocol
             .place_order(&cmd, PositionMode::OneWay)
@@ -2634,10 +3254,49 @@ mod tests {
 
         assert_eq!(spec.path, "/futures/usdt/orders");
         assert_eq!(body["contract"], "BTC_USDT");
-        assert_eq!(body["size"], -0.01);
+        assert_eq!(body["size"], -25);
         assert_eq!(body["tif"], "poc");
         assert_eq!(body["reduce_only"], true);
-        assert!(body["text"].as_str().unwrap().starts_with("t-crossarb-"));
+        assert_eq!(
+            body["text"].as_str().unwrap(),
+            "t-crossarb-live-small-dc1f310f"
+        );
+        assert!(body["text"].as_str().unwrap().len() <= 30);
+    }
+
+    #[test]
+    fn gate_client_order_id_should_be_stable_for_lookup_paths() {
+        let client_id = "crossarb-live-small-bundleabcdef-maker-1";
+        let cancel = GatePrivatePerpProtocol
+            .cancel_order(&CancelCommand {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                client_order_id: Some(client_id.to_string()),
+                exchange_order_id: None,
+                reason: None,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            cancel.path,
+            "/futures/usdt/orders/t-crossarb-live-small-dc1f310f"
+        );
+        assert_eq!(
+            gate_client_text(client_id),
+            "t-crossarb-live-small-dc1f310f"
+        );
+        assert_eq!(
+            gate_client_text_to_local("t-crossarb-live-small-dc1f310f"),
+            "crossarb-live-small-dc1f310f"
+        );
+    }
+
+    #[test]
+    fn gate_signed_size_should_reject_fractional_contracts() {
+        let err = gate_signed_size(OrderSide::Buy, 12.5).unwrap_err();
+        assert!(err.to_string().contains("integer contract count"));
     }
 
     #[test]
@@ -2700,6 +3359,164 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("does not support position mode"));
+    }
+
+    #[test]
+    fn bitget_should_build_cancel_all_and_fills_query_specs() {
+        let command = CancelAllCommand::for_symbol(
+            ExchangeId::Bitget,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            Utc::now(),
+        );
+        let spec = BitgetPrivatePerpProtocol
+            .cancel_all_orders(&command)
+            .unwrap();
+
+        assert_eq!(spec.method, PrivateRestMethod::Post);
+        assert_eq!(spec.path, "/api/v2/mix/order/cancel-all-orders");
+        let body = spec.body.unwrap();
+        assert_eq!(body["symbol"], "BTCUSDT");
+        assert_eq!(body["productType"], "USDT-FUTURES");
+
+        let mut query = FillQuery::for_symbol(
+            ExchangeId::Bitget,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+        );
+        query.exchange_order_id = Some("order-1".to_string());
+        query.limit = Some(20);
+        let fills = BitgetPrivatePerpProtocol.get_fills(&query).unwrap();
+
+        assert_eq!(fills.path, "/api/v2/mix/order/fills");
+        assert_eq!(
+            fills.query.get("symbol").map(String::as_str),
+            Some("BTCUSDT")
+        );
+        assert_eq!(
+            fills.query.get("orderId").map(String::as_str),
+            Some("order-1")
+        );
+        assert_eq!(fills.query.get("limit").map(String::as_str), Some("20"));
+    }
+
+    #[test]
+    fn bitget_should_build_batch_cancel_and_amend_specs() {
+        let cancel = CancelCommand {
+            exchange: ExchangeId::Bitget,
+            canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: Some("order-1".to_string()),
+            reason: None,
+            requested_at: Utc::now(),
+        };
+        let batch = CancelBatchCommand::new(ExchangeId::Bitget, [cancel], Utc::now());
+        let spec = BitgetPrivatePerpProtocol
+            .cancel_batch_orders(&batch)
+            .unwrap();
+        assert_eq!(spec.path, "/api/v2/mix/order/batch-cancel-orders");
+        let body = spec.body.unwrap();
+        assert_eq!(body["symbol"], "BTCUSDT");
+        assert_eq!(body["orderIdList"][0]["orderId"], "order-1");
+
+        let amend = BitgetPrivatePerpProtocol
+            .amend_order(&AmendOrderCommand {
+                exchange: ExchangeId::Bitget,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+                client_order_id: Some("client-1".to_string()),
+                exchange_order_id: None,
+                new_client_order_id: Some("client-2".to_string()),
+                new_quantity: Some(0.02),
+                new_price: Some(64_900.0),
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(amend.path, "/api/v2/mix/order/modify-order");
+        let amend_body = amend.body.unwrap();
+        assert_eq!(amend_body["clientOid"], "client-1");
+        assert_eq!(amend_body["newClientOid"], "client-2");
+        assert_eq!(amend_body["newSize"], "0.02");
+        assert_eq!(amend_body["newPrice"], "64900");
+    }
+
+    #[test]
+    fn response_items_should_expand_bitget_list_envelopes() {
+        let fills = response_items(&json!({
+            "code": "00000",
+            "data": {"fillList": [{"tradeId": "t1"}, {"tradeId": "t2"}]}
+        }));
+        assert_eq!(fills.len(), 2);
+
+        let pending = response_items(&json!({
+            "code": "00000",
+            "data": {"entrustedList": [{"orderId": "o1"}]}
+        }));
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn gate_should_build_cancel_all_and_readback_specs() {
+        let command = CancelAllCommand::for_symbol(
+            ExchangeId::Gate,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+            Utc::now(),
+        );
+        let cancel = GatePrivatePerpProtocol.cancel_all_orders(&command).unwrap();
+
+        assert_eq!(cancel.method, PrivateRestMethod::Delete);
+        assert_eq!(cancel.path, "/futures/usdt/orders");
+        assert_eq!(
+            cancel.query.get("contract").map(String::as_str),
+            Some("BTC_USDT")
+        );
+
+        let symbol = ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT");
+        let fee = GatePrivatePerpProtocol.get_trade_fee(&symbol).unwrap();
+        assert_eq!(fee.path, "/futures/usdt/contracts/BTC_USDT");
+        let config = GatePrivatePerpProtocol
+            .get_symbol_account_config(&symbol)
+            .unwrap();
+        assert_eq!(config.path, "/futures/usdt/positions/BTC_USDT");
+    }
+
+    #[test]
+    fn private_perp_should_parse_trade_fee_and_account_config_readbacks() {
+        let now = Utc::now();
+        let bitget_fee = parse_trade_fee_snapshot(
+            ExchangeId::Bitget,
+            &ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            &json!({"data":[{"symbol":"BTCUSDT","makerFeeRate":"0.0002","takerFeeRate":"0.0006"}]}),
+            now,
+        )
+        .unwrap();
+        assert_eq!(bitget_fee.maker, 0.0002);
+        assert_eq!(bitget_fee.taker, 0.0006);
+
+        let gate_fee = parse_trade_fee_snapshot(
+            ExchangeId::Gate,
+            &ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+            &json!({"name":"BTC_USDT","maker_fee_rate":"-0.00025","taker_fee_rate":"0.00075"}),
+            now,
+        )
+        .unwrap();
+        assert_eq!(gate_fee.exchange_symbol.symbol, "BTC_USDT");
+        assert_eq!(gate_fee.maker, -0.00025);
+
+        let config = parse_symbol_account_config(
+            ExchangeId::Bitget,
+            &ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            &json!({"data":[{"symbol":"BTCUSDT","posMode":"hedge_mode","marginMode":"crossed","leverage":"3","maxLever":"125"}]}),
+            now,
+            PositionMode::OneWay,
+        )
+        .unwrap();
+        assert_eq!(config.position_mode, Some(PositionMode::Hedge));
+        assert_eq!(config.margin_mode, Some(MarginMode::Cross));
+        assert_eq!(config.leverage, Some(3));
+        assert_eq!(config.max_leverage, Some(125));
     }
 
     #[test]
@@ -3123,6 +3940,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(gate.to_string().contains("INVALID_KEY"));
+    }
+
+    #[test]
+    fn private_ws_should_parse_heartbeat_and_subscribe_errors() {
+        let now = Utc::now();
+        let bitget_pong = BitgetPrivatePerpProtocol
+            .parse_private_ws_message("pong", now)
+            .unwrap();
+        assert!(matches!(bitget_pong[0].kind, PrivateEventKind::Heartbeat));
+
+        let bitget_error = BitgetPrivatePerpProtocol
+            .parse_private_ws_message(
+                r#"{"event":"error","code":"30001","msg":"invalid sign"}"#,
+                now,
+            )
+            .unwrap();
+        match &bitget_error[0].kind {
+            PrivateEventKind::Error(error) => {
+                assert_eq!(error.code.as_deref(), Some("30001"));
+                assert!(error.message.contains("invalid sign"));
+            }
+            other => panic!("expected error event, got {other:?}"),
+        }
+
+        let gate_error = GatePrivatePerpProtocol
+            .parse_private_ws_message(
+                r#"{"time":1,"channel":"futures.orders","event":"subscribe","result":{"status":"fail","message":"bad auth"}}"#,
+                now,
+            )
+            .unwrap();
+        match &gate_error[0].kind {
+            PrivateEventKind::Error(error) => assert!(error.message.contains("bad auth")),
+            other => panic!("expected error event, got {other:?}"),
+        }
     }
 
     trait BoolNot {

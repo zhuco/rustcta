@@ -611,6 +611,60 @@ async fn prepare_live_accounts(
                 }),
             }
         }
+
+        for instrument in instruments.iter().filter(|item| item.exchange == exchange) {
+            match adapter.get_trade_fee(&instrument.exchange_symbol).await {
+                Ok(fee) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(instrument.canonical_symbol.to_string()),
+                    action: "read_trade_fee".to_string(),
+                    ok: fee.maker.is_finite() && fee.taker.is_finite(),
+                    dry_run: false,
+                    message: Some(format!("maker={} taker={}", fee.maker, fee.taker)),
+                }),
+                Err(err) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(instrument.canonical_symbol.to_string()),
+                    action: "read_trade_fee".to_string(),
+                    ok: false,
+                    dry_run: false,
+                    message: Some(err.to_string()),
+                }),
+            }
+
+            match adapter
+                .get_symbol_account_config(&instrument.exchange_symbol)
+                .await
+            {
+                Ok(readback) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(instrument.canonical_symbol.to_string()),
+                    action: "read_symbol_account_config".to_string(),
+                    ok: readback
+                        .position_mode
+                        .map(|readback_mode| {
+                            readback_mode == mode || !capabilities.supports_position_mode_change
+                        })
+                        .unwrap_or(true),
+                    dry_run: false,
+                    message: Some(format!(
+                        "position_mode={:?} margin_mode={:?} leverage={:?} max_leverage={:?}",
+                        readback.position_mode,
+                        readback.margin_mode,
+                        readback.leverage,
+                        readback.max_leverage
+                    )),
+                }),
+                Err(err) => summaries.push(AccountPrepSummary {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(instrument.canonical_symbol.to_string()),
+                    action: "read_symbol_account_config".to_string(),
+                    ok: false,
+                    dry_run: false,
+                    message: Some(err.to_string()),
+                }),
+            }
+        }
     }
     summaries
 }

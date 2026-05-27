@@ -6,11 +6,12 @@ use crate::core::types::{
     Position as CorePosition, Trade as CoreTrade,
 };
 use crate::execution::{
-    CancelAck, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
-    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand, OrderAck,
-    OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState, OrderType, PositionMode,
-    PositionModeAck, PositionModeCommand, PositionSide, TimeInForce, TradingAdapter,
-    TradingCapabilities,
+    AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
+    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
+    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand,
+    MarginMode, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState,
+    OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide,
+    SymbolAccountConfig, TimeInForce, TradeFeeSnapshot, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
     canonical_from_exchange_symbol, exchange_symbol_for, CanonicalSymbol, ExchangeId,
@@ -217,6 +218,72 @@ impl TradingAdapter for ExchangeTradingAdapter {
         })
     }
 
+    async fn cancel_all_orders(&self, command: CancelAllCommand) -> Result<CancelAllAck> {
+        self.ensure_private_trading_enabled("cancel_all_orders")?;
+        let orders = self
+            .exchange
+            .cancel_all_orders(
+                command
+                    .exchange_symbol
+                    .as_ref()
+                    .map(|symbol| symbol.symbol.as_str()),
+                MarketType::Futures,
+            )
+            .await?;
+
+        Ok(CancelAllAck {
+            exchange: self.exchange_id.clone(),
+            canonical_symbol: command.canonical_symbol,
+            exchange_symbol: command.exchange_symbol,
+            accepted: true,
+            cancelled_orders: orders.len(),
+            message: None,
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    async fn cancel_batch_orders(&self, command: CancelBatchCommand) -> Result<CancelBatchAck> {
+        self.ensure_private_trading_enabled("cancel_batch_orders")?;
+        let mut by_symbol: HashMap<String, Vec<String>> = HashMap::new();
+        for order in &command.orders {
+            let order_id = order
+                .exchange_order_id
+                .as_deref()
+                .or(order.client_order_id.as_deref())
+                .ok_or_else(|| anyhow!("batch cancel requires order ids for every order"))?;
+            by_symbol
+                .entry(order.exchange_symbol.symbol.clone())
+                .or_default()
+                .push(order_id.to_string());
+        }
+
+        let mut order_acks = Vec::new();
+        for (symbol, order_ids) in by_symbol {
+            let cancelled = self
+                .exchange
+                .cancel_multiple_orders(order_ids, &symbol, MarketType::Futures)
+                .await?;
+            order_acks.extend(cancelled.into_iter().map(|order| CancelAck {
+                exchange: self.exchange_id.clone(),
+                client_order_id: extract_core_client_order_id(&order),
+                exchange_order_id: Some(order.id),
+                accepted: true,
+                status: map_order_status(&order.status),
+                message: None,
+                acknowledged_at: Utc::now(),
+            }));
+        }
+
+        Ok(CancelBatchAck {
+            exchange: command.exchange,
+            accepted: true,
+            cancelled_orders: order_acks.len(),
+            order_acks,
+            message: None,
+            acknowledged_at: Utc::now(),
+        })
+    }
+
     async fn get_order(&self, query: OrderQuery) -> Result<OrderState> {
         self.ensure_private_trading_enabled("get_order")?;
         let order_id = query
@@ -288,6 +355,59 @@ impl TradingAdapter for ExchangeTradingAdapter {
             .collect())
     }
 
+    async fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<TradeFeeSnapshot> {
+        self.ensure_private_trading_enabled("get_trade_fee")?;
+        let canonical = canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
+            .unwrap_or_else(|| symbol_to_canonical(&symbol.symbol));
+        let fee = self
+            .exchange
+            .get_trade_fee(&canonical.as_pair(), MarketType::Futures)
+            .await?;
+
+        Ok(TradeFeeSnapshot {
+            exchange: self.exchange_id.clone(),
+            canonical_symbol: canonical,
+            exchange_symbol: symbol.clone(),
+            maker: fee.maker_fee.unwrap_or(fee.maker),
+            taker: fee.taker_fee.unwrap_or(fee.taker),
+            source: "core_exchange_trade_fee".to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        symbol: &ExchangeSymbol,
+    ) -> Result<SymbolAccountConfig> {
+        self.ensure_private_trading_enabled("get_symbol_account_config")?;
+        let canonical = canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
+            .unwrap_or_else(|| symbol_to_canonical(&symbol.symbol));
+        let positions = self
+            .exchange
+            .get_positions(Some(&canonical.as_pair()))
+            .await?;
+        let leverage = positions.iter().find_map(|position| position.leverage);
+        let margin_mode = positions
+            .iter()
+            .find_map(|position| position.margin_type.as_deref().map(parse_margin_mode));
+        let position_mode = self
+            .position_mode
+            .lock()
+            .map_err(|_| anyhow!("position mode mutex poisoned"))
+            .map(|mode| Some(*mode))?;
+
+        Ok(SymbolAccountConfig {
+            exchange: self.exchange_id.clone(),
+            canonical_symbol: canonical,
+            exchange_symbol: symbol.clone(),
+            position_mode,
+            margin_mode,
+            leverage,
+            max_leverage: None,
+            updated_at: Utc::now(),
+        })
+    }
+
     async fn get_fills(&self, query: FillQuery) -> Result<Vec<FillEvent>> {
         self.ensure_private_trading_enabled("get_fills")?;
         let symbol = query
@@ -319,6 +439,51 @@ impl TradingAdapter for ExchangeTradingAdapter {
             })
             .map(|trade| map_fill_event(self.exchange_id.clone(), trade))
             .collect())
+    }
+
+    async fn amend_order(&self, command: AmendOrderCommand) -> Result<AmendOrderAck> {
+        self.ensure_private_trading_enabled("amend_order")?;
+        let order_id = command
+            .exchange_order_id
+            .as_deref()
+            .or(command.client_order_id.as_deref())
+            .ok_or_else(|| anyhow!("amend requires exchange_order_id or client_order_id"))?;
+        let instrument = self.instrument_for(&command.canonical_symbol);
+        let (new_quantity, new_price) = if let Some(instrument) = instrument {
+            let quantity_for_rules = command.new_quantity.unwrap_or(instrument.quantity_step);
+            let normalized = instrument.normalize_order_input(
+                quantity_for_rules,
+                command.new_price,
+                RoundingMode::Floor,
+                RoundingMode::Nearest,
+            );
+            (
+                command.new_quantity.map(|_| normalized.quantity),
+                command.new_price.and(normalized.price),
+            )
+        } else {
+            (command.new_quantity, command.new_price)
+        };
+        let order = self
+            .exchange
+            .modify_order(
+                order_id,
+                &command.exchange_symbol.symbol,
+                new_price,
+                new_quantity,
+                MarketType::Futures,
+            )
+            .await?;
+
+        Ok(AmendOrderAck {
+            exchange: command.exchange,
+            client_order_id: command.new_client_order_id.or(command.client_order_id),
+            exchange_order_id: Some(order.id),
+            accepted: true,
+            status: map_order_status(&order.status),
+            message: None,
+            acknowledged_at: Utc::now(),
+        })
     }
 
     async fn set_leverage(&self, command: LeverageCommand) -> Result<LeverageAck> {
@@ -568,6 +733,14 @@ fn should_send_reduce_only(exchange: &ExchangeId, position_mode: PositionMode) -
     )
 }
 
+fn parse_margin_mode(value: &str) -> MarginMode {
+    match value.to_ascii_lowercase().as_str() {
+        "cross" | "crossed" => MarginMode::Cross,
+        "isolated" | "fixed" => MarginMode::Isolated,
+        _ => MarginMode::Unknown,
+    }
+}
+
 fn normalize_order_fields(
     instrument: Option<&InstrumentMeta>,
     quantity: f64,
@@ -762,6 +935,16 @@ fn extract_position_side(info: &serde_json::Value) -> PositionSide {
         "SHORT" => PositionSide::Short,
         _ => PositionSide::Net,
     }
+}
+
+fn extract_core_client_order_id(order: &CoreOrder) -> Option<String> {
+    order
+        .info
+        .get("clientOrderId")
+        .or_else(|| order.info.get("client_order_id"))
+        .or_else(|| order.info.get("clientOid"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
 }
 
 fn extract_average_fill_price(order: &CoreOrder) -> Option<f64> {

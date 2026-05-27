@@ -100,6 +100,103 @@ impl CancelAck {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelAllCommand {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub requested_at: DateTime<Utc>,
+}
+
+impl CancelAllCommand {
+    pub fn for_symbol(
+        exchange: ExchangeId,
+        canonical_symbol: CanonicalSymbol,
+        exchange_symbol: ExchangeSymbol,
+        requested_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            exchange,
+            canonical_symbol: Some(canonical_symbol),
+            exchange_symbol: Some(exchange_symbol),
+            requested_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CancelAllAck {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub accepted: bool,
+    pub cancelled_orders: usize,
+    pub message: Option<String>,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+impl CancelAllAck {
+    pub fn dry_run(command: &CancelAllCommand, acknowledged_at: DateTime<Utc>) -> Self {
+        Self {
+            exchange: command.exchange.clone(),
+            canonical_symbol: command.canonical_symbol.clone(),
+            exchange_symbol: command.exchange_symbol.clone(),
+            accepted: false,
+            cancelled_orders: 0,
+            message: Some("dry-run: cancel-all was not sent to adapter".to_string()),
+            acknowledged_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CancelBatchCommand {
+    pub exchange: ExchangeId,
+    pub orders: Vec<CancelCommand>,
+    pub requested_at: DateTime<Utc>,
+}
+
+impl CancelBatchCommand {
+    pub fn new(
+        exchange: ExchangeId,
+        orders: impl IntoIterator<Item = CancelCommand>,
+        requested_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            exchange,
+            orders: orders.into_iter().collect(),
+            requested_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CancelBatchAck {
+    pub exchange: ExchangeId,
+    pub accepted: bool,
+    pub cancelled_orders: usize,
+    pub order_acks: Vec<CancelAck>,
+    pub message: Option<String>,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+impl CancelBatchAck {
+    pub fn dry_run(command: &CancelBatchCommand, acknowledged_at: DateTime<Utc>) -> Self {
+        Self {
+            exchange: command.exchange.clone(),
+            accepted: false,
+            cancelled_orders: 0,
+            order_acks: command
+                .orders
+                .iter()
+                .map(|order| CancelAck::dry_run(order, acknowledged_at))
+                .collect(),
+            message: Some("dry-run: cancel-batch was not sent to adapter".to_string()),
+            acknowledged_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrderQuery {
     pub exchange: ExchangeId,
@@ -159,6 +256,17 @@ pub struct ExchangeBalance {
     pub total: f64,
     pub available: f64,
     pub locked: f64,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TradeFeeSnapshot {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: ExchangeSymbol,
+    pub maker: f64,
+    pub taker: f64,
+    pub source: String,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -431,6 +539,66 @@ impl PositionModeAck {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarginMode {
+    Cross,
+    Isolated,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SymbolAccountConfig {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: ExchangeSymbol,
+    pub position_mode: Option<PositionMode>,
+    pub margin_mode: Option<MarginMode>,
+    pub leverage: Option<u32>,
+    pub max_leverage: Option<u32>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AmendOrderCommand {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: ExchangeSymbol,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub new_client_order_id: Option<String>,
+    pub new_quantity: Option<f64>,
+    pub new_price: Option<f64>,
+    pub requested_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AmendOrderAck {
+    pub exchange: ExchangeId,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub accepted: bool,
+    pub status: OrderCommandStatus,
+    pub message: Option<String>,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+impl AmendOrderAck {
+    pub fn dry_run(command: &AmendOrderCommand, acknowledged_at: DateTime<Utc>) -> Self {
+        Self {
+            exchange: command.exchange.clone(),
+            client_order_id: command
+                .new_client_order_id
+                .clone()
+                .or_else(|| command.client_order_id.clone()),
+            exchange_order_id: command.exchange_order_id.clone(),
+            accepted: false,
+            status: OrderCommandStatus::Planned,
+            message: Some("dry-run: amend order was not sent to adapter".to_string()),
+            acknowledged_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClosePositionCommand {
     pub exchange: ExchangeId,
@@ -513,6 +681,21 @@ pub trait TradingAdapter: Send + Sync {
 
     async fn place_order(&self, command: OrderCommand) -> anyhow::Result<OrderAck>;
     async fn cancel_order(&self, command: CancelCommand) -> anyhow::Result<CancelAck>;
+    async fn cancel_all_orders(&self, _command: CancelAllCommand) -> anyhow::Result<CancelAllAck> {
+        anyhow::bail!(
+            "trading adapter {} does not support cancel-all",
+            self.exchange()
+        )
+    }
+    async fn cancel_batch_orders(
+        &self,
+        _command: CancelBatchCommand,
+    ) -> anyhow::Result<CancelBatchAck> {
+        anyhow::bail!(
+            "trading adapter {} does not support cancel-batch",
+            self.exchange()
+        )
+    }
     async fn get_order(&self, query: OrderQuery) -> anyhow::Result<OrderState>;
     async fn get_open_orders(
         &self,
@@ -523,9 +706,31 @@ pub trait TradingAdapter: Send + Sync {
         symbol: Option<&ExchangeSymbol>,
     ) -> anyhow::Result<Vec<ExchangePosition>>;
     async fn get_balances(&self) -> anyhow::Result<Vec<ExchangeBalance>>;
+    async fn get_trade_fee(&self, _symbol: &ExchangeSymbol) -> anyhow::Result<TradeFeeSnapshot> {
+        anyhow::bail!(
+            "trading adapter {} does not support trade fee readback",
+            self.exchange()
+        )
+    }
+    async fn get_symbol_account_config(
+        &self,
+        _symbol: &ExchangeSymbol,
+    ) -> anyhow::Result<SymbolAccountConfig> {
+        anyhow::bail!(
+            "trading adapter {} does not support symbol account config readback",
+            self.exchange()
+        )
+    }
     async fn get_fills(&self, _query: FillQuery) -> anyhow::Result<Vec<FillEvent>> {
         anyhow::bail!(
             "unsupported: trading adapter {} does not support fill queries",
+            self.exchange()
+        )
+    }
+
+    async fn amend_order(&self, _command: AmendOrderCommand) -> anyhow::Result<AmendOrderAck> {
+        anyhow::bail!(
+            "trading adapter {} does not support order amendments",
             self.exchange()
         )
     }

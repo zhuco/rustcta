@@ -1,6 +1,7 @@
 use crate::execution::{
-    CancelAck, CancelCommand, ClosePositionAck, ClosePositionCommand, LeverageAck, LeverageCommand,
-    OrderAck, OrderCommand, PositionModeAck, PositionModeCommand, TradingAdapter,
+    AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
+    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand, LeverageAck,
+    LeverageCommand, OrderAck, OrderCommand, PositionModeAck, PositionModeCommand, TradingAdapter,
 };
 use crate::market::ExchangeId;
 use anyhow::{anyhow, Result};
@@ -192,6 +193,48 @@ impl ExecutionRouter {
             )
         })?;
         adapter.cancel_order(command).await
+    }
+
+    pub async fn route_cancel_all(&self, command: CancelAllCommand) -> Result<CancelAllAck> {
+        if self.dry_run {
+            return Ok(CancelAllAck::dry_run(&command, Utc::now()));
+        }
+
+        let adapter = self.adapters.get(&command.exchange).ok_or_else(|| {
+            anyhow!(
+                "missing trading adapter for exchange {}",
+                command.exchange.as_str()
+            )
+        })?;
+        adapter.cancel_all_orders(command).await
+    }
+
+    pub async fn route_cancel_batch(&self, command: CancelBatchCommand) -> Result<CancelBatchAck> {
+        if self.dry_run {
+            return Ok(CancelBatchAck::dry_run(&command, Utc::now()));
+        }
+
+        let adapter = self.adapters.get(&command.exchange).ok_or_else(|| {
+            anyhow!(
+                "missing trading adapter for exchange {}",
+                command.exchange.as_str()
+            )
+        })?;
+        adapter.cancel_batch_orders(command).await
+    }
+
+    pub async fn route_amend_order(&self, command: AmendOrderCommand) -> Result<AmendOrderAck> {
+        if self.dry_run {
+            return Ok(AmendOrderAck::dry_run(&command, Utc::now()));
+        }
+
+        let adapter = self.adapters.get(&command.exchange).ok_or_else(|| {
+            anyhow!(
+                "missing trading adapter for exchange {}",
+                command.exchange.as_str()
+            )
+        })?;
+        adapter.amend_order(command).await
     }
 
     pub async fn route_set_leverage(&self, command: LeverageCommand) -> Result<LeverageAck> {
