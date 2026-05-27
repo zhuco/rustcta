@@ -1,3 +1,4 @@
+use super::private_perp::private_perp_trading_capabilities;
 use crate::core::exchange::Exchange;
 use crate::core::types::{
     Balance as CoreBalance, MarketType, Order as CoreOrder, OrderRequest,
@@ -33,7 +34,7 @@ pub struct ExchangeTradingAdapter {
 
 impl ExchangeTradingAdapter {
     pub fn new(exchange_id: ExchangeId, exchange: Arc<dyn Exchange>) -> Self {
-        let support = private_trading_support_for(&exchange_id);
+        let support = core_exchange_private_trading_support_for(&exchange_id);
         Self {
             exchange,
             exchange_id,
@@ -136,6 +137,20 @@ impl ExchangeTradingAdapter {
                 self.exchange_id
             ))
         }
+    }
+}
+
+fn core_exchange_private_trading_support_for(exchange: &ExchangeId) -> PrivateTradingSupport {
+    match exchange {
+        ExchangeId::Bitget | ExchangeId::Gate => PrivateTradingSupport {
+            exchange: exchange.clone(),
+            private_trading_enabled: false,
+            capabilities: disabled_trading_capabilities(),
+            disabled_reason: Some(
+                "core Exchange private trading implementation is not wired; use private_perp TradingAdapter",
+            ),
+        },
+        _ => private_trading_support_for(exchange),
     }
 }
 
@@ -432,11 +447,9 @@ pub fn private_trading_support_for(exchange: &ExchangeId) -> PrivateTradingSuppo
         },
         ExchangeId::Bitget | ExchangeId::Gate => PrivateTradingSupport {
             exchange: exchange.clone(),
-            private_trading_enabled: false,
-            capabilities: disabled_trading_capabilities(),
-            disabled_reason: Some(
-                "core Exchange private trading implementation is not wired; public market adapter only",
-            ),
+            private_trading_enabled: true,
+            capabilities: private_perp_trading_capabilities(exchange.clone()),
+            disabled_reason: None,
         },
         ExchangeId::Other(_) => PrivateTradingSupport {
             exchange: exchange.clone(),
@@ -844,20 +857,19 @@ mod tests {
     }
 
     #[test]
-    fn trading_adapter_registry_should_disable_unwired_private_exchanges() {
+    fn trading_adapter_registry_should_enable_private_perp_exchanges() {
         let bitget = private_trading_support_for(&ExchangeId::Bitget);
-        assert!(!bitget.private_trading_enabled);
-        assert!(!bitget.capabilities.supports_limit_orders);
-        assert!(!bitget.capabilities.supports_market_orders);
-        assert!(!bitget.capabilities.supports_leverage);
-        assert!(bitget
-            .disabled_reason
-            .unwrap()
-            .contains("public market adapter only"));
+        assert!(bitget.private_trading_enabled);
+        assert!(bitget.capabilities.supports_limit_orders);
+        assert!(bitget.capabilities.supports_market_orders);
+        assert!(bitget.capabilities.supports_leverage);
+        assert!(bitget.capabilities.supports_position_mode_change);
+        assert!(bitget.disabled_reason.is_none());
 
         let gate = private_trading_support_for(&ExchangeId::Gate);
-        assert!(!gate.private_trading_enabled);
-        assert!(!gate.capabilities.supports_close_position);
+        assert!(gate.private_trading_enabled);
+        assert!(gate.capabilities.supports_close_position);
+        assert!(!gate.capabilities.supports_position_mode_change);
 
         let binance = private_trading_support_for(&ExchangeId::Binance);
         assert!(binance.private_trading_enabled);
@@ -877,6 +889,10 @@ mod tests {
         assert!(err.to_string().contains("disabled"));
         assert!(err.to_string().contains("place_order"));
         assert!(!adapter.capabilities().supports_limit_orders);
+        assert!(adapter
+            .disabled_reason
+            .unwrap()
+            .contains("private_perp TradingAdapter"));
     }
 
     #[tokio::test]

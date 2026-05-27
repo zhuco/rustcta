@@ -14,7 +14,7 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -29,7 +29,10 @@ use crate::execution::{
     OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide, PrivateErrorEvent,
     PrivateEvent, PrivateEventKind, TimeInForce, TradingAdapter, TradingCapabilities,
 };
-use crate::market::{canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol};
+use crate::market::{
+    canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
+    RoundingMode,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
@@ -325,6 +328,7 @@ pub struct PrivatePerpTradingAdapter<P, T> {
     protocol: P,
     transport: T,
     position_mode: PositionMode,
+    instruments: HashMap<CanonicalSymbol, InstrumentMeta>,
 }
 
 impl<P, T> PrivatePerpTradingAdapter<P, T>
@@ -338,12 +342,89 @@ where
             protocol,
             transport,
             position_mode: PositionMode::OneWay,
+            instruments: HashMap::new(),
         }
     }
 
     pub fn with_position_mode(mut self, position_mode: PositionMode) -> Self {
         self.position_mode = position_mode;
         self
+    }
+
+    pub fn with_instruments(
+        mut self,
+        instruments: impl IntoIterator<Item = InstrumentMeta>,
+    ) -> Self {
+        for instrument in instruments {
+            self.register_instrument(instrument);
+        }
+        self
+    }
+
+    pub fn register_instrument(&mut self, instrument: InstrumentMeta) {
+        if instrument.exchange == self.exchange {
+            self.instruments
+                .insert(instrument.canonical_symbol.clone(), instrument);
+        }
+    }
+
+    fn instrument_for(&self, canonical_symbol: &CanonicalSymbol) -> Option<&InstrumentMeta> {
+        self.instruments.get(canonical_symbol)
+    }
+
+    fn normalize_order_command(&self, mut command: OrderCommand) -> Result<OrderCommand> {
+        if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+            let normalized = instrument.normalize_order_input(
+                command.quantity,
+                command.price,
+                RoundingMode::Floor,
+                RoundingMode::Nearest,
+            );
+            if !normalized.is_valid() {
+                anyhow::bail!(
+                    "{} {} order violates precision rules for {}: {:?}",
+                    self.exchange,
+                    command.client_order_id,
+                    instrument.exchange_symbol.symbol,
+                    normalized.violations
+                );
+            }
+            command.quantity = normalized.quantity;
+            command.price = normalized.price;
+        }
+        if matches!(command.order_type, OrderType::Limit) && command.price.is_none() {
+            anyhow::bail!("{} limit order requires price", self.exchange);
+        }
+        Ok(command)
+    }
+
+    fn normalize_close_command(
+        &self,
+        mut command: ClosePositionCommand,
+    ) -> Result<ClosePositionCommand> {
+        if let Some(instrument) = self.instrument_for(&command.canonical_symbol) {
+            let normalized = instrument.normalize_order_input(
+                command.quantity,
+                command.price,
+                RoundingMode::Floor,
+                RoundingMode::Nearest,
+            );
+            if !normalized.is_valid() {
+                anyhow::bail!(
+                    "{} {} close violates precision rules for {}: {:?}",
+                    self.exchange,
+                    command.client_order_id,
+                    instrument.exchange_symbol.symbol,
+                    normalized.violations
+                );
+            }
+            command.quantity = normalized.quantity;
+            command.price = normalized.price;
+        }
+        if matches!(command.order_type, OrderType::Limit) && command.price.is_none() {
+            anyhow::bail!("{} limit close requires price", self.exchange);
+        }
+        Ok(command)
     }
 }
 
@@ -362,6 +443,7 @@ where
     }
 
     async fn place_order(&self, command: OrderCommand) -> Result<OrderAck> {
+        let command = self.normalize_order_command(command)?;
         let value = self
             .transport
             .execute(self.protocol.place_order(&command, self.position_mode)?)
@@ -524,6 +606,7 @@ where
     }
 
     async fn close_position(&self, command: ClosePositionCommand) -> Result<ClosePositionAck> {
+        let command = self.normalize_close_command(command)?;
         let value = self
             .transport
             .execute(close_position_spec(
@@ -544,6 +627,16 @@ where
             message: response_string(&value, &["msg", "message"]),
             acknowledged_at: Utc::now(),
         })
+    }
+
+    async fn load_symbol_rules(&self, symbol: &ExchangeSymbol) -> Result<Option<InstrumentMeta>> {
+        if symbol.exchange != self.exchange {
+            return Ok(None);
+        }
+        Ok(
+            canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
+                .and_then(|canonical| self.instruments.get(&canonical).cloned()),
+        )
     }
 }
 
@@ -604,20 +697,31 @@ pub fn private_perp_trading_adapter_for(
     auth: PrivateRestAuth,
     position_mode: PositionMode,
 ) -> Result<Arc<dyn TradingAdapter>> {
+    private_perp_trading_adapter_for_with_instruments(exchange, auth, position_mode, Vec::new())
+}
+
+pub fn private_perp_trading_adapter_for_with_instruments(
+    exchange: PrivatePerpExchange,
+    auth: PrivateRestAuth,
+    position_mode: PositionMode,
+    instruments: impl IntoIterator<Item = InstrumentMeta>,
+) -> Result<Arc<dyn TradingAdapter>> {
     match exchange {
         PrivatePerpExchange::Bitget => Ok(Arc::new(
             PrivatePerpTradingAdapter::new(
                 BitgetPrivatePerpProtocol,
                 ReqwestPrivateRestTransport::new(exchange, auth)?,
             )
-            .with_position_mode(position_mode),
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
         )),
         PrivatePerpExchange::Gate => Ok(Arc::new(
             PrivatePerpTradingAdapter::new(
                 GatePrivatePerpProtocol,
                 ReqwestPrivateRestTransport::new(exchange, auth)?,
             )
-            .with_position_mode(position_mode),
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
         )),
     }
 }
@@ -2191,6 +2295,26 @@ mod tests {
         )
     }
 
+    fn instrument(exchange: ExchangeId, symbol: &str) -> InstrumentMeta {
+        InstrumentMeta::new(
+            exchange.clone(),
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(exchange, symbol),
+            "BTC",
+            "USDT",
+            "USDT",
+            crate::market::ContractType::LinearPerpetual,
+            1.0,
+            0.5,
+            0.001,
+            0.001,
+            10.0,
+            1,
+            3,
+            crate::market::InstrumentStatus::Trading,
+        )
+    }
+
     #[test]
     fn bitget_should_build_place_order_spec() {
         let spec = BitgetPrivatePerpProtocol
@@ -2420,6 +2544,62 @@ mod tests {
         assert_eq!(ack.exchange_order_id.as_deref(), Some("exchange-1"));
         let seen = transport.seen.lock().unwrap();
         assert_eq!(seen[0].path, "/api/v2/mix/order/place-order");
+    }
+
+    #[tokio::test]
+    async fn private_perp_trading_adapter_should_apply_instrument_precision() {
+        let transport = MockTransport::new(json!({
+            "code": "00000",
+            "data": {"orderId": "exchange-1"}
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(BitgetPrivatePerpProtocol, transport.clone())
+            .with_instruments([instrument(ExchangeId::Bitget, "BTCUSDT")]);
+        let mut cmd = command(ExchangeId::Bitget, "BTCUSDT");
+        cmd.quantity = 0.01234;
+        cmd.price = Some(65_000.24);
+
+        adapter.place_order(cmd).await.unwrap();
+
+        let seen = transport.seen.lock().unwrap();
+        let body = seen[0].body.as_ref().unwrap();
+        assert_eq!(body["size"], "0.012");
+        assert_eq!(body["price"], "65000");
+    }
+
+    #[tokio::test]
+    async fn private_perp_trading_adapter_should_reject_below_min_notional() {
+        let transport = MockTransport::new(json!({
+            "code": "00000",
+            "data": {"orderId": "exchange-1"}
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(BitgetPrivatePerpProtocol, transport)
+            .with_instruments([instrument(ExchangeId::Bitget, "BTCUSDT")]);
+        let mut cmd = command(ExchangeId::Bitget, "BTCUSDT");
+        cmd.quantity = 0.0001;
+        cmd.price = Some(65_000.0);
+
+        let err = adapter.place_order(cmd).await.unwrap_err();
+
+        assert!(err.to_string().contains("precision rules"));
+        assert!(err.to_string().contains("BelowMinQuantity"));
+    }
+
+    #[tokio::test]
+    async fn private_perp_trading_adapter_should_load_registered_symbol_rules() {
+        let adapter = PrivatePerpTradingAdapter::new(
+            GatePrivatePerpProtocol,
+            MockTransport::new(Value::Null),
+        )
+        .with_instruments([instrument(ExchangeId::Gate, "BTC_USDT")]);
+
+        let rules = adapter
+            .load_symbol_rules(&ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(rules.exchange, ExchangeId::Gate);
+        assert_eq!(rules.quantity_step, 0.001);
     }
 
     #[tokio::test]

@@ -13,8 +13,11 @@ use rustcta::exchanges::adapters::{
     OkxMarketAdapter,
 };
 use rustcta::exchanges::{BinanceExchange, OkxExchange};
+use rustcta::execution::FillQuery;
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
-use rustcta::strategies::cross_exchange_arbitrage::CrossExchangeArbitrageConfig;
+use rustcta::strategies::cross_exchange_arbitrage::{
+    build_trading_adapter_for_exchange, CrossExchangeArbitrageConfig,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tokio::time::{timeout, Duration};
@@ -293,6 +296,10 @@ async fn check_private_exchange(
     config: &CrossExchangeArbitrageConfig,
     timeout_ms: u64,
 ) -> Vec<PreflightCheck> {
+    if matches!(exchange, ExchangeId::Bitget | ExchangeId::Gate) {
+        return check_private_trading_adapter(exchange, config, timeout_ms).await;
+    }
+
     let mut checks = Vec::new();
     let private_exchange = match build_private_exchange(exchange) {
         Ok(Some(exchange)) => exchange,
@@ -416,6 +423,84 @@ async fn check_private_exchange(
     checks.push(warn(
         format!("{}.private.leverage", exchange.as_str()),
         "leverage readback is not exposed by the core Exchange trait; verify manually or add venue-specific readback before live",
+    ));
+
+    checks
+}
+
+async fn check_private_trading_adapter(
+    exchange: &ExchangeId,
+    config: &CrossExchangeArbitrageConfig,
+    timeout_ms: u64,
+) -> Vec<PreflightCheck> {
+    let mut checks = Vec::new();
+    let adapter = match build_trading_adapter_for_exchange(config, exchange) {
+        Ok(adapter) => adapter,
+        Err(err) => {
+            checks.push(fail(
+                format!("{}.private.credentials", exchange.as_str()),
+                err.to_string(),
+            ));
+            return checks;
+        }
+    };
+
+    checks.push(pass(
+        format!("{}.private.adapter", exchange.as_str()),
+        "private USDT perpetual TradingAdapter is registered",
+    ));
+    checks.push(
+        timed(
+            format!("{}.private.balance", exchange.as_str()),
+            timeout_ms,
+            adapter.get_balances(),
+        )
+        .await
+        .map_message(|balances| format!("loaded {} futures balances", balances.len())),
+    );
+
+    for symbol in &config.universe.symbols {
+        let exchange_symbol = exchange_symbol_for(exchange, symbol);
+        checks.push(
+            timed(
+                format!("{}.{}.private.positions", exchange.as_str(), symbol),
+                timeout_ms,
+                adapter.get_positions(Some(&exchange_symbol)),
+            )
+            .await
+            .map_message(|positions| format!("loaded {} positions", positions.len())),
+        );
+        checks.push(
+            timed(
+                format!("{}.{}.private.open_orders", exchange.as_str(), symbol),
+                timeout_ms,
+                adapter.get_open_orders(Some(&exchange_symbol)),
+            )
+            .await
+            .map_message(|orders| format!("loaded {} open orders", orders.len())),
+        );
+
+        let mut fill_query =
+            FillQuery::for_symbol(exchange.clone(), symbol.clone(), exchange_symbol);
+        fill_query.limit = Some(5);
+        checks.push(
+            timed(
+                format!("{}.{}.private.fills", exchange.as_str(), symbol),
+                timeout_ms,
+                adapter.get_fills(fill_query),
+            )
+            .await
+            .map_message(|trades| format!("loaded {} recent fills", trades.len())),
+        );
+    }
+
+    checks.push(warn(
+        format!("{}.private.position_mode", exchange.as_str()),
+        "position mode write is supported by the adapter when the venue supports it; live readback still requires venue-specific confirmation",
+    ));
+    checks.push(warn(
+        format!("{}.private.leverage", exchange.as_str()),
+        "leverage write is supported by the adapter; live readback still requires venue-specific confirmation",
     ));
 
     checks
@@ -642,11 +727,28 @@ mod tests {
     }
 
     #[test]
+    fn live_gate_should_allow_bitget_gate_private_adapters() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.universe.enabled_exchanges =
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
+
+        let decision = evaluate_live_gate(&config, true, &[]);
+
+        assert!(decision.live_ready);
+        assert!(decision.blocking_reasons.is_empty());
+    }
+
+    #[test]
     fn live_gate_should_block_exchanges_without_private_adapter() {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
-        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Bitget];
+        config.universe.enabled_exchanges = vec![
+            ExchangeId::Binance,
+            ExchangeId::Other("venue-x".to_string()),
+        ];
 
         let decision = evaluate_live_gate(&config, true, &[]);
 
@@ -654,7 +756,7 @@ mod tests {
         assert!(decision
             .blocking_reasons
             .iter()
-            .any(|reason| reason.contains("bitget private")));
+            .any(|reason| reason.contains("venue-x private")));
     }
 
     #[test]

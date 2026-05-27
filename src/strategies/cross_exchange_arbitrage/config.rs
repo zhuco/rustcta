@@ -406,7 +406,37 @@ pub struct ExchangeRuntimeConfig {
     #[serde(default)]
     pub ws_batch_size: Option<usize>,
     #[serde(default)]
+    pub env_prefix: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub private_rest_enabled: bool,
+    #[serde(default)]
+    pub private_ws_enabled: bool,
+    #[serde(default)]
+    pub private_ws_run: PrivateWsRuntimeConfig,
+    #[serde(default)]
     pub routes: ExchangeRouteConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrivateWsRuntimeConfig {
+    pub connect_timeout_ms: u64,
+    pub reconnect_delay_ms: u64,
+    pub heartbeat_interval_ms: u64,
+    pub subscribe_interval_ms: u64,
+}
+
+impl Default for PrivateWsRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout_ms: 10_000,
+            reconnect_delay_ms: 2_000,
+            heartbeat_interval_ms: 15_000,
+            subscribe_interval_ms: 50,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
