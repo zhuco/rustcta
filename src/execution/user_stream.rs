@@ -13,6 +13,51 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub fn parse_binance_futures_user_data_event(
+    raw: &str,
+    received_at: DateTime<Utc>,
+) -> anyhow::Result<Vec<PrivateEvent>> {
+    let value: serde_json::Value = serde_json::from_str(raw)?;
+    parse_binance_futures_user_data_value(&value, received_at)
+}
+
+pub fn parse_binance_futures_user_data_value(
+    value: &serde_json::Value,
+    received_at: DateTime<Utc>,
+) -> anyhow::Result<Vec<PrivateEvent>> {
+    match value.get("e").and_then(serde_json::Value::as_str) {
+        Some("ORDER_TRADE_UPDATE") => Ok(parse_binance_order_trade_update(value, received_at)),
+        Some("ACCOUNT_UPDATE") => Ok(parse_binance_account_update(value, received_at)),
+        Some("listenKeyExpired") => Ok(vec![PrivateEvent::new(
+            ExchangeId::Binance,
+            PrivateEventKind::StreamDisconnected {
+                reason: Some("binance futures listenKeyExpired".to_string()),
+                disconnected_at: received_at,
+            },
+            received_at,
+        )
+        .with_raw(value.clone())]),
+        Some(event) if event.ends_with("expired") || event.ends_with("Expired") => {
+            Ok(vec![PrivateEvent::new(
+                ExchangeId::Binance,
+                PrivateEventKind::StreamDisconnected {
+                    reason: Some(format!("binance futures private event {event}")),
+                    disconnected_at: received_at,
+                },
+                received_at,
+            )
+            .with_raw(value.clone())])
+        }
+        Some(_) => Ok(vec![PrivateEvent::new(
+            ExchangeId::Binance,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value.clone())]),
+        None => Ok(Vec::new()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrivateEvent {
     pub exchange: ExchangeId,
@@ -655,6 +700,264 @@ impl FillEvent {
     }
 }
 
+fn parse_binance_order_trade_update(
+    value: &serde_json::Value,
+    received_at: DateTime<Utc>,
+) -> Vec<PrivateEvent> {
+    let Some(order) = value.get("o") else {
+        return Vec::new();
+    };
+    let symbol = str_field(order, "s").unwrap_or_default();
+    if symbol.is_empty() {
+        return Vec::new();
+    }
+    let exchange_symbol = ExchangeSymbol::new(ExchangeId::Binance, symbol.clone());
+    let canonical_symbol = canonical_symbol_from_exchange_symbol(&ExchangeId::Binance, &symbol);
+    let side = parse_binance_order_side(str_field(order, "S").as_deref());
+    let status = binance_order_status(str_field(order, "X").as_deref());
+    let quantity = f64_field(order, "q").unwrap_or_default();
+    let filled_quantity = f64_field(order, "z").unwrap_or_default();
+    let last_filled_quantity = f64_field(order, "l").unwrap_or_default();
+    let price = f64_field(order, "p");
+    let average_fill_price = f64_field(order, "ap");
+    let position_side = parse_position_side(str_field(order, "ps").as_deref().unwrap_or(""));
+    let event_time = millis_value(
+        order
+            .get("T")
+            .or_else(|| value.get("T"))
+            .or_else(|| value.get("E")),
+        received_at,
+    );
+    let client_order_id = str_field(order, "c");
+    let exchange_order_id = str_field(order, "i");
+
+    let order_event = PrivateEvent::order(
+        OrderState {
+            exchange: ExchangeId::Binance,
+            canonical_symbol: canonical_symbol.clone(),
+            exchange_symbol: exchange_symbol.clone(),
+            client_order_id: client_order_id.clone(),
+            exchange_order_id: exchange_order_id.clone(),
+            side,
+            position_side,
+            order_type: parse_binance_order_type(str_field(order, "o").as_deref()),
+            quantity,
+            price,
+            filled_quantity,
+            average_fill_price,
+            time_in_force: parse_binance_time_in_force(str_field(order, "f").as_deref()),
+            reduce_only: bool_field(order, "R"),
+            status,
+            updated_at: event_time,
+        },
+        received_at,
+    )
+    .with_raw(value.clone());
+
+    let mut events = vec![order_event];
+    if last_filled_quantity > 0.0 {
+        let fill_price = f64_field(order, "L")
+            .or(average_fill_price)
+            .or(price)
+            .unwrap_or_default();
+        let quote_quantity = f64_field(order, "Y")
+            .or_else(|| f64_field(order, "Z"))
+            .unwrap_or(fill_price * last_filled_quantity);
+        let fill = FillEvent {
+            exchange: ExchangeId::Binance,
+            canonical_symbol,
+            exchange_symbol,
+            trade_id: str_field(order, "t").unwrap_or_else(|| {
+                format!(
+                    "binance-fill-{}-{}",
+                    exchange_order_id.clone().unwrap_or_default(),
+                    event_time.timestamp_millis()
+                )
+            }),
+            client_order_id,
+            exchange_order_id,
+            side,
+            position_side,
+            liquidity: if bool_field(order, "m") {
+                FillLiquidity::Maker
+            } else {
+                FillLiquidity::Taker
+            },
+            price: fill_price,
+            quantity: last_filled_quantity,
+            quote_quantity,
+            fee: f64_field(order, "n"),
+            fee_asset: str_field(order, "N"),
+            fee_rate: None,
+            realized_pnl: f64_field(order, "rp"),
+            reduce_only: Some(bool_field(order, "R")),
+            filled_at: event_time,
+            received_at,
+        };
+        events.push(PrivateEvent::fill(fill, received_at).with_raw(value.clone()));
+    }
+    events
+}
+
+fn parse_binance_account_update(
+    value: &serde_json::Value,
+    received_at: DateTime<Utc>,
+) -> Vec<PrivateEvent> {
+    let Some(account) = value.get("a") else {
+        return Vec::new();
+    };
+    let event_time = millis_value(
+        value
+            .get("E")
+            .or_else(|| value.get("T"))
+            .or_else(|| account.get("m")),
+        received_at,
+    );
+    let mut events = Vec::new();
+    if let Some(balances) = account.get("B").and_then(serde_json::Value::as_array) {
+        for balance in balances {
+            let Some(asset) = str_field(balance, "a") else {
+                continue;
+            };
+            let total = f64_field(balance, "wb").unwrap_or_default();
+            let available = f64_field(balance, "cw").unwrap_or(total);
+            events.push(
+                PrivateEvent::balance(
+                    ExchangeBalance {
+                        exchange: ExchangeId::Binance,
+                        asset,
+                        total,
+                        available,
+                        locked: (total - available).max(0.0),
+                        updated_at: event_time,
+                    },
+                    received_at,
+                )
+                .with_raw(value.clone()),
+            );
+        }
+    }
+    if let Some(positions) = account.get("P").and_then(serde_json::Value::as_array) {
+        for position in positions {
+            let Some(symbol) = str_field(position, "s") else {
+                continue;
+            };
+            let signed_qty = f64_field(position, "pa").unwrap_or_default();
+            let position_side = match str_field(position, "ps")
+                .unwrap_or_default()
+                .to_ascii_uppercase()
+                .as_str()
+            {
+                "LONG" => PositionSide::Long,
+                "SHORT" => PositionSide::Short,
+                "BOTH" if signed_qty < 0.0 => PositionSide::Short,
+                "BOTH" if signed_qty > 0.0 => PositionSide::Long,
+                "BOTH" => PositionSide::Net,
+                _ if signed_qty < 0.0 => PositionSide::Short,
+                _ if signed_qty > 0.0 => PositionSide::Long,
+                _ => PositionSide::Net,
+            };
+            events.push(
+                PrivateEvent::position(
+                    ExchangePosition {
+                        exchange: ExchangeId::Binance,
+                        canonical_symbol: canonical_symbol_from_exchange_symbol(
+                            &ExchangeId::Binance,
+                            &symbol,
+                        ),
+                        exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, symbol),
+                        position_side,
+                        quantity: signed_qty.abs(),
+                        entry_price: f64_field(position, "ep"),
+                        mark_price: None,
+                        unrealized_pnl: f64_field(position, "up"),
+                        updated_at: event_time,
+                    },
+                    received_at,
+                )
+                .with_raw(value.clone()),
+            );
+        }
+    }
+    events
+}
+
+fn str_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|field| match field {
+        serde_json::Value::String(value) if !value.is_empty() => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    })
+}
+
+fn f64_field(value: &serde_json::Value, key: &str) -> Option<f64> {
+    value.get(key).and_then(|field| match field {
+        serde_json::Value::Number(value) => value.as_f64(),
+        serde_json::Value::String(value) => value.parse::<f64>().ok(),
+        _ => None,
+    })
+}
+
+fn bool_field(value: &serde_json::Value, key: &str) -> bool {
+    value.get(key).is_some_and(|field| match field {
+        serde_json::Value::Bool(value) => *value,
+        serde_json::Value::String(value) => {
+            matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "yes")
+        }
+        serde_json::Value::Number(value) => value.as_i64() == Some(1),
+        _ => false,
+    })
+}
+
+fn millis_value(value: Option<&serde_json::Value>, fallback: DateTime<Utc>) -> DateTime<Utc> {
+    value
+        .and_then(|value| match value {
+            serde_json::Value::Number(number) => number.as_i64(),
+            serde_json::Value::String(value) => value.parse::<i64>().ok(),
+            _ => None,
+        })
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
+        .unwrap_or(fallback)
+}
+
+fn parse_binance_order_side(side: Option<&str>) -> OrderSide {
+    match side.unwrap_or_default().to_ascii_uppercase().as_str() {
+        "SELL" => OrderSide::Sell,
+        _ => OrderSide::Buy,
+    }
+}
+
+fn parse_binance_order_type(order_type: Option<&str>) -> OrderType {
+    match order_type.unwrap_or_default().to_ascii_uppercase().as_str() {
+        "LIMIT" | "LIMIT_MAKER" => OrderType::Limit,
+        _ => OrderType::Market,
+    }
+}
+
+fn parse_binance_time_in_force(time_in_force: Option<&str>) -> TimeInForce {
+    match time_in_force
+        .unwrap_or_default()
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "IOC" => TimeInForce::Ioc,
+        "FOK" => TimeInForce::Fok,
+        "GTX" => TimeInForce::PostOnly,
+        _ => TimeInForce::Gtc,
+    }
+}
+
+fn binance_order_status(status: Option<&str>) -> OrderCommandStatus {
+    match status.unwrap_or_default().to_ascii_uppercase().as_str() {
+        "NEW" => OrderCommandStatus::Accepted,
+        "PARTIALLY_FILLED" => OrderCommandStatus::PartiallyFilled,
+        "FILLED" => OrderCommandStatus::Filled,
+        "CANCELED" | "EXPIRED" => OrderCommandStatus::Cancelled,
+        "REJECTED" => OrderCommandStatus::Rejected,
+        _ => OrderCommandStatus::Submitted,
+    }
+}
+
 impl From<OrderStatus> for OrderCommandStatus {
     fn from(value: OrderStatus) -> Self {
         match value {
@@ -925,6 +1228,107 @@ mod tests {
         assert_eq!(balance.total, 10_000.0);
         assert_eq!(balance.available, 8_000.0);
         assert_eq!(balance.locked, 2_000.0);
+    }
+
+    #[test]
+    fn binance_futures_order_trade_update_should_emit_order_and_fill_events() {
+        let now = Utc::now();
+        let raw = r#"{
+          "e":"ORDER_TRADE_UPDATE",
+          "E":1700000000100,
+          "T":1700000000200,
+          "o":{
+            "s":"BTCUSDT",
+            "c":"crossarb-live-small-bundle1-maker-1",
+            "S":"SELL",
+            "o":"LIMIT",
+            "f":"GTX",
+            "q":"0.001",
+            "p":"65000",
+            "ap":"65000",
+            "x":"TRADE",
+            "X":"PARTIALLY_FILLED",
+            "i":888001,
+            "l":"0.001",
+            "z":"0.001",
+            "L":"65000",
+            "n":"0.0065",
+            "N":"USDT",
+            "T":1700000000200,
+            "t":991,
+            "m":true,
+            "R":false,
+            "ps":"SHORT",
+            "rp":"0"
+          }
+        }"#;
+
+        let events = parse_binance_futures_user_data_event(raw, now).unwrap();
+
+        assert_eq!(events.len(), 2);
+        match &events[0].kind {
+            PrivateEventKind::Order(order) => {
+                assert_eq!(order.exchange, ExchangeId::Binance);
+                assert_eq!(
+                    order.client_order_id.as_deref(),
+                    Some("crossarb-live-small-bundle1-maker-1")
+                );
+                assert_eq!(order.exchange_order_id.as_deref(), Some("888001"));
+                assert_eq!(order.position_side, PositionSide::Short);
+                assert_eq!(order.time_in_force, TimeInForce::PostOnly);
+                assert_eq!(order.status, OrderCommandStatus::PartiallyFilled);
+            }
+            other => panic!("expected order event, got {other:?}"),
+        }
+        match &events[1].kind {
+            PrivateEventKind::Fill(fill) => {
+                assert_eq!(fill.exchange, ExchangeId::Binance);
+                assert_eq!(fill.trade_id, "991");
+                assert_eq!(
+                    fill.client_order_id.as_deref(),
+                    Some("crossarb-live-small-bundle1-maker-1")
+                );
+                assert_eq!(fill.exchange_order_id.as_deref(), Some("888001"));
+                assert_eq!(fill.side, OrderSide::Sell);
+                assert_eq!(fill.position_side, PositionSide::Short);
+                assert_eq!(fill.liquidity, FillLiquidity::Maker);
+                assert_eq!(fill.quantity, 0.001);
+                assert_eq!(fill.price, 65000.0);
+                assert_eq!(fill.fee_asset.as_deref(), Some("USDT"));
+            }
+            other => panic!("expected fill event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binance_futures_account_update_should_emit_balance_and_positions() {
+        let now = Utc::now();
+        let raw = r#"{
+          "e":"ACCOUNT_UPDATE",
+          "E":1700000000100,
+          "T":1700000000200,
+          "a":{
+            "m":"ORDER",
+            "B":[{"a":"USDT","wb":"100.0","cw":"90.0","bc":"0"}],
+            "P":[
+              {"s":"BTCUSDT","pa":"0.001","ep":"65000","cr":"0","up":"1.25","mt":"cross","iw":"0","ps":"LONG"},
+              {"s":"ETHUSDT","pa":"-0.02","ep":"3200","cr":"0","up":"-0.5","mt":"cross","iw":"0","ps":"SHORT"}
+            ]
+          }
+        }"#;
+
+        let events = parse_binance_futures_user_data_event(raw, now).unwrap();
+
+        assert_eq!(events.len(), 3);
+        assert!(events
+            .iter()
+            .any(|event| matches!(&event.kind, PrivateEventKind::Balance(balance) if balance.asset == "USDT" && balance.available == 90.0)));
+        assert!(events
+            .iter()
+            .any(|event| matches!(&event.kind, PrivateEventKind::Position(position) if position.canonical_symbol == CanonicalSymbol::new("BTC", "USDT") && position.position_side == PositionSide::Long && position.quantity == 0.001)));
+        assert!(events
+            .iter()
+            .any(|event| matches!(&event.kind, PrivateEventKind::Position(position) if position.canonical_symbol == CanonicalSymbol::new("ETH", "USDT") && position.position_side == PositionSide::Short && position.quantity == 0.02)));
     }
 
     #[test]
