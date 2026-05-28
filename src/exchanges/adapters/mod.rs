@@ -9,14 +9,20 @@ use serde::{Deserialize, Serialize};
 
 pub mod binance_market;
 pub mod bitget_market;
+pub mod bybit_market;
 pub mod gate_market;
+pub mod htx_market;
+pub mod mexc_market;
 pub mod okx_market;
 pub mod private_perp;
 pub mod trading;
 
 pub use binance_market::BinanceMarketAdapter;
 pub use bitget_market::BitgetMarketAdapter;
+pub use bybit_market::BybitMarketAdapter;
 pub use gate_market::GateMarketAdapter;
+pub use htx_market::HtxMarketAdapter;
+pub use mexc_market::MexcMarketAdapter;
 pub use okx_market::OkxMarketAdapter;
 pub use private_perp::*;
 pub use trading::{private_trading_support_for, ExchangeTradingAdapter, PrivateTradingSupport};
@@ -103,6 +109,10 @@ pub fn underscored_symbol(canonical: &CanonicalSymbol) -> String {
     format!("{}_{}", canonical.base(), canonical.quote())
 }
 
+pub fn dashed_symbol(canonical: &CanonicalSymbol) -> String {
+    format!("{}-{}", canonical.base(), canonical.quote())
+}
+
 pub fn compact_symbol_to_canonical(symbol: &str) -> Option<CanonicalSymbol> {
     let normalized = symbol
         .trim()
@@ -179,6 +189,18 @@ mod tests {
             GateMarketAdapter.to_exchange_symbol(&symbol).symbol,
             "BTC_USDT"
         );
+        assert_eq!(
+            BybitMarketAdapter.to_exchange_symbol(&symbol).symbol,
+            "BTCUSDT"
+        );
+        assert_eq!(
+            MexcMarketAdapter.to_exchange_symbol(&symbol).symbol,
+            "BTC_USDT"
+        );
+        assert_eq!(
+            HtxMarketAdapter.to_exchange_symbol(&symbol).symbol,
+            "BTC-USDT"
+        );
     }
 
     #[test]
@@ -191,5 +213,8 @@ mod tests {
         assert!(!BitgetMarketAdapter.supports_sequence());
         assert!(GateMarketAdapter.supports_mark_price());
         assert!(!GateMarketAdapter.supports_sequence());
+        assert!(BybitMarketAdapter.supports_sequence());
+        assert!(MexcMarketAdapter.supports_orderbook5());
+        assert!(HtxMarketAdapter.supports_funding());
     }
 }

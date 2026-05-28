@@ -9,8 +9,8 @@ use rustcta::core::config::{ApiKeys, Config as CoreExchangeConfig};
 use rustcta::core::exchange::Exchange;
 use rustcta::core::types::MarketType;
 use rustcta::exchanges::adapters::{
-    private_trading_support_for, BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter,
-    OkxMarketAdapter,
+    private_trading_support_for, BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter,
+    GateMarketAdapter, HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
 };
 use rustcta::exchanges::{BinanceExchange, OkxExchange};
 use rustcta::execution::FillQuery;
@@ -198,6 +198,9 @@ fn market_adapter(exchange: &ExchangeId) -> Option<Box<dyn MarketDataAdapter + S
         ExchangeId::Okx => Some(Box::new(OkxMarketAdapter)),
         ExchangeId::Bitget => Some(Box::new(BitgetMarketAdapter)),
         ExchangeId::Gate => Some(Box::new(GateMarketAdapter)),
+        ExchangeId::Bybit => Some(Box::new(BybitMarketAdapter)),
+        ExchangeId::Mexc => Some(Box::new(MexcMarketAdapter)),
+        ExchangeId::Htx => Some(Box::new(HtxMarketAdapter)),
         ExchangeId::Other(_) => None,
     }
 }
@@ -527,7 +530,12 @@ fn build_private_exchange(exchange: &ExchangeId) -> Result<Option<Box<dyn Exchan
     match exchange {
         ExchangeId::Binance => Ok(Some(Box::new(BinanceExchange::new(config, api_keys)))),
         ExchangeId::Okx => Ok(Some(Box::new(OkxExchange::new(config, api_keys)))),
-        ExchangeId::Bitget | ExchangeId::Gate | ExchangeId::Other(_) => Ok(None),
+        ExchangeId::Bitget
+        | ExchangeId::Gate
+        | ExchangeId::Bybit
+        | ExchangeId::Mexc
+        | ExchangeId::Htx
+        | ExchangeId::Other(_) => Ok(None),
     }
 }
 

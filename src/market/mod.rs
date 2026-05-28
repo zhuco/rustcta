@@ -45,6 +45,9 @@ pub enum ExchangeId {
     Okx,
     Bitget,
     Gate,
+    Bybit,
+    Mexc,
+    Htx,
     Other(String),
 }
 
@@ -74,6 +77,9 @@ impl ExchangeId {
             Self::Okx => "okx",
             Self::Bitget => "bitget",
             Self::Gate => "gate",
+            Self::Bybit => "bybit",
+            Self::Mexc => "mexc",
+            Self::Htx => "htx",
             Self::Other(exchange) => exchange.as_str(),
         }
     }
@@ -86,6 +92,9 @@ impl From<&str> for ExchangeId {
             "okx" => Self::Okx,
             "bitget" => Self::Bitget,
             "gate" | "gateio" | "gate.io" => Self::Gate,
+            "bybit" => Self::Bybit,
+            "mexc" | "mxc" => Self::Mexc,
+            "htx" | "huobi" => Self::Htx,
             other => Self::Other(other.to_string()),
         }
     }

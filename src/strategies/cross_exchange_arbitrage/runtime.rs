@@ -157,7 +157,11 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
                 instruments,
             )
         }
-        ExchangeId::Other(_) => anyhow::bail!("{exchange} trading adapter is not registered"),
+        ExchangeId::Bybit | ExchangeId::Mexc | ExchangeId::Htx | ExchangeId::Other(_) => {
+            anyhow::bail!(
+                "{exchange} private trading adapter is not registered; market data is available, but live orders require private REST/WS implementation and credential preflight"
+            )
+        }
     }
 }
 

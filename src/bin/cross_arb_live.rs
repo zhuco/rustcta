@@ -5,7 +5,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use rustcta::exchanges::adapters::{BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter};
+use rustcta::exchanges::adapters::{
+    BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
+    HtxMarketAdapter, MexcMarketAdapter,
+};
 use rustcta::execution::{
     ExecutionEngine, ExecutionRouter, LeverageCommand, PositionMode, PositionModeCommand,
     TradingAdapter,
@@ -773,6 +776,9 @@ fn market_adapter(exchange: &ExchangeId) -> Option<Box<dyn MarketDataAdapter + S
         ExchangeId::Binance => Some(Box::new(BinanceMarketAdapter)),
         ExchangeId::Bitget => Some(Box::new(BitgetMarketAdapter)),
         ExchangeId::Gate => Some(Box::new(GateMarketAdapter)),
+        ExchangeId::Bybit => Some(Box::new(BybitMarketAdapter)),
+        ExchangeId::Mexc => Some(Box::new(MexcMarketAdapter)),
+        ExchangeId::Htx => Some(Box::new(HtxMarketAdapter)),
         ExchangeId::Okx | ExchangeId::Other(_) => None,
     }
 }
@@ -794,6 +800,9 @@ mod tests {
         assert!(market_adapter(&ExchangeId::Binance).is_some());
         assert!(market_adapter(&ExchangeId::Bitget).is_some());
         assert!(market_adapter(&ExchangeId::Gate).is_some());
+        assert!(market_adapter(&ExchangeId::Bybit).is_some());
+        assert!(market_adapter(&ExchangeId::Mexc).is_some());
+        assert!(market_adapter(&ExchangeId::Htx).is_some());
         assert!(market_adapter(&ExchangeId::Okx).is_none());
     }
 

@@ -357,6 +357,27 @@ impl Default for FeeConfig {
                 taker: 0.0005,
             },
         );
+        per_exchange.insert(
+            ExchangeId::Bybit,
+            ExchangeFeeRates {
+                maker: 0.0002,
+                taker: 0.00055,
+            },
+        );
+        per_exchange.insert(
+            ExchangeId::Mexc,
+            ExchangeFeeRates {
+                maker: 0.0002,
+                taker: 0.0006,
+            },
+        );
+        per_exchange.insert(
+            ExchangeId::Htx,
+            ExchangeFeeRates {
+                maker: 0.0002,
+                taker: 0.0005,
+            },
+        );
 
         Self {
             default_maker_fee_rate: 0.0002,

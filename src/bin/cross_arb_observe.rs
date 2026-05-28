@@ -5,8 +5,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::exchanges::adapters::{
-    BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter, MarketAdapterInfo,
-    OkxMarketAdapter,
+    BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
+    HtxMarketAdapter, MarketAdapterInfo, MexcMarketAdapter, OkxMarketAdapter,
 };
 use rustcta::market::{
     CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta, MarketDataAdapter,
@@ -251,6 +251,15 @@ fn configured_adapters(
             ExchangeId::Gate => {
                 Some(Box::new(GateMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
             }
+            ExchangeId::Bybit => {
+                Some(Box::new(BybitMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
+            }
+            ExchangeId::Mexc => {
+                Some(Box::new(MexcMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
+            }
+            ExchangeId::Htx => {
+                Some(Box::new(HtxMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
+            }
             ExchangeId::Other(_) => None,
         })
         .collect()
@@ -262,6 +271,9 @@ fn exchange_symbol_for(exchange: &ExchangeId, canonical: &CanonicalSymbol) -> Ex
         ExchangeId::Okx => OkxMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Bitget => BitgetMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Gate => GateMarketAdapter.to_exchange_symbol(canonical),
+        ExchangeId::Bybit => BybitMarketAdapter.to_exchange_symbol(canonical),
+        ExchangeId::Mexc => MexcMarketAdapter.to_exchange_symbol(canonical),
+        ExchangeId::Htx => HtxMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Other(name) => {
             ExchangeSymbol::new(ExchangeId::Other(name.clone()), canonical.to_string())
         }

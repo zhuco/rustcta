@@ -10,7 +10,7 @@ pub fn exchange_symbol_for(
     canonical_symbol: &CanonicalSymbol,
 ) -> ExchangeSymbol {
     let symbol = match exchange {
-        ExchangeId::Binance | ExchangeId::Bitget => {
+        ExchangeId::Binance | ExchangeId::Bitget | ExchangeId::Bybit => {
             format!("{}{}", canonical_symbol.base(), canonical_symbol.quote())
         }
         ExchangeId::Okx => format!(
@@ -18,7 +18,10 @@ pub fn exchange_symbol_for(
             canonical_symbol.base(),
             canonical_symbol.quote()
         ),
-        ExchangeId::Gate => format!("{}_{}", canonical_symbol.base(), canonical_symbol.quote()),
+        ExchangeId::Gate | ExchangeId::Mexc => {
+            format!("{}_{}", canonical_symbol.base(), canonical_symbol.quote())
+        }
+        ExchangeId::Htx => format!("{}-{}", canonical_symbol.base(), canonical_symbol.quote()),
         ExchangeId::Other(_) => canonical_symbol.as_pair(),
     };
     ExchangeSymbol::new(exchange.clone(), symbol)
@@ -31,8 +34,9 @@ pub fn canonical_from_exchange_symbol(
     let value = exchange_symbol.trim().to_ascii_uppercase();
     match exchange {
         ExchangeId::Okx => parse_delimited_symbol(&value, '-'),
-        ExchangeId::Gate => parse_delimited_symbol(&value, '_'),
-        ExchangeId::Binance | ExchangeId::Bitget | ExchangeId::Other(_) => {
+        ExchangeId::Gate | ExchangeId::Mexc => parse_delimited_symbol(&value, '_'),
+        ExchangeId::Htx => parse_delimited_symbol(&value, '-'),
+        ExchangeId::Binance | ExchangeId::Bitget | ExchangeId::Bybit | ExchangeId::Other(_) => {
             parse_compact_usdt_symbol(&value)
                 .or_else(|| parse_delimited_symbol(&value, '_'))
                 .or_else(|| parse_delimited_symbol(&value, '-'))
@@ -287,6 +291,18 @@ mod tests {
             canonical_from_exchange_symbol(&ExchangeId::Bitget, "BTCUSDT_UMCBL").unwrap(),
             CanonicalSymbol::new("BTC", "USDT")
         );
+        assert_eq!(
+            canonical_from_exchange_symbol(&ExchangeId::Bybit, "BTCUSDT").unwrap(),
+            CanonicalSymbol::new("BTC", "USDT")
+        );
+        assert_eq!(
+            canonical_from_exchange_symbol(&ExchangeId::Mexc, "BTC_USDT").unwrap(),
+            CanonicalSymbol::new("BTC", "USDT")
+        );
+        assert_eq!(
+            canonical_from_exchange_symbol(&ExchangeId::Htx, "BTC-USDT").unwrap(),
+            CanonicalSymbol::new("BTC", "USDT")
+        );
     }
 
     #[test]
@@ -304,6 +320,18 @@ mod tests {
         assert_eq!(
             exchange_symbol_for(&ExchangeId::Gate, &canonical).symbol,
             "ETH_USDT"
+        );
+        assert_eq!(
+            exchange_symbol_for(&ExchangeId::Bybit, &canonical).symbol,
+            "ETHUSDT"
+        );
+        assert_eq!(
+            exchange_symbol_for(&ExchangeId::Mexc, &canonical).symbol,
+            "ETH_USDT"
+        );
+        assert_eq!(
+            exchange_symbol_for(&ExchangeId::Htx, &canonical).symbol,
+            "ETH-USDT"
         );
     }
 }

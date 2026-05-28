@@ -17,7 +17,8 @@ use axum::{Json, Router};
 use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, ValueEnum};
 use rustcta::exchanges::adapters::{
-    BinanceMarketAdapter, BitgetMarketAdapter, GateMarketAdapter, OkxMarketAdapter,
+    BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
+    HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
 };
 use rustcta::market::{
     exchange_symbol_for, mark_book_freshness, BookLevel, CanonicalSymbol, ContractType, ExchangeId,
@@ -2802,6 +2803,15 @@ fn configured_market_adapters(
             ExchangeId::Gate => {
                 Some(Box::new(GateMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
             }
+            ExchangeId::Bybit => {
+                Some(Box::new(BybitMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
+            }
+            ExchangeId::Mexc => {
+                Some(Box::new(MexcMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
+            }
+            ExchangeId::Htx => {
+                Some(Box::new(HtxMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
+            }
             ExchangeId::Other(_) => None,
         })
         .collect()
@@ -2827,6 +2837,15 @@ fn configured_market_adapter_arcs(
             ExchangeId::Gate => {
                 Some(Arc::new(GateMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
             }
+            ExchangeId::Bybit => {
+                Some(Arc::new(BybitMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
+            }
+            ExchangeId::Mexc => {
+                Some(Arc::new(MexcMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
+            }
+            ExchangeId::Htx => {
+                Some(Arc::new(HtxMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
+            }
             ExchangeId::Other(_) => None,
         })
         .collect()
@@ -2837,7 +2856,13 @@ fn simulation_exchanges(config: &CrossExchangeArbitrageConfig) -> Vec<ExchangeId
     exchanges.retain(|exchange| {
         matches!(
             exchange,
-            ExchangeId::Binance | ExchangeId::Okx | ExchangeId::Bitget | ExchangeId::Gate
+            ExchangeId::Binance
+                | ExchangeId::Okx
+                | ExchangeId::Bitget
+                | ExchangeId::Gate
+                | ExchangeId::Bybit
+                | ExchangeId::Mexc
+                | ExchangeId::Htx
         )
     });
     if exchanges.len() < 2 {

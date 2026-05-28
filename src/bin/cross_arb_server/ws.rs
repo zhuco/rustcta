@@ -70,6 +70,7 @@ pub fn build_public_ws_endpoints(
 ) -> anyhow::Result<Vec<PublicWsEndpoint>> {
     let batch_size = match exchange {
         ExchangeId::Gate => max_symbols_per_connection.min(30).max(1),
+        ExchangeId::Htx => max_symbols_per_connection.min(50).max(1),
         _ => max_symbols_per_connection.max(1),
     };
     let mut endpoints = Vec::new();
@@ -155,6 +156,60 @@ fn build_public_ws_endpoint(
                 subscribe_messages,
                 symbol_count: symbols.len(),
                 send_interval_ms: 50,
+            }
+        }
+        ExchangeId::Bybit => {
+            let args = symbols
+                .iter()
+                .map(|symbol| format!("orderbook.1.{}", symbol.symbol))
+                .collect::<Vec<_>>();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://stream.bybit.com/v5/public/linear".to_string(),
+                subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
+                symbol_count: symbols.len(),
+                send_interval_ms: 0,
+            }
+        }
+        ExchangeId::Mexc => {
+            let subscribe_messages = symbols
+                .iter()
+                .map(|symbol| {
+                    json!({
+                        "method": "sub.depth.full",
+                        "param": {
+                            "symbol": symbol.symbol,
+                            "limit": 5
+                        }
+                    })
+                    .to_string()
+                })
+                .collect();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://contract.mexc.com/edge".to_string(),
+                subscribe_messages,
+                symbol_count: symbols.len(),
+                send_interval_ms: 20,
+            }
+        }
+        ExchangeId::Htx => {
+            let subscribe_messages = symbols
+                .iter()
+                .map(|symbol| {
+                    json!({
+                        "sub": format!("market.{}.depth.step0", symbol.symbol),
+                        "id": format!("{}-depth-step0", symbol.symbol)
+                    })
+                    .to_string()
+                })
+                .collect();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://api.hbdm.com/linear-swap-ws".to_string(),
+                subscribe_messages,
+                symbol_count: symbols.len(),
+                send_interval_ms: 20,
             }
         }
         ExchangeId::Other(other) => {
@@ -465,5 +520,47 @@ mod tests {
         assert!(endpoint.subscribe_messages[0].contains("ARB_USDT"));
         assert!(endpoint.subscribe_messages[0].contains("\"0\""));
         assert_eq!(endpoint.send_interval_ms, 50);
+    }
+
+    #[test]
+    fn public_ws_should_build_bybit_orderbook_payload() {
+        let endpoint = build_public_ws_endpoint(
+            ExchangeId::Bybit,
+            &[ExchangeSymbol::new(ExchangeId::Bybit, "BTCUSDT")],
+        )
+        .unwrap();
+
+        assert_eq!(endpoint.url, "wss://stream.bybit.com/v5/public/linear");
+        assert_eq!(endpoint.subscribe_messages.len(), 1);
+        assert!(endpoint.subscribe_messages[0].contains("\"op\":\"subscribe\""));
+        assert!(endpoint.subscribe_messages[0].contains("orderbook.1.BTCUSDT"));
+    }
+
+    #[test]
+    fn public_ws_should_build_mexc_depth_payload_per_symbol() {
+        let endpoint = build_public_ws_endpoint(
+            ExchangeId::Mexc,
+            &[ExchangeSymbol::new(ExchangeId::Mexc, "BTC_USDT")],
+        )
+        .unwrap();
+
+        assert_eq!(endpoint.url, "wss://contract.mexc.com/edge");
+        assert_eq!(endpoint.subscribe_messages.len(), 1);
+        assert!(endpoint.subscribe_messages[0].contains("sub.depth.full"));
+        assert!(endpoint.subscribe_messages[0].contains("BTC_USDT"));
+    }
+
+    #[test]
+    fn public_ws_should_build_htx_depth_payload_per_symbol() {
+        let endpoint = build_public_ws_endpoint(
+            ExchangeId::Htx,
+            &[ExchangeSymbol::new(ExchangeId::Htx, "BTC-USDT")],
+        )
+        .unwrap();
+
+        assert_eq!(endpoint.url, "wss://api.hbdm.com/linear-swap-ws");
+        assert_eq!(endpoint.subscribe_messages.len(), 1);
+        assert!(endpoint.subscribe_messages[0].contains("market.BTC-USDT.depth.step0"));
+        assert_eq!(endpoint.send_interval_ms, 20);
     }
 }

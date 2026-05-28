@@ -28,7 +28,11 @@ pub fn exchange_symbol(exchange: ExchangeId, canonical: &CanonicalSymbol) -> Exc
         ExchangeId::Binance => format!("{}{}", canonical.base(), canonical.quote()),
         ExchangeId::Okx => format!("{}-{}-SWAP", canonical.base(), canonical.quote()),
         ExchangeId::Bitget => format!("{}{}UMCBL", canonical.base(), canonical.quote()),
-        ExchangeId::Gate => format!("{}_{}", canonical.base(), canonical.quote()),
+        ExchangeId::Gate | ExchangeId::Mexc => {
+            format!("{}_{}", canonical.base(), canonical.quote())
+        }
+        ExchangeId::Bybit => format!("{}{}", canonical.base(), canonical.quote()),
+        ExchangeId::Htx => format!("{}-{}", canonical.base(), canonical.quote()),
         ExchangeId::Other(_) => canonical.as_pair(),
     };
     ExchangeSymbol::new(exchange, symbol)

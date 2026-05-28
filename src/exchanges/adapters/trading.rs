@@ -616,12 +616,14 @@ pub fn private_trading_support_for(exchange: &ExchangeId) -> PrivateTradingSuppo
             capabilities: private_perp_trading_capabilities(exchange.clone()),
             disabled_reason: None,
         },
-        ExchangeId::Other(_) => PrivateTradingSupport {
-            exchange: exchange.clone(),
-            private_trading_enabled: false,
-            capabilities: disabled_trading_capabilities(),
-            disabled_reason: Some("exchange is not registered for private trading"),
-        },
+        ExchangeId::Bybit | ExchangeId::Mexc | ExchangeId::Htx | ExchangeId::Other(_) => {
+            PrivateTradingSupport {
+                exchange: exchange.clone(),
+                private_trading_enabled: false,
+                capabilities: disabled_trading_capabilities(),
+                disabled_reason: Some("exchange is not registered for private trading"),
+            }
+        }
     }
 }
 
