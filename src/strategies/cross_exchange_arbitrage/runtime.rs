@@ -142,7 +142,11 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
                     .with_instruments(instruments),
             ))
         }
-        ExchangeId::Bitget | ExchangeId::Gate => {
+        ExchangeId::Bitget
+        | ExchangeId::Gate
+        | ExchangeId::Bybit
+        | ExchangeId::Mexc
+        | ExchangeId::Htx => {
             let private_exchange = private_perp_exchange(exchange)
                 .ok_or_else(|| anyhow!("{exchange} private perpetual adapter is not registered"))?;
             let auth = private_rest_auth_for_exchange(config, exchange)?;
@@ -157,11 +161,7 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
                 instruments,
             )
         }
-        ExchangeId::Bybit | ExchangeId::Mexc | ExchangeId::Htx | ExchangeId::Other(_) => {
-            anyhow::bail!(
-                "{exchange} private trading adapter is not registered; market data is available, but live orders require private REST/WS implementation and credential preflight"
-            )
-        }
+        ExchangeId::Other(_) => anyhow::bail!("{exchange} trading adapter is not registered"),
     }
 }
 
@@ -253,6 +253,9 @@ pub fn private_perp_exchange(exchange: &ExchangeId) -> Option<PrivatePerpExchang
     match exchange {
         ExchangeId::Bitget => Some(PrivatePerpExchange::Bitget),
         ExchangeId::Gate => Some(PrivatePerpExchange::Gate),
+        ExchangeId::Bybit => Some(PrivatePerpExchange::Bybit),
+        ExchangeId::Mexc => Some(PrivatePerpExchange::Mexc),
+        ExchangeId::Htx => Some(PrivatePerpExchange::Htx),
         _ => None,
     }
 }

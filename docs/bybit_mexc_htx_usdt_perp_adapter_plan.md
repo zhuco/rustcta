@@ -100,29 +100,29 @@ for live orders:
 | --- | --- | --- | --- |
 | Place order | `POST /v5/order/create` | `POST /api/v1/private/order/submit` | `POST /linear-swap-api/v1/swap_cross_order` |
 | Cancel order | `POST /v5/order/cancel` | `POST /api/v1/private/order/cancel` | `POST /linear-swap-api/v1/swap_cross_cancel` |
-| Cancel all | `POST /v5/order/cancel-all` | private cancel-all endpoint | `POST /linear-swap-api/v1/swap_cross_cancelall` |
-| Batch cancel | `POST /v5/order/cancel-batch` | private batch cancel endpoint | `POST /linear-swap-api/v1/swap_cross_cancel` batch-compatible path if supported |
-| Amend order | `POST /v5/order/amend` | private order change endpoint if available | not mandatory unless supported and verified |
-| Open orders | `GET /v5/order/realtime` | private open-orders endpoint | `POST /linear-swap-api/v1/swap_cross_openorders` |
-| Recent fills | `GET /v5/execution/list` | private deals/order-deals endpoint | `POST /linear-swap-api/v1/swap_cross_matchresults` |
-| Positions | `GET /v5/position/list` | private position endpoint | `POST /linear-swap-api/v1/swap_cross_position_info` |
-| Balances | `GET /v5/account/wallet-balance` | private account asset endpoint | `POST /linear-swap-api/v1/swap_cross_account_info` |
-| Leverage | `POST /v5/position/set-leverage` | private leverage endpoint | `POST /linear-swap-api/v1/swap_cross_switch_lever_rate` |
-| Position mode | `POST /v5/position/switch-mode` | verify account-level support | HTX linear swap generally uses direction/offset fields; verify hedge/one-way semantics per account |
-| Fee rate | `GET /v5/account/fee-rate` | private fee-rate endpoint if available | account fee endpoint if available |
+| Cancel all | `POST /v5/order/cancel-all` | `POST /api/v1/private/order/cancel_all` | `POST /linear-swap-api/v1/swap_cross_cancelall` |
+| Batch cancel | `POST /v5/order/cancel-batch` | `POST /api/v1/private/order/cancel` with order-id list | `POST /linear-swap-api/v1/swap_cross_cancel` with comma-separated ids |
+| Amend order | `POST /v5/order/amend` | `POST /api/v1/private/order/change_order_price` | unsupported until a verified HTX amend endpoint is available |
+| Open orders | `GET /v5/order/realtime` | `GET /api/v1/private/order/list/open_orders/{symbol}` | `POST /linear-swap-api/v1/swap_cross_openorders` |
+| Recent fills | `GET /v5/execution/list` | `GET /api/v1/private/order/list/order_deals/{symbol}` | `POST /linear-swap-api/v1/swap_cross_matchresults` |
+| Positions | `GET /v5/position/list` | `GET /api/v1/private/position/open_positions` | `POST /linear-swap-api/v1/swap_cross_position_info` |
+| Balances | `GET /v5/account/wallet-balance` | `GET /api/v1/private/account/assets` | `POST /linear-swap-api/v1/swap_cross_account_info` |
+| Leverage | `POST /v5/position/set-leverage` | `POST /api/v1/private/position/change_leverage` | `POST /linear-swap-api/v1/swap_cross_switch_lever_rate` |
+| Position mode | `POST /v5/position/switch-mode` | `POST /api/v1/private/position/change_position_mode` | unsupported by adapter; use HTX direction/offset semantics and account preflight |
+| Fee rate | `GET /v5/account/fee-rate` | `GET /api/v1/private/account/tiered_fee_rate` | `POST /linear-swap-api/v1/swap_fee` |
 
-Private REST implementation requirements:
+Implemented private REST support:
 
-- Request builders must be unit tested without credentials.
-- Signing must be deterministic and covered by fixture tests.
-- All order identifiers must preserve both client order id and exchange order
+- Request builders are unit tested without credentials.
+- Signing/header construction is deterministic and covered by unit tests.
+- All order identifiers preserve both client order id and exchange order
   id when the venue supports both.
-- All quantity conversion must use `InstrumentMeta` contract size and lot
+- Quantity conversion uses `InstrumentMeta` contract size and lot
   rules, not hard-coded decimals.
-- Position-side mapping must explicitly handle one-way and hedge mode. If a
+- Position-side mapping explicitly handles one-way and hedge mode. If a
   venue cannot switch mode while positions/orders exist, preflight must block
   live startup.
-- REST order acknowledgements must be treated as accepted/rejected only; final
+- REST order acknowledgements are treated as accepted/rejected only; final
   state comes from private WebSocket and REST audit.
 
 ## Private WebSocket Target Matrix
@@ -136,7 +136,7 @@ Bybit:
 MEXC:
 
 - URL: futures private WebSocket endpoint under contract API.
-- Auth: verify current official login method and signature payload.
+- Auth: API key, request time, and HMAC-SHA256 signature login payload.
 - Topics needed: orders, deals/fills, positions, assets.
 
 HTX:
@@ -146,14 +146,14 @@ HTX:
 - Topics needed: orders, match orders/fills, positions, accounts.
 - Transport compression/decompression must be verified in the runner.
 
-Private WebSocket implementation requirements:
+Implemented private WebSocket support:
 
-- Login builders and subscription builders must be tested as raw JSON.
-- Parsers must emit existing `PrivateEvent` variants for order, fill, position,
+- Login builders and subscription builders are tested as raw JSON.
+- Parsers emit existing `PrivateEvent` variants for order, fill, position,
   balance, heartbeat, disconnected, and venue error messages.
 - Reconnect must resubscribe and trigger REST audit after reconnect.
-- Heartbeat handling must use each exchange's native ping/pong protocol.
-- Unknown private messages must be logged at low volume and never crash the
+- Heartbeat handling uses each exchange's native ping/pong protocol.
+- Unknown private messages must stay low volume and never crash the
   stream task.
 
 ## Live-Small Readiness Gate
@@ -175,7 +175,20 @@ Before enabling Bybit/MEXC/HTX for real orders:
 ## Current Status
 
 Market-data support for the three venues has been implemented and wired into
-the public scanner path. Private trading is intentionally disabled for
-Bybit/MEXC/HTX until the private REST/WS matrix above is implemented and tested
-with operator credentials. This is a safety constraint, not a strategy-layer
-limitation.
+the public scanner path. Private REST and private WebSocket adapters for
+Bybit/MEXC/HTX are now registered in the same `PrivatePerpTradingAdapter`
+path as Bitget/Gate and are covered by request-builder, signing/header,
+WebSocket-builder, parser, runtime, and preflight tests.
+
+Remaining live-small blockers are external validation items:
+
+- Operator API keys are required for read-only REST audit and private
+  WebSocket login tests.
+- MEXC's futures private order endpoints must be verified against the live
+  account because official docs have historically marked some order endpoints
+  as maintenance-restricted.
+- HTX private WebSocket gzip binary-frame decoding is implemented, but must be
+  validated from the production server with real private subscriptions.
+- No Bybit/MEXC/HTX live orders should be enabled until preflight confirms
+  balance, position, open-order, fill, fee, leverage, and position-mode
+  readbacks for the exact account and symbols.

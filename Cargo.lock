@@ -1920,6 +1920,7 @@ dependencies = [
  "dashmap",
  "dotenv",
  "env_logger",
+ "flate2",
  "futures-util",
  "hashbrown 0.15.5",
  "hex",

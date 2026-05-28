@@ -748,12 +748,18 @@ mod tests {
     }
 
     #[test]
-    fn live_gate_should_allow_bitget_gate_private_adapters() {
+    fn live_gate_should_allow_registered_private_adapters() {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
-        config.universe.enabled_exchanges =
-            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
+        config.universe.enabled_exchanges = vec![
+            ExchangeId::Binance,
+            ExchangeId::Bitget,
+            ExchangeId::Gate,
+            ExchangeId::Bybit,
+            ExchangeId::Mexc,
+            ExchangeId::Htx,
+        ];
 
         let decision = evaluate_live_gate(&config, true, &[]);
 

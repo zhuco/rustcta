@@ -9,12 +9,14 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
+use flate2::read::GzDecoder;
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::{BTreeMap, HashMap};
+use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use thiserror::Error;
@@ -34,8 +36,8 @@ use crate::execution::{
     TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
-    canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
-    RoundingMode,
+    canonical_from_exchange_symbol, exchange_symbol_for, CanonicalSymbol, ExchangeId,
+    ExchangeSymbol, InstrumentMeta, RoundingMode,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -55,6 +57,9 @@ pub struct PrivateRestError {
 pub enum PrivatePerpExchange {
     Bitget,
     Gate,
+    Bybit,
+    Mexc,
+    Htx,
 }
 
 impl PrivatePerpExchange {
@@ -62,6 +67,9 @@ impl PrivatePerpExchange {
         match self {
             Self::Bitget => ExchangeId::Bitget,
             Self::Gate => ExchangeId::Gate,
+            Self::Bybit => ExchangeId::Bybit,
+            Self::Mexc => ExchangeId::Mexc,
+            Self::Htx => ExchangeId::Htx,
         }
     }
 
@@ -69,6 +77,9 @@ impl PrivatePerpExchange {
         match self {
             Self::Bitget => "https://api.bitget.com",
             Self::Gate => "https://api.gateio.ws/api/v4",
+            Self::Bybit => "https://api.bybit.com",
+            Self::Mexc => "https://contract.mexc.com",
+            Self::Htx => "https://api.hbdm.com",
         }
     }
 
@@ -76,6 +87,9 @@ impl PrivatePerpExchange {
         match self {
             Self::Bitget => "wss://ws.bitget.com/v2/ws/private",
             Self::Gate => "wss://fx-ws.gateio.ws/v4/ws/usdt",
+            Self::Bybit => "wss://stream.bybit.com/v5/private",
+            Self::Mexc => "wss://contract.mexc.com/edge",
+            Self::Htx => "wss://api.hbdm.com/linear-swap-notification",
         }
     }
 }
@@ -282,6 +296,9 @@ impl ReqwestPrivateRestTransport {
                 headers.insert("X-Gate-Size-Decimal".to_string(), "1".to_string());
                 Ok(headers)
             }
+            PrivatePerpExchange::Bybit => bybit_rest_headers(&self.auth, request, timestamp),
+            PrivatePerpExchange::Mexc => mexc_rest_headers(&self.auth, request, timestamp),
+            PrivatePerpExchange::Htx => htx_rest_headers(&self.auth, request, timestamp),
         }
     }
 
@@ -307,8 +324,10 @@ impl PrivateRestTransport for ReqwestPrivateRestTransport {
         }
 
         let timestamp = match self.exchange {
-            PrivatePerpExchange::Bitget => Utc::now().timestamp_millis(),
-            PrivatePerpExchange::Gate => Utc::now().timestamp(),
+            PrivatePerpExchange::Bitget
+            | PrivatePerpExchange::Bybit
+            | PrivatePerpExchange::Mexc => Utc::now().timestamp_millis(),
+            PrivatePerpExchange::Gate | PrivatePerpExchange::Htx => Utc::now().timestamp(),
         };
         let mut builder = match request.method {
             PrivateRestMethod::Get => self.client.get(self.url(&request)),
@@ -768,6 +787,11 @@ where
                 ExchangeId::Bitget => {
                     parse_bitget_position(&item, Utc::now()).and_then(event_position)
                 }
+                ExchangeId::Bybit => {
+                    parse_bybit_position(&item, Utc::now()).and_then(event_position)
+                }
+                ExchangeId::Mexc => parse_mexc_position(&item, Utc::now()).and_then(event_position),
+                ExchangeId::Htx => parse_htx_position(&item, Utc::now()).and_then(event_position),
                 ExchangeId::Gate => {
                     let contract_size = self
                         .gate_contract_size_for_item(&item, symbol)
@@ -792,6 +816,9 @@ where
                 ExchangeId::Bitget => {
                     parse_bitget_balance(&item, Utc::now()).and_then(event_balance)
                 }
+                ExchangeId::Bybit => parse_bybit_balance(&item, Utc::now()).and_then(event_balance),
+                ExchangeId::Mexc => parse_mexc_balance(&item, Utc::now()).and_then(event_balance),
+                ExchangeId::Htx => parse_htx_balance(&item, Utc::now()).and_then(event_balance),
                 ExchangeId::Gate => parse_gate_balance(&item, Utc::now()).and_then(event_balance),
                 _ => None,
             })
@@ -844,6 +871,9 @@ where
             .into_iter()
             .filter_map(|item| match exchange {
                 ExchangeId::Bitget => parse_bitget_fill(&item, Utc::now()).and_then(event_fill),
+                ExchangeId::Bybit => parse_bybit_fill(&item, Utc::now()).and_then(event_fill),
+                ExchangeId::Mexc => parse_mexc_fill(&item, Utc::now()).and_then(event_fill),
+                ExchangeId::Htx => parse_htx_fill(&item, Utc::now()).and_then(event_fill),
                 ExchangeId::Gate => {
                     let contract_size = self
                         .gate_contract_size_for_item(&item, query.exchange_symbol.as_ref())
@@ -1001,12 +1031,18 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
         supports_ioc: true,
         supports_fok: true,
         supports_reduce_only: true,
-        supports_hedge_mode: matches!(exchange, ExchangeId::Bitget),
+        supports_hedge_mode: matches!(
+            exchange,
+            ExchangeId::Bitget | ExchangeId::Bybit | ExchangeId::Mexc
+        ),
         supports_client_order_id: true,
         supports_leverage: true,
-        supports_position_mode_change: matches!(exchange, ExchangeId::Bitget),
+        supports_position_mode_change: matches!(
+            exchange,
+            ExchangeId::Bitget | ExchangeId::Bybit | ExchangeId::Mexc
+        ),
         supports_close_position: true,
-        supports_countdown_cancel_all: matches!(exchange, ExchangeId::Gate),
+        supports_countdown_cancel_all: matches!(exchange, ExchangeId::Gate | ExchangeId::Bybit),
     }
 }
 
@@ -1128,6 +1164,30 @@ pub fn private_perp_trading_adapter_for_with_instruments(
             .with_position_mode(position_mode)
             .with_instruments(instruments),
         )),
+        PrivatePerpExchange::Bybit => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                BybitPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::new(exchange, auth)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Mexc => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                MexcPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::new(exchange, auth)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Htx => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                HtxPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::new(exchange, auth)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
     }
 }
 
@@ -1153,6 +1213,30 @@ pub fn private_perp_trading_adapter_for_with_base_url_and_instruments(
         PrivatePerpExchange::Gate => Ok(Arc::new(
             PrivatePerpTradingAdapter::new(
                 GatePrivatePerpProtocol,
+                ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Bybit => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                BybitPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Mexc => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                MexcPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Htx => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                HtxPrivatePerpProtocol,
                 ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
             )
             .with_position_mode(position_mode)
@@ -1200,6 +1284,27 @@ pub fn build_private_ws_endpoint_with_url(
         ),
         PrivatePerpExchange::Gate => build_private_ws_endpoint_for(
             GatePrivatePerpProtocol,
+            auth,
+            symbols,
+            timestamp,
+            url.trim(),
+        ),
+        PrivatePerpExchange::Bybit => build_private_ws_endpoint_for(
+            BybitPrivatePerpProtocol,
+            auth,
+            symbols,
+            timestamp,
+            url.trim(),
+        ),
+        PrivatePerpExchange::Mexc => build_private_ws_endpoint_for(
+            MexcPrivatePerpProtocol,
+            auth,
+            symbols,
+            timestamp,
+            url.trim(),
+        ),
+        PrivatePerpExchange::Htx => build_private_ws_endpoint_for(
+            HtxPrivatePerpProtocol,
             auth,
             symbols,
             timestamp,
@@ -1255,10 +1360,58 @@ where
                 .map(|request| request.message)
         })
         .collect::<Result<Vec<_>>>()?,
+        PrivatePerpExchange::Bybit => ["order", "execution", "position", "wallet"]
+            .into_iter()
+            .map(|channel| {
+                protocol
+                    .ws_subscribe(
+                        &PrivateWsSubscription {
+                            channel: channel.to_string(),
+                            symbols: Vec::new(),
+                            auth: None,
+                        },
+                        timestamp,
+                    )
+                    .map(|request| request.message)
+            })
+            .collect::<Result<Vec<_>>>()?,
+        PrivatePerpExchange::Mexc => ["order", "deal", "position", "asset"]
+            .into_iter()
+            .map(|channel| {
+                protocol
+                    .ws_subscribe(
+                        &PrivateWsSubscription {
+                            channel: channel.to_string(),
+                            symbols: symbols.to_vec(),
+                            auth: None,
+                        },
+                        timestamp,
+                    )
+                    .map(|request| request.message)
+            })
+            .collect::<Result<Vec<_>>>()?,
+        PrivatePerpExchange::Htx => ["orders", "match_orders", "positions", "accounts"]
+            .into_iter()
+            .map(|channel| {
+                protocol
+                    .ws_subscribe(
+                        &PrivateWsSubscription {
+                            channel: channel.to_string(),
+                            symbols: symbols.to_vec(),
+                            auth: None,
+                        },
+                        timestamp,
+                    )
+                    .map(|request| request.message)
+            })
+            .collect::<Result<Vec<_>>>()?,
     };
 
     let login_message = match exchange {
-        PrivatePerpExchange::Bitget => Some(protocol.ws_login(&auth, timestamp)?.message),
+        PrivatePerpExchange::Bitget
+        | PrivatePerpExchange::Bybit
+        | PrivatePerpExchange::Mexc
+        | PrivatePerpExchange::Htx => Some(protocol.ws_login(&auth, timestamp)?.message),
         PrivatePerpExchange::Gate => None,
     };
 
@@ -1325,6 +1478,39 @@ pub async fn run_private_ws_with_url(
             PrivatePerpExchange::Gate => {
                 run_private_ws_protocol_with_url(
                     GatePrivatePerpProtocol,
+                    auth.clone(),
+                    symbols.clone(),
+                    config,
+                    url.clone(),
+                    tx.clone(),
+                )
+                .await
+            }
+            PrivatePerpExchange::Bybit => {
+                run_private_ws_protocol_with_url(
+                    BybitPrivatePerpProtocol,
+                    auth.clone(),
+                    symbols.clone(),
+                    config,
+                    url.clone(),
+                    tx.clone(),
+                )
+                .await
+            }
+            PrivatePerpExchange::Mexc => {
+                run_private_ws_protocol_with_url(
+                    MexcPrivatePerpProtocol,
+                    auth.clone(),
+                    symbols.clone(),
+                    config,
+                    url.clone(),
+                    tx.clone(),
+                )
+                .await
+            }
+            PrivatePerpExchange::Htx => {
+                run_private_ws_protocol_with_url(
+                    HtxPrivatePerpProtocol,
                     auth.clone(),
                     symbols.clone(),
                     config,
@@ -1417,7 +1603,8 @@ where
             _ = heartbeat.tick() => {
                 match exchange {
                     PrivatePerpExchange::Bitget => write.send(Message::Text("ping".to_string())).await?,
-                    PrivatePerpExchange::Gate => write.send(Message::Ping(Vec::new())).await?,
+                    PrivatePerpExchange::Gate | PrivatePerpExchange::Bybit | PrivatePerpExchange::Mexc => write.send(Message::Ping(Vec::new())).await?,
+                    PrivatePerpExchange::Htx => write.send(Message::Text(json!({"ping": Utc::now().timestamp_millis()}).to_string())).await?,
                 }
                 if !publish_private_event(
                     &tx,
@@ -1450,7 +1637,7 @@ where
                         }
                     }
                     Some(Ok(Message::Binary(raw))) => {
-                        match String::from_utf8(raw) {
+                        match decode_private_ws_binary(exchange, &raw) {
                             Ok(text) => {
                                 let received_at = Utc::now();
                                 match protocol.parse_private_ws_message(&text, received_at) {
@@ -1566,11 +1753,30 @@ async fn emit_private_ws_disconnected(
         .await;
 }
 
+fn decode_private_ws_binary(exchange: PrivatePerpExchange, raw: &[u8]) -> Result<String> {
+    if exchange == PrivatePerpExchange::Htx {
+        let mut decoder = GzDecoder::new(raw);
+        let mut text = String::new();
+        decoder.read_to_string(&mut text)?;
+        return Ok(text);
+    }
+    String::from_utf8(raw.to_vec()).map_err(Into::into)
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BitgetPrivatePerpProtocol;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GatePrivatePerpProtocol;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BybitPrivatePerpProtocol;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MexcPrivatePerpProtocol;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HtxPrivatePerpProtocol;
 
 impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
     fn exchange(&self) -> PrivatePerpExchange {
@@ -2190,6 +2396,831 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
     }
 }
 
+impl PrivatePerpProtocol for BybitPrivatePerpProtocol {
+    fn exchange(&self) -> PrivatePerpExchange {
+        PrivatePerpExchange::Bybit
+    }
+
+    fn place_order(
+        &self,
+        command: &OrderCommand,
+        position_mode: PositionMode,
+    ) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "category": "linear",
+            "symbol": command.exchange_symbol.symbol,
+            "side": bybit_side(command.side),
+            "orderType": bybit_order_type(command.order_type),
+            "qty": number_string(command.quantity),
+            "orderLinkId": command.client_order_id,
+            "timeInForce": bybit_time_in_force(command.time_in_force, command.post_only),
+        });
+        if let Some(price) = command.price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        if command.reduce_only {
+            set_bool(&mut body, "reduceOnly", true);
+        }
+        if position_mode.is_hedge() {
+            set_i64(
+                &mut body,
+                "positionIdx",
+                bybit_position_idx(command.position_side, command.side),
+            );
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/order/create",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_order(&self, command: &CancelCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "category": "linear",
+            "symbol": command.exchange_symbol.symbol,
+        });
+        if let Some(order_id) = &command.exchange_order_id {
+            set_str(&mut body, "orderId", order_id);
+        }
+        if let Some(client_order_id) = &command.client_order_id {
+            set_str(&mut body, "orderLinkId", client_order_id);
+        }
+        if command.exchange_order_id.is_none() && command.client_order_id.is_none() {
+            anyhow::bail!("bybit cancel requires orderId or orderLinkId");
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/order/cancel",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({"category": "linear"});
+        if let Some(symbol) = &command.exchange_symbol {
+            set_str(&mut body, "symbol", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/order/cancel-all",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_batch_orders(&self, command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec> {
+        let list = command
+            .orders
+            .iter()
+            .map(|order| {
+                let mut item = json!({"symbol": order.exchange_symbol.symbol});
+                if let Some(order_id) = &order.exchange_order_id {
+                    set_str(&mut item, "orderId", order_id);
+                }
+                if let Some(client_order_id) = &order.client_order_id {
+                    set_str(&mut item, "orderLinkId", client_order_id);
+                }
+                item
+            })
+            .collect::<Vec<_>>();
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/order/cancel-batch",
+        )
+        .with_body(json!({"category": "linear", "request": list})))
+    }
+
+    fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Get,
+            "/v5/order/realtime",
+        )
+        .with_query("category", "linear")
+        .with_query("symbol", &query.exchange_symbol.symbol);
+        if let Some(order_id) = &query.exchange_order_id {
+            spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(client_order_id) = &query.client_order_id {
+            spec = spec.with_query("orderLinkId", client_order_id);
+        }
+        Ok(spec)
+    }
+
+    fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Get,
+            "/v5/order/realtime",
+        )
+        .with_query("category", "linear")
+        .with_query("openOnly", "0");
+        if let Some(symbol) = symbol {
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Get,
+            "/v5/execution/list",
+        )
+        .with_query("category", "linear");
+        if let Some(symbol) = &query.exchange_symbol {
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        if let Some(order_id) = &query.exchange_order_id {
+            spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(client_order_id) = &query.client_order_id {
+            spec = spec.with_query("orderLinkId", client_order_id);
+        }
+        if let Some(start_time) = query.start_time {
+            spec = spec.with_query("startTime", start_time.timestamp_millis());
+        }
+        if let Some(end_time) = query.end_time {
+            spec = spec.with_query("endTime", end_time.timestamp_millis());
+        }
+        if let Some(limit) = query.limit {
+            spec = spec.with_query("limit", limit);
+        }
+        Ok(spec)
+    }
+
+    fn get_positions(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Get,
+            "/v5/position/list",
+        )
+        .with_query("category", "linear")
+        .with_query("settleCoin", "USDT");
+        if let Some(symbol) = symbol {
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn get_balances(&self) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Get,
+            "/v5/account/wallet-balance",
+        )
+        .with_query("accountType", "UNIFIED")
+        .with_query("coin", "USDT"))
+    }
+
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Get,
+            "/v5/account/fee-rate",
+        )
+        .with_query("category", "linear")
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        self.get_positions(Some(symbol))
+    }
+
+    fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "category": "linear",
+            "symbol": command.exchange_symbol.symbol,
+        });
+        if let Some(order_id) = &command.exchange_order_id {
+            set_str(&mut body, "orderId", order_id);
+        }
+        if let Some(client_order_id) = &command.client_order_id {
+            set_str(&mut body, "orderLinkId", client_order_id);
+        }
+        if let Some(quantity) = command.new_quantity {
+            set_str(&mut body, "qty", number_string(quantity));
+        }
+        if let Some(price) = command.new_price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        if command.exchange_order_id.is_none() && command.client_order_id.is_none() {
+            anyhow::bail!("bybit amend requires orderId or orderLinkId");
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/order/amend",
+        )
+        .with_body(body))
+    }
+
+    fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/position/set-leverage",
+        )
+        .with_body(json!({
+            "category": "linear",
+            "symbol": command.exchange_symbol.symbol,
+            "buyLeverage": command.leverage.to_string(),
+            "sellLeverage": command.leverage.to_string(),
+        })))
+    }
+
+    fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/position/switch-mode",
+        )
+        .with_body(json!({
+            "category": "linear",
+            "coin": "USDT",
+            "mode": if command.mode.is_hedge() { 3 } else { 0 },
+        })))
+    }
+
+    fn set_countdown_cancel_all(
+        &self,
+        command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "timeWindow": command.timeout_secs,
+        });
+        if let Some(symbol) = &command.exchange_symbol {
+            set_str(&mut body, "symbol", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Bybit,
+            PrivateRestMethod::Post,
+            "/v5/order/disconnected-cancel-all",
+        )
+        .with_body(body))
+    }
+
+    fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest> {
+        let expires = timestamp_ms_from_any(timestamp) + 10_000;
+        let sign = bybit_ws_signature(&auth.api_secret, expires);
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Bybit,
+            url: PrivatePerpExchange::Bybit.private_ws_url().to_string(),
+            message: json!({
+                "op": "auth",
+                "args": [auth.api_key, expires, sign]
+            })
+            .to_string(),
+        })
+    }
+
+    fn ws_subscribe(
+        &self,
+        subscription: &PrivateWsSubscription,
+        _timestamp: i64,
+    ) -> Result<PrivateWsRequest> {
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Bybit,
+            url: PrivatePerpExchange::Bybit.private_ws_url().to_string(),
+            message: json!({"op": "subscribe", "args": [subscription.channel]}).to_string(),
+        })
+    }
+
+    fn parse_private_ws_message(
+        &self,
+        raw: &str,
+        received_at: DateTime<Utc>,
+    ) -> Result<Vec<PrivateEvent>> {
+        parse_bybit_private_message(raw, received_at)
+    }
+}
+
+impl PrivatePerpProtocol for MexcPrivatePerpProtocol {
+    fn exchange(&self) -> PrivatePerpExchange {
+        PrivatePerpExchange::Mexc
+    }
+
+    fn place_order(
+        &self,
+        command: &OrderCommand,
+        position_mode: PositionMode,
+    ) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "symbol": command.exchange_symbol.symbol,
+            "side": mexc_order_side(command.side, command.reduce_only),
+            "type": mexc_order_type(command.order_type, command.time_in_force, command.post_only),
+            "vol": number_string(command.quantity),
+            "openType": 2,
+            "externalOid": command.client_order_id,
+        });
+        if let Some(price) = command.price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        if position_mode.is_hedge() {
+            set_str(&mut body, "positionMode", "hedge_mode");
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/order/submit",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_order(&self, command: &CancelCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({});
+        if let Some(order_id) = &command.exchange_order_id {
+            set_str(&mut body, "orderId", order_id);
+        }
+        if let Some(client_order_id) = &command.client_order_id {
+            set_str(&mut body, "externalOid", client_order_id);
+            set_str(&mut body, "symbol", &command.exchange_symbol.symbol);
+        }
+        if command.exchange_order_id.is_none() && command.client_order_id.is_none() {
+            anyhow::bail!("mexc cancel requires orderId or externalOid");
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/order/cancel",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/order/cancel_all",
+        );
+        if let Some(symbol) = &command.exchange_symbol {
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn cancel_batch_orders(&self, command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec> {
+        let order_ids = command
+            .orders
+            .iter()
+            .filter_map(|order| order.exchange_order_id.clone())
+            .collect::<Vec<_>>();
+        if order_ids.is_empty() {
+            anyhow::bail!("mexc batch cancel requires exchange order ids");
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/order/cancel",
+        )
+        .with_body(json!(order_ids)))
+    }
+
+    fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec> {
+        if let Some(order_id) = &query.exchange_order_id {
+            return Ok(PrivateRestRequestSpec::new(
+                ExchangeId::Mexc,
+                PrivateRestMethod::Get,
+                format!("/api/v1/private/order/get/{order_id}"),
+            ));
+        }
+        let client_order_id = query
+            .client_order_id
+            .as_ref()
+            .ok_or_else(|| anyhow!("mexc order query requires orderId or externalOid"))?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            format!(
+                "/api/v1/private/order/external/{}/{}",
+                query.exchange_symbol.symbol, client_order_id
+            ),
+        ))
+    }
+
+    fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let symbol = symbol.ok_or_else(|| anyhow!("mexc open orders require symbol"))?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            format!("/api/v1/private/order/list/open_orders/{}", symbol.symbol),
+        ))
+    }
+
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec> {
+        let symbol = query
+            .exchange_symbol
+            .as_ref()
+            .ok_or_else(|| anyhow!("mexc fills require symbol"))?;
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            format!("/api/v1/private/order/list/order_deals/{}", symbol.symbol),
+        );
+        if let Some(order_id) = &query.exchange_order_id {
+            spec = spec.with_query("order_id", order_id);
+        }
+        if let Some(limit) = query.limit {
+            spec = spec.with_query("page_size", limit);
+        }
+        Ok(spec)
+    }
+
+    fn get_positions(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            "/api/v1/private/position/open_positions",
+        );
+        if let Some(symbol) = symbol {
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn get_balances(&self) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            "/api/v1/private/account/assets",
+        ))
+    }
+
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            "/api/v1/private/account/tiered_fee_rate",
+        )
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Get,
+            "/api/v1/private/position/leverage",
+        )
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        let order_id = command
+            .exchange_order_id
+            .as_ref()
+            .ok_or_else(|| anyhow!("mexc amend requires exchange order id"))?;
+        let mut body = json!({"orderId": order_id});
+        if let Some(price) = command.new_price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        if let Some(quantity) = command.new_quantity {
+            set_str(&mut body, "vol", number_string(quantity));
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/order/change_order_price",
+        )
+        .with_body(body))
+    }
+
+    fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/position/change_leverage",
+        )
+        .with_body(json!({
+            "symbol": command.exchange_symbol.symbol,
+            "leverage": command.leverage,
+            "openType": 2,
+        })))
+    }
+
+    fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Mexc,
+            PrivateRestMethod::Post,
+            "/api/v1/private/position/change_position_mode",
+        )
+        .with_body(json!({
+            "positionMode": if command.mode.is_hedge() { 1 } else { 2 },
+        })))
+    }
+
+    fn set_countdown_cancel_all(
+        &self,
+        _command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!("mexc countdown cancel-all is not supported by this adapter")
+    }
+
+    fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest> {
+        let timestamp = timestamp_ms_from_any(timestamp);
+        let sign = mexc_ws_signature(&auth.api_key, &auth.api_secret, timestamp);
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Mexc,
+            url: PrivatePerpExchange::Mexc.private_ws_url().to_string(),
+            message: json!({
+                "method": "login",
+                "param": {
+                    "apiKey": auth.api_key,
+                    "reqTime": timestamp,
+                    "signature": sign
+                }
+            })
+            .to_string(),
+        })
+    }
+
+    fn ws_subscribe(
+        &self,
+        subscription: &PrivateWsSubscription,
+        _timestamp: i64,
+    ) -> Result<PrivateWsRequest> {
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Mexc,
+            url: PrivatePerpExchange::Mexc.private_ws_url().to_string(),
+            message: json!({"method": format!("sub.personal.{}", subscription.channel)})
+                .to_string(),
+        })
+    }
+
+    fn parse_private_ws_message(
+        &self,
+        raw: &str,
+        received_at: DateTime<Utc>,
+    ) -> Result<Vec<PrivateEvent>> {
+        parse_mexc_private_message(raw, received_at)
+    }
+}
+
+impl PrivatePerpProtocol for HtxPrivatePerpProtocol {
+    fn exchange(&self) -> PrivatePerpExchange {
+        PrivatePerpExchange::Htx
+    }
+
+    fn place_order(
+        &self,
+        command: &OrderCommand,
+        _position_mode: PositionMode,
+    ) -> Result<PrivateRestRequestSpec> {
+        let body = json!({
+            "contract_code": command.exchange_symbol.symbol,
+            "client_order_id": htx_client_order_id(&command.client_order_id),
+            "price": command.price.map(number_string),
+            "volume": number_string(command.quantity),
+            "direction": htx_direction(command.side),
+            "offset": if command.reduce_only { "close" } else { "open" },
+            "lever_rate": 1,
+            "order_price_type": htx_order_price_type(command.order_type, command.time_in_force, command.post_only),
+        });
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_order",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_order(&self, command: &CancelCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({"contract_code": command.exchange_symbol.symbol});
+        if let Some(order_id) = &command.exchange_order_id {
+            set_str(&mut body, "order_id", order_id);
+        }
+        if let Some(client_order_id) = &command.client_order_id {
+            set_str(
+                &mut body,
+                "client_order_id",
+                htx_client_order_id(client_order_id),
+            );
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_cancel",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({});
+        if let Some(symbol) = &command.exchange_symbol {
+            set_str(&mut body, "contract_code", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_cancelall",
+        )
+        .with_body(body))
+    }
+
+    fn cancel_batch_orders(&self, command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec> {
+        let first = command
+            .orders
+            .first()
+            .ok_or_else(|| anyhow!("htx batch cancel requires at least one order"))?;
+        let order_ids = command
+            .orders
+            .iter()
+            .filter_map(|order| order.exchange_order_id.clone())
+            .collect::<Vec<_>>()
+            .join(",");
+        let client_order_ids = command
+            .orders
+            .iter()
+            .filter_map(|order| {
+                order
+                    .client_order_id
+                    .as_ref()
+                    .map(|id| htx_client_order_id(id))
+            })
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut body = json!({"contract_code": first.exchange_symbol.symbol});
+        if !order_ids.is_empty() {
+            set_str(&mut body, "order_id", order_ids);
+        }
+        if !client_order_ids.is_empty() {
+            set_str(&mut body, "client_order_id", client_order_ids);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_cancel",
+        )
+        .with_body(body))
+    }
+
+    fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({"contract_code": query.exchange_symbol.symbol});
+        if let Some(order_id) = &query.exchange_order_id {
+            set_str(&mut body, "order_id", order_id);
+        }
+        if let Some(client_order_id) = &query.client_order_id {
+            set_str(
+                &mut body,
+                "client_order_id",
+                htx_client_order_id(client_order_id),
+            );
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_order_info",
+        )
+        .with_body(body))
+    }
+
+    fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({"page_index": 1, "page_size": 50});
+        if let Some(symbol) = symbol {
+            set_str(&mut body, "contract_code", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_openorders",
+        )
+        .with_body(body))
+    }
+
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({"page_index": 1, "page_size": query.limit.unwrap_or(50)});
+        if let Some(symbol) = &query.exchange_symbol {
+            set_str(&mut body, "contract_code", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_matchresults",
+        )
+        .with_body(body))
+    }
+
+    fn get_positions(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({});
+        if let Some(symbol) = symbol {
+            set_str(&mut body, "contract_code", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_position_info",
+        )
+        .with_body(body))
+    }
+
+    fn get_balances(&self) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_account_info",
+        )
+        .with_body(json!({})))
+    }
+
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_fee",
+        )
+        .with_body(json!({"contract_code": symbol.symbol})))
+    }
+
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        self.get_positions(Some(symbol))
+    }
+
+    fn amend_order(&self, _command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!("htx linear swap does not expose a verified amend-order endpoint")
+    }
+
+    fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Htx,
+            PrivateRestMethod::Post,
+            "/linear-swap-api/v1/swap_cross_switch_lever_rate",
+        )
+        .with_body(json!({
+            "contract_code": command.exchange_symbol.symbol,
+            "lever_rate": command.leverage,
+        })))
+    }
+
+    fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!(
+            "htx position mode is account/product-specific and is not changed by this adapter; requested {:?}",
+            command.mode
+        )
+    }
+
+    fn set_countdown_cancel_all(
+        &self,
+        _command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!("htx countdown cancel-all is not supported by this adapter")
+    }
+
+    fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest> {
+        let timestamp = DateTime::<Utc>::from_timestamp(timestamp_secs_from_any(timestamp), 0)
+            .unwrap_or_else(Utc::now)
+            .format("%Y-%m-%dT%H:%M:%S")
+            .to_string();
+        let host = "api.hbdm.com";
+        let path = "/linear-swap-notification";
+        let signature = htx_signature(&auth.api_secret, "GET", host, path, &timestamp);
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Htx,
+            url: PrivatePerpExchange::Htx.private_ws_url().to_string(),
+            message: json!({
+                "op": "auth",
+                "type": "api",
+                "AccessKeyId": auth.api_key,
+                "SignatureMethod": "HmacSHA256",
+                "SignatureVersion": "2",
+                "Timestamp": timestamp,
+                "Signature": signature,
+            })
+            .to_string(),
+        })
+    }
+
+    fn ws_subscribe(
+        &self,
+        subscription: &PrivateWsSubscription,
+        _timestamp: i64,
+    ) -> Result<PrivateWsRequest> {
+        let topic = match subscription.channel.as_str() {
+            "orders" => "orders_cross.*",
+            "match_orders" => "match_orders_cross.*",
+            "positions" => "positions_cross.*",
+            "accounts" => "accounts_cross.*",
+            other => other,
+        };
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Htx,
+            url: PrivatePerpExchange::Htx.private_ws_url().to_string(),
+            message: json!({"op": "sub", "topic": topic}).to_string(),
+        })
+    }
+
+    fn parse_private_ws_message(
+        &self,
+        raw: &str,
+        received_at: DateTime<Utc>,
+    ) -> Result<Vec<PrivateEvent>> {
+        parse_htx_private_message(raw, received_at)
+    }
+}
+
 pub fn bitget_signature(
     secret: &str,
     timestamp: &str,
@@ -2301,6 +3332,152 @@ pub fn gate_ws_signature(secret: &str, channel: &str, event: &str, timestamp: i6
     hex::encode(mac.finalize().into_bytes())
 }
 
+pub fn bybit_signature(
+    secret: &str,
+    timestamp_ms: i64,
+    api_key: &str,
+    recv_window: u64,
+    payload: &str,
+) -> String {
+    let prehash = format!("{timestamp_ms}{api_key}{recv_window}{payload}");
+    hmac_sha256_hex(secret, &prehash)
+}
+
+pub fn bybit_ws_signature(secret: &str, expires_ms: i64) -> String {
+    hmac_sha256_hex(secret, &format!("GET/realtime{expires_ms}"))
+}
+
+fn bybit_rest_headers(
+    auth: &PrivateRestAuth,
+    request: &PrivateRestRequestSpec,
+    timestamp_ms: i64,
+) -> Result<BTreeMap<String, String>> {
+    let recv_window = 5_000_u64;
+    let payload = if request.method == PrivateRestMethod::Get {
+        request.query_string()
+    } else {
+        request.body_string()
+    };
+    let sign = bybit_signature(
+        &auth.api_secret,
+        timestamp_ms,
+        &auth.api_key,
+        recv_window,
+        &payload,
+    );
+    Ok(BTreeMap::from([
+        ("X-BAPI-API-KEY".to_string(), auth.api_key.clone()),
+        ("X-BAPI-SIGN".to_string(), sign),
+        ("X-BAPI-SIGN-TYPE".to_string(), "2".to_string()),
+        ("X-BAPI-TIMESTAMP".to_string(), timestamp_ms.to_string()),
+        ("X-BAPI-RECV-WINDOW".to_string(), recv_window.to_string()),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ]))
+}
+
+pub fn mexc_signature(secret: &str, payload: &str) -> String {
+    hmac_sha256_hex(secret, payload)
+}
+
+fn mexc_rest_headers(
+    auth: &PrivateRestAuth,
+    request: &PrivateRestRequestSpec,
+    timestamp_ms: i64,
+) -> Result<BTreeMap<String, String>> {
+    let body = request.body_string();
+    let query = request.query_string();
+    let payload = format!(
+        "{}{}{}",
+        auth.api_key,
+        timestamp_ms,
+        if body.is_empty() { &query } else { &body }
+    );
+    let sign = mexc_signature(&auth.api_secret, &payload);
+    Ok(BTreeMap::from([
+        ("ApiKey".to_string(), auth.api_key.clone()),
+        ("Request-Time".to_string(), timestamp_ms.to_string()),
+        ("Signature".to_string(), sign),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ]))
+}
+
+fn mexc_ws_signature(api_key: &str, secret: &str, timestamp_ms: i64) -> String {
+    mexc_signature(secret, &format!("{api_key}{timestamp_ms}"))
+}
+
+pub fn htx_signature(
+    secret: &str,
+    method: &str,
+    host: &str,
+    path: &str,
+    timestamp: &str,
+) -> String {
+    let query = BTreeMap::from([
+        ("SignatureMethod", "HmacSHA256"),
+        ("SignatureVersion", "2"),
+        ("Timestamp", timestamp),
+    ]);
+    let query = query
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    let payload = format!(
+        "{}\n{}\n{}\n{}",
+        method.to_ascii_uppercase(),
+        host,
+        path,
+        query
+    );
+    hmac_sha256_base64(secret, &payload)
+}
+
+fn htx_rest_headers(
+    auth: &PrivateRestAuth,
+    request: &PrivateRestRequestSpec,
+    timestamp_secs: i64,
+) -> Result<BTreeMap<String, String>> {
+    let timestamp = DateTime::<Utc>::from_timestamp(timestamp_secs, 0)
+        .unwrap_or_else(Utc::now)
+        .format("%Y-%m-%dT%H:%M:%S")
+        .to_string();
+    let sign = htx_signature(
+        &auth.api_secret,
+        request.method.as_str(),
+        "api.hbdm.com",
+        &request.path,
+        &timestamp,
+    );
+    Ok(BTreeMap::from([
+        ("AccessKeyId".to_string(), auth.api_key.clone()),
+        ("SignatureMethod".to_string(), "HmacSHA256".to_string()),
+        ("SignatureVersion".to_string(), "2".to_string()),
+        ("Timestamp".to_string(), timestamp),
+        ("Signature".to_string(), sign),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ]))
+}
+
+fn hmac_sha256_hex(secret: &str, payload: &str) -> String {
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts arbitrary key length");
+    mac.update(payload.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+fn hmac_sha256_base64(secret: &str, payload: &str) -> String {
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts arbitrary key length");
+    mac.update(payload.as_bytes());
+    general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+}
+
 fn normalize_private_rest_response(exchange: ExchangeId, value: Value) -> Result<Value> {
     match exchange {
         ExchangeId::Bitget => {
@@ -2339,6 +3516,62 @@ fn normalize_private_rest_response(exchange: ExchangeId, value: Value) -> Result
             }
             Ok(value)
         }
+        ExchangeId::Bybit => {
+            let code = str_field(&value, &["retCode"]).unwrap_or_else(|| "0".to_string());
+            if code != "0" {
+                let message = str_field(&value, &["retMsg", "msg", "message"])
+                    .unwrap_or_else(|| "bybit private REST error".to_string());
+                return Err(PrivateRestError {
+                    exchange,
+                    class: classify_generic_rest_error(&code, &message),
+                    endpoint: None,
+                    code: Some(code),
+                    message,
+                }
+                .into());
+            }
+            Ok(value)
+        }
+        ExchangeId::Mexc => {
+            let success = value
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let code = str_field(&value, &["code"]).unwrap_or_else(|| "0".to_string());
+            if !success || code != "0" {
+                let message = str_field(&value, &["message", "msg"])
+                    .unwrap_or_else(|| "mexc private REST error".to_string());
+                return Err(PrivateRestError {
+                    exchange,
+                    class: classify_generic_rest_error(&code, &message),
+                    endpoint: None,
+                    code: Some(code),
+                    message,
+                }
+                .into());
+            }
+            Ok(value)
+        }
+        ExchangeId::Htx => {
+            let status = str_field(&value, &["status"]).unwrap_or_else(|| "ok".to_string());
+            if !status.eq_ignore_ascii_case("ok") {
+                let code = str_field(&value, &["err_code", "err-code", "code"]);
+                let message = str_field(&value, &["err_msg", "err-msg", "message"])
+                    .unwrap_or_else(|| "htx private REST error".to_string());
+                return Err(PrivateRestError {
+                    exchange,
+                    class: classify_generic_rest_error(
+                        code.as_deref().unwrap_or_default(),
+                        &message,
+                    ),
+                    endpoint: None,
+                    code,
+                    message,
+                }
+                .into());
+            }
+            Ok(value)
+        }
         _ => Ok(value),
     }
 }
@@ -2364,6 +3597,9 @@ fn private_rest_http_error(
             }
             ExchangeId::Gate => {
                 classify_gate_rest_error(code.as_deref().unwrap_or_default(), &message)
+            }
+            ExchangeId::Bybit | ExchangeId::Mexc | ExchangeId::Htx => {
+                classify_generic_rest_error(code.as_deref().unwrap_or_default(), &message)
             }
             _ => ExchangeErrorClass::Unknown,
         },
@@ -2472,6 +3708,51 @@ fn classify_gate_rest_error(label: &str, message: &str) -> ExchangeErrorClass {
     }
 }
 
+fn classify_generic_rest_error(code: &str, message: &str) -> ExchangeErrorClass {
+    let text = format!("{code} {message}").to_ascii_lowercase();
+    if text.contains("sign")
+        || text.contains("signature")
+        || text.contains("api key")
+        || text.contains("apikey")
+        || text.contains("auth")
+        || text.contains("login")
+    {
+        ExchangeErrorClass::Authentication
+    } else if text.contains("permission") || text.contains("forbidden") || text.contains("ip") {
+        ExchangeErrorClass::Permission
+    } else if text.contains("rate") || text.contains("too many") || text.contains("frequency") {
+        ExchangeErrorClass::RateLimited
+    } else if text.contains("balance")
+        || text.contains("margin")
+        || text.contains("insufficient")
+        || text.contains("not enough")
+    {
+        ExchangeErrorClass::InsufficientBalance
+    } else if text.contains("duplicate") || text.contains("client") && text.contains("exist") {
+        ExchangeErrorClass::DuplicateClientOrderId
+    } else if text.contains("not found")
+        || text.contains("not exist")
+        || text.contains("order does not exist")
+    {
+        ExchangeErrorClass::OrderNotFound
+    } else if text.contains("precision")
+        || text.contains("minimum")
+        || text.contains("min")
+        || text.contains("qty")
+        || text.contains("size")
+        || text.contains("price")
+        || text.contains("param")
+    {
+        ExchangeErrorClass::Precision
+    } else if text.contains("risk") || text.contains("reject") {
+        ExchangeErrorClass::RiskRejected
+    } else if text.contains("maintenance") || text.contains("under maintenance") {
+        ExchangeErrorClass::Maintenance
+    } else {
+        ExchangeErrorClass::Unknown
+    }
+}
+
 fn response_data(value: &Value) -> Value {
     value
         .get("data")
@@ -2539,6 +3820,75 @@ fn close_position_spec(
             )
             .with_body(body))
         }
+        ExchangeId::Bybit => BybitPrivatePerpProtocol.place_order(
+            &OrderCommand {
+                command_id: command.client_order_id.clone(),
+                bundle_id: command.client_order_id.clone(),
+                exchange: ExchangeId::Bybit,
+                canonical_symbol: command.canonical_symbol.clone(),
+                exchange_symbol: command.exchange_symbol.clone(),
+                intent: crate::execution::OrderIntent::CloseLongTaker,
+                side: command.order_side(),
+                position_side: command.position_side,
+                order_type: command.order_type,
+                quantity: command.quantity,
+                price: command.price,
+                time_in_force: command.time_in_force,
+                post_only: false,
+                reduce_only: true,
+                client_order_id: command.client_order_id.clone(),
+                max_slippage_pct: command.max_slippage_pct,
+                status: OrderCommandStatus::Planned,
+                created_at: command.requested_at,
+            },
+            position_mode,
+        ),
+        ExchangeId::Mexc => MexcPrivatePerpProtocol.place_order(
+            &OrderCommand {
+                command_id: command.client_order_id.clone(),
+                bundle_id: command.client_order_id.clone(),
+                exchange: ExchangeId::Mexc,
+                canonical_symbol: command.canonical_symbol.clone(),
+                exchange_symbol: command.exchange_symbol.clone(),
+                intent: crate::execution::OrderIntent::CloseLongTaker,
+                side: command.order_side(),
+                position_side: command.position_side,
+                order_type: command.order_type,
+                quantity: command.quantity,
+                price: command.price,
+                time_in_force: command.time_in_force,
+                post_only: false,
+                reduce_only: true,
+                client_order_id: command.client_order_id.clone(),
+                max_slippage_pct: command.max_slippage_pct,
+                status: OrderCommandStatus::Planned,
+                created_at: command.requested_at,
+            },
+            position_mode,
+        ),
+        ExchangeId::Htx => HtxPrivatePerpProtocol.place_order(
+            &OrderCommand {
+                command_id: command.client_order_id.clone(),
+                bundle_id: command.client_order_id.clone(),
+                exchange: ExchangeId::Htx,
+                canonical_symbol: command.canonical_symbol.clone(),
+                exchange_symbol: command.exchange_symbol.clone(),
+                intent: crate::execution::OrderIntent::CloseLongTaker,
+                side: command.order_side(),
+                position_side: command.position_side,
+                order_type: command.order_type,
+                quantity: command.quantity,
+                price: command.price,
+                time_in_force: command.time_in_force,
+                post_only: false,
+                reduce_only: true,
+                client_order_id: command.client_order_id.clone(),
+                max_slippage_pct: command.max_slippage_pct,
+                status: OrderCommandStatus::Planned,
+                created_at: command.requested_at,
+            },
+            position_mode,
+        ),
         other => anyhow::bail!("{other} private perp close_position is not supported"),
     }
 }
@@ -2555,6 +3905,10 @@ fn response_items(value: &Value) -> Vec<Value> {
                 .or_else(|| map.get("orderList"))
                 .or_else(|| map.get("successList"))
                 .or_else(|| map.get("failureList"))
+                .or_else(|| map.get("orders"))
+                .or_else(|| map.get("positions"))
+                .or_else(|| map.get("assets"))
+                .or_else(|| map.get("ticks"))
             {
                 items.clone()
             } else {
@@ -2675,11 +4029,25 @@ fn parse_trade_fee_snapshot(
         .unwrap_or_else(|| fallback_symbol.symbol.clone());
     let maker = f64_field(
         &item,
-        &["makerFeeRate", "maker_fee_rate", "maker", "makerFee"],
+        &[
+            "makerFeeRate",
+            "maker_fee_rate",
+            "maker",
+            "makerFee",
+            "makerFeeRateE4",
+            "open_maker_fee",
+        ],
     )?;
     let taker = f64_field(
         &item,
-        &["takerFeeRate", "taker_fee_rate", "taker", "takerFee"],
+        &[
+            "takerFeeRate",
+            "taker_fee_rate",
+            "taker",
+            "takerFee",
+            "takerFeeRateE4",
+            "open_taker_fee",
+        ],
     )?;
     Some(TradeFeeSnapshot {
         exchange: exchange.clone(),
@@ -2754,6 +4122,9 @@ fn parse_rest_order_with_gate_contract_size(
     };
     let event = match exchange {
         ExchangeId::Bitget => parse_bitget_order_or_fill(&item, received_at),
+        ExchangeId::Bybit => parse_bybit_order_or_fill(&item, received_at),
+        ExchangeId::Mexc => parse_mexc_order_or_fill(&item, received_at),
+        ExchangeId::Htx => parse_htx_order_or_fill(&item, received_at),
         ExchangeId::Gate => parse_gate_order_or_fill_with_contract_size(
             &item,
             received_at,
@@ -2899,6 +4270,184 @@ fn parse_gate_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<V
     Ok(events)
 }
 
+fn parse_bybit_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<Vec<PrivateEvent>> {
+    let value: Value = serde_json::from_str(raw)?;
+    if value.get("op").and_then(Value::as_str) == Some("pong")
+        || value.get("success").and_then(Value::as_bool) == Some(true)
+    {
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Bybit,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    if value.get("success").and_then(Value::as_bool) == Some(false) {
+        return Ok(vec![private_error_event(
+            ExchangeId::Bybit,
+            ExchangeErrorClass::InvalidRequest,
+            str_field(&value, &["retCode", "code"]),
+            str_field(&value, &["retMsg", "msg", "message"])
+                .unwrap_or_else(|| "bybit websocket error".to_string()),
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    let topic = value
+        .get("topic")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let data = value
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut events = Vec::new();
+    for item in data {
+        let event = match topic {
+            "order" => parse_bybit_order_or_fill(&item, received_at),
+            "execution" => parse_bybit_fill(&item, received_at),
+            "position" => parse_bybit_position(&item, received_at),
+            "wallet" => parse_bybit_balance(&item, received_at),
+            _ => None,
+        };
+        if let Some(event) = event {
+            events.push(event.with_raw(item));
+        }
+    }
+    Ok(events)
+}
+
+fn parse_mexc_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<Vec<PrivateEvent>> {
+    let value: Value = serde_json::from_str(raw)?;
+    if value.get("channel").and_then(Value::as_str) == Some("pong")
+        || value.get("method").and_then(Value::as_str) == Some("login")
+    {
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Mexc,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    if value.get("success").and_then(Value::as_bool) == Some(false) {
+        return Ok(vec![private_error_event(
+            ExchangeId::Mexc,
+            ExchangeErrorClass::InvalidRequest,
+            str_field(&value, &["code"]),
+            str_field(&value, &["message", "msg"])
+                .unwrap_or_else(|| "mexc websocket error".to_string()),
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    let channel = value
+        .get("channel")
+        .or_else(|| value.get("method"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let data = value.get("data").cloned().unwrap_or(Value::Null);
+    let items = match data {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![data],
+        _ => Vec::new(),
+    };
+    let mut events = Vec::new();
+    for item in items {
+        let event = if channel.contains("order") {
+            parse_mexc_order_or_fill(&item, received_at)
+        } else if channel.contains("deal") {
+            parse_mexc_fill(&item, received_at)
+        } else if channel.contains("position") {
+            parse_mexc_position(&item, received_at)
+        } else if channel.contains("asset") || channel.contains("account") {
+            parse_mexc_balance(&item, received_at)
+        } else {
+            None
+        };
+        if let Some(event) = event {
+            events.push(event.with_raw(item));
+        }
+    }
+    Ok(events)
+}
+
+fn parse_htx_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<Vec<PrivateEvent>> {
+    let value: Value = serde_json::from_str(raw)?;
+    if value.get("op").and_then(Value::as_str) == Some("ping") {
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Htx,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    if value.get("op").and_then(Value::as_str) == Some("pong")
+        || value.get("pong").is_some()
+        || value.get("ping").is_some()
+    {
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Htx,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    if value.get("op").and_then(Value::as_str) == Some("auth")
+        || value.get("op").and_then(Value::as_str) == Some("sub")
+    {
+        if value
+            .get("err-code")
+            .or_else(|| value.get("err_code"))
+            .is_some()
+        {
+            return Ok(vec![private_error_event(
+                ExchangeId::Htx,
+                ExchangeErrorClass::InvalidRequest,
+                str_field(&value, &["err-code", "err_code"]),
+                str_field(&value, &["err-msg", "err_msg"])
+                    .unwrap_or_else(|| "htx websocket error".to_string()),
+                received_at,
+            )
+            .with_raw(value)]);
+        }
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Htx,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    let topic = value
+        .get("topic")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let data = value.get("data").cloned().unwrap_or(Value::Null);
+    let items = match data {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![data],
+        _ => Vec::new(),
+    };
+    let mut events = Vec::new();
+    for item in items {
+        let event = if topic.contains("orders") && !topic.contains("match_orders") {
+            parse_htx_order_or_fill(&item, received_at)
+        } else if topic.contains("match_orders") {
+            parse_htx_fill(&item, received_at)
+        } else if topic.contains("positions") {
+            parse_htx_position(&item, received_at)
+        } else if topic.contains("accounts") {
+            parse_htx_balance(&item, received_at)
+        } else {
+            None
+        };
+        if let Some(event) = event {
+            events.push(event.with_raw(item));
+        }
+    }
+    Ok(events)
+}
+
 fn parse_bitget_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
     if item.get("tradeId").or_else(|| item.get("fillId")).is_some() {
         return parse_bitget_fill(item, received_at);
@@ -2996,6 +4545,346 @@ fn parse_bitget_balance(item: &Value, received_at: DateTime<Utc>) -> Option<Priv
             total: f64_field(item, &["equity", "accountEquity"]).unwrap_or_default(),
             available: f64_field(item, &["available", "availableBalance"]).unwrap_or_default(),
             locked: f64_field(item, &["locked", "frozen"]).unwrap_or_default(),
+            updated_at: received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_bybit_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    if item
+        .get("execId")
+        .or_else(|| item.get("execPrice"))
+        .is_some()
+    {
+        return parse_bybit_fill(item, received_at);
+    }
+    let symbol = str_field(item, &["symbol"])?;
+    let side = parse_order_side(str_field(item, &["side"]).as_deref());
+    Some(PrivateEvent::order(
+        OrderState {
+            exchange: ExchangeId::Bybit,
+            canonical_symbol: canonical(&ExchangeId::Bybit, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bybit, symbol),
+            client_order_id: str_field(item, &["orderLinkId"]),
+            exchange_order_id: str_field(item, &["orderId"]),
+            side,
+            position_side: bybit_position_side_from_idx(i64_field(item, &["positionIdx"]), side),
+            order_type: parse_order_type(str_field(item, &["orderType"]).as_deref()),
+            quantity: f64_field(item, &["qty", "cumExecQty"]).unwrap_or_default(),
+            price: f64_field(item, &["price"]),
+            filled_quantity: f64_field(item, &["cumExecQty"]).unwrap_or_default(),
+            average_fill_price: f64_field(item, &["avgPrice"]),
+            time_in_force: parse_time_in_force(str_field(item, &["timeInForce"]).as_deref()),
+            reduce_only: bool_field(item, &["reduceOnly"]),
+            status: bybit_status(str_field(item, &["orderStatus"]).as_deref()),
+            updated_at: millis_field(item, &["updatedTime", "createdTime"], received_at),
+        },
+        received_at,
+    ))
+}
+
+fn parse_bybit_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["symbol"])?;
+    let side = parse_order_side(str_field(item, &["side"]).as_deref());
+    let price = f64_field(item, &["execPrice", "price"]).unwrap_or_default();
+    let quantity = f64_field(item, &["execQty", "qty"]).unwrap_or_default();
+    Some(PrivateEvent::fill(
+        FillEvent {
+            exchange: ExchangeId::Bybit,
+            canonical_symbol: canonical(&ExchangeId::Bybit, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bybit, symbol),
+            trade_id: str_field(item, &["execId"])
+                .unwrap_or_else(|| format!("bybit-fill-{}", received_at.timestamp_millis())),
+            client_order_id: str_field(item, &["orderLinkId"]),
+            exchange_order_id: str_field(item, &["orderId"]),
+            side,
+            position_side: bybit_position_side_from_idx(i64_field(item, &["positionIdx"]), side),
+            liquidity: liquidity(str_field(item, &["execType", "isMaker"]).as_deref()),
+            price,
+            quantity,
+            quote_quantity: f64_field(item, &["execValue"]).unwrap_or(price * quantity),
+            fee: f64_field(item, &["execFee"]),
+            fee_asset: str_field(item, &["feeCurrency"]).or_else(|| Some("USDT".to_string())),
+            fee_rate: f64_field(item, &["feeRate"]),
+            realized_pnl: f64_field(item, &["execPnl"]),
+            reduce_only: None,
+            filled_at: millis_field(item, &["execTime", "createdTime"], received_at),
+            received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_bybit_position(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["symbol"])?;
+    Some(PrivateEvent::position(
+        ExchangePosition {
+            exchange: ExchangeId::Bybit,
+            canonical_symbol: canonical(&ExchangeId::Bybit, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bybit, symbol),
+            position_side: parse_position_side(
+                str_field(item, &["side"]).as_deref().unwrap_or_default(),
+            ),
+            quantity: f64_field(item, &["size"]).unwrap_or_default().abs(),
+            entry_price: f64_field(item, &["avgPrice", "entryPrice"]),
+            mark_price: f64_field(item, &["markPrice"]),
+            unrealized_pnl: f64_field(item, &["unrealisedPnl", "unrealizedPnl"]),
+            updated_at: millis_field(item, &["updatedTime", "createdTime"], received_at),
+        },
+        received_at,
+    ))
+}
+
+fn parse_bybit_balance(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    if let Some(coins) = item.get("coin").and_then(Value::as_array) {
+        return coins
+            .first()
+            .and_then(|coin| parse_bybit_balance(coin, received_at));
+    }
+    let asset = str_field(item, &["coin"]).unwrap_or_else(|| "USDT".to_string());
+    Some(PrivateEvent::balance(
+        ExchangeBalance {
+            exchange: ExchangeId::Bybit,
+            asset,
+            total: f64_field(item, &["walletBalance", "equity", "totalEquity"]).unwrap_or_default(),
+            available: f64_field(
+                item,
+                &["availableToWithdraw", "availableBalance", "walletBalance"],
+            )
+            .unwrap_or_default(),
+            locked: f64_field(item, &["locked", "orderIM", "totalOrderIM"]).unwrap_or_default(),
+            updated_at: received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_mexc_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    if item.get("tradeId").or_else(|| item.get("dealId")).is_some() {
+        return parse_mexc_fill(item, received_at);
+    }
+    let symbol = str_field(item, &["symbol"])?;
+    let side = mexc_side_to_order_side(i64_field(item, &["side"]).unwrap_or_default());
+    Some(PrivateEvent::order(
+        OrderState {
+            exchange: ExchangeId::Mexc,
+            canonical_symbol: canonical(&ExchangeId::Mexc, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Mexc, symbol),
+            client_order_id: str_field(item, &["externalOid", "clientOrderId"]),
+            exchange_order_id: str_field(item, &["orderId", "id"]),
+            side,
+            position_side: mexc_side_to_position_side(
+                i64_field(item, &["side"]).unwrap_or_default(),
+                side,
+            ),
+            order_type: mexc_parse_order_type(i64_field(item, &["type"])),
+            quantity: f64_field(item, &["vol", "qty"]).unwrap_or_default(),
+            price: f64_field(item, &["price"]),
+            filled_quantity: f64_field(item, &["dealVol", "filledQty"]).unwrap_or_default(),
+            average_fill_price: f64_field(item, &["dealAvgPrice", "avgPrice"]),
+            time_in_force: TimeInForce::Gtc,
+            reduce_only: mexc_side_is_close(i64_field(item, &["side"]).unwrap_or_default()),
+            status: mexc_status(
+                i64_field(item, &["state"]).or_else(|| i64_field(item, &["status"])),
+            ),
+            updated_at: millis_field(item, &["updateTime", "createTime", "time"], received_at),
+        },
+        received_at,
+    ))
+}
+
+fn parse_mexc_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["symbol"])?;
+    let side = mexc_side_to_order_side(i64_field(item, &["side"]).unwrap_or_default());
+    let price = f64_field(item, &["price", "dealPrice"]).unwrap_or_default();
+    let quantity = f64_field(item, &["vol", "qty", "dealVol"]).unwrap_or_default();
+    Some(PrivateEvent::fill(
+        FillEvent {
+            exchange: ExchangeId::Mexc,
+            canonical_symbol: canonical(&ExchangeId::Mexc, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Mexc, symbol),
+            trade_id: str_field(item, &["tradeId", "dealId", "id"])
+                .unwrap_or_else(|| format!("mexc-fill-{}", received_at.timestamp_millis())),
+            client_order_id: str_field(item, &["externalOid", "clientOrderId"]),
+            exchange_order_id: str_field(item, &["orderId"]),
+            side,
+            position_side: mexc_side_to_position_side(
+                i64_field(item, &["side"]).unwrap_or_default(),
+                side,
+            ),
+            liquidity: liquidity(str_field(item, &["role", "takerOrMaker"]).as_deref()),
+            price,
+            quantity,
+            quote_quantity: f64_field(item, &["amount"]).unwrap_or(price * quantity),
+            fee: f64_field(item, &["fee"]),
+            fee_asset: str_field(item, &["feeCurrency"]).or_else(|| Some("USDT".to_string())),
+            fee_rate: None,
+            realized_pnl: f64_field(item, &["profit", "realisedPnl", "realizedPnl"]),
+            reduce_only: Some(mexc_side_is_close(
+                i64_field(item, &["side"]).unwrap_or_default(),
+            )),
+            filled_at: millis_field(item, &["time", "createTime"], received_at),
+            received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_mexc_position(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["symbol"])?;
+    let side_text = str_field(item, &["positionType", "holdSide", "side"]).unwrap_or_default();
+    Some(PrivateEvent::position(
+        ExchangePosition {
+            exchange: ExchangeId::Mexc,
+            canonical_symbol: canonical(&ExchangeId::Mexc, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Mexc, symbol),
+            position_side: mexc_position_side(&side_text),
+            quantity: f64_field(item, &["holdVol", "vol", "position"])
+                .unwrap_or_default()
+                .abs(),
+            entry_price: f64_field(item, &["holdAvgPrice", "avgPrice", "openAvgPrice"]),
+            mark_price: f64_field(item, &["markPrice", "fairPrice"]),
+            unrealized_pnl: f64_field(item, &["unrealised", "unrealizedPnl", "profit"]),
+            updated_at: millis_field(item, &["updateTime", "createTime"], received_at),
+        },
+        received_at,
+    ))
+}
+
+fn parse_mexc_balance(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let asset =
+        str_field(item, &["currency", "asset", "coin"]).unwrap_or_else(|| "USDT".to_string());
+    Some(PrivateEvent::balance(
+        ExchangeBalance {
+            exchange: ExchangeId::Mexc,
+            asset,
+            total: f64_field(item, &["equity", "total", "balance"]).unwrap_or_default(),
+            available: f64_field(item, &["availableBalance", "available", "cashBalance"])
+                .unwrap_or_default(),
+            locked: f64_field(item, &["frozenBalance", "frozen", "positionMargin"])
+                .unwrap_or_default(),
+            updated_at: received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_htx_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    if item.get("trade_id").is_some() {
+        return parse_htx_fill(item, received_at);
+    }
+    let symbol = str_field(item, &["contract_code"])?;
+    let side = parse_order_side(str_field(item, &["direction"]).as_deref());
+    Some(PrivateEvent::order(
+        OrderState {
+            exchange: ExchangeId::Htx,
+            canonical_symbol: canonical(&ExchangeId::Htx, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Htx, symbol),
+            client_order_id: str_field(item, &["client_order_id"]).map(|id| id.to_string()),
+            exchange_order_id: str_field(item, &["order_id"]),
+            side,
+            position_side: htx_position_side(
+                str_field(item, &["direction"]).as_deref(),
+                str_field(item, &["offset"]).as_deref(),
+            ),
+            order_type: if str_field(item, &["order_price_type"])
+                .as_deref()
+                .unwrap_or_default()
+                .contains("market")
+            {
+                OrderType::Market
+            } else {
+                OrderType::Limit
+            },
+            quantity: f64_field(item, &["volume"]).unwrap_or_default(),
+            price: f64_field(item, &["price"]),
+            filled_quantity: f64_field(item, &["trade_volume"]).unwrap_or_default(),
+            average_fill_price: f64_field(item, &["trade_avg_price"]),
+            time_in_force: TimeInForce::Gtc,
+            reduce_only: str_field(item, &["offset"])
+                .is_some_and(|offset| offset.eq_ignore_ascii_case("close")),
+            status: htx_status(i64_field(item, &["status"])),
+            updated_at: millis_field(item, &["created_at", "update_time"], received_at),
+        },
+        received_at,
+    ))
+}
+
+fn parse_htx_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["contract_code"])?;
+    let side = parse_order_side(str_field(item, &["direction"]).as_deref());
+    let price = f64_field(item, &["trade_price", "price"]).unwrap_or_default();
+    let quantity = f64_field(item, &["trade_volume", "volume"]).unwrap_or_default();
+    Some(PrivateEvent::fill(
+        FillEvent {
+            exchange: ExchangeId::Htx,
+            canonical_symbol: canonical(&ExchangeId::Htx, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Htx, symbol),
+            trade_id: str_field(item, &["trade_id", "id"])
+                .unwrap_or_else(|| format!("htx-fill-{}", received_at.timestamp_millis())),
+            client_order_id: str_field(item, &["client_order_id"]),
+            exchange_order_id: str_field(item, &["order_id"]),
+            side,
+            position_side: htx_position_side(
+                str_field(item, &["direction"]).as_deref(),
+                str_field(item, &["offset"]).as_deref(),
+            ),
+            liquidity: liquidity(str_field(item, &["role"]).as_deref()),
+            price,
+            quantity,
+            quote_quantity: price * quantity,
+            fee: f64_field(item, &["trade_fee", "fee"]),
+            fee_asset: str_field(item, &["fee_asset"]).or_else(|| Some("USDT".to_string())),
+            fee_rate: None,
+            realized_pnl: f64_field(item, &["profit", "real_profit"]),
+            reduce_only: str_field(item, &["offset"])
+                .map(|offset| offset.eq_ignore_ascii_case("close")),
+            filled_at: millis_field(item, &["created_at", "trade_time"], received_at),
+            received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_htx_position(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["contract_code"])?;
+    Some(PrivateEvent::position(
+        ExchangePosition {
+            exchange: ExchangeId::Htx,
+            canonical_symbol: canonical(&ExchangeId::Htx, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Htx, symbol),
+            position_side: parse_position_side(
+                str_field(item, &["direction"])
+                    .as_deref()
+                    .unwrap_or_default(),
+            ),
+            quantity: f64_field(item, &["volume", "available"])
+                .unwrap_or_default()
+                .abs(),
+            entry_price: f64_field(item, &["cost_open", "cost_hold", "entry_price"]),
+            mark_price: f64_field(item, &["last_price", "mark_price"]),
+            unrealized_pnl: f64_field(item, &["profit_unreal", "unrealized_pnl"]),
+            updated_at: received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_htx_balance(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let asset = str_field(item, &["margin_asset", "symbol", "currency"])
+        .unwrap_or_else(|| "USDT".to_string());
+    Some(PrivateEvent::balance(
+        ExchangeBalance {
+            exchange: ExchangeId::Htx,
+            asset,
+            total: f64_field(item, &["margin_balance", "total", "equity"]).unwrap_or_default(),
+            available: f64_field(
+                item,
+                &["withdraw_available", "available_margin", "available"],
+            )
+            .unwrap_or_default(),
+            locked: f64_field(item, &["margin_frozen", "frozen"]).unwrap_or_default(),
             updated_at: received_at,
         },
         received_at,
@@ -3144,6 +5033,18 @@ fn set_str(body: &mut Value, key: &str, value: impl ToString) {
     }
 }
 
+fn set_bool(body: &mut Value, key: &str, value: bool) {
+    if let Some(map) = body.as_object_mut() {
+        map.insert(key.to_string(), Value::Bool(value));
+    }
+}
+
+fn set_i64(body: &mut Value, key: &str, value: i64) {
+    if let Some(map) = body.as_object_mut() {
+        map.insert(key.to_string(), Value::Number(value.into()));
+    }
+}
+
 fn set_optional_str(body: &mut Value, key: &str, value: Option<&'static str>) {
     if let Some(value) = value {
         set_str(body, key, value);
@@ -3193,6 +5094,139 @@ fn bitget_trade_side(reduce_only: bool) -> &'static str {
         "close"
     } else {
         "open"
+    }
+}
+
+fn bybit_side(side: OrderSide) -> &'static str {
+    match side {
+        OrderSide::Buy => "Buy",
+        OrderSide::Sell => "Sell",
+    }
+}
+
+fn bybit_order_type(order_type: OrderType) -> &'static str {
+    match order_type {
+        OrderType::Limit => "Limit",
+        OrderType::Market => "Market",
+    }
+}
+
+fn bybit_time_in_force(tif: TimeInForce, post_only: bool) -> &'static str {
+    match (tif, post_only) {
+        (_, true) | (TimeInForce::PostOnly, _) => "PostOnly",
+        (TimeInForce::Ioc, _) => "IOC",
+        (TimeInForce::Fok, _) => "FOK",
+        (TimeInForce::Gtc, _) => "GTC",
+    }
+}
+
+fn bybit_position_idx(position_side: PositionSide, fallback_side: OrderSide) -> i64 {
+    match position_side {
+        PositionSide::Long => 1,
+        PositionSide::Short => 2,
+        PositionSide::Net => match fallback_side {
+            OrderSide::Buy => 1,
+            OrderSide::Sell => 2,
+        },
+    }
+}
+
+fn bybit_position_side_from_idx(idx: Option<i64>, fallback_side: OrderSide) -> PositionSide {
+    match idx {
+        Some(1) => PositionSide::Long,
+        Some(2) => PositionSide::Short,
+        _ => match fallback_side {
+            OrderSide::Buy => PositionSide::Long,
+            OrderSide::Sell => PositionSide::Short,
+        },
+    }
+}
+
+fn mexc_order_side(side: OrderSide, reduce_only: bool) -> i64 {
+    match (side, reduce_only) {
+        (OrderSide::Buy, false) => 1,
+        (OrderSide::Sell, false) => 3,
+        (OrderSide::Buy, true) => 2,
+        (OrderSide::Sell, true) => 4,
+    }
+}
+
+fn mexc_order_type(order_type: OrderType, tif: TimeInForce, post_only: bool) -> i64 {
+    match (order_type, tif, post_only) {
+        (OrderType::Market, _, _) => 5,
+        (_, _, true) | (_, TimeInForce::PostOnly, _) => 2,
+        (_, TimeInForce::Ioc, _) => 3,
+        (_, TimeInForce::Fok, _) => 4,
+        _ => 1,
+    }
+}
+
+fn mexc_side_to_order_side(side: i64) -> OrderSide {
+    match side {
+        3 | 4 => OrderSide::Sell,
+        _ => OrderSide::Buy,
+    }
+}
+
+fn mexc_side_is_close(side: i64) -> bool {
+    matches!(side, 2 | 4)
+}
+
+fn mexc_side_to_position_side(side: i64, fallback: OrderSide) -> PositionSide {
+    match side {
+        1 | 4 => PositionSide::Long,
+        2 | 3 => PositionSide::Short,
+        _ => match fallback {
+            OrderSide::Buy => PositionSide::Long,
+            OrderSide::Sell => PositionSide::Short,
+        },
+    }
+}
+
+fn mexc_parse_order_type(order_type: Option<i64>) -> OrderType {
+    match order_type {
+        Some(1 | 2 | 3 | 4) => OrderType::Limit,
+        _ => OrderType::Market,
+    }
+}
+
+fn mexc_position_side(value: &str) -> PositionSide {
+    match value.to_ascii_lowercase().as_str() {
+        "1" | "long" => PositionSide::Long,
+        "2" | "short" => PositionSide::Short,
+        _ => PositionSide::Net,
+    }
+}
+
+fn htx_direction(side: OrderSide) -> &'static str {
+    match side {
+        OrderSide::Buy => "buy",
+        OrderSide::Sell => "sell",
+    }
+}
+
+fn htx_order_price_type(order_type: OrderType, tif: TimeInForce, post_only: bool) -> &'static str {
+    match (order_type, tif, post_only) {
+        (OrderType::Market, _, _) => "optimal_5",
+        (_, _, true) | (_, TimeInForce::PostOnly, _) => "post_only",
+        (_, TimeInForce::Ioc, _) => "ioc",
+        (_, TimeInForce::Fok, _) => "fok",
+        _ => "limit",
+    }
+}
+
+fn htx_client_order_id(client_order_id: &str) -> i64 {
+    let digest = Sha256::digest(client_order_id.as_bytes());
+    let mut bytes = [0_u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    (u64::from_be_bytes(bytes) % 9_000_000_000_000_000_000) as i64
+}
+
+fn htx_position_side(direction: Option<&str>, offset: Option<&str>) -> PositionSide {
+    match (direction.unwrap_or_default(), offset.unwrap_or_default()) {
+        ("buy", "open") | ("sell", "close") => PositionSide::Long,
+        ("sell", "open") | ("buy", "close") => PositionSide::Short,
+        _ => PositionSide::Net,
     }
 }
 
@@ -3478,10 +5512,21 @@ fn parse_order_type(order_type: Option<&str>) -> OrderType {
     }
 }
 
+fn parse_time_in_force(tif: Option<&str>) -> TimeInForce {
+    match tif.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "ioc" | "immediateorcancel" => TimeInForce::Ioc,
+        "fok" | "fillorkill" => TimeInForce::Fok,
+        "postonly" | "post_only" => TimeInForce::PostOnly,
+        _ => TimeInForce::Gtc,
+    }
+}
+
 fn liquidity(role: Option<&str>) -> FillLiquidity {
     match role.unwrap_or_default().to_ascii_lowercase().as_str() {
         "maker" | "m" => FillLiquidity::Maker,
+        "true" => FillLiquidity::Maker,
         "taker" | "t" => FillLiquidity::Taker,
+        "false" => FillLiquidity::Taker,
         _ => FillLiquidity::Unknown,
     }
 }
@@ -3507,6 +5552,55 @@ fn gate_status(status: Option<&str>, left: f64) -> OrderCommandStatus {
         "rejected" | "failed" => OrderCommandStatus::Rejected,
         _ if left > 0.0 => OrderCommandStatus::PartiallyFilled,
         _ => OrderCommandStatus::Filled,
+    }
+}
+
+fn bybit_status(status: Option<&str>) -> OrderCommandStatus {
+    match status.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "new" | "created" | "untriggered" => OrderCommandStatus::Accepted,
+        "partiallyfilled" => OrderCommandStatus::PartiallyFilled,
+        "filled" => OrderCommandStatus::Filled,
+        "cancelled" | "canceled" | "partiallyfilledcanceled" => OrderCommandStatus::Cancelled,
+        "rejected" | "deactivated" => OrderCommandStatus::Rejected,
+        _ => OrderCommandStatus::Submitted,
+    }
+}
+
+fn mexc_status(status: Option<i64>) -> OrderCommandStatus {
+    match status {
+        Some(1 | 2) => OrderCommandStatus::Accepted,
+        Some(3) => OrderCommandStatus::PartiallyFilled,
+        Some(4) => OrderCommandStatus::Filled,
+        Some(5) => OrderCommandStatus::Cancelled,
+        Some(6) => OrderCommandStatus::Rejected,
+        _ => OrderCommandStatus::Submitted,
+    }
+}
+
+fn htx_status(status: Option<i64>) -> OrderCommandStatus {
+    match status {
+        Some(1 | 2 | 3) => OrderCommandStatus::Accepted,
+        Some(4) => OrderCommandStatus::PartiallyFilled,
+        Some(5 | 6) => OrderCommandStatus::Filled,
+        Some(7) => OrderCommandStatus::Cancelled,
+        Some(10 | 11) => OrderCommandStatus::Rejected,
+        _ => OrderCommandStatus::Submitted,
+    }
+}
+
+fn timestamp_ms_from_any(timestamp: i64) -> i64 {
+    if timestamp > 1_000_000_000_000 {
+        timestamp
+    } else {
+        timestamp * 1000
+    }
+}
+
+fn timestamp_secs_from_any(timestamp: i64) -> i64 {
+    if timestamp > 1_000_000_000_000 {
+        timestamp / 1000
+    } else {
+        timestamp
     }
 }
 
@@ -3750,6 +5844,26 @@ mod tests {
         .unwrap();
         assert_eq!(gate.exchange(), ExchangeId::Gate);
         assert!(gate.capabilities().supports_leverage);
+
+        for exchange in [
+            PrivatePerpExchange::Bybit,
+            PrivatePerpExchange::Mexc,
+            PrivatePerpExchange::Htx,
+        ] {
+            let adapter = private_perp_trading_adapter_for(
+                exchange,
+                PrivateRestAuth {
+                    api_key: "key".to_string(),
+                    api_secret: "secret".to_string(),
+                    passphrase: None,
+                    demo_trading: false,
+                },
+                PositionMode::OneWay,
+            )
+            .unwrap();
+            assert_eq!(adapter.exchange(), exchange.exchange_id());
+            assert!(adapter.capabilities().supports_leverage);
+        }
     }
 
     #[test]
@@ -3802,6 +5916,114 @@ mod tests {
             Some("order-1")
         );
         assert_eq!(fills.query.get("limit").map(String::as_str), Some("20"));
+    }
+
+    #[test]
+    fn bybit_should_build_full_private_rest_specs() {
+        let cmd = command(ExchangeId::Bybit, "BTCUSDT");
+        let place = BybitPrivatePerpProtocol
+            .place_order(&cmd, PositionMode::Hedge)
+            .unwrap();
+        assert_eq!(place.path, "/v5/order/create");
+        let body = place.body.unwrap();
+        assert_eq!(body["category"], "linear");
+        assert_eq!(body["symbol"], "BTCUSDT");
+        assert_eq!(body["orderLinkId"], cmd.client_order_id);
+        assert_eq!(body["positionIdx"], 1);
+
+        let cancel = BybitPrivatePerpProtocol
+            .cancel_order(&CancelCommand {
+                exchange: ExchangeId::Bybit,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Bybit, "BTCUSDT"),
+                client_order_id: Some("client-1".to_string()),
+                exchange_order_id: None,
+                reason: None,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(cancel.path, "/v5/order/cancel");
+        assert_eq!(cancel.body.unwrap()["orderLinkId"], "client-1");
+
+        let leverage = BybitPrivatePerpProtocol
+            .set_leverage(&LeverageCommand {
+                exchange: ExchangeId::Bybit,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Bybit, "BTCUSDT"),
+                leverage: 3,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(leverage.path, "/v5/position/set-leverage");
+        assert_eq!(leverage.body.unwrap()["buyLeverage"], "3");
+    }
+
+    #[test]
+    fn mexc_should_build_full_private_rest_specs() {
+        let cmd = command(ExchangeId::Mexc, "BTC_USDT");
+        let place = MexcPrivatePerpProtocol
+            .place_order(&cmd, PositionMode::Hedge)
+            .unwrap();
+        assert_eq!(place.path, "/api/v1/private/order/submit");
+        let body = place.body.unwrap();
+        assert_eq!(body["symbol"], "BTC_USDT");
+        assert_eq!(body["side"], 1);
+        assert_eq!(body["externalOid"], cmd.client_order_id);
+
+        let open_orders = MexcPrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Mexc, "BTC_USDT")))
+            .unwrap();
+        assert_eq!(
+            open_orders.path,
+            "/api/v1/private/order/list/open_orders/BTC_USDT"
+        );
+
+        let mode = MexcPrivatePerpProtocol
+            .set_position_mode(&PositionModeCommand {
+                exchange: ExchangeId::Mexc,
+                mode: PositionMode::Hedge,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(mode.body.unwrap()["positionMode"], 1);
+    }
+
+    #[test]
+    fn htx_should_build_full_private_rest_specs() {
+        let cmd = command(ExchangeId::Htx, "BTC-USDT");
+        let place = HtxPrivatePerpProtocol
+            .place_order(&cmd, PositionMode::OneWay)
+            .unwrap();
+        assert_eq!(place.path, "/linear-swap-api/v1/swap_cross_order");
+        let body = place.body.unwrap();
+        assert_eq!(body["contract_code"], "BTC-USDT");
+        assert_eq!(body["direction"], "buy");
+        assert_eq!(body["offset"], "open");
+
+        let cancel_all = HtxPrivatePerpProtocol
+            .cancel_all_orders(&CancelAllCommand::for_symbol(
+                ExchangeId::Htx,
+                CanonicalSymbol::new("BTC", "USDT"),
+                ExchangeSymbol::new(ExchangeId::Htx, "BTC-USDT"),
+                Utc::now(),
+            ))
+            .unwrap();
+        assert_eq!(cancel_all.path, "/linear-swap-api/v1/swap_cross_cancelall");
+        assert_eq!(cancel_all.body.unwrap()["contract_code"], "BTC-USDT");
+
+        let leverage = HtxPrivatePerpProtocol
+            .set_leverage(&LeverageCommand {
+                exchange: ExchangeId::Htx,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Htx, "BTC-USDT"),
+                leverage: 3,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(
+            leverage.path,
+            "/linear-swap-api/v1/swap_cross_switch_lever_rate"
+        );
     }
 
     #[test]
@@ -4064,6 +6286,51 @@ mod tests {
     }
 
     #[test]
+    fn new_private_ws_endpoints_should_login_and_subscribe() {
+        let auth = PrivateWsAuth {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            passphrase: None,
+            account_id: None,
+            demo_trading: false,
+        };
+
+        let bybit = build_private_ws_endpoint(
+            PrivatePerpExchange::Bybit,
+            auth.clone(),
+            &[ExchangeSymbol::new(ExchangeId::Bybit, "BTCUSDT")],
+            1_700_000_000,
+        )
+        .unwrap();
+        assert_eq!(bybit.exchange, ExchangeId::Bybit);
+        assert!(bybit.login_message.unwrap().contains("\"op\":\"auth\""));
+        assert_eq!(bybit.subscribe_messages.len(), 4);
+        assert!(bybit.subscribe_messages[0].contains("\"order\""));
+
+        let mexc = build_private_ws_endpoint(
+            PrivatePerpExchange::Mexc,
+            auth.clone(),
+            &[ExchangeSymbol::new(ExchangeId::Mexc, "BTC_USDT")],
+            1_700_000_000,
+        )
+        .unwrap();
+        assert_eq!(mexc.exchange, ExchangeId::Mexc);
+        assert!(mexc.login_message.unwrap().contains("\"method\":\"login\""));
+        assert!(mexc.subscribe_messages[0].contains("sub.personal.order"));
+
+        let htx = build_private_ws_endpoint(
+            PrivatePerpExchange::Htx,
+            auth,
+            &[ExchangeSymbol::new(ExchangeId::Htx, "BTC-USDT")],
+            1_700_000_000,
+        )
+        .unwrap();
+        assert_eq!(htx.exchange, ExchangeId::Htx);
+        assert!(htx.login_message.unwrap().contains("\"op\":\"auth\""));
+        assert!(htx.subscribe_messages[0].contains("orders_cross"));
+    }
+
+    #[test]
     fn gate_private_ws_subscription_should_require_account_id() {
         let err = build_private_ws_endpoint(
             PrivatePerpExchange::Gate,
@@ -4131,6 +6398,86 @@ mod tests {
                 assert_eq!(fill.quantity, 2.0);
             }
             other => panic!("expected fill event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bybit_should_parse_private_events() {
+        let now = Utc::now();
+        let raw = r#"{
+          "topic":"order",
+          "data":[{
+            "symbol":"BTCUSDT","orderId":"o1","orderLinkId":"c1","side":"Buy",
+            "orderType":"Limit","qty":"0.01","price":"65000","cumExecQty":"0.005",
+            "orderStatus":"PartiallyFilled","positionIdx":1,"updatedTime":"1700000000000"
+          }]
+        }"#;
+
+        let events = BybitPrivatePerpProtocol
+            .parse_private_ws_message(raw, now)
+            .unwrap();
+
+        assert_eq!(events.len(), 1);
+        match &events[0].kind {
+            PrivateEventKind::Order(order) => {
+                assert_eq!(order.exchange, ExchangeId::Bybit);
+                assert_eq!(order.position_side, PositionSide::Long);
+                assert_eq!(order.status, OrderCommandStatus::PartiallyFilled);
+            }
+            other => panic!("expected order event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mexc_should_parse_private_events() {
+        let now = Utc::now();
+        let raw = r#"{
+          "channel":"push.personal.order",
+          "data":{"symbol":"BTC_USDT","orderId":"o1","externalOid":"c1","side":3,
+            "type":1,"vol":"2","price":"65000","dealVol":"1","state":3,
+            "updateTime":1700000000000}
+        }"#;
+
+        let events = MexcPrivatePerpProtocol
+            .parse_private_ws_message(raw, now)
+            .unwrap();
+
+        assert_eq!(events.len(), 1);
+        match &events[0].kind {
+            PrivateEventKind::Order(order) => {
+                assert_eq!(order.exchange, ExchangeId::Mexc);
+                assert_eq!(order.side, OrderSide::Sell);
+                assert_eq!(order.position_side, PositionSide::Short);
+                assert_eq!(order.status, OrderCommandStatus::PartiallyFilled);
+            }
+            other => panic!("expected order event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn htx_should_parse_private_events() {
+        let now = Utc::now();
+        let raw = r#"{
+          "op":"notify",
+          "topic":"orders_cross.*",
+          "data":{"contract_code":"BTC-USDT","order_id":"o1","client_order_id":"123",
+            "direction":"sell","offset":"open","volume":"2","price":"65000",
+            "trade_volume":"1","status":4,"created_at":1700000000000}
+        }"#;
+
+        let events = HtxPrivatePerpProtocol
+            .parse_private_ws_message(raw, now)
+            .unwrap();
+
+        assert_eq!(events.len(), 1);
+        match &events[0].kind {
+            PrivateEventKind::Order(order) => {
+                assert_eq!(order.exchange, ExchangeId::Htx);
+                assert_eq!(order.side, OrderSide::Sell);
+                assert_eq!(order.position_side, PositionSide::Short);
+                assert_eq!(order.status, OrderCommandStatus::PartiallyFilled);
+            }
+            other => panic!("expected order event, got {other:?}"),
         }
     }
 
@@ -4465,6 +6812,75 @@ mod tests {
             Some("1700000000")
         );
         assert!(headers.get("SIGN").is_some_and(|v| !v.is_empty()));
+    }
+
+    #[test]
+    fn reqwest_transport_should_build_new_exchange_headers() {
+        let auth = PrivateRestAuth {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            passphrase: None,
+            demo_trading: false,
+        };
+
+        let bybit_transport =
+            ReqwestPrivateRestTransport::new(PrivatePerpExchange::Bybit, auth.clone()).unwrap();
+        let bybit_spec = BybitPrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Bybit, "BTCUSDT")))
+            .unwrap();
+        let bybit_headers = bybit_transport
+            .signed_headers(&bybit_spec, 1_700_000_000_000)
+            .unwrap();
+        assert_eq!(
+            bybit_headers.get("X-BAPI-API-KEY").map(String::as_str),
+            Some("key")
+        );
+        assert!(bybit_headers
+            .get("X-BAPI-SIGN")
+            .is_some_and(|value| !value.is_empty()));
+
+        let mexc_transport =
+            ReqwestPrivateRestTransport::new(PrivatePerpExchange::Mexc, auth.clone()).unwrap();
+        let mexc_spec = MexcPrivatePerpProtocol
+            .get_positions(Some(&ExchangeSymbol::new(ExchangeId::Mexc, "BTC_USDT")))
+            .unwrap();
+        let mexc_headers = mexc_transport
+            .signed_headers(&mexc_spec, 1_700_000_000_000)
+            .unwrap();
+        assert_eq!(mexc_headers.get("ApiKey").map(String::as_str), Some("key"));
+        assert!(mexc_headers
+            .get("Signature")
+            .is_some_and(|value| !value.is_empty()));
+
+        let htx_transport =
+            ReqwestPrivateRestTransport::new(PrivatePerpExchange::Htx, auth).unwrap();
+        let htx_spec = HtxPrivatePerpProtocol.get_balances().unwrap();
+        let htx_headers = htx_transport
+            .signed_headers(&htx_spec, 1_700_000_000)
+            .unwrap();
+        assert_eq!(
+            htx_headers.get("AccessKeyId").map(String::as_str),
+            Some("key")
+        );
+        assert!(htx_headers
+            .get("Signature")
+            .is_some_and(|value| !value.is_empty()));
+    }
+
+    #[test]
+    fn htx_binary_decoder_should_inflate_gzip_payloads() {
+        use flate2::{write::GzEncoder, Compression};
+        use std::io::Write;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder
+            .write_all(br#"{"op":"ping","ts":1700000000000}"#)
+            .unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let text = decode_private_ws_binary(PrivatePerpExchange::Htx, &compressed).unwrap();
+
+        assert!(text.contains("\"op\":\"ping\""));
     }
 
     #[test]
