@@ -67,6 +67,8 @@ struct PrivateWsSpecSummary {
     exchange: String,
     symbols: usize,
     account_id_configured: bool,
+    url: String,
+    demo_trading: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -214,6 +216,8 @@ async fn bootstrap_live(
                 exchange: spec.exchange.exchange_id().as_str().to_string(),
                 symbols: spec.symbols.len(),
                 account_id_configured: spec.auth.account_id.is_some(),
+                url: spec.url.clone(),
+                demo_trading: spec.auth.demo_trading,
             })
             .collect(),
         binance_private_ws_specs: parts.binance_private_ws_specs.len(),

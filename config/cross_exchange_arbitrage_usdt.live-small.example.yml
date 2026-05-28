@@ -82,6 +82,9 @@ exchanges:
     position_mode: hedge
     ws_batch_size: 50
     env_prefix: BITGET
+    # Bitget Demo Trading requires separate demo API keys. Set true only with demo keys;
+    # production live-small must leave this false.
+    demo_trading: false
     private_rest_enabled: true
     private_ws_enabled: true
     private_ws_run:
@@ -104,6 +107,12 @@ exchanges:
     ws_batch_size: 80
     env_prefix: GATE
     account_id: "REPLACE_WITH_GATE_ACCOUNT_ID"
+    # Gate Futures TestNet requires separate testnet API keys and endpoint overrides.
+    # Example overrides:
+    # demo_trading: true
+    # private_rest_base_url: https://fx-api-testnet.gateio.ws/api/v4
+    # private_ws_url: wss://fx-ws-testnet.gateio.ws/v4/ws/usdt
+    demo_trading: false
     private_rest_enabled: true
     private_ws_enabled: true
     private_ws_run:

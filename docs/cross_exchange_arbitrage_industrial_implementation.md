@@ -1136,9 +1136,11 @@ fixture 类型：
   - Merge depth: <https://www.bitget.com/api-doc/contract/market/Get-Merge-Depth>
   - Current funding rate: <https://www.bitget.com/api-doc/contract/market/Get-Current-Funding-Rate>
   - Place order: <https://www.bitget.com/api-doc/contract/trade/Place-Order>
+  - Demo Trading uses separate demo API keys and requires the `paptrading: 1` header on private REST requests. Treat demo matching, balance, and depth as validation-only rather than production-equivalent liquidity.
 - Gate API v4 Futures：
   - API v4 futures: <https://www.gate.com/docs/developers/apiv4/en/futures/>
   - API v4 main reference: <https://www.gate.com/docs/apiv4/index.html>
+  - Futures TestNet uses separate testnet keys and testnet REST/WebSocket endpoints. Treat testnet matching and account state as validation-only rather than production-equivalent liquidity.
 
 ## 15. 第一批开发任务建议
 

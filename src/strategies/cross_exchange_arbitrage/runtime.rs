@@ -7,8 +7,8 @@ use super::{CrossExchangeArbitrageConfig, PrivateWsRuntimeConfig};
 use crate::core::config::ApiKeys;
 use crate::core::exchange::Exchange;
 use crate::exchanges::adapters::{
-    private_perp_trading_adapter_for_with_instruments, ExchangeTradingAdapter, PrivatePerpExchange,
-    PrivateRestAuth, PrivateWsAuth, PrivateWsRunConfig,
+    private_perp_trading_adapter_for_with_base_url_and_instruments, ExchangeTradingAdapter,
+    PrivatePerpExchange, PrivateRestAuth, PrivateWsAuth, PrivateWsRunConfig,
 };
 use crate::exchanges::{BinanceExchange, OkxExchange};
 use crate::execution::{ExecutionRouter, PositionMode, TradingAdapter};
@@ -22,6 +22,7 @@ pub struct PrivateWsRuntimeSpec {
     pub auth: PrivateWsAuth,
     pub symbols: Vec<ExchangeSymbol>,
     pub config: PrivateWsRunConfig,
+    pub url: String,
 }
 
 #[derive(Clone)]
@@ -145,10 +146,14 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
             let private_exchange = private_perp_exchange(exchange)
                 .ok_or_else(|| anyhow!("{exchange} private perpetual adapter is not registered"))?;
             let auth = private_rest_auth_for_exchange(config, exchange)?;
-            private_perp_trading_adapter_for_with_instruments(
+            private_perp_trading_adapter_for_with_base_url_and_instruments(
                 private_exchange,
                 auth,
                 configured_position_mode(config, exchange),
+                config
+                    .exchanges
+                    .get(exchange)
+                    .and_then(|runtime| runtime.private_rest_base_url.as_deref()),
                 instruments,
             )
         }
@@ -180,6 +185,9 @@ pub fn build_private_ws_runtime_specs(
                 .map(|runtime| runtime.private_ws_run.clone())
                 .unwrap_or_default()
                 .into(),
+            url: runtime
+                .and_then(|runtime| runtime.private_ws_url.clone())
+                .unwrap_or_else(|| private_exchange.private_ws_url().to_string()),
         });
     }
     Ok(specs)
@@ -194,6 +202,11 @@ pub fn private_rest_auth_for_exchange(
         api_key: api_keys.api_key,
         api_secret: api_keys.api_secret,
         passphrase: api_keys.passphrase,
+        demo_trading: config
+            .exchanges
+            .get(exchange)
+            .map(|runtime| runtime.demo_trading)
+            .unwrap_or(false),
     })
 }
 
@@ -212,6 +225,11 @@ pub fn private_ws_auth_for_exchange(
         api_secret: api_keys.api_secret,
         passphrase: api_keys.passphrase,
         account_id,
+        demo_trading: config
+            .exchanges
+            .get(exchange)
+            .map(|runtime| runtime.demo_trading)
+            .unwrap_or(false),
     })
 }
 
@@ -363,6 +381,8 @@ mod tests {
         gate.private_ws_enabled = true;
         gate.account_id = Some("20011".to_string());
         gate.env_prefix = Some("GATE_TEST_RUNTIME".to_string());
+        gate.demo_trading = true;
+        gate.private_ws_url = Some("wss://fx-ws-testnet.gateio.ws/v4/ws/usdt".to_string());
         std::env::set_var("GATE_TEST_RUNTIME_API_KEY", "key");
         std::env::set_var("GATE_TEST_RUNTIME_API_SECRET", "secret");
 
@@ -378,6 +398,8 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].exchange, PrivatePerpExchange::Gate);
         assert_eq!(specs[0].auth.account_id.as_deref(), Some("20011"));
+        assert!(specs[0].auth.demo_trading);
+        assert_eq!(specs[0].url, "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt");
 
         std::env::remove_var("GATE_TEST_RUNTIME_API_KEY");
         std::env::remove_var("GATE_TEST_RUNTIME_API_SECRET");
@@ -388,6 +410,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         let bitget = config.exchanges.entry(ExchangeId::Bitget).or_default();
         bitget.env_prefix = Some("BITGET_TEST_RUNTIME".to_string());
+        bitget.demo_trading = true;
         std::env::set_var("BITGET_TEST_RUNTIME_API_KEY", "key");
         std::env::set_var("BITGET_TEST_RUNTIME_API_SECRET", "secret");
         std::env::set_var("BITGET_TEST_RUNTIME_PASSPHRASE", "pass");
@@ -396,6 +419,7 @@ mod tests {
 
         assert_eq!(auth.api_key, "key");
         assert_eq!(auth.passphrase.as_deref(), Some("pass"));
+        assert!(auth.demo_trading);
 
         std::env::remove_var("BITGET_TEST_RUNTIME_API_KEY");
         std::env::remove_var("BITGET_TEST_RUNTIME_API_SECRET");

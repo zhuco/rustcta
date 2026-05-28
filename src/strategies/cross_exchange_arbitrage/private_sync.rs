@@ -5,7 +5,7 @@ use super::{
     CrossArbExecutionCoordinator, CrossArbRuntime, PrivateWsRuntimeSpec,
 };
 use crate::core::types::MarketType;
-use crate::exchanges::adapters::run_private_ws;
+use crate::exchanges::adapters::run_private_ws_with_url;
 use crate::execution::{
     parse_binance_futures_user_data_event, ExchangeBalance, ExchangeErrorClass, ExchangePosition,
     FillEvent, FillQuery, OrderState, PrivateErrorEvent, PrivateEvent, PrivateEventKind,
@@ -212,11 +212,12 @@ impl PrivateRuntimeSync {
     ) -> mpsc::Receiver<PrivateEvent> {
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
         for spec in specs {
-            tokio::spawn(run_private_ws(
+            tokio::spawn(run_private_ws_with_url(
                 spec.exchange,
                 spec.auth,
                 spec.symbols,
                 spec.config,
+                spec.url,
                 tx.clone(),
             ));
         }

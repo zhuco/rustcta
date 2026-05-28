@@ -463,6 +463,12 @@ pub struct ExchangeRuntimeConfig {
     pub env_prefix: Option<String>,
     #[serde(default)]
     pub account_id: Option<String>,
+    #[serde(default)]
+    pub demo_trading: bool,
+    #[serde(default)]
+    pub private_rest_base_url: Option<String>,
+    #[serde(default)]
+    pub private_ws_url: Option<String>,
     #[serde(default = "default_true")]
     pub private_rest_enabled: bool,
     #[serde(default)]

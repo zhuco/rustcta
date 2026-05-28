@@ -163,6 +163,8 @@ pub struct PrivateWsAuth {
     pub passphrase: Option<String>,
     #[serde(default)]
     pub account_id: Option<String>,
+    #[serde(default)]
+    pub demo_trading: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,6 +220,8 @@ pub struct PrivateRestAuth {
     pub api_key: String,
     pub api_secret: String,
     pub passphrase: Option<String>,
+    #[serde(default)]
+    pub demo_trading: bool,
 }
 
 impl From<PrivateWsAuth> for PrivateRestAuth {
@@ -226,6 +230,7 @@ impl From<PrivateWsAuth> for PrivateRestAuth {
             api_key: value.api_key,
             api_secret: value.api_secret,
             passphrase: value.passphrase,
+            demo_trading: value.demo_trading,
         }
     }
 }
@@ -1092,19 +1097,80 @@ pub fn private_perp_trading_adapter_for_with_instruments(
     }
 }
 
+pub fn private_perp_trading_adapter_for_with_base_url_and_instruments(
+    exchange: PrivatePerpExchange,
+    auth: PrivateRestAuth,
+    position_mode: PositionMode,
+    base_url: Option<&str>,
+    instruments: impl IntoIterator<Item = InstrumentMeta>,
+) -> Result<Arc<dyn TradingAdapter>> {
+    let base_url = base_url
+        .map(str::to_string)
+        .unwrap_or_else(|| exchange.rest_base_url().to_string());
+    match exchange {
+        PrivatePerpExchange::Bitget => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                BitgetPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Gate => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                GatePrivatePerpProtocol,
+                ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+    }
+}
+
 pub fn build_private_ws_endpoint(
     exchange: PrivatePerpExchange,
     auth: PrivateWsAuth,
     symbols: &[ExchangeSymbol],
     timestamp: i64,
 ) -> Result<PrivateWsEndpoint> {
+    build_private_ws_endpoint_with_url(
+        exchange,
+        auth,
+        symbols,
+        timestamp,
+        exchange.private_ws_url(),
+    )
+}
+
+pub fn build_private_ws_endpoint_with_url(
+    exchange: PrivatePerpExchange,
+    auth: PrivateWsAuth,
+    symbols: &[ExchangeSymbol],
+    timestamp: i64,
+    url: impl Into<String>,
+) -> Result<PrivateWsEndpoint> {
+    let url = url.into();
+    if url.trim().is_empty() {
+        anyhow::bail!(
+            "{} private websocket URL cannot be empty",
+            exchange.exchange_id()
+        );
+    }
     match exchange {
-        PrivatePerpExchange::Bitget => {
-            build_private_ws_endpoint_for(BitgetPrivatePerpProtocol, auth, symbols, timestamp)
-        }
-        PrivatePerpExchange::Gate => {
-            build_private_ws_endpoint_for(GatePrivatePerpProtocol, auth, symbols, timestamp)
-        }
+        PrivatePerpExchange::Bitget => build_private_ws_endpoint_for(
+            BitgetPrivatePerpProtocol,
+            auth,
+            symbols,
+            timestamp,
+            url.trim(),
+        ),
+        PrivatePerpExchange::Gate => build_private_ws_endpoint_for(
+            GatePrivatePerpProtocol,
+            auth,
+            symbols,
+            timestamp,
+            url.trim(),
+        ),
     }
 }
 
@@ -1113,6 +1179,7 @@ fn build_private_ws_endpoint_for<P>(
     auth: PrivateWsAuth,
     symbols: &[ExchangeSymbol],
     timestamp: i64,
+    url: &str,
 ) -> Result<PrivateWsEndpoint>
 where
     P: PrivatePerpProtocol,
@@ -1163,7 +1230,7 @@ where
 
     Ok(PrivateWsEndpoint {
         exchange: exchange.exchange_id(),
-        url: exchange.private_ws_url().to_string(),
+        url: url.to_string(),
         login_message,
         subscribe_messages,
         send_interval_ms: PrivateWsRunConfig::default().subscribe_interval_ms,
@@ -1177,6 +1244,33 @@ pub async fn run_private_ws(
     config: PrivateWsRunConfig,
     tx: mpsc::Sender<PrivateEvent>,
 ) -> Result<()> {
+    run_private_ws_with_url(
+        exchange,
+        auth,
+        symbols,
+        config,
+        exchange.private_ws_url().to_string(),
+        tx,
+    )
+    .await
+}
+
+pub async fn run_private_ws_with_url(
+    exchange: PrivatePerpExchange,
+    auth: PrivateWsAuth,
+    symbols: Vec<ExchangeSymbol>,
+    config: PrivateWsRunConfig,
+    url: impl Into<String>,
+    tx: mpsc::Sender<PrivateEvent>,
+) -> Result<()> {
+    let url = url.into();
+    if url.trim().is_empty() {
+        anyhow::bail!(
+            "{} private websocket URL cannot be empty",
+            exchange.exchange_id()
+        );
+    }
+    let url = url.trim().to_string();
     loop {
         if tx.is_closed() {
             return Ok(());
@@ -1184,21 +1278,23 @@ pub async fn run_private_ws(
 
         let result = match exchange {
             PrivatePerpExchange::Bitget => {
-                run_private_ws_protocol(
+                run_private_ws_protocol_with_url(
                     BitgetPrivatePerpProtocol,
                     auth.clone(),
                     symbols.clone(),
                     config,
+                    url.clone(),
                     tx.clone(),
                 )
                 .await
             }
             PrivatePerpExchange::Gate => {
-                run_private_ws_protocol(
+                run_private_ws_protocol_with_url(
                     GatePrivatePerpProtocol,
                     auth.clone(),
                     symbols.clone(),
                     config,
+                    url.clone(),
                     tx.clone(),
                 )
                 .await
@@ -1213,7 +1309,7 @@ pub async fn run_private_ws(
                 &tx,
                 exchange.exchange_id(),
                 ExchangeErrorClass::Network,
-                Some(exchange.private_ws_url().to_string()),
+                Some(url.clone()),
                 err.to_string(),
             )
             .await;
@@ -1233,9 +1329,32 @@ pub async fn run_private_ws_protocol<P>(
 where
     P: PrivatePerpProtocol + Send + Sync + Copy + 'static,
 {
+    run_private_ws_protocol_with_url(
+        protocol,
+        auth,
+        symbols,
+        config,
+        protocol.exchange().private_ws_url().to_string(),
+        tx,
+    )
+    .await
+}
+
+pub async fn run_private_ws_protocol_with_url<P>(
+    protocol: P,
+    auth: PrivateWsAuth,
+    symbols: Vec<ExchangeSymbol>,
+    config: PrivateWsRunConfig,
+    url: impl Into<String>,
+    tx: mpsc::Sender<PrivateEvent>,
+) -> Result<()>
+where
+    P: PrivatePerpProtocol + Send + Sync + Copy + 'static,
+{
     let exchange = protocol.exchange();
     let timestamp = Utc::now().timestamp();
-    let mut endpoint = build_private_ws_endpoint(exchange, auth, &symbols, timestamp)?;
+    let mut endpoint =
+        build_private_ws_endpoint_with_url(exchange, auth, &symbols, timestamp, url)?;
     endpoint.send_interval_ms = config.subscribe_interval_ms;
 
     let connect = timeout(
@@ -2031,7 +2150,13 @@ fn bitget_rest_headers(
         ("ACCESS-PASSPHRASE".to_string(), passphrase.clone()),
         ("Content-Type".to_string(), "application/json".to_string()),
         ("locale".to_string(), "en-US".to_string()),
-    ]))
+    ])
+    .into_iter()
+    .chain(
+        auth.demo_trading
+            .then(|| ("paptrading".to_string(), "1".to_string())),
+    )
+    .collect())
 }
 
 pub fn gate_rest_signature(
@@ -3473,6 +3598,7 @@ mod tests {
             api_secret: "secret".to_string(),
             passphrase: Some("pass".to_string()),
             account_id: Some("20011".to_string()),
+            demo_trading: false,
         };
 
         let bitget = BitgetPrivatePerpProtocol
@@ -3496,6 +3622,7 @@ mod tests {
             api_key: "key".to_string(),
             api_secret: "secret".to_string(),
             passphrase: Some("pass".to_string()),
+            demo_trading: false,
         })
         .unwrap();
         assert_eq!(bitget.exchange(), ExchangeId::Bitget);
@@ -3507,6 +3634,7 @@ mod tests {
                 api_key: "key".to_string(),
                 api_secret: "secret".to_string(),
                 passphrase: None,
+                demo_trading: false,
             },
             PositionMode::OneWay,
         )
@@ -3695,6 +3823,7 @@ mod tests {
                 api_secret: "secret".to_string(),
                 passphrase: Some("pass".to_string()),
                 account_id: None,
+                demo_trading: false,
             },
             &[ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT")],
             1_700_000_000,
@@ -3712,6 +3841,27 @@ mod tests {
     }
 
     #[test]
+    fn private_ws_endpoint_should_accept_configured_url_override() {
+        let endpoint = build_private_ws_endpoint_with_url(
+            PrivatePerpExchange::Gate,
+            PrivateWsAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+                account_id: Some("20011".to_string()),
+                demo_trading: false,
+            },
+            &[],
+            1_700_000_000,
+            "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt",
+        )
+        .unwrap();
+
+        assert_eq!(endpoint.url, "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt");
+        assert_eq!(endpoint.exchange, ExchangeId::Gate);
+    }
+
+    #[test]
     fn gate_private_ws_endpoint_should_authenticate_every_subscription() {
         let endpoint = build_private_ws_endpoint(
             PrivatePerpExchange::Gate,
@@ -3720,6 +3870,7 @@ mod tests {
                 api_secret: "secret".to_string(),
                 passphrase: None,
                 account_id: Some("20011".to_string()),
+                demo_trading: false,
             },
             &[],
             1_700_000_000,
@@ -3750,6 +3901,7 @@ mod tests {
                 api_secret: "secret".to_string(),
                 passphrase: None,
                 account_id: None,
+                demo_trading: false,
             },
             &[],
             1_700_000_000,
@@ -4046,6 +4198,7 @@ mod tests {
                 api_key: "key".to_string(),
                 api_secret: "secret".to_string(),
                 passphrase: Some("pass".to_string()),
+                demo_trading: false,
             },
         )
         .unwrap();
@@ -4060,11 +4213,33 @@ mod tests {
             headers.get("ACCESS-PASSPHRASE").map(String::as_str),
             Some("pass")
         );
+        assert_eq!(headers.get("paptrading").map(String::as_str), None);
         assert!(headers.get("ACCESS-SIGN").is_some_and(|v| !v.is_empty()));
         assert_eq!(
             headers.get("ACCESS-TIMESTAMP").map(String::as_str),
             Some("1700000000000")
         );
+    }
+
+    #[test]
+    fn reqwest_transport_should_add_bitget_demo_header_when_enabled() {
+        let transport = ReqwestPrivateRestTransport::new(
+            PrivatePerpExchange::Bitget,
+            PrivateRestAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: Some("pass".to_string()),
+                demo_trading: true,
+            },
+        )
+        .unwrap();
+        let spec = BitgetPrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT")))
+            .unwrap();
+
+        let headers = transport.signed_headers(&spec, 1_700_000_000_000).unwrap();
+
+        assert_eq!(headers.get("paptrading").map(String::as_str), Some("1"));
     }
 
     #[test]
@@ -4075,6 +4250,7 @@ mod tests {
                 api_key: "key".to_string(),
                 api_secret: "secret".to_string(),
                 passphrase: None,
+                demo_trading: false,
             },
         )
         .unwrap();
