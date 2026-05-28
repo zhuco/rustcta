@@ -140,6 +140,8 @@ struct CrossArbReadModel {
     #[serde(skip)]
     tick_index: u64,
     shadow_store: ShadowPersistenceStore,
+    #[serde(skip)]
+    runtime_telemetry: RuntimeTelemetry,
 }
 
 impl CrossArbReadModel {
@@ -204,6 +206,7 @@ impl CrossArbReadModel {
             last_shadow_fill_by_symbol: HashMap::new(),
             tick_index: 0,
             shadow_store,
+            runtime_telemetry: RuntimeTelemetry::new(now),
         };
         model.restore_shadow_persistence(now);
         if data_source == DataSource::Synthetic {
@@ -620,7 +623,14 @@ impl CrossArbReadModel {
         self.capital = exchange_capital_models(&self.config, &self.shadow_positions);
     }
 
-    fn apply_public_ws_orderbook(&mut self, book: OrderBook5, now: DateTime<Utc>) {
+    fn apply_public_ws_orderbook(
+        &mut self,
+        book: OrderBook5,
+        now: DateTime<Utc>,
+        queue_depth: usize,
+    ) {
+        self.runtime_telemetry
+            .record_orderbook(book.exchange.clone(), now, queue_depth);
         self.market_cache.upsert_orderbook_at(book, now);
     }
 
@@ -644,6 +654,8 @@ impl CrossArbReadModel {
     }
 
     fn apply_public_ws_error(&mut self, error: cross_arb_server_ws::PublicWsMarketError) {
+        self.runtime_telemetry
+            .record_error(error.exchange.clone(), error.occurred_at);
         self.market_errors.push(MarketDataError {
             exchange: error.exchange,
             canonical_symbol: error.canonical_symbol,
@@ -653,6 +665,35 @@ impl CrossArbReadModel {
             occurred_at: error.occurred_at,
         });
         trim_front(&mut self.market_errors, DEFAULT_HISTORY_LIMIT);
+    }
+
+    fn apply_public_ws_connected(
+        &mut self,
+        exchange: ExchangeId,
+        route: String,
+        symbol_count: usize,
+        connected_at: DateTime<Utc>,
+        queue_depth: usize,
+    ) {
+        self.runtime_telemetry.record_connected(
+            exchange,
+            route,
+            symbol_count,
+            connected_at,
+            queue_depth,
+        );
+    }
+
+    fn set_public_ws_channel_capacity(&mut self, capacity: usize) {
+        self.runtime_telemetry.set_channel_capacity(capacity);
+    }
+
+    fn runtime_metrics_snapshot(&self, now: DateTime<Utc>) -> RuntimeMetricsReadModel {
+        RuntimeMetricsReadModel {
+            generated_at: now,
+            process: process_resource_read_model(self.runtime_telemetry.started_at, now),
+            public_ws: self.runtime_telemetry.read_model(now),
+        }
     }
 
     fn apply_public_ws_cache_refresh(&mut self, refresh: PublicWsCacheRefresh, now: DateTime<Utc>) {
@@ -1479,6 +1520,272 @@ struct PublicWsCacheRefresh {
     funding_snapshots: Vec<MarketFundingSnapshot>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct RuntimeTelemetry {
+    started_at: DateTime<Utc>,
+    public_ws_total_orderbook_updates: u64,
+    public_ws_total_errors: u64,
+    public_ws_channel_capacity: usize,
+    public_ws_max_queue_depth: usize,
+    public_ws_by_exchange: BTreeMap<String, PublicWsExchangeTelemetry>,
+}
+
+impl RuntimeTelemetry {
+    fn new(started_at: DateTime<Utc>) -> Self {
+        Self {
+            started_at,
+            ..Self::default()
+        }
+    }
+
+    fn set_channel_capacity(&mut self, capacity: usize) {
+        self.public_ws_channel_capacity = capacity;
+    }
+
+    fn record_orderbook(&mut self, exchange: ExchangeId, now: DateTime<Utc>, queue_depth: usize) {
+        self.public_ws_total_orderbook_updates =
+            self.public_ws_total_orderbook_updates.saturating_add(1);
+        self.public_ws_max_queue_depth = self.public_ws_max_queue_depth.max(queue_depth);
+        self.exchange_mut(exchange)
+            .record_orderbook(now, queue_depth);
+    }
+
+    fn record_error(&mut self, exchange: ExchangeId, now: DateTime<Utc>) {
+        self.public_ws_total_errors = self.public_ws_total_errors.saturating_add(1);
+        self.exchange_mut(exchange).record_error(now);
+    }
+
+    fn record_connected(
+        &mut self,
+        exchange: ExchangeId,
+        route: String,
+        symbol_count: usize,
+        connected_at: DateTime<Utc>,
+        queue_depth: usize,
+    ) {
+        self.public_ws_max_queue_depth = self.public_ws_max_queue_depth.max(queue_depth);
+        self.exchange_mut(exchange)
+            .record_connected(route, symbol_count, connected_at);
+    }
+
+    fn exchange_mut(&mut self, exchange: ExchangeId) -> &mut PublicWsExchangeTelemetry {
+        let key = exchange.as_str().to_string();
+        self.public_ws_by_exchange
+            .entry(key.clone())
+            .or_insert_with(|| PublicWsExchangeTelemetry::new(key))
+    }
+
+    fn read_model(&self, now: DateTime<Utc>) -> PublicWsRuntimeReadModel {
+        let uptime_secs = now
+            .signed_duration_since(self.started_at)
+            .num_seconds()
+            .max(1) as f64;
+        let orderbook_updates_per_sec = self.public_ws_total_orderbook_updates as f64 / uptime_secs;
+        let error_rate_per_min = self.public_ws_total_errors as f64 / (uptime_secs / 60.0).max(1.0);
+        let channel_usage_pct = if self.public_ws_channel_capacity == 0 {
+            0.0
+        } else {
+            self.public_ws_max_queue_depth as f64 / self.public_ws_channel_capacity as f64
+        };
+        PublicWsRuntimeReadModel {
+            started_at: self.started_at,
+            uptime_secs,
+            total_orderbook_updates: self.public_ws_total_orderbook_updates,
+            total_errors: self.public_ws_total_errors,
+            orderbook_updates_per_sec,
+            error_rate_per_min,
+            channel_capacity: self.public_ws_channel_capacity,
+            max_queue_depth: self.public_ws_max_queue_depth,
+            channel_usage_pct,
+            exchanges: self
+                .public_ws_by_exchange
+                .values()
+                .map(|item| item.read_model(self.started_at, now))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PublicWsExchangeTelemetry {
+    exchange: String,
+    connection_count: usize,
+    subscribed_symbols: usize,
+    total_orderbook_updates: u64,
+    total_errors: u64,
+    max_queue_depth: usize,
+    last_update_at: Option<DateTime<Utc>>,
+    last_error_at: Option<DateTime<Utc>>,
+    routes: BTreeMap<String, usize>,
+}
+
+impl PublicWsExchangeTelemetry {
+    fn new(exchange: String) -> Self {
+        Self {
+            exchange,
+            ..Self::default()
+        }
+    }
+
+    fn record_connected(
+        &mut self,
+        route: String,
+        symbol_count: usize,
+        _connected_at: DateTime<Utc>,
+    ) {
+        self.connection_count = self.connection_count.saturating_add(1);
+        self.subscribed_symbols = self.subscribed_symbols.saturating_add(symbol_count);
+        self.routes.insert(route, symbol_count);
+    }
+
+    fn record_orderbook(&mut self, now: DateTime<Utc>, queue_depth: usize) {
+        self.total_orderbook_updates = self.total_orderbook_updates.saturating_add(1);
+        self.max_queue_depth = self.max_queue_depth.max(queue_depth);
+        self.last_update_at = Some(now);
+    }
+
+    fn record_error(&mut self, now: DateTime<Utc>) {
+        self.total_errors = self.total_errors.saturating_add(1);
+        self.last_error_at = Some(now);
+    }
+
+    fn read_model(
+        &self,
+        started_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> PublicWsExchangeRuntimeReadModel {
+        let uptime_secs = now.signed_duration_since(started_at).num_seconds().max(1) as f64;
+        PublicWsExchangeRuntimeReadModel {
+            exchange: self.exchange.clone(),
+            connection_count: self.connection_count,
+            subscribed_symbols: self.subscribed_symbols,
+            route_count: self.routes.len(),
+            total_orderbook_updates: self.total_orderbook_updates,
+            updates_per_sec: self.total_orderbook_updates as f64 / uptime_secs,
+            total_errors: self.total_errors,
+            max_queue_depth: self.max_queue_depth,
+            last_update_age_ms: self
+                .last_update_at
+                .map(|ts| now.signed_duration_since(ts).num_milliseconds().max(0) as u64),
+            last_error_at: self.last_error_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RuntimeMetricsReadModel {
+    generated_at: DateTime<Utc>,
+    process: ProcessResourceReadModel,
+    public_ws: PublicWsRuntimeReadModel,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProcessResourceReadModel {
+    pid: u32,
+    uptime_secs: f64,
+    rss_bytes: u64,
+    vm_size_bytes: u64,
+    threads: u64,
+    fd_count: usize,
+    cpu_percent_process: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PublicWsRuntimeReadModel {
+    started_at: DateTime<Utc>,
+    uptime_secs: f64,
+    total_orderbook_updates: u64,
+    total_errors: u64,
+    orderbook_updates_per_sec: f64,
+    error_rate_per_min: f64,
+    channel_capacity: usize,
+    max_queue_depth: usize,
+    channel_usage_pct: f64,
+    exchanges: Vec<PublicWsExchangeRuntimeReadModel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PublicWsExchangeRuntimeReadModel {
+    exchange: String,
+    connection_count: usize,
+    subscribed_symbols: usize,
+    route_count: usize,
+    total_orderbook_updates: u64,
+    updates_per_sec: f64,
+    total_errors: u64,
+    max_queue_depth: usize,
+    last_update_age_ms: Option<u64>,
+    last_error_at: Option<DateTime<Utc>>,
+}
+
+fn process_resource_read_model(
+    started_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> ProcessResourceReadModel {
+    let status = read_proc_status();
+    let fd_count = fs::read_dir("/proc/self/fd")
+        .map(|entries| entries.count())
+        .unwrap_or_default();
+    let cpu_percent_process = read_process_cpu_percent(started_at, now);
+    ProcessResourceReadModel {
+        pid: std::process::id(),
+        uptime_secs: now.signed_duration_since(started_at).num_seconds().max(1) as f64,
+        rss_bytes: status.vm_rss_kb.saturating_mul(1024),
+        vm_size_bytes: status.vm_size_kb.saturating_mul(1024),
+        threads: status.threads,
+        fd_count,
+        cpu_percent_process,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProcStatusSnapshot {
+    vm_rss_kb: u64,
+    vm_size_kb: u64,
+    threads: u64,
+}
+
+fn read_proc_status() -> ProcStatusSnapshot {
+    let Ok(raw) = fs::read_to_string("/proc/self/status") else {
+        return ProcStatusSnapshot::default();
+    };
+    let mut snapshot = ProcStatusSnapshot::default();
+    for line in raw.lines() {
+        if let Some(value) = line.strip_prefix("VmRSS:") {
+            snapshot.vm_rss_kb = parse_proc_kb(value);
+        } else if let Some(value) = line.strip_prefix("VmSize:") {
+            snapshot.vm_size_kb = parse_proc_kb(value);
+        } else if let Some(value) = line.strip_prefix("Threads:") {
+            snapshot.threads = value.trim().parse::<u64>().unwrap_or_default();
+        }
+    }
+    snapshot
+}
+
+fn parse_proc_kb(value: &str) -> u64 {
+    value
+        .split_whitespace()
+        .next()
+        .and_then(|text| text.parse::<u64>().ok())
+        .unwrap_or_default()
+}
+
+fn read_process_cpu_percent(started_at: DateTime<Utc>, now: DateTime<Utc>) -> Option<f64> {
+    let raw = fs::read_to_string("/proc/self/stat").ok()?;
+    let close = raw.rfind(')')?;
+    let fields = raw.get(close + 2..)?.split_whitespace().collect::<Vec<_>>();
+    let utime = fields.get(11)?.parse::<u64>().ok()?;
+    let stime = fields.get(12)?.parse::<u64>().ok()?;
+    let ticks_per_second = process_clock_ticks_per_second();
+    let cpu_secs = (utime + stime) as f64 / ticks_per_second;
+    let uptime_secs = now.signed_duration_since(started_at).num_seconds().max(1) as f64;
+    Some((cpu_secs / uptime_secs) * 100.0)
+}
+
+fn process_clock_ticks_per_second() -> f64 {
+    100.0
+}
+
 #[derive(Debug, Clone)]
 struct ExchangeInstrumentCoverage {
     supported_by_exchange: HashMap<ExchangeId, HashSet<CanonicalSymbol>>,
@@ -1518,6 +1825,7 @@ struct DashboardPayload {
     market_errors: Vec<MarketDataError>,
     config_summary: ConfigSummaryReadModel,
     tool_commands: Vec<ToolCommandReadModel>,
+    runtime_metrics: RuntimeMetricsReadModel,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1667,8 +1975,9 @@ async fn healthz() -> &'static str {
 
 async fn dashboard(State(state): State<AppState>) -> Json<DashboardPayload> {
     let read_model = state.read_model.read().await;
+    let now = Utc::now();
     Json(DashboardPayload {
-        generated_at: Utc::now(),
+        generated_at: now,
         status: read_model.status.clone(),
         analytics: read_model.analytics.clone(),
         data_source: read_model.data_source,
@@ -1696,6 +2005,7 @@ async fn dashboard(State(state): State<AppState>) -> Json<DashboardPayload> {
         market_errors: read_model.market_errors.clone(),
         config_summary: read_model.config_summary.clone(),
         tool_commands: read_model.tool_commands.clone(),
+        runtime_metrics: read_model.runtime_metrics_snapshot(now),
     })
 }
 
@@ -1820,6 +2130,11 @@ async fn shadow_persistence(State(state): State<AppState>) -> Json<ShadowPersist
     Json(read_model.shadow_store.read_model())
 }
 
+async fn runtime_metrics(State(state): State<AppState>) -> Json<RuntimeMetricsReadModel> {
+    let read_model = state.read_model.read().await;
+    Json(read_model.runtime_metrics_snapshot(Utc::now()))
+}
+
 async fn pause_new_entries(State(state): State<AppState>) -> Json<ControlState> {
     mutate_control(state, ControlState::pause_new_entries).await
 }
@@ -1877,6 +2192,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/cross-arb/config-summary", get(config_summary))
         .route("/api/cross-arb/tools", get(tools))
         .route("/api/cross-arb/shadow-persistence", get(shadow_persistence))
+        .route("/api/cross-arb/runtime-metrics", get(runtime_metrics))
         .route(
             "/api/cross-arb/control/pause-new-entries",
             post(pause_new_entries),
@@ -2012,7 +2328,8 @@ fn spawn_public_ws_ingestion(state: AppState, request_timeout_ms: u64) {
                 read_model.monitored_symbols.clone(),
             )
         };
-        let (tx, mut rx) = mpsc::channel(10_000);
+        let channel_capacity = 10_000usize;
+        let (tx, mut rx) = mpsc::channel(channel_capacity);
         let base_ws_config = cross_arb_server_ws::PublicWsConfig {
             connect_timeout_ms: request_timeout_ms.max(1_000),
             reconnect_delay_ms: 2_000,
@@ -2025,6 +2342,7 @@ fn spawn_public_ws_ingestion(state: AppState, request_timeout_ms: u64) {
         {
             let mut read_model = state.read_model.write().await;
             read_model.apply_instrument_coverage(coverage.clone(), Utc::now());
+            read_model.set_public_ws_channel_capacity(channel_capacity);
         }
 
         for adapter in configured_market_adapter_arcs(&config) {
@@ -2055,10 +2373,11 @@ fn spawn_public_ws_ingestion(state: AppState, request_timeout_ms: u64) {
         drop(tx);
 
         while let Some(update) = rx.recv().await {
+            let queue_depth = rx.len();
             let mut read_model = state.read_model.write().await;
             match update {
                 cross_arb_server_ws::PublicWsUpdate::OrderBook(book) => {
-                    read_model.apply_public_ws_orderbook(book, Utc::now());
+                    read_model.apply_public_ws_orderbook(book, Utc::now(), queue_depth);
                 }
                 cross_arb_server_ws::PublicWsUpdate::Error(error) => {
                     read_model.apply_public_ws_error(error);
@@ -2069,6 +2388,13 @@ fn spawn_public_ws_ingestion(state: AppState, request_timeout_ms: u64) {
                     symbol_count,
                     connected_at,
                 } => {
+                    read_model.apply_public_ws_connected(
+                        exchange.clone(),
+                        route.clone(),
+                        symbol_count,
+                        connected_at,
+                        queue_depth,
+                    );
                     log::info!(
                         "public ws connected: exchange={} symbols={} route={} at={}",
                         exchange,
@@ -3461,6 +3787,20 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
     <section class="kpis" id="metrics"></section>
     <section class="layout">
       <div class="panel">
+        <div class="title"><span>运行时资源</span><span class="sub">轻量聚合指标，不记录原始行情消息</span></div>
+        <div class="table-wrap"><table id="runtimeProcess"></table></div>
+      </div>
+      <div class="panel">
+        <div class="title"><span>Public WS 吞吐</span><span class="sub">消息更新、错误、队列水位</span></div>
+        <div class="table-wrap"><table id="runtimeWs"></table></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="title"><span>Public WS 分交易所</span><span class="sub">连接数、订阅数、更新速率和最近更新年龄</span></div>
+      <div class="table-wrap"><table id="runtimeWsExchanges"></table></div>
+    </section>
+    <section class="layout">
+      <div class="panel">
         <div class="title"><span>资金与仓位容量</span><span class="sub">每所本金 500U，10 倍杠杆，最多 50 个仓位</span></div>
         <div class="note">影子开仓会同时检查做多交易所和做空交易所容量：单交易所名义占用不超过 5000U，仓位数不超过 50。</div>
         <div class="table-wrap"><table id="capital"></table></div>
@@ -3553,6 +3893,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       document.getElementById('subtitle').textContent =
         `${modeText} | 监控 ${data.analytics.monitored_symbols} 个长尾交易对 | 盘口 ${data.analytics.books_loaded} | 资金费率 ${data.analytics.funding_loaded} | 错误 ${data.analytics.market_error_count} | ${data.control.new_entries_allowed ? '影子开仓开启' : '已暂停/熔断'} | ${data.generated_at}`;
       metrics(data.analytics);
+      runtimeMetrics(data.runtime_metrics || {});
       capital(data.capital || []);
       feeSchedule(data.fee_schedule || []);
       positions(filterBySymbolAndExchange(data.current_positions));
@@ -3603,6 +3944,32 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         metric('平均净边际', pct(a.avg_net_edge_pct), a.avg_net_edge_pct >= 0 ? 'ok' : 'bad'),
         metric('行情错误', intFmt.format(a.market_error_count), a.market_error_count === 0 ? 'ok' : 'warn')
       ].join('');
+    }
+
+    function runtimeMetrics(m) {
+      const p = m.process || {};
+      const ws = m.public_ws || {};
+      table('runtimeProcess', ['PID','运行时间','RSS','虚拟内存','线程','FD','进程CPU均值'], [[
+        p.pid || '-', duration(p.uptime_secs || 0), bytes(p.rss_bytes || 0), bytes(p.vm_size_bytes || 0),
+        p.threads || 0, p.fd_count || 0,
+        p.cpu_percent_process === null || p.cpu_percent_process === undefined ? '-' : fmt.format(p.cpu_percent_process) + '%'
+      ]]);
+      table('runtimeWs', ['总更新','更新/秒','错误','错误/分钟','队列容量','最大队列','队列水位'], [[
+        intFmt.format(ws.total_orderbook_updates || 0),
+        fmt.format(ws.orderbook_updates_per_sec || 0),
+        intFmt.format(ws.total_errors || 0),
+        fmt.format(ws.error_rate_per_min || 0),
+        intFmt.format(ws.channel_capacity || 0),
+        intFmt.format(ws.max_queue_depth || 0),
+        pct(ws.channel_usage_pct || 0)
+      ]]);
+      table('runtimeWsExchanges', ['交易所','连接','订阅','路由','总更新','更新/秒','错误','最大队列','最近更新'],
+        (ws.exchanges || []).map(r => [
+          r.exchange, r.connection_count, r.subscribed_symbols, r.route_count,
+          intFmt.format(r.total_orderbook_updates || 0), fmt.format(r.updates_per_sec || 0),
+          intFmt.format(r.total_errors || 0), intFmt.format(r.max_queue_depth || 0),
+          r.last_update_age_ms === null || r.last_update_age_ms === undefined ? '-' : `${r.last_update_age_ms} ms`
+        ]));
     }
 
     function capital(rows) {
@@ -3792,6 +4159,13 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       if (m > 0) return `${m}m ${s}s`;
       return `${s}s`;
     }
+    function bytes(v) {
+      v = Number(v || 0);
+      if (v >= 1024 * 1024 * 1024) return fmt.format(v / 1024 / 1024 / 1024) + ' GiB';
+      if (v >= 1024 * 1024) return fmt.format(v / 1024 / 1024) + ' MiB';
+      if (v >= 1024) return fmt.format(v / 1024) + ' KiB';
+      return fmt.format(v) + ' B';
+    }
     function pnlCell(v) { return `<span class="${v >= 0 ? 'ok' : 'bad'}">${money.format(v || 0)}</span>`; }
     function escapeHtml(value) {
       return value.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -3949,6 +4323,18 @@ mod tests {
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
         config.execution.dry_run = false;
         config.universe.symbols = vec![CanonicalSymbol::new("ARB", "USDT")];
+        for exchange in config.universe.enabled_exchanges.clone() {
+            config
+                .exchanges
+                .entry(exchange.clone())
+                .or_default()
+                .private_ws_enabled = true;
+            config
+                .exchanges
+                .entry(exchange)
+                .or_default()
+                .private_rest_enabled = true;
+        }
 
         let dir = tempfile::tempdir().expect("tempdir should be created");
         let config_path = dir.path().join("cross-arb-live.yml");
