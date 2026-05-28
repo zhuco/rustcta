@@ -776,10 +776,17 @@ where
         &self,
         symbol: Option<&ExchangeSymbol>,
     ) -> Result<Vec<ExchangePosition>> {
-        let value = self
+        let value = match self
             .transport
             .execute(self.protocol.get_positions(symbol)?)
-            .await?;
+            .await
+        {
+            Ok(value) => value,
+            Err(err) if is_gate_position_not_found(self.exchange(), &err) => {
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(err),
+        };
         let exchange = self.exchange();
         Ok(response_items(&value)
             .into_iter()
@@ -842,10 +849,22 @@ where
         &self,
         symbol: &ExchangeSymbol,
     ) -> Result<SymbolAccountConfig> {
-        let value = self
+        let value = match self
             .transport
             .execute(self.protocol.get_symbol_account_config(symbol)?)
-            .await?;
+            .await
+        {
+            Ok(value) => value,
+            Err(err) if is_gate_position_not_found(self.exchange(), &err) => {
+                return Ok(default_symbol_account_config(
+                    self.exchange(),
+                    symbol,
+                    Utc::now(),
+                    self.current_position_mode()?,
+                ));
+            }
+            Err(err) => return Err(err),
+        };
         parse_symbol_account_config(
             self.exchange(),
             symbol,
@@ -4180,6 +4199,32 @@ fn event_fill(event: PrivateEvent) -> Option<FillEvent> {
     }
 }
 
+fn is_gate_position_not_found(exchange: ExchangeId, err: &anyhow::Error) -> bool {
+    exchange == ExchangeId::Gate
+        && err.downcast_ref::<PrivateRestError>().is_some_and(|error| {
+            error.class == ExchangeErrorClass::OrderNotFound
+                && error.code.as_deref() == Some("POSITION_NOT_FOUND")
+        })
+}
+
+fn default_symbol_account_config(
+    exchange: ExchangeId,
+    symbol: &ExchangeSymbol,
+    received_at: DateTime<Utc>,
+    configured_position_mode: PositionMode,
+) -> SymbolAccountConfig {
+    SymbolAccountConfig {
+        exchange: exchange.clone(),
+        canonical_symbol: canonical(&exchange, &symbol.symbol),
+        exchange_symbol: symbol.clone(),
+        position_mode: Some(configured_position_mode),
+        margin_mode: None,
+        leverage: None,
+        max_leverage: None,
+        updated_at: received_at,
+    }
+}
+
 fn parse_bitget_private_message(
     raw: &str,
     received_at: DateTime<Utc>,
@@ -5630,6 +5675,7 @@ mod tests {
     #[derive(Clone)]
     struct MockTransport {
         response: Value,
+        error: Option<PrivateRestError>,
         seen: Arc<Mutex<Vec<PrivateRestRequestSpec>>>,
     }
 
@@ -5637,6 +5683,15 @@ mod tests {
         fn new(response: Value) -> Self {
             Self {
                 response,
+                error: None,
+                seen: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn with_error(error: PrivateRestError) -> Self {
+            Self {
+                response: Value::Null,
+                error: Some(error),
                 seen: Arc::new(Mutex::new(Vec::new())),
             }
         }
@@ -5646,6 +5701,9 @@ mod tests {
     impl PrivateRestTransport for MockTransport {
         async fn execute(&self, request: PrivateRestRequestSpec) -> Result<Value> {
             self.seen.lock().unwrap().push(request);
+            if let Some(error) = &self.error {
+                return Err(error.clone().into());
+            }
             Ok(self.response.clone())
         }
     }
@@ -6697,6 +6755,31 @@ mod tests {
         assert_eq!(positions.len(), 1);
         assert_eq!(positions[0].position_side, PositionSide::Short);
         assert_eq!(positions[0].quantity, 0.0025);
+    }
+
+    #[tokio::test]
+    async fn gate_adapter_should_treat_missing_position_as_flat() {
+        let error = PrivateRestError {
+            exchange: ExchangeId::Gate,
+            class: ExchangeErrorClass::OrderNotFound,
+            endpoint: Some("GET /futures/usdt/positions/DOGE_USDT".to_string()),
+            code: Some("POSITION_NOT_FOUND".to_string()),
+            message: "position not found".to_string(),
+        };
+        let adapter = PrivatePerpTradingAdapter::new(
+            GatePrivatePerpProtocol,
+            MockTransport::with_error(error),
+        );
+        let symbol = ExchangeSymbol::new(ExchangeId::Gate, "DOGE_USDT");
+
+        let positions = adapter.get_positions(Some(&symbol)).await.unwrap();
+        let config = adapter.get_symbol_account_config(&symbol).await.unwrap();
+
+        assert!(positions.is_empty());
+        assert_eq!(config.exchange, ExchangeId::Gate);
+        assert_eq!(config.exchange_symbol, symbol);
+        assert_eq!(config.position_mode, Some(PositionMode::OneWay));
+        assert_eq!(config.leverage, None);
     }
 
     #[tokio::test]
