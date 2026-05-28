@@ -4,8 +4,8 @@ use super::config::CrossExchangeArbitrageConfig;
 use super::funding::FundingEstimate;
 use super::position::PortfolioExposureSummary;
 use super::simulation::TakerVwapResult;
-use crate::execution::ReconcileSeverity;
-use crate::market::{ExchangeId, OrderBook5, RouteStatus};
+use crate::execution::{PositionSide, ReconcileSeverity};
+use crate::market::{CanonicalSymbol, ExchangeId, OrderBook5, RouteStatus};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -472,6 +472,29 @@ impl RiskGate {
 
         RiskGateDecision::from_reasons(reasons)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OneWayExposureKey {
+    pub exchange: ExchangeId,
+    pub canonical_symbol: CanonicalSymbol,
+    pub side: PositionSide,
+}
+
+pub fn one_way_conflict_for_open(
+    exchange: &ExchangeId,
+    canonical_symbol: &CanonicalSymbol,
+    proposed_side: PositionSide,
+    existing: impl IntoIterator<Item = OneWayExposureKey>,
+) -> bool {
+    if *exchange != ExchangeId::Gate {
+        return false;
+    }
+    existing.into_iter().any(|item| {
+        item.exchange == *exchange
+            && item.canonical_symbol == *canonical_symbol
+            && item.side != proposed_side
+    })
 }
 
 pub fn book_age_ms(book: &OrderBook5, now: DateTime<Utc>) -> i64 {

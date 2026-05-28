@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     scan_opportunities, ArbSignal, BundleReadModel, CrossArbDashboardStatus, CrossArbStorageEvent,
     CrossExchangeArbitrageConfig, InMemoryStorageSink, MarketSnapshot, Opportunity,
-    OpportunityReadModel, PortfolioExposureSummary, PositionManager, PrivateStreamHealthReadModel,
-    RiskEventReadModel, RiskStateReadModel, RouteReadModel, SimulatedBundleState,
-    SimulatedBundleStatus, StorageSink, StrategyRiskState,
+    OpportunityReadModel, OrderSide as StrategyOrderSide, PortfolioExposureSummary,
+    PositionManager, PrivateStreamHealthReadModel, RiskEventReadModel, RiskStateReadModel,
+    RouteReadModel, SimulatedBundleState, SimulatedBundleStatus, StorageSink, StrategyRiskState,
 };
 use crate::execution::{
     AccountSyncState, ArbitrageBundle, ExchangePosition, FillEvent, PositionSnapshot, PrivateEvent,
@@ -16,7 +16,8 @@ use crate::execution::{
 };
 use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use crate::strategies::cross_exchange_arbitrage::{
-    FillApplication, PositionError, PositionReconcileDecision,
+    one_way_conflict_for_open, FillApplication, PositionError, PositionReconcileDecision,
+    RejectReason,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,6 +65,33 @@ impl CrossArbRuntimeState {
         self.updated_at = now;
         self.sync_risk_state(now);
         self.opportunities = scan_opportunities(canonical_symbol, snapshots, &self.config, now);
+        let existing_one_way = self.position_manager.active_one_way_exposure_keys();
+        for opportunity in &mut self.opportunities {
+            let maker_side = match opportunity.maker_side {
+                StrategyOrderSide::Buy => crate::execution::PositionSide::Long,
+                StrategyOrderSide::Sell => crate::execution::PositionSide::Short,
+            };
+            let taker_side = match opportunity.taker_side {
+                StrategyOrderSide::Buy => crate::execution::PositionSide::Long,
+                StrategyOrderSide::Sell => crate::execution::PositionSide::Short,
+            };
+            if one_way_conflict_for_open(
+                &opportunity.maker_exchange,
+                &opportunity.canonical_symbol,
+                maker_side,
+                existing_one_way.clone(),
+            ) || one_way_conflict_for_open(
+                &opportunity.taker_exchange,
+                &opportunity.canonical_symbol,
+                taker_side,
+                existing_one_way.clone(),
+            ) {
+                opportunity
+                    .reject_reasons
+                    .push(RejectReason::ExchangePositionLimitExceeded);
+                opportunity.can_open = false;
+            }
+        }
 
         let signals = self
             .opportunities
@@ -418,8 +446,8 @@ impl Default for CrossArbRuntimeState {
 mod tests {
     use super::*;
     use crate::execution::{
-        ArbitrageBundle, BundleStatus, FillEvent, FillLiquidity, OrderSide, PositionSide,
-        PrivateEvent, PrivateEventKind,
+        ArbitrageBundle, BundleStatus, FillEvent, FillLiquidity, OrderSide as ExecutionOrderSide,
+        PositionSide, PrivateEvent, PrivateEventKind,
     };
     use crate::market::{BookLevel, ExchangeSymbol, OrderBook5};
 
@@ -491,7 +519,7 @@ mod tests {
             trade_id: "trade-1".to_string(),
             client_order_id: Some("client-1".to_string()),
             exchange_order_id: Some("order-1".to_string()),
-            side: OrderSide::Buy,
+            side: ExecutionOrderSide::Buy,
             position_side: PositionSide::Long,
             liquidity: FillLiquidity::Taker,
             price: 100.0,
@@ -513,7 +541,7 @@ mod tests {
             trade_id: "trade-2".to_string(),
             client_order_id: Some("client-2".to_string()),
             exchange_order_id: Some("order-2".to_string()),
-            side: OrderSide::Sell,
+            side: ExecutionOrderSide::Sell,
             position_side: PositionSide::Short,
             liquidity: FillLiquidity::Taker,
             price: 101.0,
@@ -570,5 +598,56 @@ mod tests {
             .risk_state
             .private_stream_health
             .contains_key(&ExchangeId::Binance));
+    }
+
+    #[test]
+    fn runtime_should_block_gate_one_way_opposite_direction_conflict() {
+        let now = Utc::now();
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.thresholds.min_open_maker_taker_net_edge = -1.0;
+        config.thresholds.min_display_raw_spread = -1.0;
+        config.risk.max_book_age_ms = 10_000;
+        let mut state = CrossArbRuntimeState::new(config, now);
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let existing = ArbitrageBundle::new(
+            "gate-long-existing",
+            RuntimeMode::LiveSmall,
+            symbol.clone(),
+            ExchangeId::Gate,
+            ExchangeId::Binance,
+            ExchangeId::Gate,
+            ExchangeId::Binance,
+            100.0,
+            now,
+        );
+        state.register_bundle_position(&existing, 1.0, 0.01, now);
+        state
+            .position_manager
+            .bundle_mut("gate-long-existing")
+            .unwrap()
+            .long_leg
+            .filled_qty = 1.0;
+
+        state.update_from_market_snapshots(
+            &symbol,
+            &[
+                MarketSnapshot::healthy(book(ExchangeId::Gate, 104.0, 105.0)),
+                MarketSnapshot::healthy(book(ExchangeId::Binance, 100.0, 101.0)),
+            ],
+            now,
+        );
+
+        let blocked = state
+            .opportunities
+            .iter()
+            .find(|opportunity| {
+                opportunity.maker_exchange == ExchangeId::Gate
+                    && matches!(opportunity.maker_side, StrategyOrderSide::Sell)
+            })
+            .expect("gate short-maker opportunity");
+        assert!(!blocked.can_open);
+        assert!(blocked
+            .reject_reasons
+            .contains(&RejectReason::ExchangePositionLimitExceeded));
     }
 }

@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout, Duration as TokioDuration};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -38,6 +39,16 @@ use crate::market::{
 
 type HmacSha256 = Hmac<Sha256>;
 type HmacSha512 = Hmac<Sha512>;
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("{exchange} private REST {endpoint:?}: {class:?} code={code:?} message={message}")]
+pub struct PrivateRestError {
+    pub exchange: ExchangeId,
+    pub class: ExchangeErrorClass,
+    pub endpoint: Option<String>,
+    pub code: Option<String>,
+    pub message: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PrivatePerpExchange {
@@ -315,25 +326,17 @@ impl PrivateRestTransport for ReqwestPrivateRestTransport {
             })?
         };
         if !status.is_success() {
-            anyhow::bail!(
-                "{} private REST {} {} failed: http={} body={}",
-                request.exchange,
-                request.method.as_str(),
-                request.path,
-                status.as_u16(),
-                value
-            );
+            return Err(private_rest_http_error(&request, status.as_u16(), &value).into());
         }
         normalize_private_rest_response(request.exchange, value)
     }
 }
 
-#[derive(Clone)]
 pub struct PrivatePerpTradingAdapter<P, T> {
     exchange: ExchangeId,
     protocol: P,
     transport: T,
-    position_mode: PositionMode,
+    position_mode: Mutex<PositionMode>,
     instruments: HashMap<CanonicalSymbol, InstrumentMeta>,
 }
 
@@ -347,13 +350,16 @@ where
             exchange: protocol.exchange().exchange_id(),
             protocol,
             transport,
-            position_mode: PositionMode::OneWay,
+            position_mode: Mutex::new(PositionMode::OneWay),
             instruments: HashMap::new(),
         }
     }
 
     pub fn with_position_mode(mut self, position_mode: PositionMode) -> Self {
-        self.position_mode = position_mode;
+        *self
+            .position_mode
+            .get_mut()
+            .expect("position mode mutex poisoned") = position_mode;
         self
     }
 
@@ -551,6 +557,21 @@ where
         }
         Ok(command)
     }
+
+    fn current_position_mode(&self) -> Result<PositionMode> {
+        self.position_mode
+            .lock()
+            .map(|guard| *guard)
+            .map_err(|_| anyhow!("position mode mutex poisoned"))
+    }
+
+    fn set_local_position_mode(&self, mode: PositionMode) -> Result<()> {
+        *self
+            .position_mode
+            .lock()
+            .map_err(|_| anyhow!("position mode mutex poisoned"))? = mode;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -571,11 +592,12 @@ where
         ensure_order_supported(self.exchange(), &command, self.capabilities())?;
         let command = self.normalize_order_command(command)?;
         let protocol_command = self.order_command_for_protocol(&command);
+        let position_mode = self.current_position_mode()?;
         let value = self
             .transport
             .execute(
                 self.protocol
-                    .place_order(&protocol_command, self.position_mode)?,
+                    .place_order(&protocol_command, position_mode)?,
             )
             .await?;
         let order_id = response_string(&value, &["orderId", "id"])
@@ -788,7 +810,7 @@ where
             symbol,
             &value,
             Utc::now(),
-            self.position_mode,
+            self.current_position_mode()?,
         )
         .ok_or_else(|| {
             anyhow!(
@@ -881,6 +903,7 @@ where
             .transport
             .execute(self.protocol.set_position_mode(&command)?)
             .await?;
+        self.set_local_position_mode(command.mode)?;
         Ok(PositionModeAck {
             exchange: command.exchange,
             mode: command.mode,
@@ -898,12 +921,13 @@ where
         )?;
         let command = self.normalize_close_command(command)?;
         let protocol_command = self.close_command_for_protocol(&command);
+        let position_mode = self.current_position_mode()?;
         let value = self
             .transport
             .execute(close_position_spec(
                 self.exchange(),
                 &protocol_command,
-                self.position_mode,
+                position_mode,
             )?)
             .await?;
         let order_id = response_string(&value, &["orderId", "id"])
@@ -2071,28 +2095,171 @@ pub fn gate_ws_signature(secret: &str, channel: &str, event: &str, timestamp: i6
 fn normalize_private_rest_response(exchange: ExchangeId, value: Value) -> Result<Value> {
     match exchange {
         ExchangeId::Bitget => {
-            let code = value.get("code").and_then(Value::as_str).unwrap_or("00000");
+            let code = str_field(&value, &["code"]).unwrap_or_else(|| "00000".to_string());
             if code != "00000" {
                 let msg = value
                     .get("msg")
                     .or_else(|| value.get("message"))
                     .and_then(Value::as_str)
                     .unwrap_or("bitget private REST error");
-                anyhow::bail!("bitget private REST error code={code} msg={msg}");
+                return Err(PrivateRestError {
+                    exchange,
+                    class: classify_bitget_rest_error(&code, msg),
+                    endpoint: None,
+                    code: Some(code),
+                    message: msg.to_string(),
+                }
+                .into());
             }
             Ok(value)
         }
         ExchangeId::Gate => {
-            if let Some(label) = value.get("label").and_then(Value::as_str) {
+            if let Some(label) = str_field(&value, &["label"]) {
                 let message = value
                     .get("message")
                     .and_then(Value::as_str)
                     .unwrap_or("gate private REST error");
-                anyhow::bail!("gate private REST error label={label} message={message}");
+                return Err(PrivateRestError {
+                    exchange,
+                    class: classify_gate_rest_error(&label, message),
+                    endpoint: None,
+                    code: Some(label),
+                    message: message.to_string(),
+                }
+                .into());
             }
             Ok(value)
         }
         _ => Ok(value),
+    }
+}
+
+fn private_rest_http_error(
+    request: &PrivateRestRequestSpec,
+    http_status: u16,
+    value: &Value,
+) -> PrivateRestError {
+    let code = str_field(value, &["code", "label"]).or_else(|| Some(http_status.to_string()));
+    let message = str_field(value, &["msg", "message"])
+        .unwrap_or_else(|| format!("http status {http_status} body={value}"));
+    let class = match http_status {
+        401 => ExchangeErrorClass::Authentication,
+        403 => ExchangeErrorClass::Permission,
+        404 => ExchangeErrorClass::OrderNotFound,
+        408 => ExchangeErrorClass::Timeout,
+        418 | 429 => ExchangeErrorClass::RateLimited,
+        500..=599 => ExchangeErrorClass::ExchangeUnavailable,
+        _ => match request.exchange {
+            ExchangeId::Bitget => {
+                classify_bitget_rest_error(code.as_deref().unwrap_or_default(), &message)
+            }
+            ExchangeId::Gate => {
+                classify_gate_rest_error(code.as_deref().unwrap_or_default(), &message)
+            }
+            _ => ExchangeErrorClass::Unknown,
+        },
+    };
+    PrivateRestError {
+        exchange: request.exchange.clone(),
+        class,
+        endpoint: Some(format!("{} {}", request.method.as_str(), request.path)),
+        code,
+        message,
+    }
+}
+
+fn classify_bitget_rest_error(code: &str, message: &str) -> ExchangeErrorClass {
+    let text = format!("{code} {message}").to_ascii_lowercase();
+    if text.contains("sign")
+        || text.contains("api key")
+        || text.contains("apikey")
+        || text.contains("auth")
+        || text.contains("login")
+    {
+        ExchangeErrorClass::Authentication
+    } else if text.contains("permission") || text.contains("forbidden") {
+        ExchangeErrorClass::Permission
+    } else if text.contains("rate") || text.contains("too many") || text.contains("limit") {
+        ExchangeErrorClass::RateLimited
+    } else if text.contains("balance")
+        || text.contains("margin")
+        || text.contains("insufficient")
+        || text.contains("not enough")
+    {
+        ExchangeErrorClass::InsufficientBalance
+    } else if text.contains("position")
+        && (text.contains("insufficient") || text.contains("not enough"))
+    {
+        ExchangeErrorClass::InsufficientPosition
+    } else if text.contains("duplicate") || text.contains("clientoid") && text.contains("exist") {
+        ExchangeErrorClass::DuplicateClientOrderId
+    } else if text.contains("not found")
+        || text.contains("not exist")
+        || text.contains("order does not exist")
+    {
+        ExchangeErrorClass::OrderNotFound
+    } else if text.contains("precision")
+        || text.contains("minimum")
+        || text.contains("min")
+        || text.contains("size")
+        || text.contains("price")
+    {
+        ExchangeErrorClass::Precision
+    } else if text.contains("risk") || text.contains("reject") {
+        ExchangeErrorClass::RiskRejected
+    } else if text.contains("maintenance") {
+        ExchangeErrorClass::Maintenance
+    } else {
+        ExchangeErrorClass::Unknown
+    }
+}
+
+fn classify_gate_rest_error(label: &str, message: &str) -> ExchangeErrorClass {
+    let text = format!("{label} {message}").to_ascii_lowercase();
+    if text.contains("invalid_key")
+        || text.contains("invalid_signature")
+        || text.contains("auth")
+        || text.contains("signature")
+    {
+        ExchangeErrorClass::Authentication
+    } else if text.contains("permission") || text.contains("forbidden") {
+        ExchangeErrorClass::Permission
+    } else if text.contains("too_fast") || text.contains("rate") || text.contains("too many") {
+        ExchangeErrorClass::RateLimited
+    } else if text.contains("balance")
+        || text.contains("margin")
+        || text.contains("insufficient")
+        || text.contains("not enough")
+    {
+        ExchangeErrorClass::InsufficientBalance
+    } else if text.contains("position")
+        && (text.contains("insufficient") || text.contains("not enough"))
+    {
+        ExchangeErrorClass::InsufficientPosition
+    } else if text.contains("duplicated")
+        || text.contains("duplicate")
+        || text.contains("client") && (text.contains("exist") || text.contains("repeated"))
+    {
+        ExchangeErrorClass::DuplicateClientOrderId
+    } else if text.contains("order_not_found")
+        || text.contains("not_found")
+        || text.contains("not found")
+        || text.contains("not exist")
+    {
+        ExchangeErrorClass::OrderNotFound
+    } else if text.contains("invalid_param")
+        || text.contains("invalid_price")
+        || text.contains("invalid_size")
+        || text.contains("precision")
+        || text.contains("minimum")
+    {
+        ExchangeErrorClass::Precision
+    } else if text.contains("risk") || text.contains("reject") {
+        ExchangeErrorClass::RiskRejected
+    } else if text.contains("maintenance") {
+        ExchangeErrorClass::Maintenance
+    } else {
+        ExchangeErrorClass::Unknown
     }
 }
 
@@ -3933,6 +4100,8 @@ mod tests {
         )
         .unwrap_err();
         assert!(bitget.to_string().contains("40010"));
+        let bitget = bitget.downcast_ref::<PrivateRestError>().unwrap();
+        assert_eq!(bitget.class, ExchangeErrorClass::Unknown);
 
         let gate = normalize_private_rest_response(
             ExchangeId::Gate,
@@ -3940,6 +4109,53 @@ mod tests {
         )
         .unwrap_err();
         assert!(gate.to_string().contains("INVALID_KEY"));
+        let gate = gate.downcast_ref::<PrivateRestError>().unwrap();
+        assert_eq!(gate.class, ExchangeErrorClass::Authentication);
+    }
+
+    #[test]
+    fn private_rest_error_classifier_should_cover_recovery_classes() {
+        assert_eq!(
+            classify_gate_rest_error("ORDER_NOT_FOUND", "order not found"),
+            ExchangeErrorClass::OrderNotFound
+        );
+        assert_eq!(
+            classify_gate_rest_error("INSUFFICIENT_AVAILABLE", "not enough balance"),
+            ExchangeErrorClass::InsufficientBalance
+        );
+        assert_eq!(
+            classify_bitget_rest_error("40762", "clientOid already exists"),
+            ExchangeErrorClass::DuplicateClientOrderId
+        );
+        assert_eq!(
+            classify_bitget_rest_error("429", "too many requests"),
+            ExchangeErrorClass::RateLimited
+        );
+    }
+
+    #[tokio::test]
+    async fn private_perp_position_mode_should_update_local_state_after_set() {
+        let transport = MockTransport::new(json!({"code": "00000", "msg": "success"}));
+        let adapter = PrivatePerpTradingAdapter::new(BitgetPrivatePerpProtocol, transport.clone());
+
+        adapter
+            .set_position_mode(PositionModeCommand {
+                exchange: ExchangeId::Bitget,
+                mode: PositionMode::Hedge,
+                requested_at: Utc::now(),
+            })
+            .await
+            .unwrap();
+
+        let mut cmd = command(ExchangeId::Bitget, "BTCUSDT");
+        cmd.position_side = PositionSide::Short;
+        cmd.side = OrderSide::Sell;
+        adapter.place_order(cmd).await.unwrap();
+        let seen = transport.seen.lock().unwrap();
+        let body = seen.last().unwrap().body.as_ref().unwrap();
+        assert_eq!(body["side"], "sell");
+        assert_eq!(body["tradeSide"], "open");
+        assert!(body.get("reduceOnly").is_none());
     }
 
     #[test]

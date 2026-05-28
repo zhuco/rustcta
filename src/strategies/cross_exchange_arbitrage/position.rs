@@ -1,5 +1,6 @@
 //! Position accounting primitives for cross-exchange arbitrage bundles.
 
+use super::risk::OneWayExposureKey;
 use crate::execution::{
     recommended_actions_for_severity, ArbitrageBundle, BundleStatus, ExchangePosition, FillEvent,
     OrderSide, PositionSide, ReconcileAction, ReconcileSeverity,
@@ -516,6 +517,10 @@ impl PositionManager {
         self.bundles.get(bundle_id)
     }
 
+    pub fn bundle_mut(&mut self, bundle_id: &str) -> Option<&mut BundlePosition> {
+        self.bundles.get_mut(bundle_id)
+    }
+
     pub fn bundles(&self) -> impl Iterator<Item = &BundlePosition> {
         self.bundles.values()
     }
@@ -701,6 +706,23 @@ impl PositionManager {
                 ))
         });
         result
+    }
+
+    pub fn active_one_way_exposure_keys(&self) -> Vec<OneWayExposureKey> {
+        self.bundles
+            .values()
+            .filter(|bundle| !bundle.status.is_terminal())
+            .flat_map(|bundle| {
+                [&bundle.long_leg, &bundle.short_leg]
+                    .into_iter()
+                    .filter(|leg| leg.filled_qty > 0.0 || leg.remaining_qty > 0.0)
+                    .map(|leg| OneWayExposureKey {
+                        exchange: leg.exchange.clone(),
+                        canonical_symbol: bundle.canonical_symbol.clone(),
+                        side: leg.side,
+                    })
+            })
+            .collect()
     }
 
     pub fn reconcile_exchange_positions(
