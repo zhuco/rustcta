@@ -638,6 +638,7 @@ fn disabled_trading_capabilities() -> TradingCapabilities {
         supports_leverage: false,
         supports_position_mode_change: false,
         supports_close_position: false,
+        supports_countdown_cancel_all: false,
     }
 }
 

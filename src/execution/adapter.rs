@@ -19,6 +19,7 @@ pub struct TradingCapabilities {
     pub supports_leverage: bool,
     pub supports_position_mode_change: bool,
     pub supports_close_position: bool,
+    pub supports_countdown_cancel_all: bool,
 }
 
 impl Default for TradingCapabilities {
@@ -35,6 +36,7 @@ impl Default for TradingCapabilities {
             supports_leverage: true,
             supports_position_mode_change: true,
             supports_close_position: true,
+            supports_countdown_cancel_all: false,
         }
     }
 }
@@ -144,6 +146,64 @@ impl CancelAllAck {
             accepted: false,
             cancelled_orders: 0,
             message: Some("dry-run: cancel-all was not sent to adapter".to_string()),
+            acknowledged_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CountdownCancelAllCommand {
+    pub exchange: ExchangeId,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub timeout_secs: u32,
+    pub requested_at: DateTime<Utc>,
+}
+
+impl CountdownCancelAllCommand {
+    pub fn set_for_symbol(
+        exchange: ExchangeId,
+        exchange_symbol: ExchangeSymbol,
+        timeout_secs: u32,
+        requested_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            exchange,
+            exchange_symbol: Some(exchange_symbol),
+            timeout_secs,
+            requested_at,
+        }
+    }
+
+    pub fn cancel(exchange: ExchangeId, requested_at: DateTime<Utc>) -> Self {
+        Self {
+            exchange,
+            exchange_symbol: None,
+            timeout_secs: 0,
+            requested_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CountdownCancelAllAck {
+    pub exchange: ExchangeId,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub timeout_secs: u32,
+    pub trigger_time: Option<DateTime<Utc>>,
+    pub accepted: bool,
+    pub message: Option<String>,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+impl CountdownCancelAllAck {
+    pub fn dry_run(command: &CountdownCancelAllCommand, acknowledged_at: DateTime<Utc>) -> Self {
+        Self {
+            exchange: command.exchange.clone(),
+            exchange_symbol: command.exchange_symbol.clone(),
+            timeout_secs: command.timeout_secs,
+            trigger_time: None,
+            accepted: false,
+            message: Some("dry-run: countdown cancel-all was not sent to adapter".to_string()),
             acknowledged_at,
         }
     }
@@ -758,6 +818,16 @@ pub trait TradingAdapter: Send + Sync {
     ) -> anyhow::Result<ClosePositionAck> {
         anyhow::bail!(
             "trading adapter {} does not support close position",
+            self.exchange()
+        )
+    }
+
+    async fn set_countdown_cancel_all(
+        &self,
+        _command: CountdownCancelAllCommand,
+    ) -> anyhow::Result<CountdownCancelAllAck> {
+        anyhow::bail!(
+            "trading adapter {} does not support countdown cancel-all",
             self.exchange()
         )
     }

@@ -1,7 +1,8 @@
 use crate::execution::{
     AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
-    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand, LeverageAck,
-    LeverageCommand, OrderAck, OrderCommand, PositionModeAck, PositionModeCommand, TradingAdapter,
+    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand,
+    CountdownCancelAllAck, CountdownCancelAllCommand, LeverageAck, LeverageCommand, OrderAck,
+    OrderCommand, PositionModeAck, PositionModeCommand, TradingAdapter,
 };
 use crate::market::ExchangeId;
 use anyhow::{anyhow, Result};
@@ -19,8 +20,8 @@ pub struct ExecutionRouter {
 mod tests {
     use super::*;
     use crate::execution::{
-        ExchangeBalance, ExchangePosition, OrderCommandStatus, OrderQuery, OrderState,
-        PositionMode, TradingCapabilities,
+        CountdownCancelAllCommand, ExchangeBalance, ExchangePosition, OrderCommandStatus,
+        OrderQuery, OrderState, PositionMode, TradingCapabilities,
     };
     use crate::market::{CanonicalSymbol, ExchangeSymbol};
     use async_trait::async_trait;
@@ -123,6 +124,29 @@ mod tests {
 
         assert!(!ack.accepted);
         assert_eq!(adapter.leverage_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn router_should_dry_run_countdown_cancel_without_adapter_side_effects() {
+        let adapter = Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Gate,
+            leverage_calls: AtomicUsize::new(0),
+        });
+        let mut router = ExecutionRouter::new(true);
+        router.register_adapter(adapter.clone());
+
+        let ack = router
+            .route_set_countdown_cancel_all(CountdownCancelAllCommand::set_for_symbol(
+                ExchangeId::Gate,
+                ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                30,
+                Utc::now(),
+            ))
+            .await
+            .expect("dry-run countdown cancel-all ack");
+
+        assert!(!ack.accepted);
+        assert_eq!(ack.timeout_secs, 30);
     }
 
     #[test]
@@ -283,5 +307,22 @@ impl ExecutionRouter {
             )
         })?;
         adapter.close_position(command).await
+    }
+
+    pub async fn route_set_countdown_cancel_all(
+        &self,
+        command: CountdownCancelAllCommand,
+    ) -> Result<CountdownCancelAllAck> {
+        if self.dry_run {
+            return Ok(CountdownCancelAllAck::dry_run(&command, Utc::now()));
+        }
+
+        let adapter = self.adapters.get(&command.exchange).ok_or_else(|| {
+            anyhow!(
+                "missing trading adapter for exchange {}",
+                command.exchange.as_str()
+            )
+        })?;
+        adapter.set_countdown_cancel_all(command).await
     }
 }

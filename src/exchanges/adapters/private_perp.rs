@@ -25,12 +25,13 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::core::types::{Fee, MarketType, OrderStatus as CoreOrderStatus};
 use crate::execution::{
     AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
-    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
-    ExchangeErrorClass, ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck,
-    LeverageCommand, MarginMode, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide,
-    OrderState, OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide,
-    PrivateErrorEvent, PrivateEvent, PrivateEventKind, SymbolAccountConfig, TimeInForce,
-    TradeFeeSnapshot, TradingAdapter, TradingCapabilities,
+    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand,
+    CountdownCancelAllAck, CountdownCancelAllCommand, ExchangeBalance, ExchangeErrorClass,
+    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand,
+    MarginMode, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState,
+    OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide, PrivateErrorEvent,
+    PrivateEvent, PrivateEventKind, SymbolAccountConfig, TimeInForce, TradeFeeSnapshot,
+    TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
     canonical_from_exchange_symbol, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
@@ -196,6 +197,10 @@ pub trait PrivatePerpProtocol {
     fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec>;
     fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec>;
     fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec>;
+    fn set_countdown_cancel_all(
+        &self,
+        command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec>;
 
     fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest>;
     fn ws_subscribe(
@@ -272,7 +277,11 @@ impl ReqwestPrivateRestTransport {
     ) -> Result<BTreeMap<String, String>> {
         match self.exchange {
             PrivatePerpExchange::Bitget => bitget_rest_headers(&self.auth, request, timestamp),
-            PrivatePerpExchange::Gate => gate_rest_headers(&self.auth, request, timestamp),
+            PrivatePerpExchange::Gate => {
+                let mut headers = gate_rest_headers(&self.auth, request, timestamp)?;
+                headers.insert("X-Gate-Size-Decimal".to_string(), "1".to_string());
+                Ok(headers)
+            }
         }
     }
 
@@ -918,6 +927,30 @@ where
         })
     }
 
+    async fn set_countdown_cancel_all(
+        &self,
+        command: CountdownCancelAllCommand,
+    ) -> Result<CountdownCancelAllAck> {
+        ensure_capability(
+            self.exchange(),
+            self.capabilities().supports_countdown_cancel_all,
+            "set countdown cancel-all",
+        )?;
+        let value = self
+            .transport
+            .execute(self.protocol.set_countdown_cancel_all(&command)?)
+            .await?;
+        Ok(CountdownCancelAllAck {
+            exchange: command.exchange,
+            exchange_symbol: command.exchange_symbol,
+            timeout_secs: command.timeout_secs,
+            trigger_time: parse_countdown_trigger_time(&value),
+            accepted: true,
+            message: response_string(&value, &["msg", "message"]),
+            acknowledged_at: Utc::now(),
+        })
+    }
+
     async fn close_position(&self, command: ClosePositionCommand) -> Result<ClosePositionAck> {
         ensure_capability(
             self.exchange(),
@@ -973,6 +1006,7 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
         supports_leverage: true,
         supports_position_mode_change: matches!(exchange, ExchangeId::Bitget),
         supports_close_position: true,
+        supports_countdown_cancel_all: matches!(exchange, ExchangeId::Gate),
     }
 }
 
@@ -1822,6 +1856,13 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         })))
     }
 
+    fn set_countdown_cancel_all(
+        &self,
+        _command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec> {
+        anyhow::bail!("bitget mix futures countdown cancel-all is not supported by this adapter")
+    }
+
     fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest> {
         let passphrase = auth
             .passphrase
@@ -2022,8 +2063,33 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
         ))
     }
 
-    fn amend_order(&self, _command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
-        anyhow::bail!("gate order amendment is not wired in the private perp adapter")
+    fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        let order_id = gate_order_lookup_id(
+            command.exchange_order_id.as_deref(),
+            command.client_order_id.as_deref(),
+        )?;
+        if command.new_quantity.is_some() {
+            anyhow::bail!(
+                "gate amend size requires original order side and is intentionally not wired"
+            );
+        }
+        if command.new_price.is_none() && command.new_client_order_id.is_none() {
+            anyhow::bail!("gate amend requires new price or new client order id");
+        }
+        let mut body = json!({});
+        if let Some(price) = command.new_price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        if let Some(client_order_id) = &command.new_client_order_id {
+            set_str(&mut body, "amend_text", gate_client_text(client_order_id));
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Gate,
+            PrivateRestMethod::Patch,
+            gate_order_path(order_id),
+        )
+        .with_query("contract", &command.exchange_symbol.symbol)
+        .with_body(body))
     }
 
     fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
@@ -2043,6 +2109,24 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
             "gate futures adapter does not support position mode changes; requested {:?}",
             command.mode
         )
+    }
+
+    fn set_countdown_cancel_all(
+        &self,
+        command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec> {
+        let mut body = json!({
+            "timeout": command.timeout_secs,
+        });
+        if let Some(symbol) = &command.exchange_symbol {
+            set_str(&mut body, "contract", &symbol.symbol);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Gate,
+            PrivateRestMethod::Post,
+            "/futures/usdt/countdown_cancel_all",
+        )
+        .with_body(body))
     }
 
     fn ws_login(&self, auth: &PrivateWsAuth, timestamp: i64) -> Result<PrivateWsRequest> {
@@ -2484,6 +2568,21 @@ fn response_items(value: &Value) -> Vec<Value> {
 fn response_string(value: &Value, keys: &[&str]) -> Option<String> {
     let data = response_data(value);
     str_field(&data, keys).or_else(|| str_field(value, keys))
+}
+
+fn parse_countdown_trigger_time(value: &Value) -> Option<DateTime<Utc>> {
+    let data = response_data(value);
+    i64_field(
+        &data,
+        &["trigger_time", "triggerTime", "cancel_time", "cancelTime"],
+    )
+    .and_then(|timestamp| {
+        if timestamp > 1_000_000_000_000 {
+            DateTime::<Utc>::from_timestamp_millis(timestamp)
+        } else {
+            DateTime::<Utc>::from_timestamp(timestamp, 0)
+        }
+    })
 }
 
 fn cancelled_count(value: &Value) -> usize {
@@ -3283,6 +3382,16 @@ fn f64_field(value: &Value, keys: &[&str]) -> Option<f64> {
     })
 }
 
+fn i64_field(value: &Value, keys: &[&str]) -> Option<i64> {
+    keys.iter().find_map(|key| {
+        value.get(*key).and_then(|v| match v {
+            Value::Number(number) => number.as_i64(),
+            Value::String(text) => text.parse::<i64>().ok(),
+            _ => None,
+        })
+    })
+}
+
 fn bool_field(value: &Value, keys: &[&str]) -> bool {
     keys.iter().any(|key| {
         value.get(*key).is_some_and(|v| match v {
@@ -3778,6 +3887,68 @@ mod tests {
     }
 
     #[test]
+    fn gate_should_build_amend_and_countdown_cancel_specs() {
+        let amend = GatePrivatePerpProtocol
+            .amend_order(&AmendOrderCommand {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                client_order_id: Some("crossarb-live-small-bundleabcdef-maker-1".to_string()),
+                exchange_order_id: None,
+                new_client_order_id: Some("crossarb-live-small-bundleabcdef-maker-2".to_string()),
+                new_quantity: None,
+                new_price: Some(65_001.5),
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(amend.method, PrivateRestMethod::Patch);
+        assert_eq!(
+            amend.path,
+            "/futures/usdt/orders/t-crossarb-live-small-dc1f310f"
+        );
+        assert_eq!(
+            amend.query.get("contract").map(String::as_str),
+            Some("BTC_USDT")
+        );
+        let body = amend.body.unwrap();
+        assert_eq!(body["price"], "65001.5");
+        assert_eq!(body["amend_text"], "t-crossarb-live-small-acafe971");
+
+        let countdown = GatePrivatePerpProtocol
+            .set_countdown_cancel_all(&CountdownCancelAllCommand::set_for_symbol(
+                ExchangeId::Gate,
+                ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                30,
+                Utc::now(),
+            ))
+            .unwrap();
+        assert_eq!(countdown.method, PrivateRestMethod::Post);
+        assert_eq!(countdown.path, "/futures/usdt/countdown_cancel_all");
+        let body = countdown.body.unwrap();
+        assert_eq!(body["timeout"], 30);
+        assert_eq!(body["contract"], "BTC_USDT");
+    }
+
+    #[test]
+    fn gate_amend_should_reject_size_without_original_side() {
+        let err = GatePrivatePerpProtocol
+            .amend_order(&AmendOrderCommand {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                client_order_id: Some("client-1".to_string()),
+                exchange_order_id: None,
+                new_client_order_id: None,
+                new_quantity: Some(2.0),
+                new_price: None,
+                requested_at: Utc::now(),
+            })
+            .unwrap_err();
+
+        assert!(err.to_string().contains("original order side"));
+    }
+
+    #[test]
     fn private_perp_should_parse_trade_fee_and_account_config_readbacks() {
         let now = Utc::now();
         let bitget_fee = parse_trade_fee_snapshot(
@@ -4165,6 +4336,30 @@ mod tests {
         assert_eq!(positions[0].quantity, 0.0025);
     }
 
+    #[tokio::test]
+    async fn gate_adapter_should_route_countdown_cancel_and_parse_trigger_time() {
+        let transport = MockTransport::new(json!({
+            "trigger_time": 1_700_000_030
+        }));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport.clone());
+
+        let ack = adapter
+            .set_countdown_cancel_all(CountdownCancelAllCommand::set_for_symbol(
+                ExchangeId::Gate,
+                ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                30,
+                Utc::now(),
+            ))
+            .await
+            .unwrap();
+
+        assert!(ack.accepted);
+        assert_eq!(ack.timeout_secs, 30);
+        assert_eq!(ack.trigger_time.unwrap().timestamp(), 1_700_000_030);
+        let seen = transport.seen.lock().unwrap();
+        assert_eq!(seen[0].path, "/futures/usdt/countdown_cancel_all");
+    }
+
     #[test]
     fn gate_protocol_should_use_payload_contract_size_when_present() {
         let now = Utc::now();
@@ -4261,6 +4456,10 @@ mod tests {
         let headers = transport.signed_headers(&spec, 1_700_000_000).unwrap();
 
         assert_eq!(headers.get("KEY").map(String::as_str), Some("key"));
+        assert_eq!(
+            headers.get("X-Gate-Size-Decimal").map(String::as_str),
+            Some("1")
+        );
         assert_eq!(
             headers.get("Timestamp").map(String::as_str),
             Some("1700000000")
