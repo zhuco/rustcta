@@ -382,7 +382,7 @@ mod tests {
         gate.account_id = Some("20011".to_string());
         gate.env_prefix = Some("GATE_TEST_RUNTIME".to_string());
         gate.demo_trading = true;
-        gate.private_ws_url = Some("wss://fx-ws-testnet.gateio.ws/v4/ws/usdt".to_string());
+        gate.private_ws_url = Some("wss://ws-testnet.gate.com/v4/ws/futures/usdt".to_string());
         std::env::set_var("GATE_TEST_RUNTIME_API_KEY", "key");
         std::env::set_var("GATE_TEST_RUNTIME_API_SECRET", "secret");
 
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(specs[0].exchange, PrivatePerpExchange::Gate);
         assert_eq!(specs[0].auth.account_id.as_deref(), Some("20011"));
         assert!(specs[0].auth.demo_trading);
-        assert_eq!(specs[0].url, "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt");
+        assert_eq!(specs[0].url, "wss://ws-testnet.gate.com/v4/ws/futures/usdt");
 
         std::env::remove_var("GATE_TEST_RUNTIME_API_KEY");
         std::env::remove_var("GATE_TEST_RUNTIME_API_SECRET");

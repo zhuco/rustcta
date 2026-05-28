@@ -3853,11 +3853,11 @@ mod tests {
             },
             &[],
             1_700_000_000,
-            "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt",
+            "wss://ws-testnet.gate.com/v4/ws/futures/usdt",
         )
         .unwrap();
 
-        assert_eq!(endpoint.url, "wss://fx-ws-testnet.gateio.ws/v4/ws/usdt");
+        assert_eq!(endpoint.url, "wss://ws-testnet.gate.com/v4/ws/futures/usdt");
         assert_eq!(endpoint.exchange, ExchangeId::Gate);
     }
 
