@@ -1265,11 +1265,14 @@ async fn ws_market_execution_loop(
             if closed_or_attempted {
                 continue;
             }
-            if has_active_bundle(&runtime_guard) || execution_guard.pending_maker_count() > 0 {
+            if execution_guard.pending_maker_count() > 0 {
                 continue;
             }
 
             for symbol in &config.universe.symbols {
+                if has_active_bundle_for_symbol(&runtime_guard, symbol) {
+                    continue;
+                }
                 let Some(snapshots) = snapshots_by_symbol.get(symbol) else {
                     continue;
                 };
@@ -1308,7 +1311,7 @@ async fn ws_market_execution_loop(
                     }
                     break;
                 }
-                if execution_guard.pending_maker_count() > 0 || has_active_bundle(&runtime_guard) {
+                if execution_guard.pending_maker_count() > 0 {
                     break;
                 }
             }
@@ -1508,17 +1511,32 @@ async fn snapshots_from_market_cache(
     snapshots_by_symbol
 }
 
-fn has_active_bundle(runtime: &CrossArbRuntime) -> bool {
+fn has_active_bundle_for_symbol(runtime: &CrossArbRuntime, symbol: &CanonicalSymbol) -> bool {
     runtime.state.open_bundles.values().any(|bundle| {
-        matches!(
-            bundle.status,
-            SimulatedBundleStatus::MakerPending
-                | SimulatedBundleStatus::MakerFilled
-                | SimulatedBundleStatus::Hedging
-                | SimulatedBundleStatus::OpenSimulated
-                | SimulatedBundleStatus::ClosingSimulated
-                | SimulatedBundleStatus::OrphanLeg
-        )
+        bundle.route.long_exchange != bundle.route.short_exchange
+            && matches!(
+                bundle.status,
+                SimulatedBundleStatus::MakerPending
+                    | SimulatedBundleStatus::MakerFilled
+                    | SimulatedBundleStatus::Hedging
+                    | SimulatedBundleStatus::OpenSimulated
+                    | SimulatedBundleStatus::ClosingSimulated
+                    | SimulatedBundleStatus::OrphanLeg
+            )
+            && runtime
+                .state
+                .position_manager
+                .bundle(&bundle.bundle_id)
+                .map(|position| &position.canonical_symbol == symbol)
+                .unwrap_or_else(|| {
+                    runtime
+                        .state
+                        .opportunities
+                        .iter()
+                        .find(|opportunity| opportunity.opportunity_id == bundle.opportunity_id)
+                        .map(|opportunity| &opportunity.canonical_symbol == symbol)
+                        .unwrap_or(false)
+                })
     })
 }
 
