@@ -70,6 +70,7 @@ struct PreflightCheck {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenv::dotenv().ok();
     let args = Args::parse();
     let config = load_config(&args.config)?;
     let mut checks = Vec::new();
@@ -312,7 +313,7 @@ async fn check_private_exchange(
     config: &CrossExchangeArbitrageConfig,
     timeout_ms: u64,
 ) -> Vec<PreflightCheck> {
-    if matches!(exchange, ExchangeId::Bitget | ExchangeId::Gate) {
+    if rustcta::strategies::cross_exchange_arbitrage::private_perp_exchange(exchange).is_some() {
         return check_private_trading_adapter(exchange, config, timeout_ms).await;
     }
 
@@ -497,7 +498,7 @@ async fn check_private_trading_adapter(
         );
 
         let mut fill_query =
-            FillQuery::for_symbol(exchange.clone(), symbol.clone(), exchange_symbol);
+            FillQuery::for_symbol(exchange.clone(), symbol.clone(), exchange_symbol.clone());
         fill_query.limit = Some(5);
         checks.push(
             timed(
@@ -508,15 +509,42 @@ async fn check_private_trading_adapter(
             .await
             .map_message(|trades| format!("loaded {} recent fills", trades.len())),
         );
+        checks.push(
+            timed(
+                format!("{}.{}.private.trade_fee", exchange.as_str(), symbol),
+                timeout_ms,
+                adapter.get_trade_fee(&exchange_symbol),
+            )
+            .await
+            .map_message(|fee| format!("maker_fee={}, taker_fee={}", fee.maker, fee.taker)),
+        );
+        checks.push(
+            timed(
+                format!(
+                    "{}.{}.private.symbol_account_config",
+                    exchange.as_str(),
+                    symbol
+                ),
+                timeout_ms,
+                adapter.get_symbol_account_config(&exchange_symbol),
+            )
+            .await
+            .map_message(|config| {
+                format!(
+                    "position_mode={:?}, margin_mode={:?}, leverage={:?}, max_leverage={:?}",
+                    config.position_mode, config.margin_mode, config.leverage, config.max_leverage
+                )
+            }),
+        );
     }
 
     checks.push(warn(
         format!("{}.private.position_mode", exchange.as_str()),
-        "position mode write is supported by the adapter when the venue supports it; live readback still requires venue-specific confirmation",
+        "position mode write/readback is venue-specific; Gate is one-way only and Bitget should be verified before live-small",
     ));
     checks.push(warn(
         format!("{}.private.leverage", exchange.as_str()),
-        "leverage write is supported by the adapter; live readback still requires venue-specific confirmation",
+        "leverage write/readback is venue-specific; verify configured leverage before enabling dry_run=false",
     ));
 
     checks

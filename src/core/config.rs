@@ -133,7 +133,7 @@ pub struct ApiKeys {
 impl ApiKeys {
     /// 从环境变量加载API密钥
     pub fn from_env(exchange: &str) -> Result<Self, ExchangeError> {
-        dotenv::dotenv().ok(); // 加载.env文件，忽略错误
+        load_dotenv_lenient(); // 加载.env文件；跳过非法行，避免一个坏行阻断后续密钥
 
         let exchange_upper = exchange.to_uppercase();
 
@@ -168,5 +168,97 @@ impl ApiKeys {
             passphrase,
             memo,
         })
+    }
+}
+
+fn load_dotenv_lenient() {
+    if dotenv::dotenv().is_ok() {
+        return;
+    }
+
+    let Ok(raw) = std::fs::read_to_string(".env") else {
+        return;
+    };
+
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().strip_prefix("export ").unwrap_or(key.trim());
+        if key.is_empty()
+            || key
+                .chars()
+                .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        {
+            continue;
+        }
+        if std::env::var_os(key).is_some() {
+            continue;
+        }
+        std::env::set_var(key, parse_dotenv_value(value.trim()));
+    }
+}
+
+fn parse_dotenv_value(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        let first = bytes[0];
+        let last = bytes[value.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn parse_dotenv_value_should_strip_matching_quotes() {
+        assert_eq!(parse_dotenv_value("\"key\""), "key");
+        assert_eq!(parse_dotenv_value("'secret'"), "secret");
+        assert_eq!(parse_dotenv_value("plain"), "plain");
+    }
+
+    #[test]
+    fn api_keys_from_env_should_load_valid_lines_after_malformed_dotenv_line() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let temp_dir =
+            std::env::temp_dir().join(format!("rustcta-dotenv-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(
+            temp_dir.join(".env"),
+            "BROKEN_LINE\nBITGET_TEST_API_KEY=key\nBITGET_TEST_API_SECRET=secret\nBITGET_TEST_PASSPHRASE=pass\n",
+        )
+        .unwrap();
+
+        std::env::remove_var("BITGET_TEST_API_KEY");
+        std::env::remove_var("BITGET_TEST_API_SECRET");
+        std::env::remove_var("BITGET_TEST_PASSPHRASE");
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let keys = ApiKeys::from_env("bitget_test").unwrap();
+
+        assert_eq!(keys.api_key, "key");
+        assert_eq!(keys.api_secret, "secret");
+        assert_eq!(keys.passphrase.as_deref(), Some("pass"));
+
+        std::env::set_current_dir(cwd).unwrap();
+        std::env::remove_var("BITGET_TEST_API_KEY");
+        std::env::remove_var("BITGET_TEST_API_SECRET");
+        std::env::remove_var("BITGET_TEST_PASSPHRASE");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

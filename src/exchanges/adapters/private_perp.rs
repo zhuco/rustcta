@@ -1994,7 +1994,7 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         Ok(PrivateRestRequestSpec::new(
             ExchangeId::Bitget,
             PrivateRestMethod::Get,
-            "/api/v2/mix/position/single-position",
+            "/api/v2/mix/account/account",
         )
         .with_query("productType", "USDT-FUTURES")
         .with_query("marginCoin", "USDT")
@@ -4032,8 +4032,11 @@ fn parse_trade_fee_snapshot(
         &[
             "makerFeeRate",
             "maker_fee_rate",
+            "makerFee",
             "maker",
             "makerFee",
+            "feeRateMaker",
+            "openMakerFeeRate",
             "makerFeeRateE4",
             "open_maker_fee",
         ],
@@ -4043,8 +4046,11 @@ fn parse_trade_fee_snapshot(
         &[
             "takerFeeRate",
             "taker_fee_rate",
+            "takerFee",
             "taker",
             "takerFee",
+            "feeRateTaker",
+            "openTakerFeeRate",
             "takerFeeRateE4",
             "open_taker_fee",
         ],
@@ -4093,7 +4099,16 @@ fn parse_symbol_account_config(
             .map(parse_margin_mode_text),
         leverage: f64_field(
             &item,
-            &["leverage", "lever", "crossedLeverage", "isolatedLeverage"],
+            &[
+                "leverage",
+                "lever",
+                "crossLeverage",
+                "crossedLeverage",
+                "isolatedLeverage",
+                "longLeverage",
+                "shortLeverage",
+                "holdModeLeverage",
+            ],
         )
         .map(|leverage| leverage.round().max(0.0) as u32),
         max_leverage: f64_field(&item, &["maxLever", "maxLeverage", "max_leverage"])
@@ -6196,7 +6211,7 @@ mod tests {
         let config = parse_symbol_account_config(
             ExchangeId::Bitget,
             &ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
-            &json!({"data":[{"symbol":"BTCUSDT","posMode":"hedge_mode","marginMode":"crossed","leverage":"3","maxLever":"125"}]}),
+            &json!({"data":{"symbol":"BTCUSDT","posMode":"hedge_mode","marginMode":"crossed","crossLeverage":"3","maxLever":"125"}}),
             now,
             PositionMode::OneWay,
         )
