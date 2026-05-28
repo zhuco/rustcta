@@ -1,7 +1,7 @@
 //! Configuration contracts for cross-exchange arbitrage simulation.
 
 use super::fees::ExchangeFeeRates;
-use crate::market::{CanonicalSymbol, ExchangeId, RuntimeMode};
+use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -23,6 +23,8 @@ pub struct CrossExchangeArbitrageConfig {
     pub routing: RoutingConfig,
     #[serde(default)]
     pub execution: ExecutionConfig,
+    #[serde(default)]
+    pub controls: RuntimeControlConfig,
     #[serde(default)]
     pub reconciliation: ReconciliationConfig,
     pub risk: RiskConfig,
@@ -48,6 +50,7 @@ impl Default for CrossExchangeArbitrageConfig {
             exchanges: HashMap::new(),
             routing: RoutingConfig::default(),
             execution: ExecutionConfig::default(),
+            controls: RuntimeControlConfig::default(),
             reconciliation: ReconciliationConfig::default(),
             risk: RiskConfig::default(),
             persistence: PersistenceConfig::default(),
@@ -105,6 +108,7 @@ impl CrossExchangeArbitrageConfig {
             || self.thresholds.min_open_maker_taker_net_edge < 0.0
             || self.thresholds.lock_profit_dual_taker_pct < 0.0
             || self.thresholds.strong_lock_profit_dual_taker_pct < 0.0
+            || self.thresholds.max_close_spread_pct < 0.0
         {
             return Err(ConfigValidationError::InvalidThreshold);
         }
@@ -138,20 +142,17 @@ impl CrossExchangeArbitrageConfig {
         }
         if self.mode.allows_live_orders() {
             for exchange in &self.universe.enabled_exchanges {
-                if self
-                    .exchanges
-                    .get(exchange)
-                    .and_then(|runtime| runtime.enabled)
-                    == Some(false)
+                let runtime = self.exchanges.get(exchange);
+                if runtime
+                    .map(ExchangeRuntimeConfig::is_disabled)
+                    .unwrap_or(false)
                 {
                     return Err(ConfigValidationError::LiveExchangeDisabled {
                         exchange: exchange.clone(),
                     });
                 }
                 if self.execution.dry_run == false
-                    && self
-                        .exchanges
-                        .get(exchange)
+                    && runtime
                         .map(|runtime| !runtime.private_rest_enabled)
                         .unwrap_or(false)
                 {
@@ -159,9 +160,7 @@ impl CrossExchangeArbitrageConfig {
                         exchange: exchange.clone(),
                     });
                 }
-                if self
-                    .exchanges
-                    .get(exchange)
+                if runtime
                     .map(|runtime| !runtime.private_ws_enabled)
                     .unwrap_or(true)
                 {
@@ -202,6 +201,15 @@ impl CrossExchangeArbitrageConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeControlConfig {
+    #[serde(default)]
+    pub start_paused_new_entries: bool,
+    #[serde(default)]
+    pub start_close_only: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigValidationError {
     #[error("threshold values must be non-negative")]
@@ -238,6 +246,8 @@ pub struct ThresholdConfig {
     pub max_open_raw_spread: f64,
     pub lock_profit_dual_taker_pct: f64,
     pub strong_lock_profit_dual_taker_pct: f64,
+    #[serde(default = "default_max_close_spread_pct")]
+    pub max_close_spread_pct: f64,
 }
 
 impl Default for ThresholdConfig {
@@ -248,12 +258,17 @@ impl Default for ThresholdConfig {
             max_open_raw_spread: default_max_open_raw_spread(),
             lock_profit_dual_taker_pct: 0.003,
             strong_lock_profit_dual_taker_pct: 0.005,
+            max_close_spread_pct: default_max_close_spread_pct(),
         }
     }
 }
 
 fn default_max_open_raw_spread() -> f64 {
     0.10
+}
+
+fn default_max_close_spread_pct() -> f64 {
+    0.001
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -410,6 +425,8 @@ pub struct ExecutionConfig {
     pub max_hedge_retries: u32,
     pub maker_order_ttl_ms: u64,
     pub taker_ioc_slippage_limit_pct: f64,
+    #[serde(default)]
+    pub open_execution_style: OpenExecutionStyle,
 }
 
 impl Default for ExecutionConfig {
@@ -419,8 +436,17 @@ impl Default for ExecutionConfig {
             max_hedge_retries: 1,
             maker_order_ttl_ms: 5_000,
             taker_ioc_slippage_limit_pct: 0.003,
+            open_execution_style: OpenExecutionStyle::MakerTaker,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenExecutionStyle {
+    #[default]
+    MakerTaker,
+    DualTaker,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -477,6 +503,8 @@ pub struct ExchangeRuntimeConfig {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
+    pub operating_mode: ExchangeOperatingMode,
+    #[serde(default)]
     pub position_mode: Option<String>,
     #[serde(default)]
     pub ws_batch_size: Option<usize>,
@@ -498,6 +526,35 @@ pub struct ExchangeRuntimeConfig {
     pub private_ws_run: PrivateWsRuntimeConfig,
     #[serde(default)]
     pub routes: ExchangeRouteConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExchangeOperatingMode {
+    #[default]
+    Enabled,
+    CloseOnly,
+    Disabled,
+}
+
+impl ExchangeRuntimeConfig {
+    pub fn is_disabled(&self) -> bool {
+        self.enabled == Some(false) || self.operating_mode == ExchangeOperatingMode::Disabled
+    }
+
+    pub fn allows_new_entries(&self) -> bool {
+        !self.is_disabled() && self.operating_mode == ExchangeOperatingMode::Enabled
+    }
+
+    pub fn route_status(&self) -> RouteStatus {
+        if self.is_disabled() {
+            RouteStatus::Offline
+        } else if self.allows_new_entries() {
+            RouteStatus::Healthy
+        } else {
+            RouteStatus::CloseOnly
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -569,6 +626,8 @@ pub struct RiskConfig {
     pub max_open_bundles: usize,
     #[serde(default = "default_true")]
     pub symbol_whitelist_required_live: bool,
+    #[serde(default)]
+    pub block_on_external_account_exposure: bool,
 }
 
 impl Default for RiskConfig {
@@ -583,6 +642,7 @@ impl Default for RiskConfig {
             max_notional_per_symbol_usdt: 2_000.0,
             max_open_bundles: default_max_open_bundles(),
             symbol_whitelist_required_live: true,
+            block_on_external_account_exposure: false,
         }
     }
 }
@@ -743,6 +803,49 @@ mod tests {
     }
 
     #[test]
+    fn config_validate_should_accept_live_close_only_exchange() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_private_ws_for_live_universe(&mut config);
+        config
+            .exchanges
+            .entry(ExchangeId::Gate)
+            .or_default()
+            .operating_mode = ExchangeOperatingMode::CloseOnly;
+
+        config.validate().expect("close-only venue stays attached");
+        assert_eq!(
+            config
+                .exchanges
+                .get(&ExchangeId::Gate)
+                .unwrap()
+                .route_status(),
+            RouteStatus::CloseOnly
+        );
+    }
+
+    #[test]
+    fn config_validate_should_reject_live_universe_exchange_disabled_by_operating_mode() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_private_ws_for_live_universe(&mut config);
+        config
+            .exchanges
+            .entry(ExchangeId::Gate)
+            .or_default()
+            .operating_mode = ExchangeOperatingMode::Disabled;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LiveExchangeDisabled {
+                exchange: ExchangeId::Gate
+            }
+        );
+    }
+
+    #[test]
     fn config_validate_should_reject_live_trading_without_private_rest() {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
@@ -861,7 +964,73 @@ mod tests {
                 .unwrap()
                 .position_mode
                 .as_deref(),
-            Some("one_way")
+            Some("hedge")
+        );
+    }
+
+    #[test]
+    fn binance_bitget_live_small_should_exclude_gate_and_use_account_fees() {
+        let raw = include_str!(
+            "../../../config/cross_exchange_arbitrage_binance_bitget_50u.live-small.yml"
+        );
+        let config: CrossExchangeArbitrageConfig =
+            serde_yaml::from_str(raw).expect("binance-bitget live-small should parse");
+
+        config
+            .validate()
+            .expect("binance-bitget live-small should validate");
+        assert_eq!(config.mode, RuntimeMode::LiveSmall);
+        assert_eq!(
+            config.universe.enabled_exchanges,
+            vec![ExchangeId::Binance, ExchangeId::Bitget]
+        );
+        assert!(!config
+            .universe
+            .enabled_exchanges
+            .contains(&ExchangeId::Gate));
+        assert!(config.fees.use_account_fee_api);
+        assert_eq!(config.sizing.target_notional_usdt, 10.0);
+        assert_eq!(config.risk.max_open_bundles, 50);
+        assert!(config.execution.dry_run);
+        assert_eq!(
+            config
+                .exchanges
+                .get(&ExchangeId::Gate)
+                .unwrap()
+                .operating_mode,
+            ExchangeOperatingMode::Disabled
+        );
+    }
+
+    #[test]
+    fn three_venue_live_small_should_use_ten_usdt_orders_and_zero_point_seven_pct_edge() {
+        let raw = include_str!(
+            "../../../config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"
+        );
+        let config: CrossExchangeArbitrageConfig =
+            serde_yaml::from_str(raw).expect("three-venue live-small should parse");
+
+        config
+            .validate()
+            .expect("three-venue live-small should validate");
+        assert_eq!(
+            config.universe.enabled_exchanges,
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
+        );
+        assert_eq!(config.thresholds.min_open_maker_taker_net_edge, 0.007);
+        assert_eq!(config.sizing.target_notional_usdt, 10.0);
+        assert_eq!(config.sizing.max_positions_per_exchange, 50);
+        assert_eq!(config.risk.max_open_bundles, 50);
+        assert!(config.fees.use_account_fee_api);
+        assert!(config.execution.dry_run);
+        assert_eq!(
+            config
+                .exchanges
+                .get(&ExchangeId::Binance)
+                .unwrap()
+                .env_prefix
+                .as_deref(),
+            Some("BINANCE_0")
         );
     }
 

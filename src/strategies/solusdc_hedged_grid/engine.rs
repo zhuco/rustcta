@@ -198,11 +198,15 @@ impl GridEngine {
     pub fn handle_fill(&mut self, fill: FillEvent, snapshot: &MarketSnapshot) -> Vec<EngineAction> {
         self.update_market(snapshot);
         let fill = self.normalize_fill(fill);
-        let order_price = self
+        let order_context = self
             .state
             .ledger
             .get(&fill.order_id)
-            .map(|record| record.price);
+            .map(|record| (record.price, record.filled_qty));
+        let order_price = order_context.map(|context| context.0);
+        let completed_fill_qty = order_context
+            .map(|context| self.normalize_fill_qty(context.1 + fill.fill_qty))
+            .unwrap_or(fill.fill_qty);
         self.apply_fill(&fill);
 
         if self.state.kill_switch {
@@ -211,11 +215,22 @@ impl GridEngine {
 
         self.state.last_fill_action = Some(fill.timestamp);
 
-        let mut actions = match fill.intent {
-            OrderIntent::OpenLongBuy => self.roll_after_open_long(&fill, snapshot, order_price),
-            OrderIntent::OpenShortSell => self.roll_after_open_short(&fill, snapshot, order_price),
-            OrderIntent::CloseLongSell => self.roll_after_close_long(&fill, snapshot),
-            OrderIntent::CloseShortBuy => self.roll_after_close_short(&fill, snapshot),
+        if fill.partial {
+            return Vec::new();
+        }
+
+        let mut roll_fill = fill.clone();
+        roll_fill.fill_qty = completed_fill_qty;
+
+        let mut actions = match roll_fill.intent {
+            OrderIntent::OpenLongBuy => {
+                self.roll_after_open_long(&roll_fill, snapshot, order_price)
+            }
+            OrderIntent::OpenShortSell => {
+                self.roll_after_open_short(&roll_fill, snapshot, order_price)
+            }
+            OrderIntent::CloseLongSell => self.roll_after_close_long(&roll_fill, snapshot),
+            OrderIntent::CloseShortBuy => self.roll_after_close_short(&roll_fill, snapshot),
         };
 
         // 成交后必须立即修复近端网格形态，不能只依赖周期 reconcile。
@@ -304,6 +319,15 @@ impl GridEngine {
 
     pub fn reconcile_inventory(&mut self, snapshot: &MarketSnapshot) -> Vec<EngineAction> {
         self.update_market(snapshot);
+
+        if self.config.grid.strict_pairing {
+            let mut actions = Vec::new();
+            actions.extend(self.enforce_close_limit(OrderSide::Sell));
+            actions.extend(self.enforce_close_limit(OrderSide::Buy));
+            actions.extend(self.enforce_open_limit(OrderSide::Sell));
+            actions.extend(self.enforce_open_limit(OrderSide::Buy));
+            return actions;
+        }
 
         // 兜底自愈: 任一侧开仓网格被意外清空时，直接重建双向网格，
         // 保证单一交易对长期运行下始终有多空两侧挂单。

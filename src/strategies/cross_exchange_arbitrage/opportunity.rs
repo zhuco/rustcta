@@ -302,8 +302,12 @@ fn build_opportunity(
         maker_price,
         taker_vwap: taker_vwap.vwap_price,
         target_notional_usdt: target_notional,
-        maker_quantity: maker_leg_size.as_ref().map(|leg| leg.normalized_quantity),
-        taker_quantity: taker_leg_size.as_ref().map(|leg| leg.normalized_quantity),
+        maker_quantity: maker_leg_size
+            .as_ref()
+            .map(|leg| leg.normalized_base_quantity),
+        taker_quantity: taker_leg_size
+            .as_ref()
+            .map(|leg| leg.normalized_base_quantity),
         maker_notional_usdt,
         taker_notional_usdt,
         executable_notional_usdt: executable_notional,
@@ -532,6 +536,27 @@ mod tests {
         assert!(opportunities.iter().any(|opportunity| opportunity
             .reject_reasons
             .contains(&RejectReason::FundingWindowTooClose)));
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_opportunity_should_reject_close_only_route() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut close_only = MarketSnapshot::healthy(book(ExchangeId::Binance, 99.0, 100.0, 10.0));
+        close_only.route_status = RouteStatus::CloseOnly;
+        let healthy = MarketSnapshot::healthy(book(ExchangeId::Okx, 104.0, 105.0, 10.0));
+
+        let opportunities = scan_opportunities(&symbol, &[close_only, healthy], &config(), now);
+
+        assert!(opportunities
+            .iter()
+            .all(|opportunity| opportunity.route_status == RouteStatus::CloseOnly));
+        assert!(opportunities
+            .iter()
+            .all(|opportunity| !opportunity.can_open));
+        assert!(opportunities.iter().all(|opportunity| opportunity
+            .reject_reasons
+            .contains(&RejectReason::RouteUnhealthy)));
     }
 
     #[test]

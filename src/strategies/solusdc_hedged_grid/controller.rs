@@ -1444,14 +1444,16 @@ fn sync_orders(
         }
 
         if let Some((qty, quote)) = trade_map.get(&exchange_id) {
-            if *qty > record.filled_qty + 1e-8 {
-                let delta = qty - record.filled_qty;
+            let executed_qty = *qty;
+            if executed_qty > record.filled_qty + 1e-8 {
+                let delta = executed_qty - record.filled_qty;
                 let price = if *qty > 0.0 {
                     quote / qty
                 } else {
                     record.price
                 };
-                let partial = *qty + 1e-8 < record.qty;
+                let total_qty = record.filled_qty + record.qty;
+                let partial = executed_qty + 1e-8 < total_qty;
                 let fill = FillEvent {
                     order_id: client_id.clone(),
                     intent: record.intent,

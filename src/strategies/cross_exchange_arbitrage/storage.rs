@@ -48,6 +48,10 @@ impl StorageSink for InMemoryStorageSink {
             recorded_at,
             event,
         });
+        if self.events.len() > 10_000 {
+            let overflow = self.events.len() - 10_000;
+            self.events.drain(0..overflow);
+        }
     }
 }
 

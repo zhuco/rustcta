@@ -307,12 +307,10 @@ impl TradingAdapter for ExchangeTradingAdapter {
 
     async fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<Vec<OrderState>> {
         self.ensure_private_trading_enabled("get_open_orders")?;
+        let canonical_symbol = symbol.map(canonical_for_exchange_symbol);
         let orders = self
             .exchange
-            .get_open_orders(
-                symbol.map(|symbol| symbol.symbol.as_str()),
-                MarketType::Futures,
-            )
+            .get_open_orders(canonical_symbol.as_deref(), MarketType::Futures)
             .await?;
 
         Ok(orders
@@ -336,9 +334,10 @@ impl TradingAdapter for ExchangeTradingAdapter {
         symbol: Option<&ExchangeSymbol>,
     ) -> Result<Vec<ExchangePosition>> {
         self.ensure_private_trading_enabled("get_positions")?;
+        let canonical_symbol = symbol.map(canonical_for_exchange_symbol);
         let positions = self
             .exchange
-            .get_positions(symbol.map(|symbol| symbol.symbol.as_str()))
+            .get_positions(canonical_symbol.as_deref())
             .await?;
         Ok(positions
             .into_iter()
@@ -357,8 +356,7 @@ impl TradingAdapter for ExchangeTradingAdapter {
 
     async fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<TradeFeeSnapshot> {
         self.ensure_private_trading_enabled("get_trade_fee")?;
-        let canonical = canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
-            .unwrap_or_else(|| symbol_to_canonical(&symbol.symbol));
+        let canonical = symbol_to_canonical_for_exchange(&symbol.exchange, &symbol.symbol);
         let fee = self
             .exchange
             .get_trade_fee(&canonical.as_pair(), MarketType::Futures)
@@ -380,8 +378,7 @@ impl TradingAdapter for ExchangeTradingAdapter {
         symbol: &ExchangeSymbol,
     ) -> Result<SymbolAccountConfig> {
         self.ensure_private_trading_enabled("get_symbol_account_config")?;
-        let canonical = canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
-            .unwrap_or_else(|| symbol_to_canonical(&symbol.symbol));
+        let canonical = symbol_to_canonical_for_exchange(&symbol.exchange, &symbol.symbol);
         let positions = self
             .exchange
             .get_positions(Some(&canonical.as_pair()))
@@ -418,10 +415,7 @@ impl TradingAdapter for ExchangeTradingAdapter {
                 query
                     .exchange_symbol
                     .as_ref()
-                    .and_then(|symbol| {
-                        canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol)
-                    })
-                    .map(|canonical| canonical.as_pair())
+                    .map(canonical_for_exchange_symbol)
             });
         let trades = self
             .exchange
@@ -674,7 +668,7 @@ fn command_to_order_request(
         market_type: MarketType::Futures,
         params: Some(params),
         client_order_id: Some(command.client_order_id.clone()),
-        time_in_force: Some(map_time_in_force(command.time_in_force).to_string()),
+        time_in_force: order_time_in_force(command.order_type, command.time_in_force),
         reduce_only: Some(command.reduce_only),
         post_only: Some(
             command.post_only || matches!(command.time_in_force, TimeInForce::PostOnly),
@@ -710,7 +704,7 @@ fn close_to_order_request(
         market_type: MarketType::Futures,
         params: Some(params),
         client_order_id: Some(command.client_order_id.clone()),
-        time_in_force: Some(map_time_in_force(command.time_in_force).to_string()),
+        time_in_force: order_time_in_force(command.order_type, command.time_in_force),
         reduce_only: should_send_reduce_only(&exchange, position_mode).then_some(true),
         post_only: Some(matches!(command.time_in_force, TimeInForce::PostOnly)),
     })
@@ -795,6 +789,10 @@ fn map_time_in_force(time_in_force: TimeInForce) -> &'static str {
         TimeInForce::Fok => "FOK",
         TimeInForce::PostOnly => "GTX",
     }
+}
+
+fn order_time_in_force(order_type: OrderType, time_in_force: TimeInForce) -> Option<String> {
+    matches!(order_type, OrderType::Limit).then(|| map_time_in_force(time_in_force).to_string())
 }
 
 fn map_order_status(status: &CoreOrderStatus) -> OrderCommandStatus {
@@ -926,6 +924,14 @@ fn symbol_to_canonical(symbol: &str) -> CanonicalSymbol {
         return canonical;
     }
     CanonicalSymbol::new(symbol, "USDT")
+}
+
+fn symbol_to_canonical_for_exchange(exchange: &ExchangeId, symbol: &str) -> CanonicalSymbol {
+    canonical_from_exchange_symbol(exchange, symbol).unwrap_or_else(|| symbol_to_canonical(symbol))
+}
+
+fn canonical_for_exchange_symbol(symbol: &ExchangeSymbol) -> String {
+    symbol_to_canonical_for_exchange(&symbol.exchange, &symbol.symbol).as_pair()
 }
 
 fn extract_position_side(info: &serde_json::Value) -> PositionSide {
@@ -1170,6 +1176,7 @@ mod tests {
         assert_eq!(request.symbol, "BTC/USDT");
         assert_eq!(request.side, CoreOrderSide::Sell);
         assert_eq!(request.reduce_only, None);
+        assert_eq!(request.time_in_force, None);
         assert_eq!(
             request
                 .params

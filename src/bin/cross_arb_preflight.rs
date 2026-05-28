@@ -1,22 +1,21 @@
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use rustcta::core::config::{ApiKeys, Config as CoreExchangeConfig};
 use rustcta::core::exchange::Exchange;
 use rustcta::core::types::MarketType;
 use rustcta::exchanges::adapters::{
     private_trading_support_for, BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter,
     GateMarketAdapter, HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
 };
-use rustcta::exchanges::{BinanceExchange, OkxExchange};
-use rustcta::execution::FillQuery;
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
 use rustcta::strategies::cross_exchange_arbitrage::{
-    build_trading_adapter_for_exchange, live_enabled_exchanges, CrossExchangeArbitrageConfig,
+    build_core_exchange_for_exchange, build_trading_adapter_for_exchange, live_enabled_exchanges,
+    private_ws_auth_for_exchange, CrossExchangeArbitrageConfig,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -35,6 +34,12 @@ struct Args {
     private: bool,
     #[arg(long, default_value_t = 5_000)]
     timeout_ms: u64,
+    #[arg(long, default_value_t = 8)]
+    private_symbol_sample: usize,
+    #[arg(long, default_value_t = 24)]
+    public_orderbook_sample: usize,
+    #[arg(long, default_value_t = false)]
+    full_symbol_checks: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -106,6 +111,11 @@ async fn main() -> Result<()> {
                         adapter.as_ref(),
                         &config,
                         args.timeout_ms,
+                        if args.full_symbol_checks {
+                            usize::MAX
+                        } else {
+                            args.public_orderbook_sample
+                        },
                         &mut coverage_by_symbol,
                     )
                     .await,
@@ -120,7 +130,19 @@ async fn main() -> Result<()> {
         checks.push(check_private_trading_support(exchange));
 
         if args.private {
-            checks.extend(check_private_exchange(exchange, &config, args.timeout_ms).await);
+            checks.extend(
+                check_private_exchange(
+                    exchange,
+                    &config,
+                    args.timeout_ms,
+                    if args.full_symbol_checks {
+                        usize::MAX
+                    } else {
+                        args.private_symbol_sample
+                    },
+                )
+                .await,
+            );
         } else {
             checks.push(skipped(
                 format!("{}.private", exchange.as_str()),
@@ -227,6 +249,7 @@ async fn check_public_market_adapter(
     adapter: &(dyn MarketDataAdapter + Send + Sync),
     config: &CrossExchangeArbitrageConfig,
     timeout_ms: u64,
+    orderbook_sample_limit: usize,
     coverage_by_symbol: &mut HashMap<String, HashSet<ExchangeId>>,
 ) -> Vec<PreflightCheck> {
     let exchange = adapter.exchange();
@@ -271,11 +294,22 @@ async fn check_public_market_adapter(
         ),
     ));
 
+    let orderbook_symbols = sampled_symbols(&symbols_for_exchange, orderbook_sample_limit);
     for symbol in &symbols_for_exchange {
         coverage_by_symbol
             .entry(symbol.to_string())
             .or_default()
             .insert(exchange.clone());
+    }
+    checks.push(pass(
+        format!("{}.public.orderbook_sample", exchange.as_str()),
+        format!(
+            "checking {} of {} listed configured symbols; use --full-symbol-checks for exhaustive checks",
+            orderbook_symbols.len(),
+            symbols_for_exchange.len()
+        ),
+    ));
+    for symbol in &orderbook_symbols {
         let exchange_symbol = exchange_symbol_for(&exchange, symbol);
         checks.push(
             timed(
@@ -312,13 +346,15 @@ async fn check_private_exchange(
     exchange: &ExchangeId,
     config: &CrossExchangeArbitrageConfig,
     timeout_ms: u64,
+    symbol_sample_limit: usize,
 ) -> Vec<PreflightCheck> {
     if rustcta::strategies::cross_exchange_arbitrage::private_perp_exchange(exchange).is_some() {
-        return check_private_trading_adapter(exchange, config, timeout_ms).await;
+        return check_private_trading_adapter(exchange, config, timeout_ms, symbol_sample_limit)
+            .await;
     }
 
     let mut checks = Vec::new();
-    let private_exchange = match build_private_exchange(exchange) {
+    let private_exchange = match build_private_exchange(config, exchange) {
         Ok(Some(exchange)) => exchange,
         Ok(None) => {
             checks.push(fail(
@@ -364,38 +400,58 @@ async fn check_private_exchange(
         .await
         .map_message(|balances| format!("loaded {} futures balances", balances.len())),
     );
+    checks.push(
+        timed(
+            format!("{}.private.positions_all", exchange.as_str()),
+            timeout_ms,
+            async {
+                private_exchange
+                    .get_positions(None)
+                    .await
+                    .map_err(|err| anyhow!(err.to_string()))
+            },
+        )
+        .await
+        .map_message(|positions| {
+            let nonzero = positions
+                .iter()
+                .filter(|position| {
+                    position.contracts.abs() > 1e-12
+                        || position.size.abs() > 1e-12
+                        || position.amount.abs() > 1e-12
+                })
+                .count();
+            format!(
+                "loaded {} account positions, nonzero={nonzero}",
+                positions.len()
+            )
+        }),
+    );
+    checks.push(
+        timed(
+            format!("{}.private.open_orders_all", exchange.as_str()),
+            timeout_ms,
+            async {
+                private_exchange
+                    .get_open_orders(None, MarketType::Futures)
+                    .await
+                    .map_err(|err| anyhow!(err.to_string()))
+            },
+        )
+        .await
+        .map_message(|orders| format!("loaded {} account open orders", orders.len())),
+    );
 
-    for symbol in &config.universe.symbols {
-        let symbol_pair = symbol.as_pair();
-        checks.push(
-            timed(
-                format!("{}.{}.private.positions", exchange.as_str(), symbol),
-                timeout_ms,
-                async {
-                    private_exchange
-                        .get_positions(Some(&symbol_pair))
-                        .await
-                        .map_err(|err| anyhow!(err.to_string()))
-                },
-            )
-            .await
-            .map_message(|positions| format!("loaded {} positions", positions.len())),
-        );
-        let symbol_pair = symbol.as_pair();
-        checks.push(
-            timed(
-                format!("{}.{}.private.open_orders", exchange.as_str(), symbol),
-                timeout_ms,
-                async {
-                    private_exchange
-                        .get_open_orders(Some(&symbol_pair), MarketType::Futures)
-                        .await
-                        .map_err(|err| anyhow!(err.to_string()))
-                },
-            )
-            .await
-            .map_message(|orders| format!("loaded {} open orders", orders.len())),
-        );
+    let private_symbols = sampled_symbols(&config.universe.symbols, symbol_sample_limit);
+    checks.push(pass(
+        format!("{}.private.symbol_sample", exchange.as_str()),
+        format!(
+            "checking {} of {} configured symbols; use --full-symbol-checks for exhaustive private symbol checks",
+            private_symbols.len(),
+            config.universe.symbols.len()
+        ),
+    ));
+    for symbol in &private_symbols {
         let symbol_pair = symbol.as_pair();
         checks.push(
             timed(
@@ -416,21 +472,10 @@ async fn check_private_exchange(
                 )
             }),
         );
-        let symbol_pair = symbol.as_pair();
-        checks.push(
-            timed(
-                format!("{}.{}.private.fills", exchange.as_str(), symbol),
-                timeout_ms,
-                async {
-                    private_exchange
-                        .get_my_trades(Some(&symbol_pair), MarketType::Futures, Some(5))
-                        .await
-                        .map_err(|err| anyhow!(err.to_string()))
-                },
-            )
-            .await
-            .map_message(|trades| format!("loaded {} recent fills", trades.len())),
-        );
+        checks.push(skipped(
+            format!("{}.{}.private.fills", exchange.as_str(), symbol),
+            "recent fills are private WebSocket/runtime reconciliation data; skipped to avoid REST rate-limit pressure",
+        ));
     }
 
     checks.push(warn(
@@ -449,6 +494,7 @@ async fn check_private_trading_adapter(
     exchange: &ExchangeId,
     config: &CrossExchangeArbitrageConfig,
     timeout_ms: u64,
+    symbol_sample_limit: usize,
 ) -> Vec<PreflightCheck> {
     let mut checks = Vec::new();
     let adapter = match build_trading_adapter_for_exchange(config, exchange) {
@@ -466,6 +512,7 @@ async fn check_private_trading_adapter(
         format!("{}.private.adapter", exchange.as_str()),
         "private USDT perpetual TradingAdapter is registered",
     ));
+    checks.extend(check_private_ws_identity(exchange, config));
     checks.push(
         timed(
             format!("{}.private.balance", exchange.as_str()),
@@ -475,40 +522,49 @@ async fn check_private_trading_adapter(
         .await
         .map_message(|balances| format!("loaded {} futures balances", balances.len())),
     );
+    checks.push(
+        timed(
+            format!("{}.private.positions_all", exchange.as_str()),
+            timeout_ms,
+            adapter.get_positions(None),
+        )
+        .await
+        .map_message(|positions| {
+            let nonzero = positions
+                .iter()
+                .filter(|position| position.quantity.abs() > 1e-12)
+                .count();
+            format!(
+                "loaded {} account positions, nonzero={nonzero}",
+                positions.len()
+            )
+        }),
+    );
+    checks.push(
+        timed(
+            format!("{}.private.open_orders_all", exchange.as_str()),
+            timeout_ms,
+            adapter.get_open_orders(None),
+        )
+        .await
+        .map_message(|orders| format!("loaded {} account open orders", orders.len())),
+    );
 
-    for symbol in &config.universe.symbols {
+    let private_symbols = sampled_symbols(&config.universe.symbols, symbol_sample_limit);
+    checks.push(pass(
+        format!("{}.private.symbol_sample", exchange.as_str()),
+        format!(
+            "checking {} of {} configured symbols; use --full-symbol-checks for exhaustive private symbol checks",
+            private_symbols.len(),
+            config.universe.symbols.len()
+        ),
+    ));
+    for symbol in &private_symbols {
         let exchange_symbol = exchange_symbol_for(exchange, symbol);
-        checks.push(
-            timed(
-                format!("{}.{}.private.positions", exchange.as_str(), symbol),
-                timeout_ms,
-                adapter.get_positions(Some(&exchange_symbol)),
-            )
-            .await
-            .map_message(|positions| format!("loaded {} positions", positions.len())),
-        );
-        checks.push(
-            timed(
-                format!("{}.{}.private.open_orders", exchange.as_str(), symbol),
-                timeout_ms,
-                adapter.get_open_orders(Some(&exchange_symbol)),
-            )
-            .await
-            .map_message(|orders| format!("loaded {} open orders", orders.len())),
-        );
-
-        let mut fill_query =
-            FillQuery::for_symbol(exchange.clone(), symbol.clone(), exchange_symbol.clone());
-        fill_query.limit = Some(5);
-        checks.push(
-            timed(
-                format!("{}.{}.private.fills", exchange.as_str(), symbol),
-                timeout_ms,
-                adapter.get_fills(fill_query),
-            )
-            .await
-            .map_message(|trades| format!("loaded {} recent fills", trades.len())),
-        );
+        checks.push(skipped(
+            format!("{}.{}.private.fills", exchange.as_str(), symbol),
+            "recent fills are private WebSocket/runtime reconciliation data; skipped to avoid REST rate-limit pressure",
+        ));
         checks.push(
             timed(
                 format!("{}.{}.private.trade_fee", exchange.as_str(), symbol),
@@ -540,24 +596,59 @@ async fn check_private_trading_adapter(
 
     checks.push(warn(
         format!("{}.private.position_mode", exchange.as_str()),
-        "position mode write/readback is venue-specific; Gate is one-way only and Bitget should be verified before live-small",
+        "position mode write/readback is venue-specific; verify account hedge/one-way mode on each venue before live-small",
     ));
     checks.push(warn(
         format!("{}.private.leverage", exchange.as_str()),
-        "leverage write/readback is venue-specific; verify configured leverage before enabling dry_run=false",
+        "startup does not write leverage; strategy will use each exchange account's current/default leverage unless you run a separate leverage script",
     ));
 
     checks
 }
 
-fn build_private_exchange(exchange: &ExchangeId) -> Result<Option<Box<dyn Exchange>>> {
-    let Some(config) = core_config(exchange) else {
-        return Ok(None);
-    };
-    let api_keys = ApiKeys::from_env(exchange.as_str()).map_err(|err| anyhow!(err.to_string()))?;
+fn check_private_ws_identity(
+    exchange: &ExchangeId,
+    config: &CrossExchangeArbitrageConfig,
+) -> Vec<PreflightCheck> {
+    let private_ws_enabled = config
+        .exchanges
+        .get(exchange)
+        .map(|runtime| runtime.private_ws_enabled)
+        .unwrap_or(false);
+    if !private_ws_enabled {
+        return vec![skipped(
+            format!("{}.private_ws.identity", exchange.as_str()),
+            "private WebSocket is disabled for this exchange",
+        )];
+    }
+
+    if *exchange == ExchangeId::Gate {
+        match private_ws_auth_for_exchange(config, exchange) {
+            Ok(_) => vec![pass(
+                "gate.private_ws.account_id",
+                format!(
+                    "numeric Gate user id configured for private WebSocket; {} symbol subscriptions will use this identity",
+                    config.universe.symbols.len()
+                ),
+            )],
+            Err(err) => vec![fail("gate.private_ws.account_id", err.to_string())],
+        }
+    } else {
+        vec![pass(
+            format!("{}.private_ws.identity", exchange.as_str()),
+            "private WebSocket identity can be built from configured credentials",
+        )]
+    }
+}
+
+fn build_private_exchange(
+    config: &CrossExchangeArbitrageConfig,
+    exchange: &ExchangeId,
+) -> Result<Option<Arc<dyn Exchange>>> {
     match exchange {
-        ExchangeId::Binance => Ok(Some(Box::new(BinanceExchange::new(config, api_keys)))),
-        ExchangeId::Okx => Ok(Some(Box::new(OkxExchange::new(config, api_keys)))),
+        ExchangeId::Binance | ExchangeId::Okx => {
+            build_core_exchange_for_exchange(config, exchange).map(Some)
+        }
         ExchangeId::Bitget
         | ExchangeId::Gate
         | ExchangeId::Bybit
@@ -567,26 +658,14 @@ fn build_private_exchange(exchange: &ExchangeId) -> Result<Option<Box<dyn Exchan
     }
 }
 
-fn core_config(exchange: &ExchangeId) -> Option<CoreExchangeConfig> {
-    match exchange {
-        ExchangeId::Binance => Some(CoreExchangeConfig {
-            name: "binance".to_string(),
-            testnet: false,
-            spot_base_url: "https://api.binance.com".to_string(),
-            futures_base_url: "https://fapi.binance.com".to_string(),
-            ws_spot_url: "wss://stream.binance.com:9443".to_string(),
-            ws_futures_url: "wss://fstream.binance.com".to_string(),
-        }),
-        ExchangeId::Okx => Some(CoreExchangeConfig {
-            name: "okx".to_string(),
-            testnet: false,
-            spot_base_url: "https://www.okx.com".to_string(),
-            futures_base_url: "https://www.okx.com".to_string(),
-            ws_spot_url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
-            ws_futures_url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
-        }),
-        _ => None,
+fn sampled_symbols<T: Clone>(symbols: &[T], limit: usize) -> Vec<T> {
+    if limit == 0 || symbols.is_empty() {
+        return Vec::new();
     }
+    if symbols.len() <= limit {
+        return symbols.to_vec();
+    }
+    symbols.iter().take(limit).cloned().collect()
 }
 
 async fn timed<F, T>(scope: impl Into<String>, timeout_ms: u64, future: F) -> PreflightTypedCheck<T>
@@ -736,6 +815,28 @@ fn evaluate_live_gate(
             .filter(|check| check.status == CheckStatus::Fail)
         {
             blocking_reasons.push(format!("{} failed: {}", check.scope, check.message));
+        }
+
+        if config.risk.block_on_external_account_exposure {
+            for check in checks.iter().filter(|check| {
+                check.scope.ends_with(".private.open_orders_all")
+                    && !check.message.contains("loaded 0 account open orders")
+            }) {
+                blocking_reasons.push(format!(
+                    "{} found existing open orders: {}",
+                    check.scope, check.message
+                ));
+            }
+
+            for check in checks.iter().filter(|check| {
+                check.scope.ends_with(".private.positions_all")
+                    && !check.message.contains("nonzero=0")
+            }) {
+                blocking_reasons.push(format!(
+                    "{} found existing nonzero positions: {}",
+                    check.scope, check.message
+                ));
+            }
         }
     }
 

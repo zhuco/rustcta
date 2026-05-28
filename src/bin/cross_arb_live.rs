@@ -1,8 +1,16 @@
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[path = "cross_arb_server/ws.rs"]
+mod cross_arb_server_ws;
+
 use anyhow::{anyhow, Context, Result};
+use axum::extract::State as AxumState;
+use axum::response::Html;
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::exchanges::adapters::{
@@ -10,21 +18,25 @@ use rustcta::exchanges::adapters::{
     HtxMarketAdapter, MexcMarketAdapter,
 };
 use rustcta::execution::{
-    ExecutionEngine, ExecutionRouter, LeverageCommand, PositionMode, PositionModeCommand,
-    TradingAdapter,
+    is_crossarb_client_order_id, ExchangeBalance, ExecutionEngine, ExecutionRouter, OrderSnapshot,
+    PositionMode, PositionSnapshot, TradeFeeSnapshot, TradingAdapter,
 };
 use rustcta::market::{
     exchange_symbol_for, CanonicalSymbol, ExchangeId, InstrumentMeta, MarketDataAdapter,
-    MarketFundingSnapshot, RouteStatus,
+    MarketFundingSnapshot, MarketStateCache,
 };
 use rustcta::strategies::cross_exchange_arbitrage::{
-    build_cross_arb_live_runtime_parts, live_enabled_exchanges, ArbSignalAction,
-    CrossArbExecutionCoordinator, CrossArbRuntime, CrossExchangeArbitrageConfig, MarketSnapshot,
-    PrivateRestAuditPlan, PrivateRuntimeSync, SimulatedBundleStatus,
+    build_cross_arb_live_runtime_parts, exchange_route_status, live_close_candidate_for_bundle,
+    live_close_metrics_for_bundle, live_enabled_exchanges, ArbSignalAction, BundleReadModel,
+    CrossArbDashboardStatus, CrossArbExecutionCoordinator, CrossArbRuntime,
+    CrossExchangeArbitrageConfig, ExchangeFeeRates, MarketSnapshot, OpportunityReadModel,
+    PrivateRestAuditPlan, PrivateRuntimeSync, RejectReason, RiskEventReadModel,
+    SimulatedBundleStatus,
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration as TokioDuration};
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -63,6 +75,7 @@ struct LiveBootstrapReport {
     binance_private_ws_specs: usize,
     account_preparation: Vec<AccountPrepSummary>,
     rest_audits: Vec<RestAuditSummary>,
+    account_fee_overrides: Vec<AccountFeeOverrideSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,12 +93,15 @@ struct RestAuditSummary {
     ok: bool,
     balances: usize,
     positions: usize,
+    nonzero_positions: usize,
     open_orders: usize,
+    strategy_open_orders: usize,
+    external_open_orders: usize,
     fills: usize,
     error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct AccountPrepSummary {
     exchange: String,
     symbol: Option<String>,
@@ -93,6 +109,138 @@ struct AccountPrepSummary {
     ok: bool,
     dry_run: bool,
     message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccountFeeOverrideSummary {
+    exchange: String,
+    maker: f64,
+    taker: f64,
+    symbols: usize,
+}
+
+#[derive(Clone)]
+struct LiveDashboardState {
+    runtime: Arc<RwLock<CrossArbRuntime>>,
+    close_metrics: Arc<RwLock<HashMap<String, BundleCloseMetricReadModel>>>,
+    started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct LiveDashboardPayload {
+    generated_at: DateTime<Utc>,
+    started_at: DateTime<Utc>,
+    status: CrossArbDashboardStatus,
+    symbols: Vec<SymbolCoverageReadModel>,
+    opportunities: Vec<BestOpportunityReadModel>,
+    open_bundles: Vec<BundleReadModel>,
+    active_bundles: Vec<ActiveBundleReadModel>,
+    history: Vec<BundleReadModel>,
+    risk_event_summary: Vec<RiskEventSummaryReadModel>,
+    risk_events: Vec<RiskEventReadModel>,
+    private_positions: Vec<PositionSnapshot>,
+    private_open_orders: Vec<OrderSnapshot>,
+    strategy_open_orders: Vec<OrderSnapshot>,
+    external_open_orders: Vec<OrderSnapshot>,
+    balances: Vec<ExchangeBalance>,
+    controls: LiveControlState,
+    execution: LiveExecutionSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BundleCloseMetricReadModel {
+    bundle_id: String,
+    symbol: String,
+    long_exchange: String,
+    short_exchange: String,
+    quantity: f64,
+    target_notional_usdt: f64,
+    entry_edge_pct: Option<f64>,
+    open_fee_paid_usdt: f64,
+    close_fee_est_usdt: f64,
+    gross_spread_pnl_usdt: f64,
+    realized_funding_pnl_usdt: f64,
+    close_spread_pct: f64,
+    close_profit_pct: f64,
+    close_threshold_pct: f64,
+    closeable: bool,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ActiveBundleReadModel {
+    bundle_id: String,
+    opportunity_id: String,
+    symbol: Option<String>,
+    long_exchange: Option<String>,
+    short_exchange: Option<String>,
+    status: SimulatedBundleStatus,
+    target_notional_usdt: f64,
+    entry_edge_pct: Option<f64>,
+    close_spread_pct: Option<f64>,
+    close_profit_pct: Option<f64>,
+    close_threshold_pct: f64,
+    closeable: bool,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct RiskEventSummaryReadModel {
+    key: String,
+    exchange: Option<String>,
+    symbol: Option<String>,
+    reason: String,
+    message: String,
+    count: usize,
+    first_at: DateTime<Utc>,
+    last_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct SymbolCoverageReadModel {
+    symbol: String,
+    configured_exchanges: Vec<String>,
+    exchanges: Vec<String>,
+    opportunities: usize,
+    openable_opportunities: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BestOpportunityReadModel {
+    symbol: String,
+    best_route: String,
+    long_exchange: String,
+    short_exchange: String,
+    open_spread_pct: f64,
+    expected_net_edge_pct: f64,
+    notional_usdt: f64,
+    can_open: bool,
+    reject_reasons: Vec<String>,
+    book_age_ms: i64,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct LiveControlState {
+    paused_new_entries: bool,
+    close_only: bool,
+    kill_switch: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct LiveExecutionSummary {
+    dry_run: bool,
+    open_execution_style: String,
+    target_notional_usdt: f64,
+    max_notional_usdt: f64,
+    min_open_maker_taker_net_edge: f64,
+    close_threshold_pct: f64,
+    max_open_bundles: usize,
+    max_positions_per_exchange: usize,
+    enabled_exchanges: Vec<String>,
+    enabled_symbols: usize,
+    strategy_open_orders: usize,
+    external_open_orders: usize,
 }
 
 #[tokio::main]
@@ -142,7 +290,7 @@ async fn main() -> Result<()> {
 
 async fn bootstrap_live(
     config_path: PathBuf,
-    config: CrossExchangeArbitrageConfig,
+    mut config: CrossExchangeArbitrageConfig,
     execute_requested: bool,
     run_requested: bool,
     skip_private_audit: bool,
@@ -157,6 +305,7 @@ async fn bootstrap_live(
     let private_sync = PrivateRuntimeSync::new(runtime, parts.adapters.clone());
     let account_preparation =
         prepare_live_accounts(&parts.router, &parts.adapters, &config, &instruments).await;
+    let account_fee_overrides = apply_account_fee_overrides(&mut config, &account_preparation);
 
     let rest_audits = if skip_private_audit {
         Vec::new()
@@ -168,6 +317,27 @@ async fn bootstrap_live(
         for audit in &rest_audits {
             if !audit.ok {
                 blocking_reasons.push(format!("{} private REST audit failed", audit.exchange));
+            }
+            if audit.strategy_open_orders > 0 {
+                blocking_reasons.push(format!(
+                    "{} startup audit found {} crossarb strategy open order(s); restart in close-only/reconcile mode or cancel/settle them before allowing new entries",
+                    audit.exchange, audit.strategy_open_orders
+                ));
+            }
+            if config.risk.block_on_external_account_exposure
+                && (audit.nonzero_positions > 0 || audit.open_orders > 0)
+            {
+                blocking_reasons.push(format!(
+                    "{} startup audit found nonzero_positions={} open_orders={}; restart in close-only/reconcile mode before allowing new entries",
+                    audit.exchange, audit.nonzero_positions, audit.open_orders
+                ));
+            } else if audit.nonzero_positions > 0 || audit.open_orders > 0 {
+                log::warn!(
+                    "cross_arb_live startup audit observed external exposure exchange={} nonzero_positions={} open_orders={} but block_on_external_account_exposure=false",
+                    audit.exchange,
+                    audit.nonzero_positions,
+                    audit.open_orders
+                );
             }
         }
     }
@@ -226,38 +396,24 @@ async fn bootstrap_live(
         binance_private_ws_specs: parts.binance_private_ws_specs.len(),
         account_preparation,
         rest_audits,
+        account_fee_overrides,
     })
 }
 
-async fn run_live(config: CrossExchangeArbitrageConfig, skip_private_audit: bool) -> Result<()> {
+async fn run_live(
+    mut config: CrossExchangeArbitrageConfig,
+    skip_private_audit: bool,
+) -> Result<()> {
     let enabled_exchanges = live_enabled_exchanges(&config);
     let instruments = load_live_instruments(&config, &enabled_exchanges).await?;
     let parts = build_cross_arb_live_runtime_parts(&config, instruments.clone())?;
-    let account_preparation =
-        prepare_live_accounts(&parts.router, &parts.adapters, &config, &instruments).await;
-    let failed_prep = account_preparation
-        .iter()
-        .filter(|summary| !summary.ok)
-        .map(|summary| format!("{} {}", summary.exchange, summary.action))
-        .collect::<Vec<_>>();
-    if !failed_prep.is_empty() {
-        return Err(anyhow!(
-            "account preparation failed before live loop: {}",
-            failed_prep.join(", ")
-        ));
-    }
-
     let runtime = Arc::new(RwLock::new(CrossArbRuntime::new(
         config.clone(),
         Utc::now(),
     )));
-    let execution = Arc::new(RwLock::new(CrossArbExecutionCoordinator::new(
-        ExecutionEngine::new(parts.router),
-    )));
-    let private_sync = Arc::new(PrivateRuntimeSync::with_execution(
+    let private_sync = Arc::new(PrivateRuntimeSync::new(
         runtime.clone(),
         parts.adapters.clone(),
-        Some(execution.clone()),
     ));
 
     if !skip_private_audit {
@@ -273,7 +429,85 @@ async fn run_live(config: CrossExchangeArbitrageConfig, skip_private_audit: bool
                 failures.join(", ")
             ));
         }
+        let dirty_exchanges = audits
+            .iter()
+            .filter(|summary| summary.nonzero_positions > 0 || summary.open_orders > 0)
+            .map(|summary| {
+                format!(
+                    "{} nonzero_positions={} open_orders={}",
+                    summary.exchange, summary.nonzero_positions, summary.open_orders
+                )
+            })
+            .collect::<Vec<_>>();
+        let strategy_order_exchanges = audits
+            .iter()
+            .filter(|summary| summary.strategy_open_orders > 0)
+            .map(|summary| {
+                format!(
+                    "{} strategy_open_orders={}",
+                    summary.exchange, summary.strategy_open_orders
+                )
+            })
+            .collect::<Vec<_>>();
+        if !strategy_order_exchanges.is_empty() {
+            let mut guard = runtime.write().await;
+            guard.state.set_close_only();
+            return Err(anyhow!(
+                "initial private REST audit found existing crossarb open orders without restored in-memory state: {}; cancel/reconcile them before allowing new entries",
+                strategy_order_exchanges.join(", ")
+            ));
+        }
+        if config.risk.block_on_external_account_exposure
+            && !dirty_exchanges.is_empty()
+            && config
+                .exchanges
+                .values()
+                .all(|runtime| runtime.allows_new_entries())
+        {
+            let mut guard = runtime.write().await;
+            guard.state.set_close_only();
+            return Err(anyhow!(
+                "initial private REST audit found existing exposure/open orders without restored state: {}; new entries blocked. Configure affected exchange operating_mode=close_only or reconcile state before live run",
+                dirty_exchanges.join(", ")
+            ));
+        } else if !dirty_exchanges.is_empty() {
+            log::warn!(
+                "cross_arb_live initial audit observed external account exposure but continuing because block_on_external_account_exposure=false: {}",
+                dirty_exchanges.join(", ")
+            );
+        }
     }
+
+    let account_preparation =
+        prepare_live_accounts(&parts.router, &parts.adapters, &config, &instruments).await;
+    let fee_overrides = apply_account_fee_overrides(&mut config, &account_preparation);
+    if !fee_overrides.is_empty() {
+        log::info!(
+            "cross_arb_live applied {} account fee override(s) to runtime opportunity model",
+            fee_overrides.len()
+        );
+    }
+    let failed_prep = account_preparation
+        .iter()
+        .filter(|summary| !summary.ok)
+        .map(|summary| format!("{} {}", summary.exchange, summary.action))
+        .collect::<Vec<_>>();
+    if !failed_prep.is_empty() {
+        return Err(anyhow!(
+            "account preparation failed before live loop: {}",
+            failed_prep.join(", ")
+        ));
+    }
+
+    let execution = Arc::new(RwLock::new(CrossArbExecutionCoordinator::new(
+        ExecutionEngine::new(parts.router),
+    )));
+    let close_metrics = Arc::new(RwLock::new(HashMap::new()));
+    let private_sync = Arc::new(PrivateRuntimeSync::with_execution(
+        runtime.clone(),
+        parts.adapters.clone(),
+        Some(execution.clone()),
+    ));
 
     let mut perp_rx = private_sync.start_private_ws_supervisors(parts.private_ws_specs, 256);
     let private_sync_for_perp = private_sync.clone();
@@ -299,16 +533,587 @@ async fn run_live(config: CrossExchangeArbitrageConfig, skip_private_audit: bool
         enabled_exchanges.clone(),
     ));
 
-    tokio::spawn(rest_market_execution_loop(
+    tokio::spawn(ws_market_execution_loop(
         runtime.clone(),
         execution.clone(),
+        close_metrics.clone(),
         config.clone(),
         enabled_exchanges,
         instruments,
     ));
 
+    start_live_dashboard(runtime.clone(), close_metrics, &config).await?;
+
     futures_util::future::pending::<()>().await;
     Ok(())
+}
+
+async fn start_live_dashboard(
+    runtime: Arc<RwLock<CrossArbRuntime>>,
+    close_metrics: Arc<RwLock<HashMap<String, BundleCloseMetricReadModel>>>,
+    config: &CrossExchangeArbitrageConfig,
+) -> Result<()> {
+    if !config.dashboard.enabled {
+        return Ok(());
+    }
+    let addr: SocketAddr = format!("{}:{}", config.dashboard.bind_host, config.dashboard.port)
+        .parse()
+        .with_context(|| "failed to parse cross_arb_live dashboard bind address")?;
+    let state = LiveDashboardState {
+        runtime,
+        close_metrics,
+        started_at: Utc::now(),
+    };
+    let router = live_dashboard_router(state);
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("bind cross_arb_live dashboard on {addr}"))?;
+    log::info!("cross_arb_live dashboard listening on http://{addr}");
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, router).await {
+            log::error!("cross_arb_live dashboard stopped: {error}");
+        }
+    });
+    Ok(())
+}
+
+fn live_dashboard_router(state: LiveDashboardState) -> Router {
+    Router::new()
+        .route("/", get(live_dashboard_index))
+        .route("/healthz", get(live_dashboard_healthz))
+        .route("/api/cross-arb/live/dashboard", get(live_dashboard_payload))
+        .route("/api/cross-arb/dashboard", get(live_dashboard_payload))
+        .route(
+            "/api/cross-arb/opportunities",
+            get(live_dashboard_opportunities),
+        )
+        .route(
+            "/api/cross-arb/bundles/open",
+            get(live_dashboard_open_bundles),
+        )
+        .route("/api/cross-arb/positions", get(live_dashboard_positions))
+        .route(
+            "/api/cross-arb/open-orders",
+            get(live_dashboard_open_orders),
+        )
+        .route("/api/cross-arb/balances", get(live_dashboard_balances))
+        .route(
+            "/api/cross-arb/risk-events",
+            get(live_dashboard_risk_events),
+        )
+        .route(
+            "/api/cross-arb/control/pause-new-entries",
+            post(live_dashboard_pause_new_entries),
+        )
+        .route(
+            "/api/cross-arb/control/resume-new-entries",
+            post(live_dashboard_resume_new_entries),
+        )
+        .route(
+            "/api/cross-arb/control/close-only",
+            post(live_dashboard_close_only),
+        )
+        .route(
+            "/api/cross-arb/control/kill-switch",
+            post(live_dashboard_kill_switch),
+        )
+        .with_state(state)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
+}
+
+async fn live_dashboard_index() -> Html<&'static str> {
+    Html(LIVE_DASHBOARD_HTML)
+}
+
+async fn live_dashboard_healthz() -> &'static str {
+    "ok"
+}
+
+async fn live_dashboard_payload(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<LiveDashboardPayload> {
+    Json(build_live_dashboard_payload(&state).await)
+}
+
+async fn live_dashboard_opportunities(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<Vec<OpportunityReadModel>> {
+    let guard = state.runtime.read().await;
+    Json(guard.state.opportunity_read_models())
+}
+
+async fn live_dashboard_open_bundles(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<Vec<BundleReadModel>> {
+    let guard = state.runtime.read().await;
+    Json(guard.state.open_bundle_read_models())
+}
+
+async fn live_dashboard_positions(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<Vec<PositionSnapshot>> {
+    let guard = state.runtime.read().await;
+    Json(private_positions_from_runtime(&guard))
+}
+
+async fn live_dashboard_open_orders(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<Vec<OrderSnapshot>> {
+    let guard = state.runtime.read().await;
+    Json(private_open_orders_from_runtime(&guard))
+}
+
+async fn live_dashboard_balances(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<Vec<ExchangeBalance>> {
+    let guard = state.runtime.read().await;
+    Json(balances_from_runtime(&guard))
+}
+
+async fn live_dashboard_risk_events(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<Vec<RiskEventReadModel>> {
+    let guard = state.runtime.read().await;
+    Json(guard.state.risk_events.clone())
+}
+
+async fn live_dashboard_pause_new_entries(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<LiveControlState> {
+    let mut guard = state.runtime.write().await;
+    guard.state.pause_new_entries();
+    Json(control_state_from_runtime(&guard))
+}
+
+async fn live_dashboard_resume_new_entries(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<LiveControlState> {
+    let mut guard = state.runtime.write().await;
+    guard.state.resume_new_entries();
+    Json(control_state_from_runtime(&guard))
+}
+
+async fn live_dashboard_close_only(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<LiveControlState> {
+    let mut guard = state.runtime.write().await;
+    guard.state.set_close_only();
+    Json(control_state_from_runtime(&guard))
+}
+
+async fn live_dashboard_kill_switch(
+    AxumState(state): AxumState<LiveDashboardState>,
+) -> Json<LiveControlState> {
+    let mut guard = state.runtime.write().await;
+    guard.state.kill_switch();
+    Json(control_state_from_runtime(&guard))
+}
+
+async fn build_live_dashboard_payload(state: &LiveDashboardState) -> LiveDashboardPayload {
+    let guard = state.runtime.read().await;
+    let close_metrics = state.close_metrics.read().await;
+    let status = guard.state.dashboard_status();
+    let private_open_orders = private_open_orders_from_runtime(&guard);
+    let strategy_open_orders = private_open_orders
+        .iter()
+        .filter(|order| order_is_crossarb(order))
+        .cloned()
+        .collect::<Vec<_>>();
+    let external_open_orders = private_open_orders
+        .iter()
+        .filter(|order| !order_is_crossarb(order))
+        .cloned()
+        .collect::<Vec<_>>();
+    LiveDashboardPayload {
+        generated_at: Utc::now(),
+        started_at: state.started_at,
+        status,
+        symbols: symbol_coverage_from_runtime(&guard),
+        opportunities: filtered_opportunity_read_models(&guard),
+        open_bundles: guard.state.open_bundle_read_models(),
+        active_bundles: active_bundle_read_models(&guard, &close_metrics),
+        history: guard.state.history_read_models(),
+        risk_event_summary: summarize_risk_events(&guard.state.risk_events),
+        risk_events: guard.state.risk_events.clone(),
+        private_positions: private_positions_from_runtime(&guard),
+        private_open_orders,
+        strategy_open_orders,
+        external_open_orders,
+        balances: balances_from_runtime(&guard),
+        controls: control_state_from_runtime(&guard),
+        execution: execution_summary_from_runtime(&guard),
+    }
+}
+
+fn filtered_opportunity_read_models(runtime: &CrossArbRuntime) -> Vec<BestOpportunityReadModel> {
+    let active_symbols = active_position_symbols_from_runtime(runtime);
+    let mut best_by_symbol: HashMap<String, OpportunityReadModel> = HashMap::new();
+    for opportunity in runtime
+        .state
+        .opportunity_read_models()
+        .into_iter()
+        .filter(|opportunity| !active_symbols.contains(&opportunity.canonical_symbol.to_string()))
+    {
+        let symbol = opportunity.canonical_symbol.to_string();
+        let replace = best_by_symbol
+            .get(&symbol)
+            .map(|current| opportunity_rank_cmp(&opportunity, current).is_gt())
+            .unwrap_or(true);
+        if replace {
+            best_by_symbol.insert(symbol, opportunity);
+        }
+    }
+    let mut opportunities = best_by_symbol
+        .into_values()
+        .map(|opportunity| BestOpportunityReadModel {
+            symbol: opportunity.canonical_symbol.to_string(),
+            best_route: format!(
+                "多 {} / 空 {}",
+                opportunity.long_exchange.as_str(),
+                opportunity.short_exchange.as_str()
+            ),
+            long_exchange: opportunity.long_exchange.as_str().to_string(),
+            short_exchange: opportunity.short_exchange.as_str().to_string(),
+            open_spread_pct: opportunity.raw_open_spread,
+            expected_net_edge_pct: opportunity.maker_taker_net_edge,
+            notional_usdt: opportunity.executable_notional_usdt,
+            can_open: opportunity.can_open,
+            reject_reasons: opportunity
+                .reject_reasons
+                .iter()
+                .map(|reason| chinese_reject_reason(*reason).to_string())
+                .collect(),
+            book_age_ms: opportunity.book_age_ms,
+            updated_at: opportunity.created_at,
+        })
+        .collect::<Vec<_>>();
+    opportunities.sort_by(|left, right| {
+        right.can_open.cmp(&left.can_open).then_with(|| {
+            right
+                .expected_net_edge_pct
+                .partial_cmp(&left.expected_net_edge_pct)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    opportunities.into_iter().take(200).collect()
+}
+
+fn opportunity_rank_cmp(
+    left: &OpportunityReadModel,
+    right: &OpportunityReadModel,
+) -> std::cmp::Ordering {
+    left.can_open.cmp(&right.can_open).then_with(|| {
+        left.maker_taker_net_edge
+            .partial_cmp(&right.maker_taker_net_edge)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+fn active_bundle_read_models(
+    runtime: &CrossArbRuntime,
+    close_metrics: &HashMap<String, BundleCloseMetricReadModel>,
+) -> Vec<ActiveBundleReadModel> {
+    runtime
+        .state
+        .open_bundle_read_models()
+        .into_iter()
+        .filter(|bundle| {
+            matches!(
+                bundle.status,
+                SimulatedBundleStatus::MakerPending
+                    | SimulatedBundleStatus::MakerFilled
+                    | SimulatedBundleStatus::Hedging
+                    | SimulatedBundleStatus::OpenSimulated
+                    | SimulatedBundleStatus::ClosingSimulated
+                    | SimulatedBundleStatus::OrphanLeg
+            )
+        })
+        .map(|bundle| {
+            let metric = close_metrics.get(&bundle.bundle_id);
+            let position = runtime.state.position_manager.bundle(&bundle.bundle_id);
+            ActiveBundleReadModel {
+                bundle_id: bundle.bundle_id,
+                opportunity_id: bundle.opportunity_id,
+                symbol: position
+                    .map(|position| position.canonical_symbol.to_string())
+                    .or_else(|| metric.map(|metric| metric.symbol.clone())),
+                long_exchange: position
+                    .map(|position| position.long_leg.exchange.as_str().to_string())
+                    .or_else(|| metric.map(|metric| metric.long_exchange.clone())),
+                short_exchange: position
+                    .map(|position| position.short_leg.exchange.as_str().to_string())
+                    .or_else(|| metric.map(|metric| metric.short_exchange.clone())),
+                status: bundle.status,
+                target_notional_usdt: bundle.target_notional_usdt,
+                entry_edge_pct: position.map(|position| position.entry_edge_pct),
+                close_spread_pct: metric.map(|metric| metric.close_spread_pct),
+                close_profit_pct: metric.map(|metric| metric.close_profit_pct),
+                close_threshold_pct: metric
+                    .map(|metric| metric.close_threshold_pct)
+                    .unwrap_or(runtime.state.config.thresholds.max_close_spread_pct),
+                closeable: metric.map(|metric| metric.closeable).unwrap_or(false),
+                updated_at: bundle.updated_at,
+            }
+        })
+        .collect()
+}
+
+fn summarize_risk_events(events: &[RiskEventReadModel]) -> Vec<RiskEventSummaryReadModel> {
+    let mut summaries: HashMap<String, RiskEventSummaryReadModel> = HashMap::new();
+    for event in events {
+        let symbol = event.canonical_symbol.as_ref().map(ToString::to_string);
+        let exchange = event
+            .exchange
+            .as_ref()
+            .map(|exchange| exchange.as_str().to_string());
+        let message = normalize_risk_message(&event.message);
+        let key = format!(
+            "{}|{}|{:?}|{}",
+            exchange.as_deref().unwrap_or(""),
+            symbol.as_deref().unwrap_or(""),
+            event.reason,
+            message
+        );
+        summaries
+            .entry(key.clone())
+            .and_modify(|summary| {
+                summary.count += 1;
+                summary.last_at = event.created_at;
+            })
+            .or_insert_with(|| RiskEventSummaryReadModel {
+                key,
+                exchange,
+                symbol,
+                reason: chinese_reject_reason(event.reason).to_string(),
+                message,
+                count: 1,
+                first_at: event.created_at,
+                last_at: event.created_at,
+            });
+    }
+    let mut values = summaries.into_values().collect::<Vec<_>>();
+    values.sort_by(|left, right| right.last_at.cmp(&left.last_at));
+    values
+}
+
+fn normalize_risk_message(message: &str) -> String {
+    if message.contains("cancelled after TTL") {
+        "Maker 挂单超过 TTL 未成交，已自动撤单".to_string()
+    } else if message.contains("TTL cancel failed") {
+        "Maker 挂单超过 TTL，自动撤单失败".to_string()
+    } else if message.contains("private stream event") {
+        "私有 WebSocket 事件异常".to_string()
+    } else {
+        message.to_string()
+    }
+}
+
+fn chinese_reject_reason(reason: RejectReason) -> &'static str {
+    match reason {
+        RejectReason::RawSpreadTooSmall => "原始价差不足",
+        RejectReason::NetEdgeTooSmall => "净价差不足",
+        RejectReason::StaleBook => "盘口过期",
+        RejectReason::RouteUnhealthy => "路由/交易所状态异常",
+        RejectReason::DepthInsufficient => "深度不足",
+        RejectReason::FundingDangerous => "资金费率风险",
+        RejectReason::FundingWindowTooClose => "临近资金费结算",
+        RejectReason::NotionalOverLimit => "名义金额超限",
+        RejectReason::SlippageTooHigh => "滑点过高",
+        RejectReason::BadOrderBook => "盘口异常",
+        RejectReason::PrecisionInvalid => "精度不合法",
+        RejectReason::AbnormalCrossExchangeSpread => "跨所价差异常",
+        RejectReason::ExchangeCapacityExceeded => "交易所容量超限",
+        RejectReason::ExchangePositionLimitExceeded => "交易所仓位数超限",
+    }
+}
+
+fn symbol_coverage_from_runtime(runtime: &CrossArbRuntime) -> Vec<SymbolCoverageReadModel> {
+    runtime
+        .state
+        .config
+        .universe
+        .symbols
+        .iter()
+        .map(|symbol| {
+            let mut exchanges = runtime
+                .state
+                .opportunities
+                .iter()
+                .filter(|opportunity| opportunity.canonical_symbol == *symbol)
+                .flat_map(|opportunity| {
+                    [
+                        opportunity.long_exchange.as_str().to_string(),
+                        opportunity.short_exchange.as_str().to_string(),
+                    ]
+                })
+                .collect::<Vec<_>>();
+            exchanges.sort();
+            exchanges.dedup();
+            let opportunities = runtime
+                .state
+                .opportunities
+                .iter()
+                .filter(|opportunity| opportunity.canonical_symbol == *symbol)
+                .count();
+            let openable_opportunities = runtime
+                .state
+                .opportunities
+                .iter()
+                .filter(|opportunity| {
+                    opportunity.canonical_symbol == *symbol && opportunity.can_open
+                })
+                .count();
+            SymbolCoverageReadModel {
+                symbol: symbol.to_string(),
+                configured_exchanges: runtime
+                    .state
+                    .config
+                    .universe
+                    .enabled_exchanges
+                    .iter()
+                    .map(|exchange| exchange.as_str().to_string())
+                    .collect(),
+                exchanges,
+                opportunities,
+                openable_opportunities,
+            }
+        })
+        .collect()
+}
+
+fn active_position_symbols_from_runtime(runtime: &CrossArbRuntime) -> HashSet<String> {
+    let mut symbols = runtime
+        .state
+        .position_manager
+        .bundles()
+        .filter(|position| {
+            position.closeable_qty(runtime.state.config.reconciliation.quantity_tolerance) > 0.0
+                || position.unhedged_qty() > runtime.state.config.reconciliation.quantity_tolerance
+        })
+        .map(|position| position.canonical_symbol.to_string())
+        .collect::<HashSet<_>>();
+    for position in private_positions_from_runtime(runtime) {
+        if position.quantity.abs() > runtime.state.config.reconciliation.quantity_tolerance {
+            symbols.insert(position.canonical_symbol.to_string());
+        }
+    }
+    symbols
+}
+
+fn private_positions_from_runtime(runtime: &CrossArbRuntime) -> Vec<PositionSnapshot> {
+    let mut positions = runtime
+        .state
+        .account_sync
+        .values()
+        .flat_map(|state| state.position_snapshots())
+        .collect::<Vec<_>>();
+    positions.sort_by(|left, right| {
+        left.exchange
+            .as_str()
+            .cmp(right.exchange.as_str())
+            .then_with(|| {
+                left.canonical_symbol
+                    .to_string()
+                    .cmp(&right.canonical_symbol.to_string())
+            })
+            .then_with(|| {
+                format!("{:?}", left.position_side).cmp(&format!("{:?}", right.position_side))
+            })
+    });
+    positions
+}
+
+fn private_open_orders_from_runtime(runtime: &CrossArbRuntime) -> Vec<OrderSnapshot> {
+    let mut orders = runtime
+        .state
+        .account_sync
+        .values()
+        .flat_map(|state| state.order_snapshots())
+        .collect::<Vec<_>>();
+    orders.sort_by(|left, right| {
+        left.exchange
+            .as_str()
+            .cmp(right.exchange.as_str())
+            .then_with(|| {
+                left.canonical_symbol
+                    .to_string()
+                    .cmp(&right.canonical_symbol.to_string())
+            })
+            .then_with(|| left.updated_at.cmp(&right.updated_at))
+    });
+    orders
+}
+
+fn order_is_crossarb(order: &OrderSnapshot) -> bool {
+    order
+        .client_order_id
+        .as_deref()
+        .map(is_crossarb_client_order_id)
+        .unwrap_or(false)
+}
+
+fn balances_from_runtime(runtime: &CrossArbRuntime) -> Vec<ExchangeBalance> {
+    let mut balances = runtime
+        .state
+        .account_sync
+        .values()
+        .flat_map(|state| state.account_snapshot())
+        .collect::<Vec<_>>();
+    balances.sort_by(|left, right| {
+        left.exchange
+            .as_str()
+            .cmp(right.exchange.as_str())
+            .then_with(|| left.asset.cmp(&right.asset))
+    });
+    balances
+}
+
+fn control_state_from_runtime(runtime: &CrossArbRuntime) -> LiveControlState {
+    LiveControlState {
+        paused_new_entries: runtime.state.paused_new_entries,
+        close_only: runtime.state.close_only,
+        kill_switch: runtime.state.kill_switch,
+    }
+}
+
+fn execution_summary_from_runtime(runtime: &CrossArbRuntime) -> LiveExecutionSummary {
+    let private_open_orders = private_open_orders_from_runtime(runtime);
+    let strategy_open_orders = private_open_orders
+        .iter()
+        .filter(|order| order_is_crossarb(order))
+        .count();
+    LiveExecutionSummary {
+        dry_run: runtime.state.config.execution.dry_run,
+        open_execution_style: format!("{:?}", runtime.state.config.execution.open_execution_style),
+        target_notional_usdt: runtime.state.config.sizing.target_notional_usdt,
+        max_notional_usdt: runtime.state.config.sizing.max_notional_usdt,
+        min_open_maker_taker_net_edge: runtime
+            .state
+            .config
+            .thresholds
+            .min_open_maker_taker_net_edge,
+        close_threshold_pct: runtime.state.config.thresholds.max_close_spread_pct,
+        max_open_bundles: runtime.state.config.risk.max_open_bundles,
+        max_positions_per_exchange: runtime.state.config.sizing.max_positions_per_exchange,
+        enabled_exchanges: runtime
+            .state
+            .config
+            .universe
+            .enabled_exchanges
+            .iter()
+            .map(|exchange| exchange.as_str().to_string())
+            .collect(),
+        enabled_symbols: runtime.state.config.universe.symbols.len(),
+        strategy_open_orders,
+        external_open_orders: private_open_orders
+            .len()
+            .saturating_sub(strategy_open_orders),
+    }
 }
 
 async fn periodic_rest_audit_loop(
@@ -325,100 +1130,318 @@ async fn periodic_rest_audit_loop(
     }
 }
 
-async fn rest_market_execution_loop(
+async fn ws_market_execution_loop(
     runtime: Arc<RwLock<CrossArbRuntime>>,
     execution: Arc<RwLock<CrossArbExecutionCoordinator>>,
+    close_metrics: Arc<RwLock<HashMap<String, BundleCloseMetricReadModel>>>,
     config: CrossExchangeArbitrageConfig,
     exchanges: Vec<ExchangeId>,
     instruments: Vec<InstrumentMeta>,
 ) {
-    let mut adapters = Vec::new();
+    let mut adapters: Vec<(ExchangeId, Arc<dyn MarketDataAdapter + Send + Sync>)> = Vec::new();
     for exchange in &exchanges {
         if let Some(adapter) = market_adapter(exchange) {
-            adapters.push((exchange.clone(), adapter));
+            adapters.push((exchange.clone(), Arc::from(adapter)));
         }
     }
-    let instruments_by_symbol = instruments
-        .into_iter()
-        .map(|instrument| {
-            (
-                (
-                    instrument.exchange.clone(),
-                    instrument.canonical_symbol.clone(),
-                ),
-                instrument,
-            )
-        })
-        .collect::<HashMap<_, _>>();
+
+    let market_cache = Arc::new(RwLock::new(MarketStateCache::new(
+        config.market.stale_quote_ms,
+    )));
+    {
+        let mut cache = market_cache.write().await;
+        for instrument in instruments {
+            cache.upsert_instrument(instrument);
+        }
+    }
+
+    let (ws_tx, mut ws_rx) = tokio::sync::mpsc::channel(16_384);
+    for (exchange, adapter) in &adapters {
+        let symbols = config
+            .universe
+            .symbols
+            .iter()
+            .map(|symbol| exchange_symbol_for(exchange, symbol))
+            .collect::<Vec<_>>();
+        let batch_size = config.ws_batch_size_for(exchange, 80);
+        tokio::spawn(cross_arb_server_ws::run_public_ws_adapter(
+            adapter.clone(),
+            symbols,
+            cross_arb_server_ws::PublicWsConfig {
+                max_symbols_per_connection: batch_size,
+                ..Default::default()
+            },
+            ws_tx.clone(),
+        ));
+    }
+    drop(ws_tx);
+
+    let cache_for_ws = market_cache.clone();
+    tokio::spawn(async move {
+        while let Some(update) = ws_rx.recv().await {
+            match update {
+                cross_arb_server_ws::PublicWsUpdate::OrderBook(book) => {
+                    cache_for_ws
+                        .write()
+                        .await
+                        .upsert_orderbook_at(book, Utc::now());
+                }
+                cross_arb_server_ws::PublicWsUpdate::Connected {
+                    exchange,
+                    route,
+                    symbol_count,
+                    ..
+                } => {
+                    log::info!(
+                        "cross_arb_live public ws connected exchange={} symbols={} route={}",
+                        exchange,
+                        symbol_count,
+                        route
+                    );
+                }
+                cross_arb_server_ws::PublicWsUpdate::Error(error) => {
+                    log::warn!(
+                        "cross_arb_live public ws error exchange={} kind={} message={}",
+                        error.exchange,
+                        error.kind,
+                        error.message
+                    );
+                }
+            }
+        }
+    });
+
     let mut ticker = interval(TokioDuration::from_millis(
         (config.market.stale_quote_ms / 2).max(1_000) as u64,
     ));
+    let mut funding_cache: HashMap<(ExchangeId, CanonicalSymbol), MarketFundingSnapshot> =
+        HashMap::new();
+    let mut last_funding_refresh: Option<DateTime<Utc>> = None;
 
     loop {
         ticker.tick().await;
         let now = Utc::now();
-        let funding = fetch_live_funding(&adapters, &config.universe.symbols).await;
+        if config.funding.enabled
+            && last_funding_refresh
+                .map(|last| {
+                    now.signed_duration_since(last).num_seconds()
+                        >= config.funding.refresh_secs.max(1) as i64
+                })
+                .unwrap_or(true)
+        {
+            funding_cache = fetch_live_funding(&adapters, &config.universe.symbols).await;
+            let mut cache = market_cache.write().await;
+            for funding in funding_cache.values().cloned() {
+                cache.upsert_funding(funding);
+            }
+            last_funding_refresh = Some(now);
+        }
         let snapshots_by_symbol =
-            fetch_live_orderbooks(&adapters, &config, &funding, &instruments_by_symbol, now).await;
+            snapshots_from_market_cache(&market_cache, &config, &funding_cache, now).await;
+
+        let mut close_metric_items = {
+            let runtime_guard = runtime.read().await;
+            close_metrics_from_runtime(&runtime_guard, &snapshots_by_symbol, now)
+        };
+        let previous_metrics = close_metrics.read().await.clone();
+        for (bundle_id, metric) in previous_metrics {
+            close_metric_items.entry(bundle_id).or_insert(metric);
+        }
+        *close_metrics.write().await = close_metric_items;
 
         let mut runtime_guard = runtime.write().await;
-        let mut execution_guard = execution.write().await;
-        let _ = execution_guard
-            .cancel_expired_maker_orders(&mut runtime_guard, now)
+        {
+            let mut execution_guard = execution.write().await;
+            let _ = execution_guard
+                .cancel_expired_maker_orders(&mut runtime_guard, now)
+                .await;
+            let closed_or_attempted = execute_live_close_candidates(
+                &mut runtime_guard,
+                &mut execution_guard,
+                &snapshots_by_symbol,
+                now,
+            )
             .await;
-        if has_active_bundle(&runtime_guard) || execution_guard.pending_maker_count() > 0 {
-            continue;
-        }
+            if closed_or_attempted {
+                continue;
+            }
+            if has_active_bundle(&runtime_guard) || execution_guard.pending_maker_count() > 0 {
+                continue;
+            }
 
-        for symbol in &config.universe.symbols {
-            let Some(snapshots) = snapshots_by_symbol.get(symbol) else {
-                continue;
-            };
-            if snapshots.len() < config.market.min_common_exchanges {
-                continue;
-            }
-            let signals = runtime_guard.on_market_snapshots(symbol, snapshots, now);
-            for signal in signals
-                .iter()
-                .filter(|signal| signal.action == ArbSignalAction::Open)
-                .take(1)
-            {
-                let signal_canonical_symbol = signal.opportunity_id.as_ref().and_then(|id| {
-                    runtime_guard
-                        .state
-                        .opportunities
-                        .iter()
-                        .find(|opportunity| opportunity.opportunity_id == *id)
-                        .map(|opportunity| opportunity.canonical_symbol.clone())
-                });
-                match execution_guard
-                    .execute_open_signal(&mut runtime_guard, signal)
-                    .await
-                {
-                    Ok(Some(_)) | Ok(None) => {}
-                    Err(error) => runtime_guard
-                        .state
-                        .risk_events
-                        .push(rustcta::strategies::cross_exchange_arbitrage::RiskEventReadModel {
-                            event_id: format!("live-open-exec-{}", now.timestamp_millis()),
-                            canonical_symbol: signal_canonical_symbol,
-                            exchange: None,
-                            reason: rustcta::strategies::cross_exchange_arbitrage::RejectReason::RouteUnhealthy,
-                            message: error.to_string(),
-                            created_at: now,
-                        }),
+            for symbol in &config.universe.symbols {
+                let Some(snapshots) = snapshots_by_symbol.get(symbol) else {
+                    continue;
+                };
+                if snapshots.len() < config.market.min_common_exchanges {
+                    continue;
                 }
-                break;
-            }
-            if execution_guard.pending_maker_count() > 0 || has_active_bundle(&runtime_guard) {
-                break;
+                let signals = runtime_guard.on_market_snapshots(symbol, snapshots, now);
+                for signal in signals
+                    .iter()
+                    .filter(|signal| signal.action == ArbSignalAction::Open)
+                    .take(1)
+                {
+                    let signal_canonical_symbol = signal.opportunity_id.as_ref().and_then(|id| {
+                        runtime_guard
+                            .state
+                            .opportunities
+                            .iter()
+                            .find(|opportunity| opportunity.opportunity_id == *id)
+                            .map(|opportunity| opportunity.canonical_symbol.clone())
+                    });
+                    match execution_guard
+                        .execute_open_signal(&mut runtime_guard, signal)
+                        .await
+                    {
+                        Ok(Some(_)) | Ok(None) => {}
+                        Err(error) => runtime_guard.state.risk_events.push(
+                            rustcta::strategies::cross_exchange_arbitrage::RiskEventReadModel {
+                                event_id: format!("live-open-exec-{}", now.timestamp_millis()),
+                                canonical_symbol: signal_canonical_symbol,
+                                exchange: None,
+                                reason: rustcta::strategies::cross_exchange_arbitrage::RejectReason::RouteUnhealthy,
+                                message: error.to_string(),
+                                created_at: now,
+                            },
+                        ),
+                    }
+                    break;
+                }
+                if execution_guard.pending_maker_count() > 0 || has_active_bundle(&runtime_guard) {
+                    break;
+                }
             }
         }
     }
 }
 
+async fn execute_live_close_candidates(
+    runtime: &mut CrossArbRuntime,
+    execution: &mut CrossArbExecutionCoordinator,
+    snapshots_by_symbol: &HashMap<CanonicalSymbol, Vec<MarketSnapshot>>,
+    now: DateTime<Utc>,
+) -> bool {
+    let bundle_ids = runtime
+        .state
+        .open_bundles
+        .iter()
+        .filter(|(_, bundle)| bundle.status == SimulatedBundleStatus::OpenSimulated)
+        .map(|(bundle_id, _)| bundle_id.clone())
+        .collect::<Vec<_>>();
+
+    for bundle_id in bundle_ids {
+        let Some(position) = runtime.state.position_manager.bundle(&bundle_id) else {
+            continue;
+        };
+        let Some(snapshots) = snapshots_by_symbol.get(&position.canonical_symbol) else {
+            continue;
+        };
+        let Some(candidate) = live_close_candidate_for_bundle(runtime, &bundle_id, snapshots, now)
+        else {
+            continue;
+        };
+        match execution.execute_close_bundle(runtime, &candidate).await {
+            Ok(decision) if decision.blocked_reason.is_none() => {
+                log::info!(
+                    "cross_arb_live close submitted bundle={} qty={} profit_pct={:.6}",
+                    candidate.bundle_id,
+                    candidate.quantity,
+                    candidate.close_profit_pct
+                );
+            }
+            Ok(decision) => {
+                log::warn!(
+                    "cross_arb_live close blocked bundle={} reason={:?}",
+                    candidate.bundle_id,
+                    decision.blocked_reason
+                );
+            }
+            Err(error) => {
+                runtime
+                    .state
+                    .risk_events
+                    .push(rustcta::strategies::cross_exchange_arbitrage::RiskEventReadModel {
+                        event_id: format!("live-close-exec-{}", now.timestamp_millis()),
+                        canonical_symbol: Some(candidate.canonical_symbol.clone()),
+                        exchange: None,
+                        reason: rustcta::strategies::cross_exchange_arbitrage::RejectReason::RouteUnhealthy,
+                        message: error.to_string(),
+                        created_at: now,
+                    });
+                log::warn!(
+                    "cross_arb_live close failed bundle={} error={}",
+                    candidate.bundle_id,
+                    error
+                );
+            }
+        }
+        return true;
+    }
+
+    false
+}
+
+fn close_metrics_from_runtime(
+    runtime: &CrossArbRuntime,
+    snapshots_by_symbol: &HashMap<CanonicalSymbol, Vec<MarketSnapshot>>,
+    now: DateTime<Utc>,
+) -> HashMap<String, BundleCloseMetricReadModel> {
+    let active_ids = runtime
+        .state
+        .open_bundles
+        .iter()
+        .filter(|(_, bundle)| {
+            matches!(
+                bundle.status,
+                SimulatedBundleStatus::OpenSimulated
+                    | SimulatedBundleStatus::ClosingSimulated
+                    | SimulatedBundleStatus::OrphanLeg
+            )
+        })
+        .map(|(bundle_id, _)| bundle_id.clone())
+        .collect::<Vec<_>>();
+
+    let mut next = HashMap::new();
+    for bundle_id in active_ids {
+        let Some(position) = runtime.state.position_manager.bundle(&bundle_id) else {
+            continue;
+        };
+        let Some(snapshots) = snapshots_by_symbol.get(&position.canonical_symbol) else {
+            continue;
+        };
+        let Some(metric) = live_close_metrics_for_bundle(runtime, &bundle_id, snapshots, now)
+        else {
+            continue;
+        };
+        next.insert(
+            bundle_id.clone(),
+            BundleCloseMetricReadModel {
+                bundle_id,
+                symbol: metric.canonical_symbol.to_string(),
+                long_exchange: metric.long_exchange.as_str().to_string(),
+                short_exchange: metric.short_exchange.as_str().to_string(),
+                quantity: metric.quantity,
+                target_notional_usdt: metric.target_notional_usdt,
+                entry_edge_pct: Some(position.entry_edge_pct),
+                open_fee_paid_usdt: metric.open_fee_paid_usdt,
+                close_fee_est_usdt: metric.close_fee_est_usdt,
+                gross_spread_pnl_usdt: metric.gross_spread_pnl_usdt,
+                realized_funding_pnl_usdt: metric.realized_funding_pnl_usdt,
+                close_spread_pct: metric.close_spread_pct,
+                close_profit_pct: metric.close_profit_pct,
+                close_threshold_pct: runtime.state.config.thresholds.max_close_spread_pct,
+                closeable: metric.close_spread_pct
+                    <= runtime.state.config.thresholds.max_close_spread_pct,
+                updated_at: now,
+            },
+        );
+    }
+    next
+}
+
 async fn fetch_live_funding(
-    adapters: &[(ExchangeId, Box<dyn MarketDataAdapter + Send + Sync>)],
+    adapters: &[(ExchangeId, Arc<dyn MarketDataAdapter + Send + Sync>)],
     symbols: &[CanonicalSymbol],
 ) -> HashMap<(ExchangeId, CanonicalSymbol), MarketFundingSnapshot> {
     let mut snapshots = HashMap::new();
@@ -444,59 +1467,42 @@ async fn fetch_live_funding(
     snapshots
 }
 
-async fn fetch_live_orderbooks(
-    adapters: &[(ExchangeId, Box<dyn MarketDataAdapter + Send + Sync>)],
+async fn snapshots_from_market_cache(
+    market_cache: &Arc<RwLock<MarketStateCache>>,
     config: &CrossExchangeArbitrageConfig,
     funding: &HashMap<(ExchangeId, CanonicalSymbol), MarketFundingSnapshot>,
-    instruments: &HashMap<(ExchangeId, CanonicalSymbol), InstrumentMeta>,
     now: DateTime<Utc>,
 ) -> HashMap<CanonicalSymbol, Vec<MarketSnapshot>> {
     let mut snapshots_by_symbol: HashMap<CanonicalSymbol, Vec<MarketSnapshot>> = HashMap::new();
-    for (exchange, adapter) in adapters {
-        if !adapter.capabilities().supports_rest_snapshot {
-            continue;
-        }
-        for symbol in &config.universe.symbols {
-            let exchange_symbol = exchange_symbol_for(exchange, symbol);
-            match adapter
-                .fetch_orderbook_snapshot(&exchange_symbol, config.market.depth_levels)
-                .await
-            {
-                Ok(book) => {
-                    let funding = funding.get(&(exchange.clone(), symbol.clone()));
-                    snapshots_by_symbol
-                        .entry(symbol.clone())
-                        .or_default()
-                        .push(MarketSnapshot {
-                            book,
-                            instrument: instruments
-                                .get(&(exchange.clone(), symbol.clone()))
-                                .cloned(),
-                            route_status: RouteStatus::Healthy,
-                            funding_rate: funding
-                                .map(|snapshot| snapshot.funding_rate)
-                                .unwrap_or(0.0),
-                            next_funding_time: funding
-                                .and_then(|snapshot| snapshot.next_funding_time),
-                        });
-                }
-                Err(error) => {
-                    log::warn!(
-                        "cross_arb_live orderbook fetch failed exchange={} symbol={} error={}",
-                        exchange,
-                        symbol,
-                        error
-                    );
-                }
-            }
-        }
-    }
-    for snapshots in snapshots_by_symbol.values_mut() {
-        for snapshot in snapshots {
-            snapshot.book.quality.stale = now
-                .signed_duration_since(snapshot.book.recv_ts)
-                .num_milliseconds()
+    let cache = market_cache.read().await;
+    for symbol in &config.universe.symbols {
+        for exchange in &config.universe.enabled_exchanges {
+            let Some(book) = cache.orderbook(exchange, symbol).cloned() else {
+                continue;
+            };
+            let mut book = book;
+            book.quality.stale = now.signed_duration_since(book.recv_ts).num_milliseconds()
                 > config.market.stale_quote_ms;
+            if book.quality.stale {
+                continue;
+            }
+            let funding = funding
+                .get(&(exchange.clone(), symbol.clone()))
+                .cloned()
+                .or_else(|| cache.funding(exchange, symbol).cloned());
+            snapshots_by_symbol
+                .entry(symbol.clone())
+                .or_default()
+                .push(MarketSnapshot {
+                    book,
+                    instrument: cache.instrument(exchange, symbol).cloned(),
+                    route_status: exchange_route_status(config, exchange),
+                    funding_rate: funding
+                        .as_ref()
+                        .map(|snapshot| snapshot.funding_rate)
+                        .unwrap_or(0.0),
+                    next_funding_time: funding.and_then(|snapshot| snapshot.next_funding_time),
+                });
         }
     }
     snapshots_by_symbol
@@ -517,7 +1523,7 @@ fn has_active_bundle(runtime: &CrossArbRuntime) -> bool {
 }
 
 async fn prepare_live_accounts(
-    router: &ExecutionRouter,
+    _router: &ExecutionRouter,
     adapters: &[Arc<dyn TradingAdapter>],
     config: &CrossExchangeArbitrageConfig,
     instruments: &[InstrumentMeta],
@@ -529,41 +1535,25 @@ async fn prepare_live_accounts(
         let capabilities = adapter.capabilities();
         let mode = configured_position_mode_for_config(config, &exchange);
         if capabilities.supports_position_mode_change {
-            let action = "set_position_mode".to_string();
-            match router
-                .route_set_position_mode(PositionModeCommand {
-                    exchange: exchange.clone(),
-                    mode,
-                    requested_at: Utc::now(),
-                })
-                .await
-            {
-                Ok(ack) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: None,
-                    action,
-                    ok: config.execution.dry_run || ack.accepted,
-                    dry_run: config.execution.dry_run,
-                    message: ack.message,
-                }),
-                Err(err) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: None,
-                    action,
-                    ok: false,
-                    dry_run: config.execution.dry_run,
-                    message: Some(err.to_string()),
-                }),
-            }
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                action: "set_position_mode".to_string(),
+                ok: true,
+                dry_run: config.execution.dry_run,
+                message: Some(format!(
+                    "skipped during live bootstrap to avoid account-mode writes; expected_position_mode={mode:?}"
+                )),
+            });
         } else if mode.is_hedge() {
             summaries.push(AccountPrepSummary {
                 exchange: exchange.as_str().to_string(),
                 symbol: None,
                 action: "set_position_mode".to_string(),
-                ok: false,
+                ok: true,
                 dry_run: config.execution.dry_run,
                 message: Some(format!(
-                    "{exchange} does not support position mode changes but hedge was requested"
+                    "skipped during live bootstrap: adapter does not write account mode; configured_position_mode={mode:?}, verify/read back in preflight"
                 )),
             });
         } else {
@@ -591,97 +1581,154 @@ async fn prepare_live_accounts(
             continue;
         }
 
-        for instrument in instruments.iter().filter(|item| item.exchange == exchange) {
-            let command = LeverageCommand {
-                exchange: exchange.clone(),
-                canonical_symbol: instrument.canonical_symbol.clone(),
-                exchange_symbol: instrument.exchange_symbol.clone(),
-                leverage,
-                requested_at: Utc::now(),
-            };
-            match router.route_set_leverage(command).await {
-                Ok(ack) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(ack.canonical_symbol.to_string()),
-                    action: "set_leverage".to_string(),
-                    ok: config.execution.dry_run || ack.accepted,
-                    dry_run: config.execution.dry_run,
-                    message: ack.message,
-                }),
-                Err(err) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(instrument.canonical_symbol.to_string()),
-                    action: "set_leverage".to_string(),
-                    ok: false,
-                    dry_run: config.execution.dry_run,
-                    message: Some(err.to_string()),
-                }),
-            }
+        if config.execution.dry_run {
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                action: "set_leverage".to_string(),
+                ok: true,
+                dry_run: true,
+                message: Some(format!(
+                    "skipped in dry-run pre-live bootstrap; startup does not write leverage, configured_reference_leverage={leverage}"
+                )),
+            });
+        } else {
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                action: "set_leverage".to_string(),
+                ok: true,
+                dry_run: false,
+                message: Some(format!(
+                    "skipped during live bootstrap to avoid per-symbol REST writes; using exchange current/default leverage, configured_reference_leverage={leverage}"
+                )),
+            });
         }
 
-        for instrument in instruments.iter().filter(|item| item.exchange == exchange) {
-            match adapter.get_trade_fee(&instrument.exchange_symbol).await {
-                Ok(fee) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(instrument.canonical_symbol.to_string()),
-                    action: "read_trade_fee".to_string(),
-                    ok: fee.maker.is_finite() && fee.taker.is_finite(),
-                    dry_run: false,
-                    message: Some(format!("maker={} taker={}", fee.maker, fee.taker)),
-                }),
-                Err(err) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(instrument.canonical_symbol.to_string()),
-                    action: "read_trade_fee".to_string(),
-                    ok: false,
-                    dry_run: false,
-                    message: Some(err.to_string()),
-                }),
-            }
-
-            match adapter
-                .get_symbol_account_config(&instrument.exchange_symbol)
-                .await
-            {
-                Ok(readback) => {
-                    let mode_ok = readback
-                        .position_mode
-                        .map(|readback_mode| {
-                            readback_mode == mode || !capabilities.supports_position_mode_change
-                        })
-                        .unwrap_or(true);
-                    let leverage_ok = readback
-                        .leverage
-                        .map(|readback_leverage| readback_leverage == leverage)
-                        .unwrap_or(true);
-                    summaries.push(AccountPrepSummary {
+        for instrument in instruments
+            .iter()
+            .filter(|item| item.exchange == exchange)
+            .take(3)
+        {
+            if config.fees.use_account_fee_api {
+                match adapter.get_trade_fee(&instrument.exchange_symbol).await {
+                    Ok(fee) => summaries.push(AccountPrepSummary {
                         exchange: exchange.as_str().to_string(),
                         symbol: Some(instrument.canonical_symbol.to_string()),
-                        action: "read_symbol_account_config".to_string(),
-                        ok: mode_ok && leverage_ok,
+                        action: "read_trade_fee".to_string(),
+                        ok: fee.maker.is_finite() && fee.taker.is_finite(),
                         dry_run: false,
-                        message: Some(format!(
-                            "position_mode={:?} margin_mode={:?} leverage={:?} expected_leverage={} max_leverage={:?}",
-                            readback.position_mode,
-                            readback.margin_mode,
-                            readback.leverage,
-                            leverage,
-                            readback.max_leverage
-                        )),
-                    })
+                        message: Some(format!("maker={} taker={}", fee.maker, fee.taker)),
+                    }),
+                    Err(err) => summaries.push(AccountPrepSummary {
+                        exchange: exchange.as_str().to_string(),
+                        symbol: Some(instrument.canonical_symbol.to_string()),
+                        action: "read_trade_fee".to_string(),
+                        ok: false,
+                        dry_run: false,
+                        message: Some(err.to_string()),
+                    }),
                 }
-                Err(err) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(instrument.canonical_symbol.to_string()),
-                    action: "read_symbol_account_config".to_string(),
-                    ok: false,
-                    dry_run: false,
-                    message: Some(err.to_string()),
-                }),
             }
+
+            summaries.push(AccountPrepSummary {
+                exchange: exchange.as_str().to_string(),
+                symbol: Some(instrument.canonical_symbol.to_string()),
+                action: "read_symbol_account_config".to_string(),
+                ok: true,
+                dry_run: false,
+                message: Some(
+                    "skipped as non-blocking pre-live check; precision/min-notional comes from public instrument metadata"
+                        .to_string(),
+                ),
+            });
         }
     }
     summaries
+}
+
+fn apply_account_fee_overrides(
+    config: &mut CrossExchangeArbitrageConfig,
+    account_preparation: &[AccountPrepSummary],
+) -> Vec<AccountFeeOverrideSummary> {
+    if !config.fees.use_account_fee_api {
+        return Vec::new();
+    }
+
+    let mut parsed: HashMap<ExchangeId, Vec<TradeFeeSnapshot>> = HashMap::new();
+    for summary in account_preparation
+        .iter()
+        .filter(|summary| summary.action == "read_trade_fee" && summary.ok)
+    {
+        let Some(message) = summary.message.as_deref() else {
+            continue;
+        };
+        let Some((maker, taker)) = parse_trade_fee_message(message) else {
+            continue;
+        };
+        let exchange = ExchangeId::from(summary.exchange.as_str());
+        let canonical_symbol = summary
+            .symbol
+            .as_deref()
+            .and_then(CanonicalSymbol::parse)
+            .unwrap_or_else(|| CanonicalSymbol::new("UNKNOWN", "USDT"));
+        parsed
+            .entry(exchange.clone())
+            .or_default()
+            .push(TradeFeeSnapshot {
+                exchange: exchange.clone(),
+                canonical_symbol: canonical_symbol.clone(),
+                exchange_symbol: exchange_symbol_for(&exchange, &canonical_symbol),
+                maker,
+                taker,
+                source: "account_preparation".to_string(),
+                updated_at: Utc::now(),
+            });
+    }
+
+    let mut overrides = Vec::new();
+    for (exchange, fees) in parsed {
+        let maker = fees
+            .iter()
+            .map(|fee| fee.maker.max(0.0))
+            .filter(|fee| fee.is_finite())
+            .fold(config.fees.default_maker_fee_rate, f64::max);
+        let taker = fees
+            .iter()
+            .map(|fee| fee.taker.max(0.0))
+            .filter(|fee| fee.is_finite())
+            .fold(config.fees.default_taker_fee_rate, f64::max);
+        config
+            .fees
+            .per_exchange
+            .insert(exchange.clone(), ExchangeFeeRates { maker, taker });
+        overrides.push(AccountFeeOverrideSummary {
+            exchange: exchange.as_str().to_string(),
+            maker,
+            taker,
+            symbols: fees.len(),
+        });
+    }
+    overrides.sort_by(|left, right| left.exchange.cmp(&right.exchange));
+    overrides
+}
+
+fn parse_trade_fee_message(message: &str) -> Option<(f64, f64)> {
+    let mut maker = None;
+    let mut taker = None;
+    for part in message.split_whitespace() {
+        if let Some(value) = part.strip_prefix("maker=") {
+            maker = value.parse::<f64>().ok();
+        } else if let Some(value) = part.strip_prefix("taker=") {
+            taker = value.parse::<f64>().ok();
+        }
+    }
+    match (maker, taker) {
+        (Some(maker), Some(taker)) if maker.is_finite() && taker.is_finite() => {
+            Some((maker, taker))
+        }
+        _ => None,
+    }
 }
 
 fn configured_position_mode_for_config(
@@ -744,33 +1791,56 @@ async fn run_initial_rest_audits(
 ) -> Vec<RestAuditSummary> {
     let mut summaries = Vec::new();
     for exchange in exchanges {
-        let symbols = config
-            .universe
-            .symbols
-            .iter()
-            .map(|symbol| exchange_symbol_for(exchange, symbol))
-            .collect::<Vec<_>>();
         let plan = PrivateRestAuditPlan {
             exchange: exchange.clone(),
-            symbols,
-            include_recent_fills: true,
+            symbols: Vec::new(),
+            include_recent_fills: false,
         };
         match private_sync.run_rest_audit(&plan).await {
-            Ok(snapshot) => summaries.push(RestAuditSummary {
-                exchange: exchange.as_str().to_string(),
-                ok: true,
-                balances: snapshot.balances.len(),
-                positions: snapshot.positions.len(),
-                open_orders: snapshot.open_orders.len(),
-                fills: snapshot.fills.len(),
-                error: None,
-            }),
+            Ok(snapshot) => {
+                let nonzero_positions = snapshot
+                    .positions
+                    .iter()
+                    .filter(|position| {
+                        position.quantity.abs() > config.reconciliation.quantity_tolerance
+                    })
+                    .count();
+                let strategy_open_orders = snapshot
+                    .open_orders
+                    .iter()
+                    .filter(|order| {
+                        order
+                            .client_order_id
+                            .as_deref()
+                            .map(is_crossarb_client_order_id)
+                            .unwrap_or(false)
+                    })
+                    .count();
+                summaries.push(RestAuditSummary {
+                    exchange: exchange.as_str().to_string(),
+                    ok: true,
+                    balances: snapshot.balances.len(),
+                    positions: snapshot.positions.len(),
+                    nonzero_positions,
+                    open_orders: snapshot.open_orders.len(),
+                    strategy_open_orders,
+                    external_open_orders: snapshot
+                        .open_orders
+                        .len()
+                        .saturating_sub(strategy_open_orders),
+                    fills: snapshot.fills.len(),
+                    error: None,
+                })
+            }
             Err(err) => summaries.push(RestAuditSummary {
                 exchange: exchange.as_str().to_string(),
                 ok: false,
                 balances: 0,
                 positions: 0,
+                nonzero_positions: 0,
                 open_orders: 0,
+                strategy_open_orders: 0,
+                external_open_orders: 0,
                 fills: 0,
                 error: Some(err.to_string()),
             }),
@@ -797,6 +1867,367 @@ fn load_config(path: &PathBuf) -> Result<CrossExchangeArbitrageConfig> {
     serde_yaml::from_str::<CrossExchangeArbitrageConfig>(&raw)
         .with_context(|| format!("failed to parse config {}", path.display()))
 }
+
+const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>跨所套利实盘监控</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1318;
+      --panel: #171d24;
+      --panel-2: #1f2730;
+      --line: #2d3844;
+      --text: #eef3f7;
+      --muted: #9ba8b5;
+      --ok: #44c776;
+      --warn: #f0b84a;
+      --bad: #ef6461;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 20px;
+      background: rgba(15, 19, 24, 0.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      gap: 14px;
+      padding: 16px 20px 28px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 8px 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { border-color: var(--accent); }
+    button.danger { color: #ffd9d8; border-color: #6f3333; background: #321b1e; }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+    }
+    .metric, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .metric {
+      min-height: 76px;
+      padding: 12px;
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .metric .value {
+      margin-top: 6px;
+      font-size: 22px;
+      font-weight: 750;
+    }
+    section {
+      overflow: hidden;
+    }
+    section h2 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 0;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      text-align: left;
+      white-space: nowrap;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.035); }
+    .scroll {
+      overflow: auto;
+      max-height: 440px;
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .two {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+      .two { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      header { align-items: flex-start; flex-direction: column; }
+      main { padding: 12px; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric .value { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>跨所套利实盘监控</h1>
+      <div id="subtitle" class="muted">加载中</div>
+    </div>
+    <div class="toolbar">
+      <button onclick="postControl('/api/cross-arb/control/pause-new-entries')">暂停开仓</button>
+      <button onclick="postControl('/api/cross-arb/control/resume-new-entries')">恢复开仓</button>
+      <button onclick="postControl('/api/cross-arb/control/close-only')">只平仓</button>
+      <button class="danger" onclick="postControl('/api/cross-arb/control/kill-switch')">熔断</button>
+    </div>
+  </header>
+  <main>
+    <div id="metrics" class="grid"></div>
+    <section>
+      <h2>交易对覆盖 <span id="symbols-count" class="muted"></span></h2>
+      <div class="scroll"><table id="symbols"></table></div>
+    </section>
+    <div class="two">
+      <section>
+        <h2>私有仓位 <span id="positions-count" class="muted"></span></h2>
+        <div class="scroll"><table id="positions"></table></div>
+      </section>
+      <section>
+        <h2>未成交订单 <span id="orders-count" class="muted"></span></h2>
+        <div class="scroll"><table id="orders"></table></div>
+      </section>
+    </div>
+    <section>
+      <h2>机会扫描 <span id="opportunities-count" class="muted"></span></h2>
+      <div class="scroll"><table id="opportunities"></table></div>
+    </section>
+    <section>
+      <h2>策略组合与平仓价差 <span id="bundles-count" class="muted"></span></h2>
+      <div class="scroll"><table id="bundles"></table></div>
+    </section>
+    <section>
+      <h2>账户余额 <span id="balances-count" class="muted"></span></h2>
+      <div class="scroll"><table id="balances"></table></div>
+    </section>
+    <section>
+      <h2>风控事件 <span id="risk-count" class="muted"></span></h2>
+      <div class="scroll"><table id="risk"></table></div>
+    </section>
+  </main>
+  <script>
+    const fmt = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 });
+    const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+    let data = null;
+
+    async function load() {
+      data = await fetch('/api/cross-arb/live/dashboard', { cache: 'no-store' }).then(r => r.json());
+      render();
+    }
+
+    async function postControl(path) {
+      await fetch(path, { method: 'POST' });
+      await load();
+    }
+
+    function render() {
+      const d = data;
+      const dry = d.execution.dry_run ? 'DRY RUN' : 'LIVE ORDERS';
+      const mode = d.status.risk_state.mode;
+      document.getElementById('subtitle').textContent =
+        `${dry} | ${mode} | 交易所 ${d.execution.enabled_exchanges.join(', ')} | 交易对 ${d.execution.enabled_symbols} | 更新 ${d.status.updated_at}`;
+      metrics(d);
+      rows('symbols', (d.symbols || []).slice(0, 500), [
+        ['交易对', r => r.symbol],
+        ['配置交易所', r => (r.configured_exchanges || []).join(', ')],
+        ['已扫描交易所', r => (r.exchanges || []).join(', ')],
+        ['机会数', r => r.opportunities],
+        ['可开仓机会', r => r.openable_opportunities],
+      ]);
+      text('symbols-count', `${(d.symbols || []).length} 个配置交易对`);
+      rows('positions', d.private_positions, [
+        ['交易所', r => r.exchange],
+        ['交易对', r => sym(r.canonical_symbol)],
+        ['方向', r => r.position_side],
+        ['数量', r => num(r.quantity)],
+        ['开仓价', r => num(r.entry_price)],
+        ['未实现盈亏', r => num(r.unrealized_pnl)],
+        ['更新时间', r => r.updated_at],
+      ]);
+      text('positions-count', d.private_positions.length);
+      rows('orders', d.private_open_orders, [
+        ['交易所', r => r.exchange],
+        ['交易对', r => sym(r.canonical_symbol)],
+        ['归属', r => orderOwner(r.client_order_id)],
+        ['模式', r => orderMode(r.client_order_id)],
+        ['状态', r => r.status],
+        ['数量', r => num(r.quantity)],
+        ['已成交', r => num(r.filled_quantity)],
+        ['客户端ID', r => r.client_order_id || ''],
+        ['更新时间', r => r.updated_at],
+      ]);
+      text('orders-count', `${d.strategy_open_orders.length} 策略 / ${d.external_open_orders.length} 外部 / ${d.private_open_orders.length} 总计`);
+      rows('opportunities', d.opportunities.slice(0, 200), [
+        ['交易对', r => r.symbol],
+        ['最佳组合', r => r.best_route],
+        ['开仓价差', r => pct(r.open_spread_pct)],
+        ['预计净收益', r => cls(pct(r.expected_net_edge_pct), r.can_open ? 'ok' : 'warn')],
+        ['名义金额', r => money.format(r.notional_usdt || 0)],
+        ['可开仓', r => r.can_open ? cls('是', 'ok') : cls('否', 'bad')],
+        ['拒绝原因', r => (r.reject_reasons || []).join(', ')],
+        ['盘口年龄', r => `${r.book_age_ms}ms`],
+      ]);
+      text('opportunities-count', d.opportunities.length);
+      rows('bundles', d.active_bundles, [
+        ['组合ID', r => r.bundle_id],
+        ['交易对', r => r.symbol || ''],
+        ['做多交易所', r => r.long_exchange || ''],
+        ['做空交易所', r => r.short_exchange || ''],
+        ['状态', r => r.status],
+        ['入场净边际', r => pct(r.entry_edge_pct)],
+        ['平仓价差', r => pct(r.close_spread_pct)],
+        ['平仓净收益', r => cls(pct(r.close_profit_pct), r.closeable ? 'ok' : 'warn')],
+        ['平仓阈值', r => pct(r.close_threshold_pct)],
+        ['可平仓', r => r.closeable ? cls('是', 'ok') : cls('否', 'warn')],
+        ['名义金额', r => money.format(r.target_notional_usdt || 0)],
+        ['更新时间', r => r.updated_at],
+      ]);
+      text('bundles-count', `${d.active_bundles.length} 个活动 / ${d.open_bundles.length} 个记录`);
+      rows('balances', d.balances, [
+        ['交易所', r => r.exchange],
+        ['资产', r => r.asset],
+        ['总额', r => num(r.total)],
+        ['可用', r => num(r.available)],
+        ['冻结', r => num(r.locked)],
+        ['更新时间', r => r.updated_at],
+      ]);
+      text('balances-count', d.balances.length);
+      rows('risk', d.risk_event_summary.slice(0, 200), [
+        ['最近时间', r => r.last_at],
+        ['交易所', r => r.exchange || ''],
+        ['交易对', r => r.symbol || ''],
+        ['原因', r => r.reason],
+        ['次数', r => r.count],
+        ['消息', r => r.message],
+      ]);
+      text('risk-count', `${d.risk_event_summary.length} 类 / ${d.risk_events.length} 条`);
+    }
+
+    function metrics(d) {
+      const s = d.status;
+      const e = d.execution;
+      const controls = d.controls;
+      document.getElementById('metrics').innerHTML = [
+        metric('订单模式', e.dry_run ? 'DRY' : 'LIVE', e.dry_run ? 'warn' : 'bad'),
+        metric('风控模式', s.risk_state.mode, s.risk_state.allow_new_entries ? 'ok' : 'warn'),
+        metric('开仓允许', s.risk_state.allow_new_entries ? 'YES' : 'NO', s.risk_state.allow_new_entries ? 'ok' : 'bad'),
+        metric('只平仓', controls.close_only ? 'YES' : 'NO', controls.close_only ? 'warn' : 'ok'),
+        metric('熔断', controls.kill_switch ? 'ON' : 'OFF', controls.kill_switch ? 'bad' : 'ok'),
+        metric('开仓组合', s.open_bundles),
+        metric('每单', money.format(e.target_notional_usdt)),
+        metric('开仓阈值', pct(e.min_open_maker_taker_net_edge)),
+        metric('平仓阈值', pct(e.close_threshold_pct)),
+        metric('开仓方式', e.open_execution_style),
+        metric('最多仓位', `${s.open_bundles}/${e.max_open_bundles}`),
+        metric('私有流', s.private_stream_health.length),
+        metric('仓位净风险', num(s.position_summary.net_unhedged_qty || 0)),
+        metric('交易所', e.enabled_exchanges.join(', ')),
+        metric('更新时间', new Date(s.updated_at).toLocaleTimeString()),
+      ].join('');
+    }
+
+    function metric(label, value, klass='') {
+      return `<div class="metric"><div class="label">${esc(label)}</div><div class="value ${klass}">${esc(value)}</div></div>`;
+    }
+
+    function rows(id, items, cols) {
+      const head = `<thead><tr>${cols.map(([h]) => `<th>${esc(h)}</th>`).join('')}</tr></thead>`;
+      const body = `<tbody>${items.map(item => `<tr>${cols.map(([, f]) => `<td>${renderCell(f(item))}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      document.getElementById(id).innerHTML = head + body;
+    }
+
+    function renderCell(value) {
+      if (value && value.__html) return value.__html;
+      return esc(value == null ? '' : value);
+    }
+    function cls(value, klass) { return { __html: `<span class="${klass}">${esc(value)}</span>` }; }
+    function text(id, value) { document.getElementById(id).textContent = value; }
+    function sym(value) {
+      if (!value) return '';
+      if (typeof value === 'string') return value;
+      return `${value.base || ''}/${value.quote || ''}`.replace(/^\/|\/$/g, '');
+    }
+    function num(value) { return value == null ? '' : fmt.format(Number(value)); }
+    function pct(value) { return value == null ? '' : `${fmt.format(Number(value) * 100)}%`; }
+    function orderOwner(id) {
+      const v = (id || '').replace(/^t-/, '').toLowerCase();
+      return v.startsWith('crossarb-') ? 'crossarb' : 'external';
+    }
+    function orderMode(id) {
+      const v = (id || '').replace(/^t-/, '').toLowerCase();
+      if (v.startsWith('crossarb-live-small-')) return 'live-small';
+      if (v.startsWith('crossarb-live-scaled-')) return 'live-scaled';
+      if (v.startsWith('crossarb-shadow-')) return 'shadow';
+      if (v.startsWith('crossarb-simulation-')) return 'simulation';
+      if (v.startsWith('crossarb-observe-')) return 'observe';
+      return 'external';
+    }
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    load();
+    setInterval(load, 3000);
+  </script>
+</body>
+</html>"#;
 
 #[cfg(test)]
 mod tests {

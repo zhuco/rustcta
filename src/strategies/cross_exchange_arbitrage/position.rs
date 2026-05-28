@@ -218,6 +218,36 @@ impl BundleLegState {
         self.updated_at = now;
         Ok(())
     }
+
+    fn reconcile_open_position(
+        &mut self,
+        quantity: f64,
+        entry_price: f64,
+        unrealized_pnl: Option<f64>,
+        quantity_tolerance: f64,
+        now: DateTime<Utc>,
+    ) -> bool {
+        if quantity <= quantity_tolerance || entry_price <= 0.0 || !entry_price.is_finite() {
+            return false;
+        }
+        if (quantity - self.intended_qty).abs() > quantity_tolerance {
+            return false;
+        }
+
+        let changed = (self.filled_qty - quantity).abs() > quantity_tolerance
+            || self
+                .avg_entry_price
+                .map(|price| (price - entry_price).abs() > f64::EPSILON)
+                .unwrap_or(true)
+            || self.status != LegStatus::Open;
+        self.filled_qty = quantity;
+        self.remaining_qty = 0.0;
+        self.avg_entry_price = Some(entry_price);
+        self.unrealized_pnl = unrealized_pnl.unwrap_or(self.unrealized_pnl);
+        self.status = LegStatus::Open;
+        self.updated_at = now;
+        changed
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -289,6 +319,52 @@ impl BundlePosition {
 
     pub fn is_balanced(&self, quantity_tolerance: f64) -> bool {
         self.unhedged_qty() <= quantity_tolerance
+    }
+
+    pub fn is_fully_open(&self, quantity_tolerance: f64) -> bool {
+        self.long_leg.status == LegStatus::Open
+            && self.short_leg.status == LegStatus::Open
+            && self.is_balanced(quantity_tolerance)
+    }
+
+    pub fn is_fully_closed(&self, quantity_tolerance: f64) -> bool {
+        self.long_leg.filled_qty <= quantity_tolerance
+            && self.short_leg.filled_qty <= quantity_tolerance
+            && matches!(self.long_leg.status, LegStatus::Closed | LegStatus::Planned)
+            && matches!(
+                self.short_leg.status,
+                LegStatus::Closed | LegStatus::Planned
+            )
+    }
+
+    pub fn closeable_qty(&self, quantity_tolerance: f64) -> f64 {
+        let qty = self
+            .long_leg
+            .available_to_close_qty()
+            .min(self.short_leg.available_to_close_qty());
+        if qty <= quantity_tolerance {
+            0.0
+        } else {
+            qty
+        }
+    }
+
+    pub fn open_fee_paid(&self) -> f64 {
+        self.long_leg.open_fee + self.short_leg.open_fee
+    }
+
+    pub fn realized_funding_pnl(&self) -> f64 {
+        self.long_leg.funding_pnl + self.short_leg.funding_pnl
+    }
+
+    pub fn gross_spread_pnl_at(&self, long_close_price: f64, short_close_price: f64) -> f64 {
+        let long_entry = self.long_leg.avg_entry_price.unwrap_or_default();
+        let short_entry = self.short_leg.avg_entry_price.unwrap_or_default();
+        let long_qty = self.long_leg.filled_qty;
+        let short_qty = self.short_leg.filled_qty;
+        let long_pnl = (long_close_price - long_entry) * long_qty;
+        let short_pnl = (short_entry - short_close_price) * short_qty;
+        long_pnl + short_pnl
     }
 
     pub fn unhedged_qty(&self) -> f64 {
@@ -513,6 +589,10 @@ impl PositionManager {
         self.bundles.insert(bundle.bundle_id.clone(), bundle);
     }
 
+    pub fn contains_bundle(&self, bundle_id: &str) -> bool {
+        self.bundles.contains_key(bundle_id)
+    }
+
     pub fn bundle(&self, bundle_id: &str) -> Option<&BundlePosition> {
         self.bundles.get(bundle_id)
     }
@@ -589,7 +669,77 @@ impl PositionManager {
         };
 
         bundle.refresh_exposure(fill.filled_at);
+        if reduce_only && bundle.is_fully_closed(1e-9) {
+            bundle.status = BundleStatus::Closed;
+        } else if !reduce_only && bundle.is_fully_open(1e-9) {
+            bundle.status = BundleStatus::OpenSimulated;
+        }
         Ok(application)
+    }
+
+    pub fn reconcile_bundle_open_from_exchange_positions(
+        &mut self,
+        bundle_id: &str,
+        exchange_positions: &[ExchangePosition],
+        quantity_tolerance: f64,
+        checked_at: DateTime<Utc>,
+    ) -> Result<bool, PositionError> {
+        let bundle = self
+            .bundles
+            .get_mut(bundle_id)
+            .ok_or_else(|| PositionError::BundleNotFound(bundle_id.to_string()))?;
+        if bundle.status.is_terminal() {
+            return Ok(false);
+        }
+
+        let Some(long_position) = matching_open_position(
+            exchange_positions,
+            &bundle.canonical_symbol,
+            &bundle.long_leg.exchange,
+            PositionSide::Long,
+            quantity_tolerance,
+        ) else {
+            return Ok(false);
+        };
+        let Some(short_position) = matching_open_position(
+            exchange_positions,
+            &bundle.canonical_symbol,
+            &bundle.short_leg.exchange,
+            PositionSide::Short,
+            quantity_tolerance,
+        ) else {
+            return Ok(false);
+        };
+        let Some(long_entry) = long_position.entry_price else {
+            return Ok(false);
+        };
+        let Some(short_entry) = short_position.entry_price else {
+            return Ok(false);
+        };
+
+        let long_changed = bundle.long_leg.reconcile_open_position(
+            long_position.quantity.abs(),
+            long_entry,
+            long_position.unrealized_pnl,
+            quantity_tolerance,
+            checked_at,
+        );
+        let short_changed = bundle.short_leg.reconcile_open_position(
+            short_position.quantity.abs(),
+            short_entry,
+            short_position.unrealized_pnl,
+            quantity_tolerance,
+            checked_at,
+        );
+        if bundle.is_fully_open(quantity_tolerance) {
+            let status_changed = bundle.status != BundleStatus::OpenSimulated;
+            bundle.status = BundleStatus::OpenSimulated;
+            bundle.opened_at.get_or_insert(checked_at);
+            bundle.refresh_exposure(checked_at);
+            return Ok(long_changed || short_changed || status_changed);
+        }
+
+        Ok(false)
     }
 
     pub fn reserve_reduce_only_qty(
@@ -622,6 +772,17 @@ impl PositionManager {
             .ok_or_else(|| PositionError::BundleNotFound(bundle_id.to_string()))?;
         bundle.status = status;
         bundle.updated_at = now;
+        Ok(())
+    }
+
+    pub fn reserve_bundle_close_qty(
+        &mut self,
+        bundle_id: &str,
+        quantity: f64,
+        now: DateTime<Utc>,
+    ) -> Result<(), PositionError> {
+        self.reserve_reduce_only_qty(bundle_id, PositionSide::Long, quantity, now)?;
+        self.reserve_reduce_only_qty(bundle_id, PositionSide::Short, quantity, now)?;
         Ok(())
     }
 
@@ -814,6 +975,21 @@ impl PositionManager {
         });
         decisions
     }
+}
+
+fn matching_open_position<'a>(
+    positions: &'a [ExchangePosition],
+    canonical_symbol: &CanonicalSymbol,
+    exchange: &ExchangeId,
+    side: PositionSide,
+    quantity_tolerance: f64,
+) -> Option<&'a ExchangePosition> {
+    positions.iter().find(|position| {
+        position.exchange == *exchange
+            && position.canonical_symbol == *canonical_symbol
+            && position.position_side == side
+            && position.quantity.abs() > quantity_tolerance
+    })
 }
 
 fn side_sort_key(side: PositionSide) -> u8 {

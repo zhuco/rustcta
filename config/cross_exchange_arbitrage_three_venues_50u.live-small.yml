@@ -10,11 +10,11 @@ market:
   market_type: futures
   depth_levels: 5
   stale_quote_ms: 5000
-  min_common_exchanges: 1
+  min_common_exchanges: 2
 
 thresholds:
   min_display_raw_spread: 0.001
-  min_open_maker_taker_net_edge: 0.005
+  min_open_maker_taker_net_edge: 0.007
   max_open_raw_spread: 0.10
   lock_profit_dual_taker_pct: 0.003
   strong_lock_profit_dual_taker_pct: 0.005
@@ -26,19 +26,25 @@ sizing:
   max_notional_usdt: 10.0
   exchange_equity_usdt: 50.0
   leverage: 10.0
-  max_positions_per_exchange: 3
-  capital_fraction_of_smaller_equity: 0.10
+  max_positions_per_exchange: 50
+  capital_fraction_of_smaller_equity: 1.0
   max_symbol_notional_usdt: 10.0
-  max_exchange_usage_pct: 0.35
+  max_exchange_usage_pct: 1.0
 
 fees:
   default_maker_fee_rate: 0.0002
   default_taker_fee_rate: 0.0006
   use_account_fee_api: true
   per_exchange:
+    binance:
+      maker: 0.0002
+      taker: 0.0005
     bitget:
       maker: 0.0002
       taker: 0.0006
+    gate:
+      maker: 0.0002
+      taker: 0.00075
 
 funding:
   enabled: true
@@ -50,8 +56,32 @@ funding:
   max_adverse_funding_rate: 0.001
 
 exchanges:
+  binance:
+    enabled: true
+    operating_mode: enabled
+    position_mode: hedge
+    ws_batch_size: 80
+    env_prefix: BINANCE_0
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
+    routes:
+      market_ws:
+        - wss://fstream.binance.com/ws
+        - wss://fstream.binance.com/stream
+      private_ws:
+        - wss://fstream.binance.com/ws
+      rest_public:
+        - https://fapi.binance.com
+      rest_private:
+        - https://fapi.binance.com
   bitget:
     enabled: true
+    operating_mode: enabled
     position_mode: hedge
     ws_batch_size: 50
     env_prefix: BITGET
@@ -72,6 +102,29 @@ exchanges:
         - https://api.bitget.com
       rest_private:
         - https://api.bitget.com
+  gate:
+    enabled: true
+    operating_mode: enabled
+    position_mode: one_way
+    ws_batch_size: 80
+    env_prefix: GATE
+    demo_trading: false
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
+    routes:
+      market_ws:
+        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      private_ws:
+        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      rest_public:
+        - https://api.gateio.ws/api/v4
+      rest_private:
+        - https://api.gateio.ws/api/v4
 
 routing:
   ws_stale_limit_ms: 30000
@@ -101,12 +154,12 @@ risk:
   maker_non_fill_penalty: 0.001
   safety_buffer: 0.001
   max_notional_per_symbol_usdt: 10.0
-  max_open_bundles: 3
+  max_open_bundles: 50
   symbol_whitelist_required_live: true
 
 persistence:
   enabled: true
-  jsonl_dir: logs/cross_exchange_arbitrage/bitget-50u-live-small
+  jsonl_dir: logs/cross_exchange_arbitrage/three-venues-50u-live-small
   clickhouse_enabled: false
 
 dashboard:
@@ -122,14 +175,18 @@ alerts:
 
 universe:
   enabled_exchanges:
+    - binance
     - bitget
+    - gate
   symbols:
+    - DOGE/USDT
     - BTC/USDT
     - ETH/USDT
   mode: static
-  target_symbol_count: 2
-  max_symbol_count: 2
+  target_symbol_count: 3
+  max_symbol_count: 3
   include_symbols:
+    - DOGE/USDT
     - BTC/USDT
     - ETH/USDT
   exclude_symbols: []

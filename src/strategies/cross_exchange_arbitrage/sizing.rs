@@ -8,7 +8,9 @@ pub struct ExchangeLegSize {
     pub target_notional_usdt: f64,
     pub reference_price: f64,
     pub raw_quantity: f64,
+    pub raw_base_quantity: f64,
     pub normalized_quantity: f64,
+    pub normalized_base_quantity: f64,
     pub normalized_price: Option<f64>,
     pub normalized_notional_usdt: Option<f64>,
     pub min_notional_usdt: f64,
@@ -21,6 +23,8 @@ impl ExchangeLegSize {
         target_notional_usdt: f64,
         reference_price: f64,
         raw_quantity: f64,
+        raw_base_quantity: f64,
+        normalized_base_quantity: f64,
         min_notional_usdt: f64,
         normalized: NormalizedOrderInput,
     ) -> Self {
@@ -28,7 +32,9 @@ impl ExchangeLegSize {
             target_notional_usdt,
             reference_price,
             raw_quantity,
+            raw_base_quantity,
             normalized_quantity: normalized.quantity,
+            normalized_base_quantity,
             normalized_price: normalized.price,
             normalized_notional_usdt: normalized.notional,
             min_notional_usdt,
@@ -76,7 +82,8 @@ pub fn size_exchange_leg_for_notional(
     } else {
         1.0
     };
-    let raw_quantity = target_notional_usdt / (reference_price * contract_size);
+    let raw_base_quantity = target_notional_usdt / reference_price;
+    let raw_quantity = raw_base_quantity / contract_size;
     let validation_price = Some(price.unwrap_or(reference_price));
     let mut normalized = instrument.normalize_order_input(
         raw_quantity,
@@ -101,6 +108,8 @@ pub fn size_exchange_leg_for_notional(
         target_notional_usdt,
         reference_price,
         raw_quantity,
+        raw_base_quantity,
+        normalized.quantity * contract_size,
         instrument.min_notional,
         normalized,
     )
@@ -152,7 +161,9 @@ fn invalid_leg(
         target_notional_usdt,
         reference_price,
         raw_quantity: 0.0,
+        raw_base_quantity: 0.0,
         normalized_quantity: 0.0,
+        normalized_base_quantity: 0.0,
         normalized_price: None,
         normalized_notional_usdt: None,
         min_notional_usdt: 0.0,
@@ -214,11 +225,24 @@ mod tests {
 
         assert!(pair.executable, "{:?}", pair.reject_reasons);
         assert_eq!(pair.maker.normalized_quantity, 925.0);
+        assert_eq!(pair.maker.normalized_base_quantity, 925.0);
         assert_eq!(pair.maker.normalized_price, Some(0.1081));
         assert!(pair.maker.normalized_notional_usdt.unwrap() <= 100.0);
         assert!(pair.maker.normalized_notional_usdt.unwrap() >= 99.0);
         assert_eq!(pair.taker.normalized_quantity, 92.5);
+        assert_eq!(pair.taker.normalized_base_quantity, 925.0);
         assert!(pair.taker.normalized_notional_usdt.unwrap() >= 99.0);
+    }
+
+    #[test]
+    fn sizing_should_expose_base_quantity_for_execution() {
+        let gate = instrument(ExchangeId::Gate, "SPCX_USDT", 0.01, 0.01, 1.0, 1.0, 0.0);
+        let leg = size_exchange_leg_for_notional(&gate, 10.0, 192.15, Some(192.15));
+
+        assert!(leg.valid, "{:?}", leg.violations);
+        assert_eq!(leg.normalized_quantity, 5.0);
+        assert!((leg.normalized_base_quantity - 0.05).abs() < 1e-12);
+        assert!(leg.normalized_notional_usdt.unwrap() <= 10.0);
     }
 
     #[test]

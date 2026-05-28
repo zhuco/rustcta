@@ -1347,11 +1347,16 @@ where
         PrivatePerpExchange::Bitget => ["orders", "positions", "account"]
             .into_iter()
             .map(|channel| {
+                let symbols = if channel == "account" {
+                    Vec::new()
+                } else {
+                    vec![ExchangeSymbol::new(exchange.exchange_id(), "default")]
+                };
                 protocol
                     .ws_subscribe(
                         &PrivateWsSubscription {
                             channel: channel.to_string(),
-                            symbols: Vec::new(),
+                            symbols,
                             auth: None,
                         },
                         timestamp,
@@ -1359,26 +1364,31 @@ where
                     .map(|request| request.message)
             })
             .collect::<Result<Vec<_>>>()?,
-        PrivatePerpExchange::Gate => [
-            "futures.orders",
-            "futures.usertrades",
-            "futures.positions",
-            "futures.balances",
-        ]
-        .into_iter()
-        .map(|channel| {
-            protocol
-                .ws_subscribe(
-                    &PrivateWsSubscription {
-                        channel: channel.to_string(),
-                        symbols: symbols.to_vec(),
-                        auth: Some(auth.clone()),
-                    },
-                    timestamp,
-                )
-                .map(|request| request.message)
-        })
-        .collect::<Result<Vec<_>>>()?,
+        PrivatePerpExchange::Gate => {
+            let mut messages = Vec::new();
+            for channel in [
+                "futures.orders",
+                "futures.usertrades",
+                "futures.positions",
+                "futures.balances",
+            ] {
+                for symbols in gate_private_ws_symbol_groups(channel, symbols) {
+                    messages.push(
+                        protocol
+                            .ws_subscribe(
+                                &PrivateWsSubscription {
+                                    channel: channel.to_string(),
+                                    symbols,
+                                    auth: Some(auth.clone()),
+                                },
+                                timestamp,
+                            )?
+                            .message,
+                    );
+                }
+            }
+            messages
+        }
         PrivatePerpExchange::Bybit => ["order", "execution", "position", "wallet"]
             .into_iter()
             .map(|channel| {
@@ -1469,6 +1479,53 @@ pub async fn run_private_ws_with_url(
     url: impl Into<String>,
     tx: mpsc::Sender<PrivateEvent>,
 ) -> Result<()> {
+    run_private_ws_with_url_and_gate_contract_sizes(
+        exchange,
+        auth,
+        symbols,
+        config,
+        url,
+        tx,
+        HashMap::new(),
+    )
+    .await
+}
+
+pub async fn run_private_ws_with_url_and_instruments(
+    exchange: PrivatePerpExchange,
+    auth: PrivateWsAuth,
+    symbols: Vec<ExchangeSymbol>,
+    config: PrivateWsRunConfig,
+    url: impl Into<String>,
+    tx: mpsc::Sender<PrivateEvent>,
+    instruments: Vec<InstrumentMeta>,
+) -> Result<()> {
+    let gate_contract_sizes = if exchange == PrivatePerpExchange::Gate {
+        gate_contract_sizes_from_instruments(instruments)
+    } else {
+        HashMap::new()
+    };
+    run_private_ws_with_url_and_gate_contract_sizes(
+        exchange,
+        auth,
+        symbols,
+        config,
+        url,
+        tx,
+        gate_contract_sizes,
+    )
+    .await
+}
+
+async fn run_private_ws_with_url_and_gate_contract_sizes(
+    exchange: PrivatePerpExchange,
+    auth: PrivateWsAuth,
+    symbols: Vec<ExchangeSymbol>,
+    config: PrivateWsRunConfig,
+    url: impl Into<String>,
+    tx: mpsc::Sender<PrivateEvent>,
+    gate_contract_sizes: HashMap<String, f64>,
+) -> Result<()> {
     let url = url.into();
     if url.trim().is_empty() {
         anyhow::bail!(
@@ -1491,6 +1548,7 @@ pub async fn run_private_ws_with_url(
                     config,
                     url.clone(),
                     tx.clone(),
+                    HashMap::new(),
                 )
                 .await
             }
@@ -1502,6 +1560,7 @@ pub async fn run_private_ws_with_url(
                     config,
                     url.clone(),
                     tx.clone(),
+                    gate_contract_sizes.clone(),
                 )
                 .await
             }
@@ -1513,6 +1572,7 @@ pub async fn run_private_ws_with_url(
                     config,
                     url.clone(),
                     tx.clone(),
+                    HashMap::new(),
                 )
                 .await
             }
@@ -1524,6 +1584,7 @@ pub async fn run_private_ws_with_url(
                     config,
                     url.clone(),
                     tx.clone(),
+                    HashMap::new(),
                 )
                 .await
             }
@@ -1535,6 +1596,7 @@ pub async fn run_private_ws_with_url(
                     config,
                     url.clone(),
                     tx.clone(),
+                    HashMap::new(),
                 )
                 .await
             }
@@ -1575,6 +1637,7 @@ where
         config,
         protocol.exchange().private_ws_url().to_string(),
         tx,
+        HashMap::new(),
     )
     .await
 }
@@ -1586,11 +1649,19 @@ pub async fn run_private_ws_protocol_with_url<P>(
     config: PrivateWsRunConfig,
     url: impl Into<String>,
     tx: mpsc::Sender<PrivateEvent>,
+    gate_contract_sizes_override: HashMap<String, f64>,
 ) -> Result<()>
 where
     P: PrivatePerpProtocol + Send + Sync + Copy + 'static,
 {
     let exchange = protocol.exchange();
+    let gate_contract_sizes = if !gate_contract_sizes_override.is_empty() {
+        gate_contract_sizes_override
+    } else if exchange == PrivatePerpExchange::Gate {
+        gate_contract_sizes_from_symbols(&symbols)
+    } else {
+        HashMap::new()
+    };
     let timestamp = Utc::now().timestamp();
     let mut endpoint =
         build_private_ws_endpoint_with_url(exchange, auth, &symbols, timestamp, url)?;
@@ -1636,7 +1707,12 @@ where
                 match message {
                     Some(Ok(Message::Text(raw))) => {
                         let received_at = Utc::now();
-                        match protocol.parse_private_ws_message(&raw, received_at) {
+                        match parse_private_ws_message_with_symbol_rules(
+                            protocol,
+                            &gate_contract_sizes,
+                            &raw,
+                            received_at,
+                        ) {
                             Ok(events) => {
                                 for event in events {
                                     if !publish_private_event(&tx, event).await {
@@ -1659,7 +1735,12 @@ where
                         match decode_private_ws_binary(exchange, &raw) {
                             Ok(text) => {
                                 let received_at = Utc::now();
-                                match protocol.parse_private_ws_message(&text, received_at) {
+                                match parse_private_ws_message_with_symbol_rules(
+                                    protocol,
+                                    &gate_contract_sizes,
+                                    &text,
+                                    received_at,
+                                ) {
                                     Ok(events) => {
                                         for event in events {
                                             if !publish_private_event(&tx, event).await {
@@ -1815,6 +1896,7 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         let mut body = json!({
             "productType": "USDT-FUTURES",
             "symbol": command.exchange_symbol.symbol,
+            "marginMode": "crossed",
             "marginCoin": "USDT",
             "size": number_string(command.quantity),
             "side": side,
@@ -1828,6 +1910,8 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         );
         if let Some(price) = command.price {
             set_str(&mut body, "price", number_string(price));
+        } else if command.order_type == OrderType::Market {
+            set_str(&mut body, "price", "0");
         }
         if position_mode.is_hedge() {
             set_str(
@@ -2116,21 +2200,29 @@ impl PrivatePerpProtocol for BitgetPrivatePerpProtocol {
         subscription: &PrivateWsSubscription,
         _timestamp: i64,
     ) -> Result<PrivateWsRequest> {
-        let symbols = if subscription.symbols.is_empty() {
-            vec![ExchangeSymbol::new(ExchangeId::Bitget, "default")]
+        let args = if subscription.channel == "account" {
+            vec![json!({
+                "instType": "USDT-FUTURES",
+                "channel": subscription.channel,
+                "coin": "default",
+            })]
         } else {
-            subscription.symbols.clone()
-        };
-        let args = symbols
-            .iter()
-            .map(|symbol| {
-                json!({
-                    "instType": "USDT-FUTURES",
-                    "channel": subscription.channel,
-                    "instId": symbol.symbol,
+            let symbols = if subscription.symbols.is_empty() {
+                vec![ExchangeSymbol::new(ExchangeId::Bitget, "default")]
+            } else {
+                subscription.symbols.clone()
+            };
+            symbols
+                .iter()
+                .map(|symbol| {
+                    json!({
+                        "instType": "USDT-FUTURES",
+                        "channel": subscription.channel,
+                        "instId": symbol.symbol,
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+        };
         Ok(PrivateWsRequest {
             exchange: ExchangeId::Bitget,
             url: PrivatePerpExchange::Bitget.private_ws_url().to_string(),
@@ -2166,6 +2258,8 @@ impl PrivatePerpProtocol for GatePrivatePerpProtocol {
         });
         if let Some(price) = command.price {
             set_str(&mut body, "price", number_string(price));
+        } else if command.order_type == OrderType::Market {
+            set_str(&mut body, "price", "0");
         }
         Ok(PrivateRestRequestSpec::new(
             ExchangeId::Gate,
@@ -3795,6 +3889,7 @@ fn close_position_spec(
             let mut body = json!({
                 "productType": "USDT-FUTURES",
                 "symbol": command.exchange_symbol.symbol,
+                "marginMode": "crossed",
                 "marginCoin": "USDT",
                 "size": number_string(command.quantity),
                 "side": side,
@@ -3808,6 +3903,8 @@ fn close_position_spec(
             );
             if let Some(price) = command.price {
                 set_str(&mut body, "price", number_string(price));
+            } else if command.order_type == OrderType::Market {
+                set_str(&mut body, "price", "0");
             }
             if position_mode.is_hedge() {
                 set_str(&mut body, "tradeSide", "close");
@@ -3831,6 +3928,8 @@ fn close_position_spec(
             });
             if let Some(price) = command.price {
                 set_str(&mut body, "price", number_string(price));
+            } else if command.order_type == OrderType::Market {
+                set_str(&mut body, "price", "0");
             }
             Ok(PrivateRestRequestSpec::new(
                 ExchangeId::Gate,
@@ -4329,6 +4428,96 @@ fn parse_gate_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<V
         }
     }
     Ok(events)
+}
+
+fn parse_private_ws_message_with_symbol_rules<P>(
+    protocol: P,
+    gate_contract_sizes: &HashMap<String, f64>,
+    raw: &str,
+    received_at: DateTime<Utc>,
+) -> Result<Vec<PrivateEvent>>
+where
+    P: PrivatePerpProtocol + Send + Sync + Copy + 'static,
+{
+    if protocol.exchange() == PrivatePerpExchange::Gate {
+        return parse_gate_private_message_with_contract_sizes(
+            raw,
+            received_at,
+            gate_contract_sizes,
+        );
+    }
+    protocol.parse_private_ws_message(raw, received_at)
+}
+
+fn parse_gate_private_message_with_contract_sizes(
+    raw: &str,
+    received_at: DateTime<Utc>,
+    contract_sizes: &HashMap<String, f64>,
+) -> Result<Vec<PrivateEvent>> {
+    let value: Value = serde_json::from_str(raw)?;
+    if value.get("event").and_then(Value::as_str) == Some("subscribe") {
+        return parse_gate_private_message(raw, received_at);
+    }
+    let channel = value
+        .get("channel")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let result = value.get("result").cloned().unwrap_or(Value::Null);
+    let items = match result {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![result],
+        _ => Vec::new(),
+    };
+    let mut events = Vec::new();
+    for item in items {
+        let contract_size = gate_contract_size_for_ws_item(&item, contract_sizes);
+        let event = match channel {
+            "futures.orders" => {
+                parse_gate_order_or_fill_with_contract_size(&item, received_at, contract_size)
+            }
+            "futures.usertrades" => {
+                parse_gate_fill_with_contract_size(&item, received_at, contract_size)
+            }
+            "futures.positions" => {
+                parse_gate_position_with_contract_size(&item, received_at, contract_size)
+            }
+            "futures.balances" => parse_gate_balance(&item, received_at),
+            _ => None,
+        };
+        if let Some(event) = event {
+            events.push(event.with_raw(item));
+        }
+    }
+    Ok(events)
+}
+
+fn gate_contract_size_for_ws_item(item: &Value, contract_sizes: &HashMap<String, f64>) -> f64 {
+    str_field(item, &["contract"])
+        .and_then(|symbol| contract_sizes.get(&symbol).copied())
+        .unwrap_or_else(|| gate_contract_size_from_item(item))
+}
+
+fn gate_contract_sizes_from_symbols(symbols: &[ExchangeSymbol]) -> HashMap<String, f64> {
+    symbols
+        .iter()
+        .filter(|symbol| symbol.exchange == ExchangeId::Gate)
+        .map(|symbol| (symbol.symbol.clone(), 1.0))
+        .collect()
+}
+
+fn gate_contract_sizes_from_instruments(
+    instruments: impl IntoIterator<Item = InstrumentMeta>,
+) -> HashMap<String, f64> {
+    instruments
+        .into_iter()
+        .filter(|instrument| instrument.exchange == ExchangeId::Gate)
+        .map(|instrument| {
+            (
+                instrument.exchange_symbol.symbol.clone(),
+                instrument_contract_size(&instrument),
+            )
+        })
+        .collect()
 }
 
 fn parse_bybit_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<Vec<PrivateEvent>> {
@@ -5456,6 +5645,19 @@ fn gate_private_ws_payload(
     payload
 }
 
+fn gate_private_ws_symbol_groups(
+    channel: &str,
+    symbols: &[ExchangeSymbol],
+) -> Vec<Vec<ExchangeSymbol>> {
+    if channel == "futures.balances" {
+        return vec![Vec::new()];
+    }
+    if symbols.is_empty() {
+        return vec![Vec::new()];
+    }
+    symbols.iter().cloned().map(|symbol| vec![symbol]).collect()
+}
+
 fn str_field(value: &Value, keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| {
         value.get(*key).and_then(|v| match v {
@@ -5781,12 +5983,10 @@ mod tests {
         assert_eq!(spec.path, "/api/v2/mix/order/place-order");
         let body = spec.body.unwrap();
         assert_eq!(body["productType"], "USDT-FUTURES");
+        assert_eq!(body["marginMode"], "crossed");
         assert_eq!(body["force"], "post_only");
         assert_eq!(body["tradeSide"], "open");
-        assert_eq!(
-            body["clientOid"],
-            "crossarb-live-small-bundleabcdef-maker-1"
-        );
+        assert_eq!(body["clientOid"], "crossarb-ls-mk-1-c0b4e763");
     }
 
     #[test]
@@ -5805,7 +6005,9 @@ mod tests {
         let body = spec.body.unwrap();
 
         assert_eq!(body["side"], "buy");
+        assert_eq!(body["marginMode"], "crossed");
         assert_eq!(body["tradeSide"], "close");
+        assert_eq!(body["price"], "0");
         assert!(body.get("reduceOnly").is_none());
     }
 
@@ -5825,17 +6027,36 @@ mod tests {
         assert_eq!(body["contract"], "BTC_USDT");
         assert_eq!(body["size"], -25);
         assert_eq!(body["tif"], "poc");
+        assert_eq!(body["price"], "65000");
         assert_eq!(body["reduce_only"], true);
         assert_eq!(
             body["text"].as_str().unwrap(),
-            "t-crossarb-live-small-dc1f310f"
+            "t-crossarb-ls-mk-1-c0b4e763"
         );
         assert!(body["text"].as_str().unwrap().len() <= 30);
     }
 
     #[test]
+    fn gate_market_order_should_send_zero_price() {
+        let mut cmd = command(ExchangeId::Gate, "BTC_USDT");
+        cmd.order_type = OrderType::Market;
+        cmd.price = None;
+        cmd.time_in_force = TimeInForce::Ioc;
+        cmd.post_only = false;
+        cmd.quantity = 1.0;
+
+        let spec = GatePrivatePerpProtocol
+            .place_order(&cmd, PositionMode::OneWay)
+            .unwrap();
+        let body = spec.body.unwrap();
+
+        assert_eq!(body["price"], "0");
+        assert_eq!(body["tif"], "ioc");
+    }
+
+    #[test]
     fn gate_client_order_id_should_be_stable_for_lookup_paths() {
-        let client_id = "crossarb-live-small-bundleabcdef-maker-1";
+        let client_id = "crossarb-ls-mk-1-c0b4e763";
         let cancel = GatePrivatePerpProtocol
             .cancel_order(&CancelCommand {
                 exchange: ExchangeId::Gate,
@@ -5850,15 +6071,12 @@ mod tests {
 
         assert_eq!(
             cancel.path,
-            "/futures/usdt/orders/t-crossarb-live-small-dc1f310f"
+            "/futures/usdt/orders/t-crossarb-ls-mk-1-c0b4e763"
         );
+        assert_eq!(gate_client_text(client_id), "t-crossarb-ls-mk-1-c0b4e763");
         assert_eq!(
-            gate_client_text(client_id),
-            "t-crossarb-live-small-dc1f310f"
-        );
-        assert_eq!(
-            gate_client_text_to_local("t-crossarb-live-small-dc1f310f"),
-            "crossarb-live-small-dc1f310f"
+            gate_client_text_to_local("t-crossarb-ls-mk-1-c0b4e763"),
+            "crossarb-ls-mk-1-c0b4e763"
         );
     }
 
@@ -6189,9 +6407,9 @@ mod tests {
                 exchange: ExchangeId::Gate,
                 canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
                 exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
-                client_order_id: Some("crossarb-live-small-bundleabcdef-maker-1".to_string()),
+                client_order_id: Some("crossarb-ls-mk-1-c0b4e763".to_string()),
                 exchange_order_id: None,
-                new_client_order_id: Some("crossarb-live-small-bundleabcdef-maker-2".to_string()),
+                new_client_order_id: Some("crossarb-ls-mk-2-c0b4e763".to_string()),
                 new_quantity: None,
                 new_price: Some(65_001.5),
                 requested_at: Utc::now(),
@@ -6200,7 +6418,7 @@ mod tests {
         assert_eq!(amend.method, PrivateRestMethod::Patch);
         assert_eq!(
             amend.path,
-            "/futures/usdt/orders/t-crossarb-live-small-dc1f310f"
+            "/futures/usdt/orders/t-crossarb-ls-mk-1-c0b4e763"
         );
         assert_eq!(
             amend.query.get("contract").map(String::as_str),
@@ -6208,7 +6426,7 @@ mod tests {
         );
         let body = amend.body.unwrap();
         assert_eq!(body["price"], "65001.5");
-        assert_eq!(body["amend_text"], "t-crossarb-live-small-acafe971");
+        assert_eq!(body["amend_text"], "t-crossarb-ls-mk-2-c0b4e763");
 
         let countdown = GatePrivatePerpProtocol
             .set_countdown_cancel_all(&CountdownCancelAllCommand::set_for_symbol(
@@ -6305,6 +6523,11 @@ mod tests {
         assert_eq!(orders["op"], "subscribe");
         assert_eq!(orders["args"][0]["channel"], "orders");
         assert_eq!(orders["args"][0]["instId"], "default");
+
+        let account: Value = serde_json::from_str(&endpoint.subscribe_messages[2]).unwrap();
+        assert_eq!(account["args"][0]["channel"], "account");
+        assert_eq!(account["args"][0]["coin"], "default");
+        assert!(account["args"][0].get("instId").is_none());
     }
 
     #[test]
@@ -6339,22 +6562,29 @@ mod tests {
                 account_id: Some("20011".to_string()),
                 demo_trading: false,
             },
-            &[],
+            &[
+                ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                ExchangeSymbol::new(ExchangeId::Gate, "ETH_USDT"),
+            ],
             1_700_000_000,
         )
         .unwrap();
 
         assert_eq!(endpoint.exchange, ExchangeId::Gate);
         assert!(endpoint.login_message.is_none());
-        assert_eq!(endpoint.subscribe_messages.len(), 4);
+        assert_eq!(endpoint.subscribe_messages.len(), 7);
 
         let orders: Value = serde_json::from_str(&endpoint.subscribe_messages[0]).unwrap();
         assert_eq!(orders["channel"], "futures.orders");
         assert_eq!(orders["payload"][0], "20011");
-        assert_eq!(orders["payload"][1], "!all");
+        assert_eq!(orders["payload"][1], "BTC_USDT");
         assert_eq!(orders["auth"]["KEY"], "key");
 
-        let balances: Value = serde_json::from_str(&endpoint.subscribe_messages[3]).unwrap();
+        let positions: Value = serde_json::from_str(&endpoint.subscribe_messages[4]).unwrap();
+        assert_eq!(positions["channel"], "futures.positions");
+        assert_eq!(positions["payload"][1], "BTC_USDT");
+
+        let balances: Value = serde_json::from_str(&endpoint.subscribe_messages[6]).unwrap();
         assert_eq!(balances["channel"], "futures.balances");
         assert_eq!(balances["payload"].as_array().unwrap().len(), 1);
     }
@@ -6609,8 +6839,41 @@ mod tests {
 
         let seen = transport.seen.lock().unwrap();
         let body = seen[0].body.as_ref().unwrap();
-        assert_eq!(body["size"], -123.0);
+        assert_eq!(body["size"], -123);
         assert_eq!(body["price"], "65000");
+    }
+
+    #[tokio::test]
+    async fn gate_adapter_should_not_double_convert_contract_quantity() {
+        let transport = MockTransport::new(json!({"id": "gate-order-1"}));
+        let adapter = PrivatePerpTradingAdapter::new(GatePrivatePerpProtocol, transport.clone())
+            .with_instruments([InstrumentMeta::new(
+                ExchangeId::Gate,
+                CanonicalSymbol::new("BTC", "USDT"),
+                ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                "BTC",
+                "USDT",
+                "USDT",
+                crate::market::ContractType::LinearPerpetual,
+                0.01,
+                0.01,
+                1.0,
+                1.0,
+                1.0,
+                2,
+                0,
+                crate::market::InstrumentStatus::Trading,
+            )]);
+        let mut cmd = command(ExchangeId::Gate, "BTC_USDT");
+        cmd.quantity = 0.05;
+        cmd.price = Some(192.15);
+
+        adapter.place_order(cmd).await.unwrap();
+
+        let seen = transport.seen.lock().unwrap();
+        let body = seen[0].body.as_ref().unwrap();
+        assert_eq!(body["size"], 5);
+        assert_eq!(body["price"], "192.15");
     }
 
     #[tokio::test]

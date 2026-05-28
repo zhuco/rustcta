@@ -33,6 +33,8 @@ pub struct ExecutionRequest {
     pub taker_price: Option<f64>,
     pub max_slippage_pct: Option<f64>,
     pub generated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub open_with_dual_taker: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -63,6 +65,40 @@ impl ExecutionPlan {
 
     pub fn is_blocked(&self) -> bool {
         self.blocked_reason.is_some()
+    }
+}
+
+impl ExecutionRequest {
+    fn long_exchange(&self) -> ExchangeId {
+        if self.maker_side == OrderSide::Buy {
+            self.maker_exchange.clone()
+        } else {
+            self.taker_exchange.clone()
+        }
+    }
+
+    fn short_exchange(&self) -> ExchangeId {
+        if self.maker_side == OrderSide::Sell {
+            self.maker_exchange.clone()
+        } else {
+            self.taker_exchange.clone()
+        }
+    }
+
+    fn long_exchange_symbol(&self) -> ExchangeSymbol {
+        if self.maker_side == OrderSide::Buy {
+            self.maker_exchange_symbol.clone()
+        } else {
+            self.taker_exchange_symbol.clone()
+        }
+    }
+
+    fn short_exchange_symbol(&self) -> ExchangeSymbol {
+        if self.maker_side == OrderSide::Sell {
+            self.maker_exchange_symbol.clone()
+        } else {
+            self.taker_exchange_symbol.clone()
+        }
     }
 }
 
@@ -114,17 +150,26 @@ impl ExecutionEngine {
             return ExecutionPlan::blocked(request, "invalid execution quantity", false);
         }
 
-        let command = match request.action {
-            ExecutionAction::Open => self.open_maker_command(request),
-            ExecutionAction::Close => self.close_taker_command(request, false),
-            ExecutionAction::EmergencyClose => self.close_taker_command(request, true),
-            ExecutionAction::Cancel | ExecutionAction::Noop => None,
+        let commands = match request.action {
+            ExecutionAction::Open if request.open_with_dual_taker => {
+                self.open_dual_taker_commands(request)
+            }
+            ExecutionAction::Open => self.open_maker_command(request).into_iter().collect(),
+            ExecutionAction::Close => self
+                .close_taker_command(request, false)
+                .into_iter()
+                .collect(),
+            ExecutionAction::EmergencyClose => self
+                .close_taker_command(request, true)
+                .into_iter()
+                .collect(),
+            ExecutionAction::Cancel | ExecutionAction::Noop => Vec::new(),
         };
 
         ExecutionPlan {
             request_id: request.request_id.clone(),
             mode: request.mode,
-            commands: command.into_iter().collect(),
+            commands,
             blocked_reason: None,
             requires_reconcile: false,
             created_at: request.generated_at,
@@ -138,6 +183,16 @@ impl ExecutionEngine {
         }
 
         self.submit_plan(request.mode, &mut decision).await;
+        decision
+    }
+
+    pub async fn submit_commands(&self, plan: ExecutionPlan) -> EngineDecision {
+        let mut decision = EngineDecision::from_plan(plan);
+        if decision.plan.is_blocked() || decision.plan.commands.is_empty() {
+            return decision;
+        }
+
+        self.submit_plan(decision.plan.mode, &mut decision).await;
         decision
     }
 
@@ -239,6 +294,51 @@ impl ExecutionEngine {
             request.max_slippage_pct,
             request.generated_at,
         ))
+    }
+
+    fn open_dual_taker_commands(&self, request: &ExecutionRequest) -> Vec<OrderCommand> {
+        vec![
+            OrderCommand::new(
+                request.mode,
+                request.bundle_id.clone(),
+                BundleLeg::Long,
+                1,
+                request.long_exchange(),
+                request.canonical_symbol.clone(),
+                request.long_exchange_symbol(),
+                OrderIntent::HedgeLongTaker,
+                OrderSide::Buy,
+                PositionSide::Long,
+                OrderType::Market,
+                request.quantity,
+                None,
+                TimeInForce::Ioc,
+                false,
+                false,
+                request.max_slippage_pct,
+                request.generated_at,
+            ),
+            OrderCommand::new(
+                request.mode,
+                request.bundle_id.clone(),
+                BundleLeg::Short,
+                1,
+                request.short_exchange(),
+                request.canonical_symbol.clone(),
+                request.short_exchange_symbol(),
+                OrderIntent::HedgeShortTaker,
+                OrderSide::Sell,
+                PositionSide::Short,
+                OrderType::Market,
+                request.quantity,
+                None,
+                TimeInForce::Ioc,
+                false,
+                false,
+                request.max_slippage_pct,
+                request.generated_at,
+            ),
+        ]
     }
 
     fn close_taker_command(
@@ -386,6 +486,7 @@ mod tests {
             taker_price: None,
             max_slippage_pct: Some(0.001),
             generated_at: Utc::now(),
+            open_with_dual_taker: false,
         }
     }
 
@@ -462,6 +563,45 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(decision.submitted_orders.len(), 1);
         assert!(decision.blocked_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn engine_should_submit_dual_taker_open_when_requested() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut router = ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Binance,
+            place_calls: calls.clone(),
+        }));
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Okx,
+            place_calls: calls.clone(),
+        }));
+        let engine = ExecutionEngine::new(router);
+        let mut request = request(RuntimeMode::LiveSmall);
+        request.open_with_dual_taker = true;
+
+        let decision = engine.execute_request(request).await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(decision.submitted_orders.len(), 2);
+        assert!(decision.blocked_reason.is_none());
+        let long = &decision.plan.commands[0];
+        let short = &decision.plan.commands[1];
+        assert_eq!(long.exchange, ExchangeId::Binance);
+        assert_eq!(long.side, OrderSide::Buy);
+        assert_eq!(long.position_side, PositionSide::Long);
+        assert_eq!(long.order_type, OrderType::Market);
+        assert_eq!(long.time_in_force, TimeInForce::Ioc);
+        assert!(!long.post_only);
+        assert!(!long.reduce_only);
+        assert_eq!(short.exchange, ExchangeId::Okx);
+        assert_eq!(short.side, OrderSide::Sell);
+        assert_eq!(short.position_side, PositionSide::Short);
+        assert_eq!(short.order_type, OrderType::Market);
+        assert_eq!(short.time_in_force, TimeInForce::Ioc);
+        assert!(!short.post_only);
+        assert!(!short.reduce_only);
     }
 
     #[tokio::test]

@@ -1,45 +1,42 @@
-mode: simulation
+mode: live_small
 
 strategy:
   name: cross_exchange_arbitrage_usdt_perp
-  mode: simulation
+  mode: live_small
   log_level: INFO
 
 market:
   quote_asset: USDT
   market_type: futures
   depth_levels: 5
-  stale_quote_ms: 30000
+  stale_quote_ms: 5000
   min_common_exchanges: 2
 
 thresholds:
   min_display_raw_spread: 0.001
-  min_open_maker_taker_net_edge: 0.005
+  min_open_maker_taker_net_edge: 0.007
   max_open_raw_spread: 0.10
-  lock_profit_dual_taker_pct: 0.003
-  strong_lock_profit_dual_taker_pct: 0.005
+  lock_profit_dual_taker_pct: 0.001
+  strong_lock_profit_dual_taker_pct: 0.003
   max_close_spread_pct: 0.001
 
 sizing:
-  min_notional_usdt: 20.0
-  target_notional_usdt: 100.0
-  max_notional_usdt: 500.0
-  exchange_equity_usdt: 500.0
-  leverage: 10.0
+  min_notional_usdt: 10.0
+  target_notional_usdt: 10.0
+  max_notional_usdt: 10.0
+  exchange_equity_usdt: 50.0
+  leverage: 5.0
   max_positions_per_exchange: 50
-  capital_fraction_of_smaller_equity: 0.10
-  max_symbol_notional_usdt: 200.0
-  max_exchange_usage_pct: 0.35
+  capital_fraction_of_smaller_equity: 1.0
+  max_symbol_notional_usdt: 10.0
+  max_exchange_usage_pct: 1.0
 
 fees:
   default_maker_fee_rate: 0.0002
-  default_taker_fee_rate: 0.0005
-  use_account_fee_api: false
+  default_taker_fee_rate: 0.0006
+  use_account_fee_api: true
   per_exchange:
     binance:
-      maker: 0.0002
-      taker: 0.0005
-    okx:
       maker: 0.0002
       taker: 0.0005
     bitget:
@@ -47,13 +44,13 @@ fees:
       taker: 0.0006
     gate:
       maker: 0.0002
-      taker: 0.0005
+      taker: 0.00075
 
 funding:
-  enabled: true
+  enabled: false
   mode: settlement
-  expected_holding_hours: 8.0
   refresh_secs: 30
+  expected_holding_hours: 8.0
   no_open_before_funding_mins: 5
   block_if_expected_funding_negative_pct: 0.001
   max_adverse_funding_rate: 0.001
@@ -61,47 +58,74 @@ funding:
 exchanges:
   binance:
     enabled: true
+    operating_mode: enabled
     position_mode: hedge
     ws_batch_size: 80
+    env_prefix: BINANCE_3
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
     routes:
       market_ws:
         - wss://fstream.binance.com/ws
         - wss://fstream.binance.com/stream
-      rest_public:
-        - https://fapi.binance.com
-      rest_private:
-        - https://fapi.binance.com
-  okx:
-    enabled: true
-    position_mode: net
-    ws_batch_size: 80
-    routes:
-      market_ws:
-        - wss://ws.okx.com:8443/ws/v5/public
       private_ws:
-        - wss://ws.okx.com:8443/ws/v5/private
+        - wss://fstream.binance.com/ws
       rest_public:
-        - https://www.okx.com
+        - https://fapi.binance.com
       rest_private:
-        - https://www.okx.com
+        - https://fapi.binance.com
   bitget:
-    enabled: false
+    enabled: true
+    operating_mode: enabled
     position_mode: hedge
     ws_batch_size: 50
+    env_prefix: BITGET
+    demo_trading: false
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
     routes:
-      market_ws: []
-      private_ws: []
-      rest_public: []
-      rest_private: []
+      market_ws:
+        - wss://ws.bitget.com/v2/ws/public
+      private_ws:
+        - wss://ws.bitget.com/v2/ws/private
+      rest_public:
+        - https://api.bitget.com
+      rest_private:
+        - https://api.bitget.com
   gate:
-    enabled: false
-    position_mode: one_way
+    enabled: true
+    operating_mode: enabled
+    position_mode: hedge
     ws_batch_size: 80
+    env_prefix: GATE
+    account_id: "16076371"
+    demo_trading: false
+    private_rest_enabled: true
+    private_ws_enabled: true
+    private_ws_run:
+      connect_timeout_ms: 10000
+      reconnect_delay_ms: 2000
+      heartbeat_interval_ms: 15000
+      subscribe_interval_ms: 50
     routes:
-      market_ws: []
-      private_ws: []
-      rest_public: []
-      rest_private: []
+      market_ws:
+        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      private_ws:
+        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      rest_public:
+        - https://api.gateio.ws/api/v4
+      rest_private:
+        - https://api.gateio.ws/api/v4
 
 routing:
   ws_stale_limit_ms: 30000
@@ -111,10 +135,15 @@ routing:
   degraded_mode_blocks_new_entries: true
 
 execution:
-  dry_run: true
+  dry_run: false
+  open_execution_style: dual_taker
   max_hedge_retries: 1
   maker_order_ttl_ms: 5000
   taker_ioc_slippage_limit_pct: 0.003
+
+controls:
+  start_paused_new_entries: true
+  start_close_only: true
 
 reconciliation:
   open_orders_interval_secs: 5
@@ -124,25 +153,26 @@ reconciliation:
   orphan_tolerance: 0.000001
 
 risk:
-  stale_quote_ms: 30000
-  max_book_age_ms: 30000
+  stale_quote_ms: 5000
+  max_book_age_ms: 5000
   taker_slippage_buffer: 0.0005
   max_taker_slippage_pct: 0.003
   maker_non_fill_penalty: 0.001
   safety_buffer: 0.001
-  max_notional_per_symbol_usdt: 2000.0
-  max_open_bundles: 3
+  max_notional_per_symbol_usdt: 10.0
+  max_open_bundles: 50
   symbol_whitelist_required_live: true
+  block_on_external_account_exposure: false
 
 persistence:
   enabled: true
-  jsonl_dir: logs/cross_exchange_arbitrage
+  jsonl_dir: logs/cross_exchange_arbitrage/three-venues-hcr-10u-405symbols-live-small
   clickhouse_enabled: false
 
 dashboard:
   enabled: true
   bind_host: 0.0.0.0
-  port: 8090
+  port: 8091
 
 alerts:
   enabled: true
@@ -153,7 +183,6 @@ alerts:
 universe:
   enabled_exchanges:
     - binance
-    - okx
     - bitget
     - gate
   symbols:
@@ -182,7 +211,6 @@ universe:
     - FLOCK/USDT
     - UAI/USDT
     - SQD/USDT
-    - LIGHT/USDT
     - DOLO/USDT
     - EUL/USDT
     - DIA/USDT
@@ -201,7 +229,6 @@ universe:
     - SAPIEN/USDT
     - PIXEL/USDT
     - B/USDT
-    - BEL/USDT
     - CATI/USDT
     - HAEDAL/USDT
     - MUBARAK/USDT
@@ -216,8 +243,6 @@ universe:
     - REZ/USDT
     - T/USDT
     - AMAT/USDT
-    - CLO/USDT
-    - NOM/USDT
     - MET/USDT
     - CVX/USDT
     - RECALL/USDT
@@ -557,11 +582,9 @@ universe:
     - CYBER/USDT
     - DEEP/USDT
     - DOGS/USDT
-    - EDEN/USDT
     - ERA/USDT
     - FET/USDT
     - FF/USDT
-    - FLOW/USDT
   mode: curated_long_tail
   target_symbol_count: 405
   max_symbol_count: 500

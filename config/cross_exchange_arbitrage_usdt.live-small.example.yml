@@ -18,6 +18,7 @@ thresholds:
   max_open_raw_spread: 0.10
   lock_profit_dual_taker_pct: 0.003
   strong_lock_profit_dual_taker_pct: 0.005
+  max_close_spread_pct: 0.001
 
 sizing:
   min_notional_usdt: 10.0
@@ -103,7 +104,7 @@ exchanges:
         - https://api.bitget.com
   gate:
     enabled: true
-    position_mode: one_way
+    position_mode: hedge
     ws_batch_size: 80
     env_prefix: GATE
     account_id: "REPLACE_WITH_GATE_ACCOUNT_ID"

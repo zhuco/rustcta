@@ -240,6 +240,68 @@ mod solusdc_hedged_grid {
     }
 
     #[test]
+    fn partial_fill_should_wait_for_complete_fill_before_rolling_grid() {
+        let config = test_config();
+        let levels = config.grid.levels_per_side;
+        let mut engine = GridEngine::new(config, true).expect("engine");
+        let position = PositionState {
+            long_qty: 1.0,
+            short_qty: 1.0,
+            long_entry_price: 0.0,
+            short_entry_price: 0.0,
+            long_available: 1.0,
+            short_available: 1.0,
+            equity: 10000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        };
+        engine.update_position(position);
+        let snap = snapshot(100.0);
+        engine.rebuild_grid(&snap);
+        let buy_order = engine.buy_orders().first().cloned().expect("buy");
+        let first_fill_qty = 0.04;
+        let final_fill_qty = buy_order.qty - first_fill_qty;
+
+        let partial_fill = FillEvent {
+            order_id: buy_order.id.clone(),
+            intent: buy_order.intent,
+            fill_qty: first_fill_qty,
+            fill_price: buy_order.price,
+            timestamp: Utc::now(),
+            partial: true,
+        };
+        let actions = engine.handle_fill(partial_fill, &snap);
+        let (place_count, cancel_count) = action_counts(&actions);
+        assert_eq!(place_count, 0);
+        assert_eq!(cancel_count, 0);
+        assert!(engine.order_record(&buy_order.id).is_some());
+
+        let complete_fill = FillEvent {
+            order_id: buy_order.id.clone(),
+            intent: buy_order.intent,
+            fill_qty: final_fill_qty,
+            fill_price: buy_order.price,
+            timestamp: Utc::now(),
+            partial: false,
+        };
+        let actions = engine.handle_fill(complete_fill, &snap);
+        let (place_count, cancel_count) = action_counts(&actions);
+        assert_eq!(place_count, 2);
+        assert_eq!(cancel_count, 1);
+        assert!(engine.order_record(&buy_order.id).is_none());
+
+        let sell_orders = engine.sell_orders();
+        let close_longs: Vec<_> = sell_orders
+            .iter()
+            .filter(|o| o.intent == OrderIntent::CloseLongSell)
+            .collect();
+        assert_eq!(close_longs.len(), levels);
+        assert!(close_longs
+            .iter()
+            .any(|order| (order.qty - buy_order.qty).abs() <= 1e-9));
+    }
+
+    #[test]
     fn open_short_fill_should_roll_grid() {
         let config = test_config();
         let spacing = config.grid.grid_spacing_pct;

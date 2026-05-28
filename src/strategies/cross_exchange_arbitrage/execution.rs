@@ -1,16 +1,16 @@
 //! Live execution bridge for cross-exchange arbitrage signals and private fills.
 
 use super::{
-    ArbSignal, ArbSignalAction, CrossArbRuntime, CrossArbRuntimeState, Opportunity,
-    SimulatedBundleState, SimulatedBundleStatus, StorageSink,
+    ArbSignal, ArbSignalAction, CrossArbRuntime, CrossArbRuntimeState, MarketSnapshot,
+    OpenExecutionStyle, Opportunity, SimulatedBundleState, SimulatedBundleStatus, StorageSink,
 };
 use crate::execution::{
-    deterministic_client_order_id, ArbitrageBundle, BundleLeg, BundleStatus, CancelAck,
-    CancelCommand, EngineDecision, ExecutionAction, ExecutionEngine, ExecutionLedger,
-    ExecutionRequest, FillEvent, MakerFill, OrderCommand, OrderSide, PrivateEvent,
-    PrivateEventKind,
+    deterministic_client_order_id, normalize_client_order_id, ArbitrageBundle, BundleLeg,
+    BundleStatus, CancelAck, CancelCommand, EngineDecision, ExecutionAction, ExecutionEngine,
+    ExecutionLedger, ExecutionRequest, FillEvent, MakerFill, OrderCommand, OrderIntent, OrderSide,
+    OrderType, PositionSide, PrivateEvent, PrivateEventKind, TimeInForce,
 };
-use crate::market::{exchange_symbol_for, ExchangeId, ExchangeSymbol};
+use crate::market::{exchange_symbol_for, CanonicalSymbol, ExchangeId, ExchangeSymbol};
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -238,6 +238,56 @@ impl CrossArbExecutionCoordinator {
         acks
     }
 
+    pub async fn execute_close_bundle(
+        &mut self,
+        runtime: &mut CrossArbRuntime,
+        candidate: &LiveCloseCandidate,
+    ) -> Result<EngineDecision> {
+        runtime.state.position_manager.reserve_bundle_close_qty(
+            &candidate.bundle_id,
+            candidate.quantity,
+            candidate.generated_at,
+        )?;
+        if let Some(bundle) = runtime.state.open_bundles.get_mut(&candidate.bundle_id) {
+            bundle.status = SimulatedBundleStatus::ClosingSimulated;
+            bundle.updated_at = candidate.generated_at;
+        }
+
+        let plan = crate::execution::ExecutionPlan {
+            request_id: format!("close-{}", candidate.bundle_id),
+            mode: runtime.state.config.mode,
+            commands: close_commands_from_candidate(runtime, candidate),
+            blocked_reason: None,
+            requires_reconcile: false,
+            created_at: candidate.generated_at,
+        };
+        let decision = self.engine.submit_commands(plan).await;
+        self.record_decision_with(&decision, tracked_order);
+        if let Some(reason) = &decision.blocked_reason {
+            runtime.state.risk_events.push(super::RiskEventReadModel {
+                event_id: format!(
+                    "close-decision-{}",
+                    decision.plan.created_at.timestamp_millis()
+                ),
+                canonical_symbol: Some(candidate.canonical_symbol.clone()),
+                exchange: None,
+                reason: super::RejectReason::RouteUnhealthy,
+                message: reason.clone(),
+                created_at: decision.plan.created_at,
+            });
+            if let Some(bundle) = runtime.state.open_bundles.get_mut(&candidate.bundle_id) {
+                bundle.status = SimulatedBundleStatus::OrphanLeg;
+                bundle.updated_at = decision.plan.created_at;
+            }
+            let _ = runtime.state.position_manager.mark_bundle_status(
+                &candidate.bundle_id,
+                BundleStatus::ReconcileRequired,
+                decision.plan.created_at,
+            );
+        }
+        Ok(decision)
+    }
+
     fn record_decision_with(
         &mut self,
         decision: &EngineDecision,
@@ -271,6 +321,160 @@ impl CrossArbExecutionCoordinator {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveCloseCandidate {
+    pub bundle_id: String,
+    pub canonical_symbol: CanonicalSymbol,
+    pub long_exchange: ExchangeId,
+    pub short_exchange: ExchangeId,
+    pub long_exchange_symbol: ExchangeSymbol,
+    pub short_exchange_symbol: ExchangeSymbol,
+    pub quantity: f64,
+    pub target_notional_usdt: f64,
+    pub gross_spread_pnl_usdt: f64,
+    pub realized_funding_pnl_usdt: f64,
+    pub open_fee_paid_usdt: f64,
+    pub close_fee_est_usdt: f64,
+    pub close_spread_pct: f64,
+    pub close_profit_pct: f64,
+    pub generated_at: DateTime<Utc>,
+}
+
+pub fn live_close_metrics_for_bundle(
+    runtime: &CrossArbRuntime,
+    bundle_id: &str,
+    snapshots: &[MarketSnapshot],
+    now: DateTime<Utc>,
+) -> Option<LiveCloseCandidate> {
+    let simulated = runtime.state.open_bundles.get(bundle_id)?;
+    if simulated.status != SimulatedBundleStatus::OpenSimulated {
+        return None;
+    }
+    let position = runtime.state.position_manager.bundle(bundle_id)?;
+    let quantity_tolerance = runtime.state.config.reconciliation.quantity_tolerance;
+    let quantity = position.closeable_qty(quantity_tolerance);
+    if quantity <= 0.0 {
+        return None;
+    }
+
+    let long_snapshot = snapshots
+        .iter()
+        .find(|snapshot| snapshot.book.exchange == position.long_leg.exchange)?;
+    let short_snapshot = snapshots
+        .iter()
+        .find(|snapshot| snapshot.book.exchange == position.short_leg.exchange)?;
+    let long_bid = long_snapshot.book.best_bid()?.price;
+    let short_ask = short_snapshot.book.best_ask()?.price;
+    let long_entry = position.long_leg.avg_entry_price?;
+    let short_entry = position.short_leg.avg_entry_price?;
+    if long_entry <= 0.0 || short_entry <= 0.0 {
+        return None;
+    }
+    let gross_spread_pnl_usdt = position.gross_spread_pnl_at(long_bid, short_ask);
+    let close_spread_pct = if short_ask > 0.0 {
+        short_ask / long_bid.max(f64::EPSILON) - 1.0
+    } else {
+        0.0
+    };
+    let fee_model = super::FeeModel::from_config(&runtime.state.config.fees);
+    let target_notional_usdt = (position.target_notional_usdt * quantity
+        / position.long_leg.filled_qty.max(quantity))
+    .max(1.0);
+    let close_fee_est = fee_model.fee_amount(
+        &position.long_leg.exchange,
+        super::FeeRole::Taker,
+        target_notional_usdt,
+    ) + fee_model.fee_amount(
+        &position.short_leg.exchange,
+        super::FeeRole::Taker,
+        target_notional_usdt,
+    );
+    let denominator = position.target_notional_usdt.max(1.0);
+    let close_profit_pct = (gross_spread_pnl_usdt + position.realized_funding_pnl()
+        - position.open_fee_paid()
+        - close_fee_est
+        - runtime.state.config.risk.taker_slippage_buffer * target_notional_usdt
+        - runtime.state.config.risk.safety_buffer * target_notional_usdt)
+        / denominator;
+    Some(LiveCloseCandidate {
+        bundle_id: bundle_id.to_string(),
+        canonical_symbol: position.canonical_symbol.clone(),
+        long_exchange: position.long_leg.exchange.clone(),
+        short_exchange: position.short_leg.exchange.clone(),
+        long_exchange_symbol: position.long_leg.exchange_symbol.clone(),
+        short_exchange_symbol: position.short_leg.exchange_symbol.clone(),
+        quantity,
+        target_notional_usdt,
+        gross_spread_pnl_usdt,
+        realized_funding_pnl_usdt: position.realized_funding_pnl(),
+        open_fee_paid_usdt: position.open_fee_paid(),
+        close_fee_est_usdt: close_fee_est,
+        close_spread_pct,
+        close_profit_pct,
+        generated_at: now,
+    })
+}
+
+pub fn live_close_candidate_for_bundle(
+    runtime: &CrossArbRuntime,
+    bundle_id: &str,
+    snapshots: &[MarketSnapshot],
+    now: DateTime<Utc>,
+) -> Option<LiveCloseCandidate> {
+    let candidate = live_close_metrics_for_bundle(runtime, bundle_id, snapshots, now)?;
+    (candidate.close_spread_pct <= runtime.state.config.thresholds.max_close_spread_pct)
+        .then_some(candidate)
+}
+
+fn close_commands_from_candidate(
+    runtime: &CrossArbRuntime,
+    candidate: &LiveCloseCandidate,
+) -> Vec<OrderCommand> {
+    let mode = runtime.state.config.mode;
+    vec![
+        OrderCommand::new(
+            mode,
+            candidate.bundle_id.clone(),
+            BundleLeg::CloseLong,
+            1,
+            candidate.long_exchange.clone(),
+            candidate.canonical_symbol.clone(),
+            candidate.long_exchange_symbol.clone(),
+            OrderIntent::CloseLongTaker,
+            OrderSide::Sell,
+            PositionSide::Long,
+            OrderType::Market,
+            candidate.quantity,
+            None,
+            TimeInForce::Ioc,
+            false,
+            true,
+            Some(runtime.state.config.execution.taker_ioc_slippage_limit_pct),
+            candidate.generated_at,
+        ),
+        OrderCommand::new(
+            mode,
+            candidate.bundle_id.clone(),
+            BundleLeg::CloseShort,
+            1,
+            candidate.short_exchange.clone(),
+            candidate.canonical_symbol.clone(),
+            candidate.short_exchange_symbol.clone(),
+            OrderIntent::CloseShortTaker,
+            OrderSide::Buy,
+            PositionSide::Short,
+            OrderType::Market,
+            candidate.quantity,
+            None,
+            TimeInForce::Ioc,
+            false,
+            true,
+            Some(runtime.state.config.execution.taker_ioc_slippage_limit_pct),
+            candidate.generated_at,
+        ),
+    ]
+}
+
 pub fn maker_fill_from_tracked_private_event(
     runtime: &mut CrossArbRuntime,
     tracked: &TrackedCrossArbOrder,
@@ -279,11 +483,15 @@ pub fn maker_fill_from_tracked_private_event(
     let PrivateEventKind::Fill(fill) = &event.kind else {
         return None;
     };
-    if let Err(error) = runtime.state.apply_fill_event(&tracked.bundle_id, fill) {
+    let normalized_fill = fill_for_tracked_leg(fill, tracked.leg);
+    if let Err(error) = runtime
+        .state
+        .apply_fill_event(&tracked.bundle_id, &normalized_fill)
+    {
         runtime.state.risk_events.push(super::RiskEventReadModel {
             event_id: format!("fill-apply-{}", event.received_at.timestamp_millis()),
-            canonical_symbol: Some(fill.canonical_symbol.clone()),
-            exchange: Some(fill.exchange.clone()),
+            canonical_symbol: Some(normalized_fill.canonical_symbol.clone()),
+            exchange: Some(normalized_fill.exchange.clone()),
             reason: super::RejectReason::RouteUnhealthy,
             message: error.to_string(),
             created_at: event.received_at,
@@ -291,31 +499,50 @@ pub fn maker_fill_from_tracked_private_event(
         return None;
     }
 
-    if tracked.leg != BundleLeg::Maker || fill.reduce_only.unwrap_or(false) {
+    if tracked.leg != BundleLeg::Maker || normalized_fill.reduce_only.unwrap_or(false) {
         return None;
     }
     if let Some(bundle) = runtime.state.open_bundles.get_mut(&tracked.bundle_id) {
         bundle.status = SimulatedBundleStatus::Hedging;
-        bundle.updated_at = fill.filled_at;
+        bundle.updated_at = normalized_fill.filled_at;
     }
     let _ = runtime.state.position_manager.mark_bundle_status(
         &tracked.bundle_id,
         BundleStatus::Hedging,
-        fill.filled_at,
+        normalized_fill.filled_at,
     );
 
     Some(MakerFill {
         bundle_id: tracked.bundle_id.clone(),
         mode: tracked.mode,
-        canonical_symbol: fill.canonical_symbol.clone(),
+        canonical_symbol: normalized_fill.canonical_symbol.clone(),
         taker_exchange: tracked.taker_exchange.clone(),
         taker_exchange_symbol: tracked.taker_exchange_symbol.clone(),
         maker_side: tracked.maker_side,
-        filled_quantity: fill.quantity,
+        filled_quantity: normalized_fill.quantity,
         hedge_price: None,
         max_slippage_pct: tracked.max_slippage_pct,
-        filled_at: fill.filled_at,
+        filled_at: normalized_fill.filled_at,
     })
+}
+
+fn fill_for_tracked_leg(fill: &FillEvent, leg: BundleLeg) -> FillEvent {
+    let mut normalized = fill.clone();
+    if matches!(
+        leg,
+        BundleLeg::CloseLong
+            | BundleLeg::CloseShort
+            | BundleLeg::EmergencyCloseLong
+            | BundleLeg::EmergencyCloseShort
+    ) {
+        normalized.reduce_only = Some(true);
+        normalized.position_side = match leg {
+            BundleLeg::CloseLong | BundleLeg::EmergencyCloseLong => PositionSide::Long,
+            BundleLeg::CloseShort | BundleLeg::EmergencyCloseShort => PositionSide::Short,
+            _ => normalized.position_side,
+        };
+    }
+    normalized
 }
 
 pub fn execution_request_from_signal(
@@ -378,6 +605,8 @@ pub fn execution_request_from_signal(
         taker_price: opportunity.taker_vwap,
         max_slippage_pct: Some(state.config.execution.taker_ioc_slippage_limit_pct),
         generated_at: signal.generated_at,
+        open_with_dual_taker: state.config.execution.open_execution_style
+            == OpenExecutionStyle::DualTaker,
     })
 }
 
@@ -402,7 +631,11 @@ fn register_open_bundle(
         opportunity.executable_notional_usdt,
         now,
     );
-    bundle.status = BundleStatus::MakerPending;
+    bundle.status = if request.open_with_dual_taker {
+        BundleStatus::Hedging
+    } else {
+        BundleStatus::MakerPending
+    };
     bundle.created_from_signal_id = Some(signal.signal_id.clone());
     runtime.state.register_bundle_position(
         &bundle,
@@ -415,7 +648,11 @@ fn register_open_bundle(
         SimulatedBundleState {
             bundle_id: request.bundle_id.clone(),
             opportunity_id: opportunity.opportunity_id.clone(),
-            status: SimulatedBundleStatus::MakerPending,
+            status: if request.open_with_dual_taker {
+                SimulatedBundleStatus::Hedging
+            } else {
+                SimulatedBundleStatus::MakerPending
+            },
             route: opportunity.route(),
             target_notional_usdt: opportunity.executable_notional_usdt,
             opened_at: None,
@@ -494,8 +731,13 @@ fn tracked_order_for_request(
     let mut tracked = tracked_order(command);
     tracked.mode = request.mode;
     tracked.maker_side = request.maker_side;
-    tracked.taker_exchange = request.taker_exchange.clone();
-    tracked.taker_exchange_symbol = request.taker_exchange_symbol.clone();
+    if command.exchange == request.maker_exchange {
+        tracked.taker_exchange = request.taker_exchange.clone();
+        tracked.taker_exchange_symbol = request.taker_exchange_symbol.clone();
+    } else {
+        tracked.taker_exchange = request.maker_exchange.clone();
+        tracked.taker_exchange_symbol = request.maker_exchange_symbol.clone();
+    }
     tracked.max_slippage_pct = request.max_slippage_pct;
     tracked
 }
@@ -503,12 +745,26 @@ fn tracked_order_for_request(
 fn command_leg(command: &OrderCommand) -> BundleLeg {
     if command.post_only {
         BundleLeg::Maker
-    } else if matches!(
-        command.intent,
-        crate::execution::OrderIntent::HedgeLongTaker
-            | crate::execution::OrderIntent::HedgeShortTaker
-    ) {
-        BundleLeg::Hedge
+    } else if command.intent == crate::execution::OrderIntent::HedgeLongTaker {
+        if command.position_side == PositionSide::Long {
+            BundleLeg::Long
+        } else {
+            BundleLeg::Hedge
+        }
+    } else if command.intent == crate::execution::OrderIntent::HedgeShortTaker {
+        if command.position_side == PositionSide::Short {
+            BundleLeg::Short
+        } else {
+            BundleLeg::Hedge
+        }
+    } else if command.intent == crate::execution::OrderIntent::CloseLongTaker {
+        BundleLeg::CloseLong
+    } else if command.intent == crate::execution::OrderIntent::CloseShortTaker {
+        BundleLeg::CloseShort
+    } else if command.intent == crate::execution::OrderIntent::EmergencyCloseLongTaker {
+        BundleLeg::EmergencyCloseLong
+    } else if command.intent == crate::execution::OrderIntent::EmergencyCloseShortTaker {
+        BundleLeg::EmergencyCloseShort
     } else {
         BundleLeg::Taker
     }
@@ -532,14 +788,6 @@ fn to_execution_order_side(side: super::state::OrderSide) -> OrderSide {
 fn quantity_from_notional(notional: f64, price: f64) -> Option<f64> {
     (notional > 0.0 && price > 0.0 && notional.is_finite() && price.is_finite())
         .then_some(notional / price)
-}
-
-fn normalize_client_order_id(value: &str) -> String {
-    value
-        .strip_prefix("t-")
-        .unwrap_or(value)
-        .trim()
-        .to_ascii_lowercase()
 }
 
 trait OrderSideExt {

@@ -16,11 +16,12 @@ use crate::market::{exchange_symbol_for, ExchangeId, ExchangeSymbol, InstrumentM
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrivateWsRuntimeSpec {
     pub exchange: PrivatePerpExchange,
     pub auth: PrivateWsAuth,
     pub symbols: Vec<ExchangeSymbol>,
+    pub instruments: Vec<InstrumentMeta>,
     pub config: PrivateWsRunConfig,
     pub url: String,
 }
@@ -91,7 +92,7 @@ pub fn build_cross_arb_live_runtime_parts(
                 .unwrap_or(false)
         {
             binance_private_ws_specs.push(BinancePrivateWsRuntimeSpec {
-                exchange: build_core_exchange(config, &exchange)?,
+                exchange: build_core_exchange_for_exchange(config, &exchange)?,
                 config: config
                     .exchanges
                     .get(&exchange)
@@ -110,7 +111,12 @@ pub fn build_cross_arb_live_runtime_parts(
                 .iter()
                 .map(|symbol| exchange_symbol_for(&exchange, symbol))
                 .collect::<Vec<_>>();
-            (exchange, symbols)
+            let ws_instruments = instruments
+                .iter()
+                .filter(|item| item.exchange == exchange)
+                .cloned()
+                .collect::<Vec<_>>();
+            (exchange, symbols, ws_instruments)
         }),
     )?;
     Ok(CrossArbLiveRuntimeParts {
@@ -135,7 +141,7 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
 ) -> Result<Arc<dyn TradingAdapter>> {
     match exchange {
         ExchangeId::Binance | ExchangeId::Okx => {
-            let core_exchange = build_core_exchange(config, exchange)?;
+            let core_exchange = build_core_exchange_for_exchange(config, exchange)?;
             Ok(Arc::new(
                 ExchangeTradingAdapter::new(exchange.clone(), core_exchange)
                     .with_position_mode(configured_position_mode(config, exchange))
@@ -167,10 +173,12 @@ pub fn build_trading_adapter_for_exchange_with_instruments(
 
 pub fn build_private_ws_runtime_specs(
     config: &CrossExchangeArbitrageConfig,
-    symbols_by_exchange: impl IntoIterator<Item = (ExchangeId, Vec<ExchangeSymbol>)>,
+    symbols_by_exchange: impl IntoIterator<
+        Item = (ExchangeId, Vec<ExchangeSymbol>, Vec<InstrumentMeta>),
+    >,
 ) -> Result<Vec<PrivateWsRuntimeSpec>> {
     let mut specs = Vec::new();
-    for (exchange, symbols) in symbols_by_exchange {
+    for (exchange, symbols, instruments) in symbols_by_exchange {
         let Some(private_exchange) = private_perp_exchange(&exchange) else {
             continue;
         };
@@ -185,6 +193,7 @@ pub fn build_private_ws_runtime_specs(
             exchange: private_exchange,
             auth: private_ws_auth_for_exchange(config, &exchange)?,
             symbols,
+            instruments,
             config: runtime
                 .map(|runtime| runtime.private_ws_run.clone())
                 .unwrap_or_default()
@@ -224,6 +233,16 @@ pub fn private_ws_auth_for_exchange(
         .get(exchange)
         .and_then(|runtime| runtime.account_id.clone())
         .or(api_keys.memo);
+    if *exchange == ExchangeId::Gate {
+        let account_id = account_id.as_deref().ok_or_else(|| {
+            anyhow!("gate private websocket requires exchanges.gate.account_id to be set to the numeric Gate user id")
+        })?;
+        if !account_id.chars().all(|ch| ch.is_ascii_digit()) {
+            anyhow::bail!(
+                "gate private websocket account_id must be the numeric Gate user id; current value is non-numeric"
+            );
+        }
+    }
     Ok(PrivateWsAuth {
         api_key: api_keys.api_key,
         api_secret: api_keys.api_secret,
@@ -269,11 +288,22 @@ pub fn live_enabled_exchanges(config: &CrossExchangeArbitrageConfig) -> Vec<Exch
             config
                 .exchanges
                 .get(*exchange)
-                .and_then(|runtime| runtime.enabled)
+                .map(|runtime| !runtime.is_disabled())
                 .unwrap_or(true)
         })
         .cloned()
         .collect()
+}
+
+pub fn exchange_route_status(
+    config: &CrossExchangeArbitrageConfig,
+    exchange: &ExchangeId,
+) -> crate::market::RouteStatus {
+    config
+        .exchanges
+        .get(exchange)
+        .map(|runtime| runtime.route_status())
+        .unwrap_or(crate::market::RouteStatus::Healthy)
 }
 
 fn api_keys_for_exchange(
@@ -288,7 +318,7 @@ fn api_keys_for_exchange(
     ApiKeys::from_env(prefix).map_err(|err| anyhow!(err.to_string()))
 }
 
-fn build_core_exchange(
+pub fn build_core_exchange_for_exchange(
     config: &CrossExchangeArbitrageConfig,
     exchange: &ExchangeId,
 ) -> Result<Arc<dyn Exchange>> {
@@ -345,6 +375,7 @@ impl From<PrivateWsRuntimeConfig> for PrivateWsRunConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cross_exchange_arbitrage::ExchangeOperatingMode;
     use crate::market::{CanonicalSymbol, ContractType, ExchangeSymbol, InstrumentStatus};
 
     #[test]
@@ -363,6 +394,24 @@ mod tests {
     }
 
     #[test]
+    fn runtime_should_keep_close_only_exchanges_attached() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config
+            .exchanges
+            .entry(ExchangeId::Bitget)
+            .or_default()
+            .operating_mode = ExchangeOperatingMode::CloseOnly;
+
+        let exchanges = live_enabled_exchanges(&config);
+
+        assert!(exchanges.contains(&ExchangeId::Bitget));
+        assert_eq!(
+            exchange_route_status(&config, &ExchangeId::Bitget),
+            crate::market::RouteStatus::CloseOnly
+        );
+    }
+
+    #[test]
     fn runtime_should_parse_position_mode_for_private_adapter() {
         let mut config = CrossExchangeArbitrageConfig::default();
         config
@@ -378,6 +427,16 @@ mod tests {
         assert_eq!(
             configured_position_mode(&config, &ExchangeId::Gate),
             PositionMode::OneWay
+        );
+
+        config
+            .exchanges
+            .entry(ExchangeId::Gate)
+            .or_default()
+            .position_mode = Some("hedge".to_string());
+        assert_eq!(
+            configured_position_mode(&config, &ExchangeId::Gate),
+            PositionMode::Hedge
         );
     }
 
@@ -398,6 +457,7 @@ mod tests {
             [(
                 ExchangeId::Gate,
                 vec![ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")],
+                Vec::new(),
             )],
         )
         .unwrap();

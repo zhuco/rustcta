@@ -10,6 +10,7 @@ use super::{
     PositionManager, PrivateStreamHealthReadModel, RiskEventReadModel, RiskStateReadModel,
     RouteReadModel, SimulatedBundleState, SimulatedBundleStatus, StorageSink, StrategyRiskState,
 };
+use crate::execution::BundleStatus;
 use crate::execution::{
     AccountSyncState, ArbitrageBundle, ExchangePosition, FillEvent, PositionSnapshot, PrivateEvent,
     PrivateEventKind,
@@ -39,7 +40,9 @@ pub struct CrossArbRuntimeState {
 
 impl CrossArbRuntimeState {
     pub fn new(config: CrossExchangeArbitrageConfig, now: DateTime<Utc>) -> Self {
-        Self {
+        let start_paused_new_entries = config.controls.start_paused_new_entries;
+        let start_close_only = config.controls.start_close_only;
+        let mut state = Self {
             config,
             opportunities: Vec::new(),
             signals: Vec::new(),
@@ -53,7 +56,13 @@ impl CrossArbRuntimeState {
             close_only: false,
             kill_switch: false,
             updated_at: now,
+        };
+        if start_close_only {
+            state.set_close_only();
+        } else if start_paused_new_entries {
+            state.pause_new_entries();
         }
+        state
     }
 
     pub fn update_from_market_snapshots(
@@ -64,9 +73,11 @@ impl CrossArbRuntimeState {
     ) -> Vec<ArbSignal> {
         self.updated_at = now;
         self.sync_risk_state(now);
-        self.opportunities = scan_opportunities(canonical_symbol, snapshots, &self.config, now);
+        self.opportunities
+            .retain(|opportunity| opportunity.canonical_symbol != *canonical_symbol);
+        let mut scanned = scan_opportunities(canonical_symbol, snapshots, &self.config, now);
         let existing_one_way = self.position_manager.active_one_way_exposure_keys();
-        for opportunity in &mut self.opportunities {
+        for opportunity in &mut scanned {
             let maker_side = match opportunity.maker_side {
                 StrategyOrderSide::Buy => crate::execution::PositionSide::Long,
                 StrategyOrderSide::Sell => crate::execution::PositionSide::Short,
@@ -92,10 +103,18 @@ impl CrossArbRuntimeState {
                 opportunity.can_open = false;
             }
         }
+        self.opportunities.extend(scanned);
+        self.opportunities.sort_by(|left, right| {
+            right
+                .maker_taker_net_edge
+                .partial_cmp(&left.maker_taker_net_edge)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let signals = self
             .opportunities
             .iter()
+            .filter(|opportunity| opportunity.canonical_symbol == *canonical_symbol)
             .map(|opportunity| {
                 if !self.risk_state.decision().allow_new_entries {
                     ArbSignal::noop(self.config.mode, now)
@@ -140,7 +159,9 @@ impl CrossArbRuntimeState {
         bundle_id: &str,
         fill: &FillEvent,
     ) -> Result<FillApplication, PositionError> {
-        self.position_manager.apply_fill_event(bundle_id, fill)
+        let application = self.position_manager.apply_fill_event(bundle_id, fill)?;
+        self.refresh_bundle_status_from_position(bundle_id, fill.filled_at);
+        Ok(application)
     }
 
     pub fn ingest_private_event(&mut self, event: PrivateEvent) {
@@ -153,7 +174,10 @@ impl CrossArbRuntimeState {
         };
 
         self.update_private_stream_health(exchange.clone(), received_at, needs_resync);
-        self.record_private_reconciliation_from_account_state(&exchange, received_at);
+        if self.config.risk.block_on_external_account_exposure {
+            self.record_private_reconciliation_from_account_state(&exchange, received_at);
+        }
+        self.reconcile_open_bundles_from_account_positions(received_at);
 
         if matches!(
             &event.kind,
@@ -174,6 +198,173 @@ impl CrossArbRuntimeState {
         }
 
         self.updated_at = received_at;
+    }
+
+    fn reconcile_open_bundles_from_account_positions(&mut self, checked_at: DateTime<Utc>) {
+        let exchange_positions = self
+            .account_sync
+            .values()
+            .flat_map(AccountSyncState::position_snapshots)
+            .filter(|position| {
+                position.quantity.abs() > self.config.reconciliation.quantity_tolerance
+            })
+            .map(|position| ExchangePosition {
+                exchange: position.exchange.clone(),
+                canonical_symbol: position.canonical_symbol.clone(),
+                exchange_symbol: position.exchange_symbol.unwrap_or_else(|| {
+                    crate::market::exchange_symbol_for(
+                        &position.exchange,
+                        &position.canonical_symbol,
+                    )
+                }),
+                position_side: position.position_side,
+                quantity: position.quantity,
+                entry_price: position.entry_price,
+                mark_price: None,
+                unrealized_pnl: position.unrealized_pnl,
+                updated_at: position.updated_at,
+            })
+            .collect::<Vec<_>>();
+        if exchange_positions.is_empty() {
+            return;
+        }
+        self.restore_open_bundles_from_account_positions(&exchange_positions, checked_at);
+
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let bundle_ids = self
+            .open_bundles
+            .iter()
+            .filter(|(_, bundle)| {
+                matches!(
+                    bundle.status,
+                    SimulatedBundleStatus::Hedging
+                        | SimulatedBundleStatus::OrphanLeg
+                        | SimulatedBundleStatus::MakerFilled
+                        | SimulatedBundleStatus::OpenSimulated
+                )
+            })
+            .map(|(bundle_id, _)| bundle_id.clone())
+            .collect::<Vec<_>>();
+
+        for bundle_id in bundle_ids {
+            let Ok(reconciled) = self
+                .position_manager
+                .reconcile_bundle_open_from_exchange_positions(
+                    &bundle_id,
+                    &exchange_positions,
+                    quantity_tolerance,
+                    checked_at,
+                )
+            else {
+                continue;
+            };
+            if reconciled {
+                self.refresh_bundle_status_from_position(&bundle_id, checked_at);
+                self.history.retain(|item| item.bundle_id != bundle_id);
+            }
+        }
+    }
+
+    fn restore_open_bundles_from_account_positions(
+        &mut self,
+        exchange_positions: &[ExchangePosition],
+        checked_at: DateTime<Utc>,
+    ) {
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        for long_position in exchange_positions.iter().filter(|position| {
+            position.position_side == crate::execution::PositionSide::Long
+                && position.quantity.abs() > quantity_tolerance
+                && position.entry_price.unwrap_or_default() > 0.0
+        }) {
+            for short_position in exchange_positions.iter().filter(|position| {
+                position.position_side == crate::execution::PositionSide::Short
+                    && position.quantity.abs() > quantity_tolerance
+                    && position.entry_price.unwrap_or_default() > 0.0
+                    && position.canonical_symbol == long_position.canonical_symbol
+                    && position.exchange != long_position.exchange
+            }) {
+                if (long_position.quantity.abs() - short_position.quantity.abs()).abs()
+                    > quantity_tolerance
+                {
+                    continue;
+                }
+                if !self
+                    .config
+                    .universe
+                    .symbols
+                    .contains(&long_position.canonical_symbol)
+                {
+                    continue;
+                }
+
+                let bundle_id = format!(
+                    "restored-{}-{}-{}",
+                    long_position
+                        .canonical_symbol
+                        .to_string()
+                        .replace('/', "")
+                        .to_ascii_lowercase(),
+                    long_position.exchange.as_str(),
+                    short_position.exchange.as_str()
+                );
+                if self.open_bundles.contains_key(&bundle_id)
+                    || self.position_manager.contains_bundle(&bundle_id)
+                {
+                    continue;
+                }
+
+                let target_notional = long_position.quantity.abs()
+                    * long_position.entry_price.unwrap_or_default().max(0.0);
+                let mut bundle = ArbitrageBundle::new(
+                    bundle_id.clone(),
+                    self.config.mode,
+                    long_position.canonical_symbol.clone(),
+                    long_position.exchange.clone(),
+                    short_position.exchange.clone(),
+                    long_position.exchange.clone(),
+                    short_position.exchange.clone(),
+                    target_notional,
+                    checked_at,
+                );
+                bundle.status = BundleStatus::OpenSimulated;
+                bundle.open_time = Some(checked_at);
+                self.register_bundle_position(
+                    &bundle,
+                    long_position.quantity.abs(),
+                    0.0,
+                    checked_at,
+                );
+                let _ = self
+                    .position_manager
+                    .reconcile_bundle_open_from_exchange_positions(
+                        &bundle_id,
+                        exchange_positions,
+                        quantity_tolerance,
+                        checked_at,
+                    );
+                self.open_bundles.insert(
+                    bundle_id.clone(),
+                    SimulatedBundleState {
+                        bundle_id: bundle_id.clone(),
+                        opportunity_id: format!("restored-{}", bundle_id),
+                        status: SimulatedBundleStatus::OpenSimulated,
+                        route: super::StrategyRoute {
+                            long_exchange: long_position.exchange.clone(),
+                            short_exchange: short_position.exchange.clone(),
+                            maker_exchange: long_position.exchange.clone(),
+                            taker_exchange: short_position.exchange.clone(),
+                            maker_side: StrategyOrderSide::Buy,
+                            taker_side: StrategyOrderSide::Sell,
+                            maker_leg_kind: super::MakerLegKind::LongMakerBuy,
+                        },
+                        target_notional_usdt: target_notional,
+                        opened_at: Some(checked_at),
+                        updated_at: checked_at,
+                    },
+                );
+                self.set_close_only();
+            }
+        }
     }
 
     pub fn reconcile_positions(
@@ -372,6 +563,28 @@ impl CrossArbRuntimeState {
         }
     }
 
+    fn refresh_bundle_status_from_position(&mut self, bundle_id: &str, now: DateTime<Utc>) {
+        let Some(position) = self.position_manager.bundle(bundle_id) else {
+            return;
+        };
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let Some(bundle) = self.open_bundles.get_mut(bundle_id) else {
+            return;
+        };
+        if position.is_fully_closed(quantity_tolerance) || position.status == BundleStatus::Closed {
+            bundle.status = SimulatedBundleStatus::Closed;
+            bundle.updated_at = now;
+            self.history.push(bundle.clone());
+        } else if position.is_fully_open(quantity_tolerance) {
+            bundle.status = SimulatedBundleStatus::OpenSimulated;
+            bundle.opened_at.get_or_insert(now);
+            bundle.updated_at = now;
+        } else if position.unhedged_qty() > quantity_tolerance {
+            bundle.status = SimulatedBundleStatus::OrphanLeg;
+            bundle.updated_at = now;
+        }
+    }
+
     fn route_read_models(&self) -> Vec<RouteReadModel> {
         self.opportunities
             .iter()
@@ -417,7 +630,12 @@ impl CrossArbRuntime {
         let signals = self
             .state
             .update_from_market_snapshots(canonical_symbol, snapshots, now);
-        for opportunity in &self.state.opportunities {
+        for opportunity in self
+            .state
+            .opportunities
+            .iter()
+            .filter(|opportunity| opportunity.canonical_symbol == *canonical_symbol)
+        {
             self.storage
                 .record(CrossArbStorageEvent::Opportunity(opportunity.clone()), now);
         }

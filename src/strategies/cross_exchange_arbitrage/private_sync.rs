@@ -5,7 +5,7 @@ use super::{
     CrossArbExecutionCoordinator, CrossArbRuntime, PrivateWsRuntimeSpec,
 };
 use crate::core::types::MarketType;
-use crate::exchanges::adapters::run_private_ws_with_url;
+use crate::exchanges::adapters::run_private_ws_with_url_and_instruments;
 use crate::execution::{
     parse_binance_futures_user_data_event, ExchangeBalance, ExchangeErrorClass, ExchangePosition,
     FillEvent, FillQuery, OrderState, PrivateErrorEvent, PrivateEvent, PrivateEventKind,
@@ -150,9 +150,8 @@ impl PrivateRuntimeSync {
     }
 
     pub async fn ingest_private_events(&self, events: impl IntoIterator<Item = PrivateEvent>) {
-        let mut runtime = self.runtime.write().await;
         for event in events {
-            runtime.on_private_event(event);
+            self.ingest_private_event(event).await;
         }
     }
 
@@ -179,6 +178,9 @@ impl PrivateRuntimeSync {
 
     async fn record_position_reconciliation(&self, snapshot: &PrivateRestSnapshot) {
         let mut runtime = self.runtime.write().await;
+        if !runtime.state.config.risk.block_on_external_account_exposure {
+            return;
+        }
         let decisions = runtime.state.reconcile_positions(
             &snapshot.positions,
             runtime.state.config.reconciliation.quantity_tolerance,
@@ -212,13 +214,14 @@ impl PrivateRuntimeSync {
     ) -> mpsc::Receiver<PrivateEvent> {
         let (tx, rx) = mpsc::channel(channel_capacity.max(1));
         for spec in specs {
-            tokio::spawn(run_private_ws_with_url(
+            tokio::spawn(run_private_ws_with_url_and_instruments(
                 spec.exchange,
                 spec.auth,
                 spec.symbols,
                 spec.config,
                 spec.url,
                 tx.clone(),
+                spec.instruments,
             ));
         }
         rx
@@ -257,10 +260,11 @@ pub async fn fetch_rest_snapshot(
     let mut open_orders = Vec::new();
     let mut fills = Vec::new();
 
-    for symbol in &plan.symbols {
-        positions.extend(adapter.get_positions(Some(symbol)).await?);
-        open_orders.extend(adapter.get_open_orders(Some(symbol)).await?);
-        if plan.include_recent_fills {
+    positions.extend(adapter.get_positions(None).await?);
+    open_orders.extend(adapter.get_open_orders(None).await?);
+
+    if plan.include_recent_fills {
+        for symbol in &plan.symbols {
             let mut query = FillQuery::for_symbol(
                 plan.exchange.clone(),
                 canonical_for_symbol(symbol),
@@ -673,7 +677,7 @@ mod tests {
         let snapshot = fetch_rest_snapshot(&adapter, &plan).await.unwrap();
         let events = snapshot.into_private_events();
 
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 2);
         assert!(events
             .iter()
             .any(|event| matches!(event.kind, PrivateEventKind::Balance(_))));
