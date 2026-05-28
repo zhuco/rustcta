@@ -643,25 +643,33 @@ async fn prepare_live_accounts(
                 .get_symbol_account_config(&instrument.exchange_symbol)
                 .await
             {
-                Ok(readback) => summaries.push(AccountPrepSummary {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: Some(instrument.canonical_symbol.to_string()),
-                    action: "read_symbol_account_config".to_string(),
-                    ok: readback
+                Ok(readback) => {
+                    let mode_ok = readback
                         .position_mode
                         .map(|readback_mode| {
                             readback_mode == mode || !capabilities.supports_position_mode_change
                         })
-                        .unwrap_or(true),
-                    dry_run: false,
-                    message: Some(format!(
-                        "position_mode={:?} margin_mode={:?} leverage={:?} max_leverage={:?}",
-                        readback.position_mode,
-                        readback.margin_mode,
-                        readback.leverage,
-                        readback.max_leverage
-                    )),
-                }),
+                        .unwrap_or(true);
+                    let leverage_ok = readback
+                        .leverage
+                        .map(|readback_leverage| readback_leverage == leverage)
+                        .unwrap_or(true);
+                    summaries.push(AccountPrepSummary {
+                        exchange: exchange.as_str().to_string(),
+                        symbol: Some(instrument.canonical_symbol.to_string()),
+                        action: "read_symbol_account_config".to_string(),
+                        ok: mode_ok && leverage_ok,
+                        dry_run: false,
+                        message: Some(format!(
+                            "position_mode={:?} margin_mode={:?} leverage={:?} expected_leverage={} max_leverage={:?}",
+                            readback.position_mode,
+                            readback.margin_mode,
+                            readback.leverage,
+                            leverage,
+                            readback.max_leverage
+                        )),
+                    })
+                }
                 Err(err) => summaries.push(AccountPrepSummary {
                     exchange: exchange.as_str().to_string(),
                     symbol: Some(instrument.canonical_symbol.to_string()),

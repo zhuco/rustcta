@@ -4103,6 +4103,7 @@ fn parse_symbol_account_config(
                 "leverage",
                 "lever",
                 "crossLeverage",
+                "crossedMarginLeverage",
                 "crossedLeverage",
                 "isolatedLeverage",
                 "longLeverage",
@@ -6211,7 +6212,7 @@ mod tests {
         let config = parse_symbol_account_config(
             ExchangeId::Bitget,
             &ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
-            &json!({"data":{"symbol":"BTCUSDT","posMode":"hedge_mode","marginMode":"crossed","crossLeverage":"3","maxLever":"125"}}),
+            &json!({"data":{"symbol":"BTCUSDT","posMode":"hedge_mode","marginMode":"crossed","crossedMarginLeverage":3,"maxLever":"125"}}),
             now,
             PositionMode::OneWay,
         )
