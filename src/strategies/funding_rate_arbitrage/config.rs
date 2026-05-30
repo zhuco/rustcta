@@ -137,6 +137,10 @@ pub struct ExecutionConfig {
     pub close_seconds_after_settlement: i64,
     #[serde(default = "default_order_readback_delay_secs")]
     pub order_readback_delay_secs: u64,
+    #[serde(default = "default_close_limit_timeout_secs")]
+    pub close_limit_timeout_secs: u64,
+    #[serde(default = "default_close_limit_max_retries")]
+    pub close_limit_max_retries: u32,
     #[serde(default = "default_max_slippage_pct")]
     pub max_slippage_pct: f64,
     #[serde(default)]
@@ -153,6 +157,8 @@ impl Default for ExecutionConfig {
             open_seconds_before_settlement: default_open_seconds_before_settlement(),
             close_seconds_after_settlement: default_close_seconds_after_settlement(),
             order_readback_delay_secs: default_order_readback_delay_secs(),
+            close_limit_timeout_secs: default_close_limit_timeout_secs(),
+            close_limit_max_retries: default_close_limit_max_retries(),
             max_slippage_pct: default_max_slippage_pct(),
             allow_existing_symbol_position: false,
             position_side: default_live_position_side(),
@@ -172,6 +178,12 @@ impl ExecutionConfig {
             return Err(ConfigValidationError::InvalidExecution);
         }
         if self.open_seconds_before_settlement < 0 || self.close_seconds_after_settlement < 0 {
+            return Err(ConfigValidationError::InvalidExecution);
+        }
+        if self.close_limit_timeout_secs == 0 || self.close_limit_timeout_secs > 1800 {
+            return Err(ConfigValidationError::InvalidExecution);
+        }
+        if self.close_limit_max_retries == 0 || self.close_limit_max_retries > 10 {
             return Err(ConfigValidationError::InvalidExecution);
         }
         if !self.max_slippage_pct.is_finite()
@@ -367,6 +379,14 @@ fn default_close_seconds_after_settlement() -> i64 {
 }
 
 fn default_order_readback_delay_secs() -> u64 {
+    3
+}
+
+fn default_close_limit_timeout_secs() -> u64 {
+    300
+}
+
+fn default_close_limit_max_retries() -> u32 {
     3
 }
 

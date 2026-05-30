@@ -10,8 +10,8 @@ use crate::exchanges::registry::{
     build_trading_adapter_for_exchange_with_instruments, configured_position_mode, market_adapter,
 };
 use crate::execution::{
-    ClosePositionCommand, ExchangeBalance, ExchangePosition, FillEvent, FillQuery, OrderAck,
-    OrderCommand, OrderCommandStatus, OrderIntent, OrderSide, OrderType, PositionMode,
+    CancelCommand, ClosePositionCommand, ExchangeBalance, ExchangePosition, FillEvent, FillQuery,
+    OrderAck, OrderCommand, OrderCommandStatus, OrderIntent, OrderSide, OrderType, PositionMode,
     PositionSide, TimeInForce, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
@@ -69,7 +69,13 @@ pub struct FundingLiveExchangeResult {
     pub balance_delta_usdt: Option<f64>,
     pub open_ack: Option<ActionAckSummary>,
     pub close_ack: Option<ActionAckSummary>,
+    pub close_limit_ack: Option<ActionAckSummary>,
+    pub close_limit_cancel_ack: Option<CancelAckSummary>,
+    pub close_limit_attempts: u32,
+    pub close_limit_timed_out: bool,
+    pub close_market_fallback: bool,
     pub open_fill_summary: FillSummary,
+    pub close_limit_fill_summary: FillSummary,
     pub close_fill_summary: FillSummary,
 }
 
@@ -102,8 +108,29 @@ pub struct ActionAckSummary {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CancelAckSummary {
+    pub accepted: bool,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub status: String,
+    pub message: Option<String>,
+}
+
 impl From<OrderAck> for ActionAckSummary {
     fn from(ack: OrderAck) -> Self {
+        Self {
+            accepted: ack.accepted,
+            client_order_id: ack.client_order_id,
+            exchange_order_id: ack.exchange_order_id,
+            status: format!("{:?}", ack.status),
+            message: ack.message,
+        }
+    }
+}
+
+impl From<crate::execution::CancelAck> for CancelAckSummary {
+    fn from(ack: crate::execution::CancelAck) -> Self {
         Self {
             accepted: ack.accepted,
             client_order_id: ack.client_order_id,
@@ -329,34 +356,35 @@ pub fn build_live_result_markdown(results: &[FundingLiveExchangeResult]) -> Stri
             .balance_delta_usdt
             .map(|value| format!("{:+.8}", value))
             .unwrap_or_else(|| "未知".to_string());
-        let fill_pnl = result
-            .close_fill_summary
-            .realized_pnl_usdt
-            .map(|value| format!("{:+.8}", value))
-            .unwrap_or_else(|| "未知".to_string());
+        let fill_pnl = sum_optional_values(
+            [
+                result.close_limit_fill_summary.realized_pnl_usdt,
+                result.close_fill_summary.realized_pnl_usdt,
+            ]
+            .into_iter(),
+        )
+        .map(|value| format!("{:+.8}", value))
+        .unwrap_or_else(|| "未知".to_string());
         let open_avg = result
             .open_fill_summary
             .avg_price
             .map(|value| format!("{:.8}", value))
             .unwrap_or_else(|| "-".to_string());
-        let close_avg = result
-            .close_fill_summary
-            .avg_price
+        let close_avg =
+            combined_close_avg(&result.close_limit_fill_summary, &result.close_fill_summary)
+                .map(|value| format!("{:.8}", value))
+                .unwrap_or_else(|| "-".to_string());
+        let fee = total_fee_usdt(result)
             .map(|value| format!("{:.8}", value))
-            .unwrap_or_else(|| "-".to_string());
-        let fee = match (
-            result.open_fill_summary.fee_usdt,
-            result.close_fill_summary.fee_usdt,
-        ) {
-            (Some(open_fee), Some(close_fee)) => format!("{:.8}", open_fee + close_fee),
-            _ => "未知".to_string(),
-        };
+            .unwrap_or_else(|| "未知".to_string());
+        let close_method = close_method_text(result);
 
         content.push_str(&format!(
             "### `{}` `{}`\n\
              - 状态：{}\n\
              - 资金费率：`{:+.4}%`\n\
              - 数量：`{}`，开仓均价：`{}`，平仓均价：`{}`\n\
+             - 平仓方式：`{}`，限价尝试：`{}`，限价超时：`{}`\n\
              - 本交易所余额差 USDT：<font color=\"comment\">{}</font>\n\
              - 成交回报 realized_pnl USDT：`{}`，手续费 USDT：`{}`\n",
             result.exchange,
@@ -366,6 +394,9 @@ pub fn build_live_result_markdown(results: &[FundingLiveExchangeResult]) -> Stri
             option_f64(result.planned_quantity),
             open_avg,
             close_avg,
+            close_method,
+            result.close_limit_attempts,
+            result.close_limit_timed_out,
             balance_delta,
             fill_pnl,
             fee,
@@ -464,7 +495,7 @@ async fn execute_exchange_plan(
     result.open_fill_summary = summarize_fills(&open_fills);
 
     sleep_until_utc(entry.close_at).await;
-    let close_quantity = close_quantity(
+    let mut remaining_close_quantity = close_quantity(
         adapter.as_ref(),
         &instrument,
         position_side,
@@ -472,43 +503,45 @@ async fn execute_exchange_plan(
         quantity,
     )
     .await;
-    let mut close = ClosePositionCommand::market(
-        exchange.clone(),
-        instrument.canonical_symbol.clone(),
-        instrument.exchange_symbol.clone(),
-        position_side,
-        close_quantity,
-        format!("{}-funding-close-{suffix}", exchange.as_str()),
-        Utc::now(),
-    );
-    close.max_slippage_pct = Some(config.execution.max_slippage_pct);
-    let close_ack = adapter
-        .close_position(close)
-        .await
-        .with_context(|| format!("{exchange} submit close order"))?;
-    let close_accepted = close_ack.accepted;
-    let close_client_id = close_ack.client_order_id.clone();
-    let close_exchange_id = close_ack.exchange_order_id.clone();
-    result.close_ack = Some(close_ack.into());
-    result.status = FundingLiveStatus::CloseSubmitted;
-    if !close_accepted {
-        result.fail(anyhow!("close order was not accepted"));
+    if remaining_close_quantity <= 0.0 {
+        result.fail(anyhow!("no close quantity after open readback"));
         return Ok(result);
     }
 
-    sleep(Duration::from_secs(
-        config.execution.order_readback_delay_secs,
-    ))
-    .await;
-    let close_fills = query_fills(
-        adapter.as_ref(),
-        &exchange,
-        &instrument.exchange_symbol,
-        Some(close_client_id),
-        close_exchange_id,
-    )
-    .await;
-    result.close_fill_summary = summarize_fills(&close_fills);
+    if let Some(open_avg_price) = result.open_fill_summary.avg_price {
+        if let Some(limit_outcome) = submit_close_limit_with_retries(
+            adapter.as_ref(),
+            &exchange,
+            &instrument,
+            position_side,
+            remaining_close_quantity,
+            open_avg_price,
+            suffix,
+            &config,
+            &mut result,
+        )
+        .await?
+        {
+            remaining_close_quantity = limit_outcome.remaining_quantity;
+        }
+    }
+
+    if remaining_close_quantity > 0.0 {
+        result.close_market_fallback = true;
+        let (close_ack, close_fills) = submit_market_close(
+            adapter.as_ref(),
+            &exchange,
+            &instrument,
+            position_side,
+            remaining_close_quantity,
+            suffix,
+            &config,
+        )
+        .await?;
+        result.close_ack = Some(close_ack.into());
+        result.close_fill_summary = summarize_fills(&close_fills);
+    }
+
     result.balance_after_total_usdt = read_usdt_balance_total(adapter.as_ref()).await;
     result.balance_delta_usdt = match (
         result.balance_before_total_usdt,
@@ -540,7 +573,13 @@ impl FundingLiveExchangeResult {
             balance_delta_usdt: None,
             open_ack: None,
             close_ack: None,
+            close_limit_ack: None,
+            close_limit_cancel_ack: None,
+            close_limit_attempts: 0,
+            close_limit_timed_out: false,
+            close_market_fallback: false,
             open_fill_summary: FillSummary::default(),
+            close_limit_fill_summary: FillSummary::default(),
             close_fill_summary: FillSummary::default(),
         }
     }
@@ -765,6 +804,202 @@ fn open_order_command(
     }
 }
 
+struct CloseLimitOutcome {
+    remaining_quantity: f64,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn submit_close_limit_with_retries(
+    adapter: &dyn TradingAdapter,
+    exchange: &ExchangeId,
+    instrument: &InstrumentMeta,
+    position_side: PositionSide,
+    quantity: f64,
+    price: f64,
+    suffix: i64,
+    config: &FundingRateArbitrageConfig,
+    result: &mut FundingLiveExchangeResult,
+) -> Result<Option<CloseLimitOutcome>> {
+    if !adapter.capabilities().supports_limit_orders {
+        return Ok(None);
+    }
+
+    let mut last_error = None;
+    for attempt in 1..=config.execution.close_limit_max_retries {
+        result.close_limit_attempts = attempt;
+        let command =
+            close_limit_order_command(instrument, position_side, quantity, price, suffix, attempt);
+        let client_order_id = command.client_order_id.clone();
+        let ack = match adapter.place_order(command).await {
+            Ok(ack) => ack,
+            Err(err) => {
+                last_error = Some(format!("{err:#}"));
+                log::warn!(
+                    "{} close limit attempt {} failed before ack: {err:#}",
+                    exchange,
+                    attempt
+                );
+                continue;
+            }
+        };
+        let accepted = ack.accepted;
+        let exchange_order_id = ack.exchange_order_id.clone();
+        result.close_limit_ack = Some(ack.into());
+        if !accepted {
+            last_error = Some("close limit order was not accepted".to_string());
+            log::warn!("{} close limit attempt {} was rejected", exchange, attempt);
+            continue;
+        }
+
+        result.status = FundingLiveStatus::CloseSubmitted;
+        sleep(Duration::from_secs(
+            config.execution.close_limit_timeout_secs,
+        ))
+        .await;
+        let limit_fills = query_fills(
+            adapter,
+            exchange,
+            &instrument.exchange_symbol,
+            Some(client_order_id.clone()),
+            exchange_order_id.clone(),
+        )
+        .await;
+        result.close_limit_fill_summary = summarize_fills(&limit_fills);
+
+        let filled_quantity = result.close_limit_fill_summary.quantity;
+        let remaining = remaining_close_quantity(
+            adapter,
+            instrument,
+            position_side,
+            quantity,
+            filled_quantity,
+        )
+        .await;
+        if remaining <= 0.0 {
+            return Ok(Some(CloseLimitOutcome {
+                remaining_quantity: 0.0,
+            }));
+        }
+
+        result.close_limit_timed_out = true;
+        match adapter
+            .cancel_order(CancelCommand {
+                exchange: exchange.clone(),
+                canonical_symbol: instrument.canonical_symbol.clone(),
+                exchange_symbol: instrument.exchange_symbol.clone(),
+                client_order_id: Some(client_order_id),
+                exchange_order_id,
+                reason: Some("funding close limit timeout".to_string()),
+                requested_at: Utc::now(),
+            })
+            .await
+        {
+            Ok(cancel_ack) => result.close_limit_cancel_ack = Some(cancel_ack.into()),
+            Err(err) => log::warn!("{} close limit cancel failed: {err:#}", exchange),
+        }
+        return Ok(Some(CloseLimitOutcome {
+            remaining_quantity: remaining,
+        }));
+    }
+
+    if let Some(error) = last_error {
+        log::warn!(
+            "{} close limit retries exhausted; fallback to market: {}",
+            exchange,
+            error
+        );
+    }
+    Ok(None)
+}
+
+async fn submit_market_close(
+    adapter: &dyn TradingAdapter,
+    exchange: &ExchangeId,
+    instrument: &InstrumentMeta,
+    position_side: PositionSide,
+    quantity: f64,
+    suffix: i64,
+    config: &FundingRateArbitrageConfig,
+) -> Result<(crate::execution::ClosePositionAck, Vec<FillEvent>)> {
+    let mut close = ClosePositionCommand::market(
+        exchange.clone(),
+        instrument.canonical_symbol.clone(),
+        instrument.exchange_symbol.clone(),
+        position_side,
+        quantity,
+        format!("{}-funding-close-market-{suffix}", exchange.as_str()),
+        Utc::now(),
+    );
+    close.max_slippage_pct = Some(config.execution.max_slippage_pct);
+    let ack = adapter
+        .close_position(close)
+        .await
+        .with_context(|| format!("{exchange} submit market close order"))?;
+    if !ack.accepted {
+        bail!("market close order was not accepted");
+    }
+    sleep(Duration::from_secs(
+        config.execution.order_readback_delay_secs,
+    ))
+    .await;
+    let fills = query_fills(
+        adapter,
+        exchange,
+        &instrument.exchange_symbol,
+        Some(ack.client_order_id.clone()),
+        ack.exchange_order_id.clone(),
+    )
+    .await;
+    Ok((ack, fills))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn close_limit_order_command(
+    instrument: &InstrumentMeta,
+    position_side: PositionSide,
+    quantity: f64,
+    price: f64,
+    suffix: i64,
+    attempt: u32,
+) -> OrderCommand {
+    OrderCommand {
+        command_id: format!(
+            "cmd-{}-funding-close-limit-{suffix}-{attempt}",
+            instrument.exchange.as_str()
+        ),
+        bundle_id: format!(
+            "{}-funding-close-limit-{}-{suffix}",
+            instrument.exchange.as_str(),
+            instrument.canonical_symbol.as_pair().replace('/', "")
+        ),
+        exchange: instrument.exchange.clone(),
+        canonical_symbol: instrument.canonical_symbol.clone(),
+        exchange_symbol: instrument.exchange_symbol.clone(),
+        intent: match position_side {
+            PositionSide::Short => OrderIntent::CloseShortMaker,
+            PositionSide::Long | PositionSide::Net => OrderIntent::CloseLongMaker,
+        },
+        side: match position_side {
+            PositionSide::Short => OrderSide::Buy,
+            PositionSide::Long | PositionSide::Net => OrderSide::Sell,
+        },
+        position_side,
+        order_type: OrderType::Limit,
+        quantity,
+        price: Some(price),
+        time_in_force: TimeInForce::Gtc,
+        post_only: false,
+        reduce_only: true,
+        client_order_id: format!(
+            "{}-funding-close-limit-{suffix}-{attempt}",
+            instrument.exchange.as_str()
+        ),
+        max_slippage_pct: None,
+        status: OrderCommandStatus::Planned,
+        created_at: Utc::now(),
+    }
+}
+
 async fn query_fills(
     adapter: &dyn TradingAdapter,
     exchange: &ExchangeId,
@@ -871,6 +1106,35 @@ async fn close_quantity(
     }
 }
 
+async fn remaining_close_quantity(
+    adapter: &dyn TradingAdapter,
+    instrument: &InstrumentMeta,
+    position_side: PositionSide,
+    original_quantity: f64,
+    filled_quantity: f64,
+) -> f64 {
+    match adapter
+        .get_positions(Some(&instrument.exchange_symbol))
+        .await
+    {
+        Ok(positions) => positions
+            .iter()
+            .find(|position| {
+                position.canonical_symbol == instrument.canonical_symbol
+                    && position.position_side == position_side
+            })
+            .map(|position| position.quantity.abs())
+            .unwrap_or(0.0),
+        Err(err) => {
+            log::warn!(
+                "{} remaining position read failed: {err:#}",
+                adapter.exchange()
+            );
+            (original_quantity - filled_quantity).max(0.0)
+        }
+    }
+}
+
 fn has_nonzero_position(positions: &[ExchangePosition], symbol: &CanonicalSymbol) -> bool {
     positions
         .iter()
@@ -970,6 +1234,36 @@ fn option_f64(value: Option<f64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn combined_close_avg(limit: &FillSummary, market: &FillSummary) -> Option<f64> {
+    let quantity = limit.quantity + market.quantity;
+    (quantity > 0.0).then_some((limit.quote_quantity + market.quote_quantity) / quantity)
+}
+
+fn total_fee_usdt(result: &FundingLiveExchangeResult) -> Option<f64> {
+    sum_optional_values(
+        [
+            result.open_fill_summary.fee_usdt,
+            result.close_limit_fill_summary.fee_usdt,
+            result.close_fill_summary.fee_usdt,
+        ]
+        .into_iter(),
+    )
+}
+
+fn close_method_text(result: &FundingLiveExchangeResult) -> &'static str {
+    match (
+        result.close_limit_ack.is_some(),
+        result.close_limit_fill_summary.quantity > 0.0,
+        result.close_market_fallback,
+    ) {
+        (true, true, true) => "limit_then_market_partial",
+        (true, true, false) => "limit",
+        (true, false, true) => "limit_timeout_market",
+        (false, _, true) => "market",
+        _ => "none",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
@@ -997,11 +1291,17 @@ mod tests {
             balance_delta_usdt: Some(0.12),
             open_ack: None,
             close_ack: None,
+            close_limit_ack: None,
+            close_limit_cancel_ack: None,
+            close_limit_attempts: 0,
+            close_limit_timed_out: false,
+            close_market_fallback: false,
             open_fill_summary: FillSummary {
                 avg_price: Some(100_000.0),
                 fee_usdt: Some(0.01),
                 ..FillSummary::default()
             },
+            close_limit_fill_summary: FillSummary::default(),
             close_fill_summary: FillSummary {
                 avg_price: Some(100_001.0),
                 fee_usdt: Some(0.01),

@@ -24,6 +24,8 @@ execution:
   open_seconds_before_settlement: 1
   close_seconds_after_settlement: 1
   order_readback_delay_secs: 3
+  close_limit_timeout_secs: 300
+  close_limit_max_retries: 3
   max_slippage_pct: 0.003
   allow_existing_symbol_position: false
   position_side: long
