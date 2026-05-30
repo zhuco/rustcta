@@ -674,7 +674,9 @@ async fn preflight_account(
         .get_positions(Some(&instrument.exchange_symbol))
         .await
         .with_context(|| format!("{} read positions", adapter.exchange()))?;
-    if !config.execution.allow_existing_symbol_position && has_nonzero_position(&positions) {
+    if !config.execution.allow_existing_symbol_position
+        && has_nonzero_position(&positions, &instrument.canonical_symbol)
+    {
         bail!(
             "{} has existing nonzero position on {}",
             adapter.exchange(),
@@ -869,10 +871,10 @@ async fn close_quantity(
     }
 }
 
-fn has_nonzero_position(positions: &[ExchangePosition]) -> bool {
+fn has_nonzero_position(positions: &[ExchangePosition], symbol: &CanonicalSymbol) -> bool {
     positions
         .iter()
-        .any(|position| position.quantity.abs() > 1e-9)
+        .any(|position| position.canonical_symbol == *symbol && position.quantity.abs() > 1e-9)
 }
 
 fn execution_position_side(
@@ -1043,5 +1045,29 @@ mod tests {
             execution_position_side(PositionMode::Hedge, capabilities),
             PositionSide::Long
         );
+    }
+
+    #[test]
+    fn has_nonzero_position_should_only_match_current_symbol() {
+        let positions = vec![ExchangePosition {
+            exchange: ExchangeId::Bitget,
+            canonical_symbol: CanonicalSymbol::new("NEWT", "USDT"),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "NEWTUSDT"),
+            position_side: PositionSide::Short,
+            quantity: 74.0,
+            entry_price: Some(0.07996),
+            mark_price: Some(0.06953),
+            unrealized_pnl: Some(0.77182),
+            updated_at: Utc::now(),
+        }];
+
+        assert!(!has_nonzero_position(
+            &positions,
+            &CanonicalSymbol::new("VTHO", "USDT")
+        ));
+        assert!(has_nonzero_position(
+            &positions,
+            &CanonicalSymbol::new("NEWT", "USDT")
+        ));
     }
 }
