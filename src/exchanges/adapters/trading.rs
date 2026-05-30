@@ -202,7 +202,7 @@ impl TradingAdapter for ExchangeTradingAdapter {
             .exchange
             .cancel_order(
                 order_id,
-                &command.exchange_symbol.symbol,
+                command.canonical_symbol.as_pair().as_str(),
                 MarketType::Futures,
             )
             .await?;
@@ -224,9 +224,10 @@ impl TradingAdapter for ExchangeTradingAdapter {
             .exchange
             .cancel_all_orders(
                 command
-                    .exchange_symbol
+                    .canonical_symbol
                     .as_ref()
-                    .map(|symbol| symbol.symbol.as_str()),
+                    .map(|symbol| symbol.as_pair())
+                    .as_deref(),
                 MarketType::Futures,
             )
             .await?;
@@ -252,7 +253,7 @@ impl TradingAdapter for ExchangeTradingAdapter {
                 .or(order.client_order_id.as_deref())
                 .ok_or_else(|| anyhow!("batch cancel requires order ids for every order"))?;
             by_symbol
-                .entry(order.exchange_symbol.symbol.clone())
+                .entry(order.canonical_symbol.as_pair())
                 .or_default()
                 .push(order_id.to_string());
         }
@@ -293,7 +294,11 @@ impl TradingAdapter for ExchangeTradingAdapter {
             .ok_or_else(|| anyhow!("order query requires exchange_order_id or client_order_id"))?;
         let order = self
             .exchange
-            .get_order(order_id, &query.exchange_symbol.symbol, MarketType::Futures)
+            .get_order(
+                order_id,
+                &canonical_for_exchange_symbol(&query.exchange_symbol),
+                MarketType::Futures,
+            )
             .await?;
 
         Ok(map_order_state(
@@ -321,7 +326,7 @@ impl TradingAdapter for ExchangeTradingAdapter {
                 map_order_state(
                     self.exchange_id.clone(),
                     exchange_symbol,
-                    None,
+                    extract_core_client_order_id(&order),
                     Some(order.id.clone()),
                     order,
                 )
@@ -659,6 +664,12 @@ fn command_to_order_request(
         params.insert("positionSide".to_string(), position_side.to_string());
     }
 
+    let reduce_only = if command.reduce_only {
+        should_send_reduce_only(&exchange, position_mode).then_some(true)
+    } else {
+        Some(false)
+    };
+
     Ok(OrderRequest {
         symbol: command.canonical_symbol.as_pair(),
         side: map_core_side(command.side),
@@ -669,7 +680,7 @@ fn command_to_order_request(
         params: Some(params),
         client_order_id: Some(command.client_order_id.clone()),
         time_in_force: order_time_in_force(command.order_type, command.time_in_force),
-        reduce_only: Some(command.reduce_only),
+        reduce_only,
         post_only: Some(
             command.post_only || matches!(command.time_in_force, TimeInForce::PostOnly),
         ),
@@ -1188,6 +1199,45 @@ mod tests {
     }
 
     #[test]
+    fn trading_adapter_should_omit_reduce_only_order_command_for_binance_hedge_close() {
+        let command = OrderCommand::new(
+            crate::market::RuntimeMode::LiveSmall,
+            "bundle-1",
+            BundleLeg::CloseLong,
+            1,
+            ExchangeId::Binance,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+            OrderIntent::CloseLongTaker,
+            OrderSide::Sell,
+            PositionSide::Long,
+            OrderType::Market,
+            0.1234,
+            None,
+            TimeInForce::Ioc,
+            false,
+            true,
+            Some(0.003),
+            Utc::now(),
+        );
+
+        let request =
+            command_to_order_request(ExchangeId::Binance, PositionMode::Hedge, &command, None)
+                .expect("close request");
+
+        assert_eq!(request.side, CoreOrderSide::Sell);
+        assert_eq!(request.reduce_only, None);
+        assert_eq!(
+            request
+                .params
+                .as_ref()
+                .and_then(|params| params.get("positionSide"))
+                .map(String::as_str),
+            Some("LONG")
+        );
+    }
+
+    #[test]
     fn trading_adapter_should_apply_precision_rules_before_order_send() {
         let instrument = InstrumentMeta::new(
             ExchangeId::Binance,
@@ -1223,6 +1273,31 @@ mod tests {
         assert_eq!(request.price, Some(65000.0));
         assert_eq!(request.post_only, Some(true));
         assert_eq!(request.reduce_only, Some(false));
+    }
+
+    #[tokio::test]
+    async fn trading_adapter_should_cancel_core_order_with_canonical_symbol() {
+        let exchange = Arc::new(MockExchange::new("binance"));
+        let adapter = ExchangeTradingAdapter::new(ExchangeId::Binance, exchange.clone());
+        let order = adapter
+            .place_order(limit_order_command(ExchangeId::Binance, "BTCUSDT"))
+            .await
+            .expect("order");
+
+        let cancel = adapter
+            .cancel_order(CancelCommand {
+                exchange: ExchangeId::Binance,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+                client_order_id: Some(order.client_order_id),
+                exchange_order_id: order.exchange_order_id,
+                reason: Some("test".to_string()),
+                requested_at: Utc::now(),
+            })
+            .await
+            .expect("cancel");
+
+        assert!(cancel.accepted);
     }
 
     #[test]

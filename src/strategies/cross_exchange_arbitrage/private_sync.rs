@@ -1,15 +1,15 @@
 //! Private account stream and REST reconciliation helpers for cross-arb runtime.
 
 use super::{
-    maker_fill_from_tracked_private_event, BinancePrivateWsRuntimeSpec,
+    hedge_repair_task_id, order_ack_is_live, BinancePrivateWsRuntimeSpec,
     CrossArbExecutionCoordinator, CrossArbRuntime, PrivateWsRuntimeSpec,
 };
 use crate::core::types::MarketType;
 use crate::exchanges::adapters::run_private_ws_with_url_and_instruments;
 use crate::execution::{
     parse_binance_futures_user_data_event, ExchangeBalance, ExchangeErrorClass, ExchangePosition,
-    FillEvent, FillQuery, OrderState, PrivateErrorEvent, PrivateEvent, PrivateEventKind,
-    ReconcileSeverity, TradingAdapter,
+    FillEvent, FillQuery, OrderState, PositionSide, PrivateErrorEvent, PrivateEvent,
+    PrivateEventKind, ReconcileSeverity, TradingAdapter,
 };
 use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol};
 use anyhow::{anyhow, Result};
@@ -33,6 +33,14 @@ pub struct PrivateRestSnapshot {
 
 impl PrivateRestSnapshot {
     pub fn into_private_events(self) -> Vec<PrivateEvent> {
+        self.into_private_events_inner(true)
+    }
+
+    fn into_private_events_without_positions(self) -> Vec<PrivateEvent> {
+        self.into_private_events_inner(false)
+    }
+
+    fn into_private_events_inner(self, include_positions: bool) -> Vec<PrivateEvent> {
         let fetched_at = self.fetched_at;
         let mut events = Vec::new();
         events.extend(
@@ -40,11 +48,13 @@ impl PrivateRestSnapshot {
                 .into_iter()
                 .map(|balance| PrivateEvent::balance(balance, fetched_at)),
         );
-        events.extend(
-            self.positions
-                .into_iter()
-                .map(|position| PrivateEvent::position(position, fetched_at)),
-        );
+        if include_positions {
+            events.extend(
+                self.positions
+                    .into_iter()
+                    .map(|position| PrivateEvent::position(position, fetched_at)),
+            );
+        }
         events.extend(
             self.open_orders
                 .into_iter()
@@ -99,16 +109,15 @@ impl PrivateRuntimeSync {
 
     pub async fn ingest_private_event(&self, event: PrivateEvent) {
         let hedge = if let Some(execution) = &self.execution {
-            let tracked = if let PrivateEventKind::Fill(fill) = &event.kind {
-                execution.read().await.tracked_order_for_fill(fill)
-            } else {
-                None
-            };
             let mut runtime = self.runtime.write().await;
             runtime.on_private_event(event.clone());
-            tracked.as_ref().and_then(|tracked| {
-                maker_fill_from_tracked_private_event(&mut runtime, tracked, &event)
-            })
+            let mut execution = execution.write().await;
+            let hedge = execution.hedge_candidate_from_private_event(&mut runtime, &event);
+            if hedge.is_none() {
+                execution.apply_tracked_private_order_state_event(&mut runtime, &event);
+                execution.apply_tracked_private_fill_event(&mut runtime, &event);
+            }
+            hedge
         } else {
             let mut runtime = self.runtime.write().await;
             runtime.on_private_event(event);
@@ -121,8 +130,28 @@ impl PrivateRuntimeSync {
                 .await
                 .execute_hedge_for_maker_fill(fill)
                 .await;
-            if decision.blocked_reason.is_some() || decision.requires_reconcile {
+            let submitted = decision.plan.commands.first().is_some_and(|command| {
+                decision.submitted_orders.iter().any(|ack| {
+                    ack.client_order_id == command.client_order_id && order_ack_is_live(ack)
+                })
+            });
+            if decision.blocked_reason.is_some() || decision.requires_reconcile || !submitted {
                 let mut runtime = self.runtime.write().await;
+                if let Some(command) = decision.plan.commands.first() {
+                    runtime.state.record_hedge_repair_required(
+                        command,
+                        decision
+                            .blocked_reason
+                            .clone()
+                            .unwrap_or_else(|| "hedge order was not submitted".to_string()),
+                        decision.plan.created_at,
+                    );
+                    runtime.persist_hedge_repair_task(
+                        &hedge_repair_task_id(&command.bundle_id, command.reduce_only),
+                        decision.plan.created_at,
+                    );
+                    runtime.persist_hedge_record(&command.bundle_id, decision.plan.created_at);
+                }
                 runtime.state.risk_events.push(super::RiskEventReadModel {
                     event_id: format!(
                         "hedge-decision-{}",
@@ -145,6 +174,17 @@ impl PrivateRuntimeSync {
                         .unwrap_or_else(|| "hedge requires reconciliation".to_string()),
                     created_at: decision.plan.created_at,
                 });
+            } else if let Some(command) = decision.plan.commands.first() {
+                let mut runtime = self.runtime.write().await;
+                runtime
+                    .state
+                    .record_hedge_order_submitted(command, decision.plan.created_at);
+                runtime.persist_hedge_record(&command.bundle_id, decision.plan.created_at);
+                execution
+                    .write()
+                    .await
+                    .verify_submitted_hedge_order(&mut runtime, &decision, Utc::now())
+                    .await;
             }
         }
     }
@@ -170,10 +210,40 @@ impl PrivateRuntimeSync {
 
     pub async fn run_rest_audit(&self, plan: &PrivateRestAuditPlan) -> Result<PrivateRestSnapshot> {
         let snapshot = self.fetch_rest_snapshot(plan).await?;
-        self.ingest_private_events(snapshot.clone().into_private_events())
+        {
+            let mut runtime = self.runtime.write().await;
+            runtime.state.replace_account_positions_from_rest(
+                snapshot.exchange.clone(),
+                &snapshot.positions,
+                snapshot.fetched_at,
+            );
+        }
+        self.ingest_private_events(snapshot.clone().into_private_events_without_positions())
+            .await;
+        self.persist_open_hedge_records_from_snapshot(&snapshot)
             .await;
         self.record_position_reconciliation(&snapshot).await;
         Ok(snapshot)
+    }
+
+    pub async fn reconcile_unpaired_positions_from_account_state(&self, checked_at: DateTime<Utc>) {
+        let mut runtime = self.runtime.write().await;
+        runtime
+            .state
+            .reconcile_unpaired_exchange_positions_from_account_state(checked_at);
+    }
+
+    async fn persist_open_hedge_records_from_snapshot(&self, snapshot: &PrivateRestSnapshot) {
+        let mut runtime = self.runtime.write().await;
+        let bundle_ids = runtime
+            .state
+            .open_bundles
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for bundle_id in bundle_ids {
+            runtime.ensure_and_persist_hedge_record(&bundle_id, snapshot.fetched_at);
+        }
     }
 
     async fn record_position_reconciliation(&self, snapshot: &PrivateRestSnapshot) {
@@ -296,17 +366,24 @@ fn canonical_for_symbol(symbol: &ExchangeSymbol) -> CanonicalSymbol {
 }
 
 fn dedupe_positions(positions: Vec<ExchangePosition>) -> Vec<ExchangePosition> {
-    let mut seen = HashSet::new();
-    positions
-        .into_iter()
-        .filter(|position| {
-            seen.insert((
-                position.exchange.clone(),
-                position.canonical_symbol.clone(),
-                position.position_side,
-            ))
-        })
-        .collect()
+    let mut deduped: HashMap<(ExchangeId, CanonicalSymbol, PositionSide), ExchangePosition> =
+        HashMap::new();
+    for position in positions {
+        let key = (
+            position.exchange.clone(),
+            position.canonical_symbol.clone(),
+            position.position_side,
+        );
+        match deduped.get(&key) {
+            Some(existing)
+                if existing.quantity.abs() > f64::EPSILON
+                    && position.quantity.abs() <= f64::EPSILON => {}
+            _ => {
+                deduped.insert(key, position);
+            }
+        }
+    }
+    deduped.into_values().collect()
 }
 
 fn dedupe_orders(orders: Vec<OrderState>) -> Vec<OrderState> {
@@ -684,6 +761,40 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event.kind, PrivateEventKind::Fill(_))));
+    }
+
+    #[test]
+    fn dedupe_positions_should_keep_nonzero_before_zero_duplicate() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("SPCX", "USDT");
+        let exchange_symbol = ExchangeSymbol::new(ExchangeId::Gate, "SPCX_USDT");
+        let positions = dedupe_positions(vec![
+            ExchangePosition {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: symbol.clone(),
+                exchange_symbol: exchange_symbol.clone(),
+                position_side: PositionSide::Long,
+                quantity: 0.03,
+                entry_price: Some(184.89),
+                mark_price: Some(185.0),
+                unrealized_pnl: Some(0.02),
+                updated_at: now,
+            },
+            ExchangePosition {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: symbol,
+                exchange_symbol,
+                position_side: PositionSide::Long,
+                quantity: 0.0,
+                entry_price: Some(0.0),
+                mark_price: Some(185.0),
+                unrealized_pnl: Some(0.0),
+                updated_at: now,
+            },
+        ]);
+
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].quantity, 0.03);
     }
 
     #[tokio::test]

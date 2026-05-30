@@ -43,6 +43,7 @@ pub struct PublicWsMarketError {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum PublicWsUpdate {
     OrderBook(OrderBook5),
     Error(PublicWsMarketError),

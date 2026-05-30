@@ -1,18 +1,23 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use crate::execution::PrivateEvent;
 
-use super::{ArbSignal, FundingSettlement, Opportunity, SimulatedBundleState};
+use super::{
+    ArbSignal, FundingSettlement, HedgeRecordReadModel, HedgeRepairTaskReadModel, Opportunity,
+    SimulatedBundleState,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CrossArbStorageEvent {
     Opportunity(Opportunity),
     Signal(ArbSignal),
     Bundle(SimulatedBundleState),
+    HedgeRecord(HedgeRecordReadModel),
+    HedgeRepairTask(HedgeRepairTaskReadModel),
     FundingSettlement(FundingSettlement),
     PrivateEvent(PrivateEvent),
 }
@@ -112,6 +117,43 @@ fn existing_jsonl_lines(path: &Path) -> std::io::Result<u64> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(0),
         Err(err) => Err(err),
     }
+}
+
+pub fn load_jsonl_storage_events(
+    dir: impl AsRef<Path>,
+) -> std::io::Result<Vec<StoredCrossArbEvent>> {
+    let dir = dir.as_ref();
+    let mut paths = match fs::read_dir(dir) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .collect::<Vec<_>>(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
+    paths.sort();
+
+    let mut events = Vec::new();
+    for path in paths {
+        let file = fs::File::open(path)?;
+        for line in BufReader::new(file).lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<StoredCrossArbEvent>(&line) {
+                Ok(event) => events.push(event),
+                Err(error) => log::warn!("skip malformed cross-arb jsonl event: {error}"),
+            }
+        }
+    }
+    events.sort_by(|left, right| {
+        left.recorded_at
+            .cmp(&right.recorded_at)
+            .then_with(|| left.event_id.cmp(&right.event_id))
+    });
+    Ok(events)
 }
 
 #[cfg(test)]

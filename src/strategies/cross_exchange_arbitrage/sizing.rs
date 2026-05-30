@@ -115,6 +115,59 @@ pub fn size_exchange_leg_for_notional(
     )
 }
 
+pub fn size_exchange_leg_for_base_quantity(
+    instrument: &InstrumentMeta,
+    target_notional_usdt: f64,
+    reference_price: f64,
+    base_quantity: f64,
+    price: Option<f64>,
+) -> ExchangeLegSize {
+    if target_notional_usdt <= 0.0 || !target_notional_usdt.is_finite() {
+        return invalid_leg(
+            target_notional_usdt,
+            reference_price,
+            "InvalidTargetNotional",
+        );
+    }
+    if reference_price <= 0.0 || !reference_price.is_finite() {
+        return invalid_leg(
+            target_notional_usdt,
+            reference_price,
+            "InvalidReferencePrice",
+        );
+    }
+    if base_quantity <= 0.0 || !base_quantity.is_finite() {
+        return invalid_leg(target_notional_usdt, reference_price, "InvalidBaseQuantity");
+    }
+
+    let contract_size = if instrument.contract_size.is_finite() && instrument.contract_size > 0.0 {
+        instrument.contract_size
+    } else {
+        1.0
+    };
+    let raw_quantity = base_quantity / contract_size;
+    let validation_price = Some(price.unwrap_or(reference_price));
+    let mut normalized = instrument.normalize_order_input(
+        raw_quantity,
+        validation_price,
+        RoundingMode::Floor,
+        RoundingMode::Nearest,
+    );
+    if price.is_none() {
+        normalized.price = None;
+    }
+
+    ExchangeLegSize::from_normalized(
+        target_notional_usdt,
+        reference_price,
+        raw_quantity,
+        base_quantity,
+        normalized.quantity * contract_size,
+        instrument.min_notional,
+        normalized,
+    )
+}
+
 pub fn size_hedge_pair_for_notional(
     maker_instrument: &InstrumentMeta,
     maker_reference_price: f64,
@@ -135,6 +188,31 @@ pub fn size_hedge_pair_for_notional(
         taker_reference_price,
         None,
     );
+    if maker.valid && taker.valid {
+        let common_base_quantity = maker
+            .normalized_base_quantity
+            .min(taker.normalized_base_quantity);
+        let maker = size_exchange_leg_for_base_quantity(
+            maker_instrument,
+            target_notional_usdt,
+            maker_reference_price,
+            common_base_quantity,
+            maker_limit_price,
+        );
+        let taker = size_exchange_leg_for_base_quantity(
+            taker_instrument,
+            target_notional_usdt,
+            taker_reference_price,
+            common_base_quantity,
+            None,
+        );
+        return sized_pair_from_legs(maker, taker);
+    }
+
+    sized_pair_from_legs(maker, taker)
+}
+
+fn sized_pair_from_legs(maker: ExchangeLegSize, taker: ExchangeLegSize) -> SizedHedgePair {
     let mut reject_reasons = Vec::new();
 
     if !maker.valid {
@@ -243,6 +321,35 @@ mod tests {
         assert_eq!(leg.normalized_quantity, 5.0);
         assert!((leg.normalized_base_quantity - 0.05).abs() < 1e-12);
         assert!(leg.normalized_notional_usdt.unwrap() <= 10.0);
+    }
+
+    #[test]
+    fn sizing_should_use_common_base_quantity_for_maker_taker_pair() {
+        let bitget = instrument(ExchangeId::Bitget, "SMCIUSDT", 1.0, 0.01, 0.01, 0.01, 5.0);
+        let gate = instrument(ExchangeId::Gate, "SMCI_USDT", 1.0, 0.01, 0.1, 0.1, 0.0);
+
+        let pair = size_hedge_pair_for_notional(&bitget, 46.622, Some(46.622), &gate, 47.11, 10.0);
+
+        assert!(pair.executable, "{:?}", pair.reject_reasons);
+        assert_eq!(pair.maker.normalized_base_quantity, 0.2);
+        assert_eq!(pair.taker.normalized_base_quantity, 0.2);
+    }
+
+    #[test]
+    fn sizing_should_reject_when_common_base_quantity_breaks_leg_minimum() {
+        let bitget = instrument(ExchangeId::Bitget, "SMCIUSDT", 1.0, 0.01, 0.01, 0.01, 5.0);
+        let gate = instrument(ExchangeId::Gate, "SMCI_USDT", 1.0, 0.01, 0.1, 0.1, 0.0);
+
+        let pair = size_hedge_pair_for_notional(&bitget, 46.622, Some(46.622), &gate, 47.11, 6.0);
+
+        assert!(!pair.executable);
+        assert_eq!(pair.maker.normalized_base_quantity, 0.1);
+        assert_eq!(pair.taker.normalized_base_quantity, 0.1);
+        assert!(pair
+            .maker
+            .violations
+            .iter()
+            .any(|violation| violation == "BelowMinNotional"));
     }
 
     #[test]

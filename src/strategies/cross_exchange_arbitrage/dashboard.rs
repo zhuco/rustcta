@@ -6,6 +6,7 @@ use super::risk::{
     PrivateStreamHealth, RejectReason, RiskDecision, RiskOperatingMode, StrategyRiskState,
 };
 use super::state::{SimulatedBundleState, SimulatedBundleStatus};
+use crate::execution::{OrderSide, PositionSide};
 use crate::market::{BookQuality, CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,11 @@ pub struct OpportunityReadModel {
     pub short_exchange: ExchangeId,
     pub maker_exchange: ExchangeId,
     pub taker_exchange: ExchangeId,
+    pub maker_side: super::state::OrderSide,
+    pub maker_price: f64,
+    pub maker_price_tick: Option<f64>,
+    pub maker_best_opposite_price: Option<f64>,
+    pub maker_book_spread_pct: f64,
     pub raw_open_spread: f64,
     pub maker_taker_net_edge: f64,
     pub target_notional_usdt: f64,
@@ -68,6 +74,11 @@ impl From<&Opportunity> for OpportunityReadModel {
             short_exchange: opportunity.short_exchange.clone(),
             maker_exchange: opportunity.maker_exchange.clone(),
             taker_exchange: opportunity.taker_exchange.clone(),
+            maker_side: opportunity.maker_side,
+            maker_price: opportunity.maker_price,
+            maker_price_tick: opportunity.maker_price_tick,
+            maker_best_opposite_price: opportunity.maker_best_opposite_price,
+            maker_book_spread_pct: opportunity.maker_book_spread_pct,
             raw_open_spread: opportunity.raw_open_spread,
             maker_taker_net_edge: opportunity.maker_taker_net_edge,
             target_notional_usdt: opportunity.target_notional_usdt,
@@ -126,6 +137,79 @@ pub struct RiskEventReadModel {
     pub reason: RejectReason,
     pub message: String,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MakerExecutionStatsReadModel {
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange: ExchangeId,
+    pub side: super::state::OrderSide,
+    pub consecutive_ttl_cancels: u32,
+    pub total_ttl_cancels: u64,
+    pub total_fills: u64,
+    pub current_aggressive_ticks: u32,
+    pub cooldown_until: Option<DateTime<Utc>>,
+    pub last_event_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HedgeRecordStatus {
+    Hedging,
+    Hedged,
+    RepairPending,
+    RepairSubmitted,
+    Closing,
+    Closed,
+    RepairFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HedgeRecordReadModel {
+    pub record_id: String,
+    pub bundle_id: String,
+    #[serde(default)]
+    pub opened_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub hedge_order_submitted_at: Option<DateTime<Utc>>,
+    pub canonical_symbol: CanonicalSymbol,
+    pub long_exchange: ExchangeId,
+    pub short_exchange: ExchangeId,
+    pub status: HedgeRecordStatus,
+    pub entry_net_edge_pct: Option<f64>,
+    pub close_spread_pct: Option<f64>,
+    pub close_net_profit_pct: Option<f64>,
+    pub is_closed: bool,
+    pub closed_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HedgeRepairTaskStatus {
+    Pending,
+    Submitted,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HedgeRepairTaskReadModel {
+    pub task_id: String,
+    pub record_id: String,
+    pub bundle_id: String,
+    pub canonical_symbol: CanonicalSymbol,
+    pub failed_exchange: ExchangeId,
+    pub last_attempt_exchange: Option<ExchangeId>,
+    pub side: OrderSide,
+    pub position_side: PositionSide,
+    pub quantity: f64,
+    pub reduce_only: bool,
+    pub status: HedgeRepairTaskStatus,
+    pub attempts: u32,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

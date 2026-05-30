@@ -1,6 +1,8 @@
 //! Configuration contracts for cross-exchange arbitrage simulation.
 
 use super::fees::ExchangeFeeRates;
+use crate::exchanges::adapters::PrivateWsRunConfig;
+use crate::exchanges::config::{ExchangeRegistryConfig, ExchangeRuntimeSettings};
 use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -105,12 +107,24 @@ impl Default for MarketConfig {
 impl CrossExchangeArbitrageConfig {
     pub fn validate(&self) -> Result<(), ConfigValidationError> {
         if self.thresholds.min_display_raw_spread < 0.0
+            || self.thresholds.min_open_raw_spread < 0.0
             || self.thresholds.min_open_maker_taker_net_edge < 0.0
+            || self.thresholds.max_open_raw_spread < self.thresholds.min_open_raw_spread
             || self.thresholds.lock_profit_dual_taker_pct < 0.0
             || self.thresholds.strong_lock_profit_dual_taker_pct < 0.0
             || self.thresholds.max_close_spread_pct < 0.0
         {
             return Err(ConfigValidationError::InvalidThreshold);
+        }
+        for route in &self.thresholds.route_overrides {
+            if route.min_open_raw_spread.is_some_and(|value| value < 0.0)
+                || route
+                    .min_open_maker_taker_net_edge
+                    .is_some_and(|value| value < 0.0)
+                || route.max_open_raw_spread.is_some_and(|value| value < 0.0)
+            {
+                return Err(ConfigValidationError::InvalidThreshold);
+            }
         }
         if self.sizing.min_notional_usdt <= 0.0
             || self.sizing.target_notional_usdt <= 0.0
@@ -173,7 +187,8 @@ impl CrossExchangeArbitrageConfig {
                 if runtime.private_ws_enabled
                     && (runtime.private_ws_run.connect_timeout_ms == 0
                         || runtime.private_ws_run.reconnect_delay_ms == 0
-                        || runtime.private_ws_run.heartbeat_interval_ms == 0)
+                        || runtime.private_ws_run.heartbeat_interval_ms == 0
+                        || runtime.private_ws_run.stale_after_ms == 0)
                 {
                     return Err(ConfigValidationError::InvalidPrivateWsRuntime {
                         exchange: exchange.clone(),
@@ -183,6 +198,16 @@ impl CrossExchangeArbitrageConfig {
         }
         if self.risk.max_open_bundles == 0 {
             return Err(ConfigValidationError::InvalidRisk);
+        }
+        if self.execution.maker_order_ttl_ms == 0
+            || self.execution.max_concurrent_maker_orders == 0
+            || self.execution.maker_aggressive_after_cancels == 0
+            || self.execution.maker_aggressive_step_ticks == 0
+            || self.execution.maker_cooldown_after_cancels == 0
+            || !self.execution.taker_ioc_slippage_limit_pct.is_finite()
+            || self.execution.taker_ioc_slippage_limit_pct < 0.0
+        {
+            return Err(ConfigValidationError::InvalidExecution);
         }
         for exchange in &self.universe.enabled_exchanges {
             if !self.fees.per_exchange.contains_key(exchange) {
@@ -235,15 +260,21 @@ pub enum ConfigValidationError {
     InvalidPrivateWsRuntime { exchange: ExchangeId },
     #[error("risk values must be positive and internally consistent")]
     InvalidRisk,
+    #[error("execution values must be positive and internally consistent")]
+    InvalidExecution,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThresholdConfig {
     pub min_display_raw_spread: f64,
+    #[serde(default = "default_min_open_raw_spread")]
+    pub min_open_raw_spread: f64,
     pub min_open_maker_taker_net_edge: f64,
     #[serde(default = "default_max_open_raw_spread")]
     pub max_open_raw_spread: f64,
+    #[serde(default)]
+    pub route_overrides: Vec<RouteThresholdOverride>,
     pub lock_profit_dual_taker_pct: f64,
     pub strong_lock_profit_dual_taker_pct: f64,
     #[serde(default = "default_max_close_spread_pct")]
@@ -254,13 +285,68 @@ impl Default for ThresholdConfig {
     fn default() -> Self {
         Self {
             min_display_raw_spread: 0.001,
+            min_open_raw_spread: default_min_open_raw_spread(),
             min_open_maker_taker_net_edge: 0.005,
             max_open_raw_spread: default_max_open_raw_spread(),
+            route_overrides: Vec::new(),
             lock_profit_dual_taker_pct: 0.003,
             strong_lock_profit_dual_taker_pct: 0.005,
             max_close_spread_pct: default_max_close_spread_pct(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteThresholdOverride {
+    pub long_exchange: ExchangeId,
+    pub short_exchange: ExchangeId,
+    #[serde(default)]
+    pub min_open_raw_spread: Option<f64>,
+    #[serde(default)]
+    pub min_open_maker_taker_net_edge: Option<f64>,
+    #[serde(default)]
+    pub max_open_raw_spread: Option<f64>,
+}
+
+impl ThresholdConfig {
+    pub fn route_thresholds(
+        &self,
+        long_exchange: &ExchangeId,
+        short_exchange: &ExchangeId,
+    ) -> EffectiveRouteThresholds {
+        let mut effective = EffectiveRouteThresholds {
+            min_open_raw_spread: self.min_open_raw_spread,
+            min_open_maker_taker_net_edge: self.min_open_maker_taker_net_edge,
+            max_open_raw_spread: self.max_open_raw_spread,
+        };
+        if let Some(override_config) = self.route_overrides.iter().find(|override_config| {
+            &override_config.long_exchange == long_exchange
+                && &override_config.short_exchange == short_exchange
+        }) {
+            if let Some(value) = override_config.min_open_raw_spread {
+                effective.min_open_raw_spread = value;
+            }
+            if let Some(value) = override_config.min_open_maker_taker_net_edge {
+                effective.min_open_maker_taker_net_edge = value;
+            }
+            if let Some(value) = override_config.max_open_raw_spread {
+                effective.max_open_raw_spread = value;
+            }
+        }
+        effective
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EffectiveRouteThresholds {
+    pub min_open_raw_spread: f64,
+    pub min_open_maker_taker_net_edge: f64,
+    pub max_open_raw_spread: f64,
+}
+
+fn default_min_open_raw_spread() -> f64 {
+    0.005
 }
 
 fn default_max_open_raw_spread() -> f64 {
@@ -424,6 +510,20 @@ pub struct ExecutionConfig {
     pub dry_run: bool,
     pub max_hedge_retries: u32,
     pub maker_order_ttl_ms: u64,
+    #[serde(default = "default_max_concurrent_maker_orders")]
+    pub max_concurrent_maker_orders: usize,
+    #[serde(default)]
+    pub maker_price_offset_ticks: u32,
+    #[serde(default = "default_maker_aggressive_after_cancels")]
+    pub maker_aggressive_after_cancels: u32,
+    #[serde(default = "default_maker_aggressive_step_ticks")]
+    pub maker_aggressive_step_ticks: u32,
+    #[serde(default = "default_maker_aggressive_max_ticks")]
+    pub maker_aggressive_max_ticks: u32,
+    #[serde(default = "default_maker_cooldown_after_cancels")]
+    pub maker_cooldown_after_cancels: u32,
+    #[serde(default = "default_maker_cooldown_ms")]
+    pub maker_cooldown_ms: u64,
     pub taker_ioc_slippage_limit_pct: f64,
     #[serde(default)]
     pub open_execution_style: OpenExecutionStyle,
@@ -435,10 +535,41 @@ impl Default for ExecutionConfig {
             dry_run: true,
             max_hedge_retries: 1,
             maker_order_ttl_ms: 5_000,
+            max_concurrent_maker_orders: default_max_concurrent_maker_orders(),
+            maker_price_offset_ticks: 0,
+            maker_aggressive_after_cancels: default_maker_aggressive_after_cancels(),
+            maker_aggressive_step_ticks: default_maker_aggressive_step_ticks(),
+            maker_aggressive_max_ticks: default_maker_aggressive_max_ticks(),
+            maker_cooldown_after_cancels: default_maker_cooldown_after_cancels(),
+            maker_cooldown_ms: default_maker_cooldown_ms(),
             taker_ioc_slippage_limit_pct: 0.003,
             open_execution_style: OpenExecutionStyle::MakerTaker,
         }
     }
+}
+
+fn default_max_concurrent_maker_orders() -> usize {
+    1
+}
+
+fn default_maker_aggressive_after_cancels() -> u32 {
+    5
+}
+
+fn default_maker_aggressive_step_ticks() -> u32 {
+    1
+}
+
+fn default_maker_aggressive_max_ticks() -> u32 {
+    2
+}
+
+fn default_maker_cooldown_after_cancels() -> u32 {
+    10
+}
+
+fn default_maker_cooldown_ms() -> u64 {
+    120_000
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -557,6 +688,52 @@ impl ExchangeRuntimeConfig {
     }
 }
 
+impl ExchangeRuntimeSettings for ExchangeRuntimeConfig {
+    fn is_disabled(&self) -> bool {
+        self.is_disabled()
+    }
+
+    fn env_prefix(&self) -> Option<&str> {
+        self.env_prefix.as_deref()
+    }
+
+    fn account_id(&self) -> Option<&str> {
+        self.account_id.as_deref()
+    }
+
+    fn demo_trading(&self) -> bool {
+        self.demo_trading
+    }
+
+    fn private_rest_base_url(&self) -> Option<&str> {
+        self.private_rest_base_url.as_deref()
+    }
+
+    fn private_ws_url(&self) -> Option<&str> {
+        self.private_ws_url.as_deref()
+    }
+
+    fn private_ws_enabled(&self) -> bool {
+        self.private_ws_enabled
+    }
+
+    fn private_ws_run(&self) -> PrivateWsRunConfig {
+        self.private_ws_run.clone().into()
+    }
+
+    fn position_mode_text(&self) -> Option<&str> {
+        self.position_mode.as_deref()
+    }
+}
+
+impl ExchangeRegistryConfig for CrossExchangeArbitrageConfig {
+    type Entry = ExchangeRuntimeConfig;
+
+    fn exchange_runtime(&self) -> &HashMap<ExchangeId, Self::Entry> {
+        &self.exchanges
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrivateWsRuntimeConfig {
@@ -564,6 +741,8 @@ pub struct PrivateWsRuntimeConfig {
     pub reconnect_delay_ms: u64,
     pub heartbeat_interval_ms: u64,
     pub subscribe_interval_ms: u64,
+    #[serde(default = "default_private_ws_stale_after_ms")]
+    pub stale_after_ms: u64,
 }
 
 impl Default for PrivateWsRuntimeConfig {
@@ -573,8 +752,25 @@ impl Default for PrivateWsRuntimeConfig {
             reconnect_delay_ms: 2_000,
             heartbeat_interval_ms: 15_000,
             subscribe_interval_ms: 50,
+            stale_after_ms: default_private_ws_stale_after_ms(),
         }
     }
+}
+
+impl From<PrivateWsRuntimeConfig> for PrivateWsRunConfig {
+    fn from(value: PrivateWsRuntimeConfig) -> Self {
+        Self {
+            connect_timeout_ms: value.connect_timeout_ms,
+            reconnect_delay_ms: value.reconnect_delay_ms,
+            heartbeat_interval_ms: value.heartbeat_interval_ms,
+            subscribe_interval_ms: value.subscribe_interval_ms,
+            stale_after_ms: value.stale_after_ms,
+        }
+    }
+}
+
+fn default_private_ws_stale_after_ms() -> u64 {
+    45_000
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -628,6 +824,14 @@ pub struct RiskConfig {
     pub symbol_whitelist_required_live: bool,
     #[serde(default)]
     pub block_on_external_account_exposure: bool,
+    #[serde(default = "default_true")]
+    pub orphan_exposure_blocks_new_entries: bool,
+    #[serde(default = "default_one")]
+    pub orphan_close_only_after_count: usize,
+    #[serde(default = "default_true")]
+    pub private_resync_blocks_new_entries: bool,
+    #[serde(default = "default_true")]
+    pub restored_position_blocks_new_entries: bool,
 }
 
 impl Default for RiskConfig {
@@ -643,8 +847,16 @@ impl Default for RiskConfig {
             max_open_bundles: default_max_open_bundles(),
             symbol_whitelist_required_live: true,
             block_on_external_account_exposure: false,
+            orphan_exposure_blocks_new_entries: true,
+            orphan_close_only_after_count: 1,
+            private_resync_blocks_new_entries: true,
+            restored_position_blocks_new_entries: true,
         }
     }
+}
+
+fn default_one() -> usize {
+    1
 }
 
 fn default_max_open_bundles() -> usize {
@@ -939,6 +1151,7 @@ mod tests {
         assert_eq!(config.sizing.max_notional_usdt, 10.0);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.execution.dry_run);
+        assert_eq!(config.execution.max_concurrent_maker_orders, 1);
         for exchange in &config.universe.enabled_exchanges {
             assert!(
                 config
@@ -965,6 +1178,17 @@ mod tests {
                 .position_mode
                 .as_deref(),
             Some("hedge")
+        );
+    }
+
+    #[test]
+    fn config_validate_should_reject_zero_maker_concurrency() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.execution.max_concurrent_maker_orders = 0;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::InvalidExecution
         );
     }
 
@@ -1032,6 +1256,45 @@ mod tests {
                 .as_deref(),
             Some("BINANCE_0")
         );
+    }
+
+    #[test]
+    fn hcr_live_small_config_should_use_single_maker_debug_limits() {
+        let raw = include_str!(
+            "../../../config/cross_exchange_arbitrage_three_venues_hcr_10u_405symbols.live-small.yml"
+        );
+        let config: CrossExchangeArbitrageConfig =
+            serde_yaml::from_str(raw).expect("hcr live-small config should parse");
+
+        config
+            .validate()
+            .expect("hcr live-small config should validate");
+        assert_eq!(
+            config.execution.open_execution_style,
+            OpenExecutionStyle::MakerTaker
+        );
+        assert_eq!(config.execution.maker_order_ttl_ms, 20_000);
+        assert_eq!(config.execution.max_concurrent_maker_orders, 5);
+        assert_eq!(config.execution.maker_cooldown_after_cancels, 10);
+        assert_eq!(config.execution.maker_cooldown_ms, 120_000);
+        assert_eq!(config.sizing.min_notional_usdt, 6.0);
+        assert_eq!(config.sizing.target_notional_usdt, 6.0);
+        assert_eq!(config.sizing.max_notional_usdt, 6.0);
+        assert_eq!(config.sizing.max_positions_per_exchange, 20);
+        assert_eq!(config.risk.max_open_bundles, 20);
+        assert!(config.controls.start_paused_new_entries);
+        assert_eq!(
+            config
+                .exchanges
+                .get(&ExchangeId::Binance)
+                .expect("binance config")
+                .private_ws_run
+                .stale_after_ms,
+            45_000
+        );
+        assert!(config.risk.private_resync_blocks_new_entries);
+        assert!(config.risk.restored_position_blocks_new_entries);
+        assert_eq!(config.dashboard.port, 8091);
     }
 
     #[test]

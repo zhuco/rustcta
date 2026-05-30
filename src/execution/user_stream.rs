@@ -310,8 +310,12 @@ impl AccountSyncState {
             PrivateStreamEvent::PositionUpdate(position) => {
                 self.last_event_at
                     .insert(position.exchange.clone(), position.updated_at);
-                self.positions
-                    .insert(PositionKey::from_snapshot(&position), position);
+                let key = PositionKey::from_snapshot(&position);
+                if position.quantity.abs() <= self.config.quantity_tolerance {
+                    self.positions.remove(&key);
+                } else {
+                    self.positions.insert(key, position);
+                }
             }
             PrivateStreamEvent::FundingSettlement { ref exchange, .. } => {
                 self.last_event_at.insert(exchange.clone(), Utc::now());
@@ -329,49 +333,52 @@ impl AccountSyncState {
     pub fn apply_private_event(&mut self, event: PrivateEvent) {
         let exchange = event.exchange.clone();
         let received_at = event.received_at;
-        self.last_event_at.insert(exchange.clone(), received_at);
-        self.last_disconnect_at.remove(&exchange);
         match event.kind {
             PrivateEventKind::Order(order) => {
-                let snapshot = OrderSnapshot::from_order_state(order);
+                self.last_event_at.insert(exchange.clone(), received_at);
+                self.last_disconnect_at.remove(&exchange);
+                let mut snapshot = OrderSnapshot::from_order_state(order);
+                snapshot.updated_at = received_at;
                 self.apply_event(PrivateStreamEvent::OrderUpdate(snapshot));
             }
             PrivateEventKind::Fill(fill) => {
+                self.last_event_at.insert(exchange.clone(), received_at);
+                self.last_disconnect_at.remove(&exchange);
                 let key = OrderKey::from_fill(&fill);
-                let snapshot = OrderSnapshot::from_fill(fill.clone());
-                let existed = self.open_orders.contains_key(&key);
                 let mut should_remove = false;
-                self.open_orders
-                    .entry(key)
-                    .and_modify(|existing| {
-                        existing.client_order_id = existing
-                            .client_order_id
-                            .clone()
-                            .or_else(|| fill.client_order_id.clone());
-                        existing.exchange_order_id = existing
-                            .exchange_order_id
-                            .clone()
-                            .or_else(|| fill.exchange_order_id.clone());
-                        existing.filled_quantity =
-                            (existing.filled_quantity + fill.quantity).min(existing.quantity);
-                        existing.status = if existing.filled_quantity >= existing.quantity {
-                            OrderCommandStatus::Filled
-                        } else {
-                            OrderCommandStatus::PartiallyFilled
-                        };
-                        existing.updated_at = fill.filled_at;
-                        should_remove = existing.status == OrderCommandStatus::Filled;
-                    })
-                    .or_insert(snapshot);
-                if existed && should_remove {
-                    self.open_orders.remove(&OrderKey::from_fill(&fill));
+                if let Some(existing) = self.open_orders.get_mut(&key) {
+                    existing.client_order_id = existing
+                        .client_order_id
+                        .clone()
+                        .or_else(|| fill.client_order_id.clone());
+                    existing.exchange_order_id = existing
+                        .exchange_order_id
+                        .clone()
+                        .or_else(|| fill.exchange_order_id.clone());
+                    existing.filled_quantity =
+                        (existing.filled_quantity + fill.quantity).min(existing.quantity);
+                    existing.status = if existing.filled_quantity >= existing.quantity {
+                        OrderCommandStatus::Filled
+                    } else {
+                        OrderCommandStatus::PartiallyFilled
+                    };
+                    existing.updated_at = fill.filled_at;
+                    should_remove = existing.status == OrderCommandStatus::Filled;
+                }
+                if should_remove {
+                    self.open_orders.remove(&key);
                 }
             }
             PrivateEventKind::Position(position) => {
-                let snapshot = PositionSnapshot::from_exchange_position(position);
+                self.last_event_at.insert(exchange.clone(), received_at);
+                self.last_disconnect_at.remove(&exchange);
+                let mut snapshot = PositionSnapshot::from_exchange_position(position);
+                snapshot.updated_at = received_at;
                 self.apply_event(PrivateStreamEvent::PositionUpdate(snapshot));
             }
             PrivateEventKind::Balance(balance) => {
+                self.last_event_at.insert(exchange.clone(), received_at);
+                self.last_disconnect_at.remove(&exchange);
                 self.apply_balance_event(balance, received_at);
             }
             PrivateEventKind::FundingSettlement {
@@ -380,17 +387,25 @@ impl AccountSyncState {
                 funding_pnl_usdt,
                 funding_rate,
                 settled_at,
-            } => self.apply_event(PrivateStreamEvent::FundingSettlement {
-                exchange: exchange.clone(),
-                canonical_symbol,
-                position_side,
-                funding_pnl_usdt,
-                funding_rate,
-                settled_at,
-            }),
+            } => {
+                self.last_event_at.insert(exchange.clone(), received_at);
+                self.last_disconnect_at.remove(&exchange);
+                self.apply_event(PrivateStreamEvent::FundingSettlement {
+                    exchange: exchange.clone(),
+                    canonical_symbol,
+                    position_side,
+                    funding_pnl_usdt,
+                    funding_rate,
+                    settled_at,
+                });
+            }
             PrivateEventKind::Error(_) => {}
-            PrivateEventKind::RateLimit(_) => {}
+            PrivateEventKind::RateLimit(_) => {
+                self.last_disconnect_at.remove(&exchange);
+                self.last_event_at.insert(exchange, received_at);
+            }
             PrivateEventKind::Heartbeat => {
+                self.last_disconnect_at.remove(&exchange);
                 self.last_event_at.insert(exchange, received_at);
             }
             PrivateEventKind::StreamDisconnected { reason, .. } => {
@@ -452,8 +467,37 @@ impl AccountSyncState {
         self.open_orders.values().collect()
     }
 
+    pub fn apply_order_state(&mut self, order: OrderState) {
+        self.apply_event(PrivateStreamEvent::OrderUpdate(
+            OrderSnapshot::from_order_state(order),
+        ));
+    }
+
     pub fn position_snapshots(&self) -> Vec<PositionSnapshot> {
-        self.positions.values().cloned().collect()
+        self.positions
+            .values()
+            .filter(|position| position.quantity.abs() > self.config.quantity_tolerance)
+            .cloned()
+            .collect()
+    }
+
+    pub fn replace_exchange_positions(
+        &mut self,
+        exchange: ExchangeId,
+        positions: impl IntoIterator<Item = PositionSnapshot>,
+        updated_at: DateTime<Utc>,
+    ) {
+        self.positions.retain(|key, _| key.exchange != exchange);
+        for mut position in positions {
+            if position.quantity.abs() <= self.config.quantity_tolerance {
+                continue;
+            }
+            position.updated_at = updated_at;
+            self.positions
+                .insert(PositionKey::from_snapshot(&position), position);
+        }
+        self.last_event_at.insert(exchange.clone(), updated_at);
+        self.last_disconnect_at.remove(&exchange);
     }
 
     pub fn order_snapshots(&self) -> Vec<OrderSnapshot> {
@@ -558,24 +602,10 @@ impl OrderSnapshot {
             updated_at: state.updated_at,
         }
     }
-
-    fn from_fill(fill: FillEvent) -> Self {
-        Self {
-            exchange: fill.exchange,
-            canonical_symbol: fill.canonical_symbol,
-            exchange_symbol: Some(fill.exchange_symbol),
-            client_order_id: fill.client_order_id,
-            exchange_order_id: fill.exchange_order_id,
-            status: OrderCommandStatus::PartiallyFilled,
-            quantity: fill.quantity,
-            filled_quantity: fill.quantity,
-            updated_at: fill.filled_at,
-        }
-    }
 }
 
 impl PositionSnapshot {
-    fn from_exchange_position(position: ExchangePosition) -> Self {
+    pub fn from_exchange_position(position: ExchangePosition) -> Self {
         Self {
             exchange: position.exchange,
             canonical_symbol: position.canonical_symbol,
@@ -1185,6 +1215,22 @@ mod tests {
     }
 
     #[test]
+    fn unknown_fill_should_not_create_open_order_snapshot() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::default();
+
+        let fill_event = PrivateEvent::from_ws_message(
+            ExchangeId::Binance,
+            WsMessage::Trade(ws_trade(now)),
+            now,
+        )
+        .expect("trade should map to private event");
+        state.apply_private_event(fill_event);
+
+        assert!(state.open_orders().is_empty());
+    }
+
+    #[test]
     fn position_update_should_sync_position_state() {
         let now = Utc::now();
         let mut state = AccountSyncState::default();
@@ -1207,6 +1253,54 @@ mod tests {
         assert_eq!(snapshot.quantity, 0.05);
         assert_eq!(snapshot.entry_price, Some(65_000.0));
         assert_eq!(snapshot.unrealized_pnl, Some(5.0));
+    }
+
+    #[test]
+    fn zero_position_update_should_remove_position_snapshot() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::new(AccountSyncConfig {
+            quantity_tolerance: 0.001,
+            orphan_tolerance: 0.01,
+            stale_after_ms: 10_000,
+        });
+
+        state.apply_event(PrivateStreamEvent::PositionUpdate(position(0.05, now)));
+        assert_eq!(state.position_snapshots().len(), 1);
+
+        state.apply_event(PrivateStreamEvent::PositionUpdate(position(
+            0.0005,
+            now + chrono::Duration::seconds(1),
+        )));
+
+        assert!(state.position_snapshots().is_empty());
+        assert!(state
+            .position(
+                &ExchangeId::Binance,
+                &CanonicalSymbol::new("BTC", "USDT"),
+                PositionSide::Long,
+            )
+            .is_none());
+    }
+
+    #[test]
+    fn rest_position_snapshot_should_replace_exchange_positions() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::new(AccountSyncConfig {
+            quantity_tolerance: 0.001,
+            orphan_tolerance: 0.01,
+            stale_after_ms: 10_000,
+        });
+
+        state.apply_event(PrivateStreamEvent::PositionUpdate(position(0.05, now)));
+        assert_eq!(state.position_snapshots().len(), 1);
+
+        state.replace_exchange_positions(
+            ExchangeId::Binance,
+            Vec::<PositionSnapshot>::new(),
+            now + chrono::Duration::seconds(1),
+        );
+
+        assert!(state.position_snapshots().is_empty());
     }
 
     #[test]
@@ -1346,6 +1440,70 @@ mod tests {
         });
 
         assert!(state.needs_resync(&ExchangeId::Binance, now));
+    }
+
+    #[test]
+    fn rate_limit_private_event_should_refresh_stream_liveness() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::new(AccountSyncConfig {
+            quantity_tolerance: 0.001,
+            orphan_tolerance: 0.01,
+            stale_after_ms: 5_000,
+        });
+
+        state.apply_private_event(PrivateEvent::new(
+            ExchangeId::Binance,
+            PrivateEventKind::RateLimit(RateLimitState {
+                exchange: ExchangeId::Binance,
+                scope: crate::execution::RateLimitScope::UserStream,
+                endpoint: None,
+                limit: None,
+                used: None,
+                remaining: Some(100),
+                window_ms: None,
+                reset_at: None,
+                retry_after_ms: None,
+                banned_until: None,
+                updated_at: now,
+            }),
+            now,
+        ));
+
+        assert!(!state.needs_resync(&ExchangeId::Binance, now));
+    }
+
+    #[test]
+    fn stale_exchange_timestamp_should_not_mark_received_private_event_stale() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::new(AccountSyncConfig {
+            quantity_tolerance: 0.001,
+            orphan_tolerance: 0.01,
+            stale_after_ms: 5_000,
+        });
+
+        state.apply_private_event(PrivateEvent::order(
+            OrderState {
+                exchange: ExchangeId::Binance,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+                client_order_id: Some("stale-exchange-time".to_string()),
+                exchange_order_id: Some("1".to_string()),
+                side: OrderSide::Buy,
+                position_side: PositionSide::Long,
+                order_type: OrderType::Limit,
+                quantity: 0.01,
+                price: Some(50_000.0),
+                filled_quantity: 0.0,
+                average_fill_price: None,
+                time_in_force: TimeInForce::Gtc,
+                reduce_only: false,
+                status: OrderCommandStatus::Accepted,
+                updated_at: now - chrono::Duration::seconds(120),
+            },
+            now,
+        ));
+
+        assert!(!state.needs_resync(&ExchangeId::Binance, now));
     }
 
     #[test]

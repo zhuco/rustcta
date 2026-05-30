@@ -8,10 +8,8 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::core::exchange::Exchange;
 use rustcta::core::types::MarketType;
-use rustcta::exchanges::adapters::{
-    private_trading_support_for, BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter,
-    GateMarketAdapter, HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
-};
+use rustcta::exchanges::adapters::private_trading_support_for;
+use rustcta::exchanges::registry::{market_adapter, private_perp_exchange};
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
 use rustcta::strategies::cross_exchange_arbitrage::{
     build_core_exchange_for_exchange, build_trading_adapter_for_exchange, live_enabled_exchanges,
@@ -215,19 +213,6 @@ fn load_config(path: &PathBuf) -> Result<CrossExchangeArbitrageConfig> {
         .with_context(|| format!("failed to parse config {}", path.display()))
 }
 
-fn market_adapter(exchange: &ExchangeId) -> Option<Box<dyn MarketDataAdapter + Send + Sync>> {
-    match exchange {
-        ExchangeId::Binance => Some(Box::new(BinanceMarketAdapter)),
-        ExchangeId::Okx => Some(Box::new(OkxMarketAdapter)),
-        ExchangeId::Bitget => Some(Box::new(BitgetMarketAdapter)),
-        ExchangeId::Gate => Some(Box::new(GateMarketAdapter)),
-        ExchangeId::Bybit => Some(Box::new(BybitMarketAdapter)),
-        ExchangeId::Mexc => Some(Box::new(MexcMarketAdapter)),
-        ExchangeId::Htx => Some(Box::new(HtxMarketAdapter)),
-        ExchangeId::Other(_) => None,
-    }
-}
-
 fn check_private_trading_support(exchange: &ExchangeId) -> PreflightCheck {
     let support = private_trading_support_for(exchange);
     if support.private_trading_enabled {
@@ -348,7 +333,7 @@ async fn check_private_exchange(
     timeout_ms: u64,
     symbol_sample_limit: usize,
 ) -> Vec<PreflightCheck> {
-    if rustcta::strategies::cross_exchange_arbitrage::private_perp_exchange(exchange).is_some() {
+    if private_perp_exchange(exchange).is_some() {
         return check_private_trading_adapter(exchange, config, timeout_ms, symbol_sample_limit)
             .await;
     }

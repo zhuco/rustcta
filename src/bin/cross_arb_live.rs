@@ -13,29 +13,28 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use rustcta::exchanges::adapters::{
-    BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
-    HtxMarketAdapter, MexcMarketAdapter,
-};
+use rustcta::exchanges::registry as exchange_registry;
 use rustcta::execution::{
-    is_crossarb_client_order_id, ExchangeBalance, ExecutionEngine, ExecutionRouter, OrderSnapshot,
-    PositionMode, PositionSnapshot, TradeFeeSnapshot, TradingAdapter,
+    is_crossarb_client_order_id, BundleLeg, CancelCommand, ClosePositionCommand, ExchangeBalance,
+    ExchangePosition, ExecutionEngine, ExecutionRouter, OrderCommand, OrderIntent, OrderSide,
+    OrderSnapshot, OrderType, PositionMode, PositionSide, PositionSnapshot, TimeInForce,
+    TradeFeeSnapshot, TradingAdapter,
 };
 use rustcta::market::{
-    exchange_symbol_for, CanonicalSymbol, ExchangeId, InstrumentMeta, MarketDataAdapter,
-    MarketFundingSnapshot, MarketStateCache,
+    exchange_symbol_for, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
+    MarketDataAdapter, MarketFundingSnapshot, MarketStateCache, RoundingMode,
 };
 use rustcta::strategies::cross_exchange_arbitrage::{
     build_cross_arb_live_runtime_parts, exchange_route_status, live_close_candidate_for_bundle,
-    live_close_metrics_for_bundle, live_enabled_exchanges, ArbSignalAction, BundleReadModel,
-    CrossArbDashboardStatus, CrossArbExecutionCoordinator, CrossArbRuntime,
-    CrossExchangeArbitrageConfig, ExchangeFeeRates, MarketSnapshot, OpportunityReadModel,
-    PrivateRestAuditPlan, PrivateRuntimeSync, RejectReason, RiskEventReadModel,
-    SimulatedBundleStatus,
+    live_close_metrics_for_bundle, live_enabled_exchanges, order_ack_is_live, ArbSignal,
+    ArbSignalAction, BundleReadModel, CrossArbDashboardStatus, CrossArbExecutionCoordinator,
+    CrossArbRuntime, CrossExchangeArbitrageConfig, ExchangeFeeRates, HedgeRecordReadModel,
+    HedgeRepairTaskReadModel, MarketSnapshot, OpportunityReadModel, PrivateRestAuditPlan,
+    PrivateRuntimeSync, RejectReason, RiskEventReadModel, SimulatedBundleStatus,
 };
 use serde::Serialize;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration as TokioDuration};
+use tokio::time::{interval, sleep, Duration as TokioDuration};
 use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Parser, Debug)]
@@ -101,6 +100,30 @@ struct RestAuditSummary {
     error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct StartupOrphanCloseAttempt {
+    exchange: ExchangeId,
+    canonical_symbol: CanonicalSymbol,
+    position_side: PositionSide,
+    quantity: f64,
+    client_order_id: String,
+    accepted: bool,
+    message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct StartupStrategyOrderCancelAttempt {
+    exchange: ExchangeId,
+    canonical_symbol: CanonicalSymbol,
+    client_order_id: Option<String>,
+    exchange_order_id: Option<String>,
+    accepted: bool,
+    message: Option<String>,
+}
+
+const STARTUP_ORPHAN_CLOSE_MAX_ATTEMPTS: usize = 3;
+const STARTUP_ORPHAN_CLOSE_SETTLE_SECS: u64 = 3;
+
 #[derive(Debug, Clone, Serialize)]
 struct AccountPrepSummary {
     exchange: String,
@@ -122,6 +145,7 @@ struct AccountFeeOverrideSummary {
 #[derive(Clone)]
 struct LiveDashboardState {
     runtime: Arc<RwLock<CrossArbRuntime>>,
+    execution: Arc<RwLock<CrossArbExecutionCoordinator>>,
     close_metrics: Arc<RwLock<HashMap<String, BundleCloseMetricReadModel>>>,
     started_at: DateTime<Utc>,
 }
@@ -135,6 +159,8 @@ struct LiveDashboardPayload {
     opportunities: Vec<BestOpportunityReadModel>,
     open_bundles: Vec<BundleReadModel>,
     active_bundles: Vec<ActiveBundleReadModel>,
+    hedge_records: Vec<HedgeRecordReadModel>,
+    hedge_repair_tasks: Vec<HedgeRepairTaskReadModel>,
     history: Vec<BundleReadModel>,
     risk_event_summary: Vec<RiskEventSummaryReadModel>,
     risk_events: Vec<RiskEventReadModel>,
@@ -145,6 +171,8 @@ struct LiveDashboardPayload {
     balances: Vec<ExchangeBalance>,
     controls: LiveControlState,
     execution: LiveExecutionSummary,
+    maker_execution_stats:
+        Vec<rustcta::strategies::cross_exchange_arbitrage::MakerExecutionStatsReadModel>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +191,10 @@ struct BundleCloseMetricReadModel {
     close_spread_pct: f64,
     close_profit_pct: f64,
     close_threshold_pct: f64,
+    close_maker_exchange: String,
+    close_maker_side: String,
+    close_maker_price: f64,
+    close_maker_book_spread_pct: f64,
     closeable: bool,
     updated_at: DateTime<Utc>,
 }
@@ -180,6 +212,10 @@ struct ActiveBundleReadModel {
     close_spread_pct: Option<f64>,
     close_profit_pct: Option<f64>,
     close_threshold_pct: f64,
+    close_maker_exchange: Option<String>,
+    close_maker_side: Option<String>,
+    close_maker_price: Option<f64>,
+    close_maker_book_spread_pct: Option<f64>,
     closeable: bool,
     updated_at: DateTime<Utc>,
 }
@@ -211,6 +247,10 @@ struct BestOpportunityReadModel {
     best_route: String,
     long_exchange: String,
     short_exchange: String,
+    maker_exchange: String,
+    maker_side: String,
+    maker_price: f64,
+    maker_book_spread_pct: f64,
     open_spread_pct: f64,
     expected_net_edge_pct: f64,
     notional_usdt: f64,
@@ -231,10 +271,19 @@ struct LiveControlState {
 struct LiveExecutionSummary {
     dry_run: bool,
     open_execution_style: String,
+    maker_order_ttl_ms: u64,
+    max_concurrent_maker_orders: usize,
+    pending_maker_orders: usize,
+    maker_price_offset_ticks: u32,
+    maker_aggressive_after_cancels: u32,
+    maker_aggressive_step_ticks: u32,
+    maker_aggressive_max_ticks: u32,
+    maker_cooldown_after_cancels: u32,
+    maker_cooldown_ms: u64,
     target_notional_usdt: f64,
     max_notional_usdt: f64,
     min_open_maker_taker_net_edge: f64,
-    close_threshold_pct: f64,
+    close_profit_threshold_pct: f64,
     max_open_bundles: usize,
     max_positions_per_exchange: usize,
     enabled_exchanges: Vec<String>,
@@ -246,6 +295,7 @@ struct LiveExecutionSummary {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
     let config = load_config(&args.config)?;
     config
@@ -307,11 +357,28 @@ async fn bootstrap_live(
         prepare_live_accounts(&parts.router, &parts.adapters, &config, &instruments).await;
     let account_fee_overrides = apply_account_fee_overrides(&mut config, &account_preparation);
 
-    let rest_audits = if skip_private_audit {
+    let mut rest_audits = if skip_private_audit {
         Vec::new()
     } else {
         run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await
     };
+    if execute_requested
+        && run_requested
+        && !skip_private_audit
+        && !config.execution.dry_run
+        && rest_audits
+            .iter()
+            .any(|audit| audit.strategy_open_orders > 0)
+    {
+        let startup_cancel_attempts =
+            cancel_startup_strategy_open_orders(&private_sync, &parts.adapters, &enabled_exchanges)
+                .await;
+        log_startup_strategy_order_cancel_attempts(&startup_cancel_attempts);
+        if !startup_cancel_attempts.is_empty() {
+            sleep(TokioDuration::from_secs(STARTUP_ORPHAN_CLOSE_SETTLE_SECS)).await;
+            rest_audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
+        }
+    }
     let mut blocking_reasons = Vec::new();
     if !skip_private_audit {
         for audit in &rest_audits {
@@ -411,13 +478,24 @@ async fn run_live(
         config.clone(),
         Utc::now(),
     )));
+    {
+        let mut guard = runtime.write().await;
+        let (records, tasks) = guard.state.import_persisted_hedge_state(Utc::now());
+        if records > 0 || tasks > 0 {
+            log::info!(
+                "cross_arb_live imported persisted hedge state records={} repair_tasks={}",
+                records,
+                tasks
+            );
+        }
+    }
     let private_sync = Arc::new(PrivateRuntimeSync::new(
         runtime.clone(),
         parts.adapters.clone(),
     ));
 
     if !skip_private_audit {
-        let audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
+        let mut audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
         let failures = audits
             .iter()
             .filter(|summary| !summary.ok)
@@ -428,6 +506,47 @@ async fn run_live(
                 "initial private REST audit failed before live loop: {}",
                 failures.join(", ")
             ));
+        }
+        let startup_cancel_attempts =
+            cancel_startup_strategy_open_orders(&private_sync, &parts.adapters, &enabled_exchanges)
+                .await;
+        if !startup_cancel_attempts.is_empty() {
+            log_startup_strategy_order_cancel_attempts(&startup_cancel_attempts);
+            sleep(TokioDuration::from_secs(STARTUP_ORPHAN_CLOSE_SETTLE_SECS)).await;
+            audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
+        }
+        let startup_close_attempts = close_startup_unpaired_positions(
+            runtime.clone(),
+            &private_sync,
+            &parts.adapters,
+            &config,
+            &enabled_exchanges,
+        )
+        .await;
+        if !startup_close_attempts.is_empty() {
+            for attempt in &startup_close_attempts {
+                if attempt.accepted {
+                    log::warn!(
+                        "cross_arb_live startup orphan close submitted exchange={} symbol={} side={:?} qty={} client_order_id={}",
+                        attempt.exchange,
+                        attempt.canonical_symbol,
+                        attempt.position_side,
+                        attempt.quantity,
+                        attempt.client_order_id
+                    );
+                } else {
+                    log::error!(
+                        "cross_arb_live startup orphan close failed exchange={} symbol={} side={:?} qty={} client_order_id={} message={}",
+                        attempt.exchange,
+                        attempt.canonical_symbol,
+                        attempt.position_side,
+                        attempt.quantity,
+                        attempt.client_order_id,
+                        attempt.message.as_deref().unwrap_or("unknown")
+                    );
+                }
+            }
+            audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
         }
         let dirty_exchanges = audits
             .iter()
@@ -449,6 +568,39 @@ async fn run_live(
                 )
             })
             .collect::<Vec<_>>();
+        let remaining_unpaired = {
+            let guard = runtime.read().await;
+            guard.state.account_unpaired_exchange_positions()
+        };
+        if remaining_unpaired.is_empty() {
+            let mut guard = runtime.write().await;
+            if !startup_close_attempts.is_empty()
+                && guard.state.close_only
+                && !guard.state.kill_switch
+                && !config.controls.start_close_only
+                && guard.state.open_bundles.is_empty()
+            {
+                guard.state.clear_close_only();
+            }
+        } else {
+            let mut guard = runtime.write().await;
+            guard.state.set_close_only();
+            log::error!(
+                "cross_arb_live startup still has {} unpaired position(s) after cleanup; keeping close-only: {}",
+                remaining_unpaired.len(),
+                remaining_unpaired
+                    .iter()
+                    .map(|position| format!(
+                        "{} {} {:?} qty={}",
+                        position.exchange,
+                        position.canonical_symbol,
+                        position.position_side,
+                        position.quantity
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         if !strategy_order_exchanges.is_empty() {
             let mut guard = runtime.write().await;
             guard.state.set_close_only();
@@ -542,7 +694,7 @@ async fn run_live(
         instruments,
     ));
 
-    start_live_dashboard(runtime.clone(), close_metrics, &config).await?;
+    start_live_dashboard(runtime.clone(), execution.clone(), close_metrics, &config).await?;
 
     futures_util::future::pending::<()>().await;
     Ok(())
@@ -550,6 +702,7 @@ async fn run_live(
 
 async fn start_live_dashboard(
     runtime: Arc<RwLock<CrossArbRuntime>>,
+    execution: Arc<RwLock<CrossArbExecutionCoordinator>>,
     close_metrics: Arc<RwLock<HashMap<String, BundleCloseMetricReadModel>>>,
     config: &CrossExchangeArbitrageConfig,
 ) -> Result<()> {
@@ -561,6 +714,7 @@ async fn start_live_dashboard(
         .with_context(|| "failed to parse cross_arb_live dashboard bind address")?;
     let state = LiveDashboardState {
         runtime,
+        execution,
         close_metrics,
         started_at: Utc::now(),
     };
@@ -716,6 +870,7 @@ async fn live_dashboard_kill_switch(
 
 async fn build_live_dashboard_payload(state: &LiveDashboardState) -> LiveDashboardPayload {
     let guard = state.runtime.read().await;
+    let execution_guard = state.execution.read().await;
     let close_metrics = state.close_metrics.read().await;
     let status = guard.state.dashboard_status();
     let private_open_orders = private_open_orders_from_runtime(&guard);
@@ -737,6 +892,8 @@ async fn build_live_dashboard_payload(state: &LiveDashboardState) -> LiveDashboa
         opportunities: filtered_opportunity_read_models(&guard),
         open_bundles: guard.state.open_bundle_read_models(),
         active_bundles: active_bundle_read_models(&guard, &close_metrics),
+        hedge_records: guard.state.hedge_record_read_models(),
+        hedge_repair_tasks: guard.state.hedge_repair_task_read_models(),
         history: guard.state.history_read_models(),
         risk_event_summary: summarize_risk_events(&guard.state.risk_events),
         risk_events: guard.state.risk_events.clone(),
@@ -746,7 +903,8 @@ async fn build_live_dashboard_payload(state: &LiveDashboardState) -> LiveDashboa
         external_open_orders,
         balances: balances_from_runtime(&guard),
         controls: control_state_from_runtime(&guard),
-        execution: execution_summary_from_runtime(&guard),
+        execution: execution_summary_from_runtime(&guard, execution_guard.pending_maker_count()),
+        maker_execution_stats: execution_guard.maker_execution_stats(&guard.state.config),
     }
 }
 
@@ -779,6 +937,10 @@ fn filtered_opportunity_read_models(runtime: &CrossArbRuntime) -> Vec<BestOpport
             ),
             long_exchange: opportunity.long_exchange.as_str().to_string(),
             short_exchange: opportunity.short_exchange.as_str().to_string(),
+            maker_exchange: opportunity.maker_exchange.as_str().to_string(),
+            maker_side: format!("{:?}", opportunity.maker_side),
+            maker_price: opportunity.maker_price,
+            maker_book_spread_pct: opportunity.maker_book_spread_pct,
             open_spread_pct: opportunity.raw_open_spread,
             expected_net_edge_pct: opportunity.maker_taker_net_edge,
             notional_usdt: opportunity.executable_notional_usdt,
@@ -818,7 +980,8 @@ fn active_bundle_read_models(
     runtime: &CrossArbRuntime,
     close_metrics: &HashMap<String, BundleCloseMetricReadModel>,
 ) -> Vec<ActiveBundleReadModel> {
-    runtime
+    let mut by_pair: HashMap<String, ActiveBundleReadModel> = HashMap::new();
+    for item in runtime
         .state
         .open_bundle_read_models()
         .into_iter()
@@ -855,12 +1018,53 @@ fn active_bundle_read_models(
                 close_profit_pct: metric.map(|metric| metric.close_profit_pct),
                 close_threshold_pct: metric
                     .map(|metric| metric.close_threshold_pct)
-                    .unwrap_or(runtime.state.config.thresholds.max_close_spread_pct),
+                    .unwrap_or(runtime.state.config.thresholds.lock_profit_dual_taker_pct),
+                close_maker_exchange: metric.map(|metric| metric.close_maker_exchange.clone()),
+                close_maker_side: metric.map(|metric| metric.close_maker_side.clone()),
+                close_maker_price: metric.map(|metric| metric.close_maker_price),
+                close_maker_book_spread_pct: metric
+                    .map(|metric| metric.close_maker_book_spread_pct),
                 closeable: metric.map(|metric| metric.closeable).unwrap_or(false),
                 updated_at: bundle.updated_at,
             }
         })
-        .collect()
+    {
+        let key = match (&item.symbol, &item.long_exchange, &item.short_exchange) {
+            (Some(symbol), Some(long), Some(short)) => format!("{symbol}|{long}|{short}"),
+            _ => format!("bundle|{}", item.bundle_id),
+        };
+        let replace = by_pair
+            .get(&key)
+            .map(|current| should_replace_active_bundle(current, &item))
+            .unwrap_or(true);
+        if replace {
+            by_pair.insert(key, item);
+        }
+    }
+    let mut items = by_pair.into_values().collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        left.symbol
+            .cmp(&right.symbol)
+            .then_with(|| left.long_exchange.cmp(&right.long_exchange))
+            .then_with(|| left.short_exchange.cmp(&right.short_exchange))
+            .then_with(|| left.bundle_id.cmp(&right.bundle_id))
+    });
+    items
+}
+
+fn should_replace_active_bundle(
+    current: &ActiveBundleReadModel,
+    candidate: &ActiveBundleReadModel,
+) -> bool {
+    let current_restored = current.bundle_id.starts_with("restored-");
+    let candidate_restored = candidate.bundle_id.starts_with("restored-");
+    if current_restored != candidate_restored {
+        return current_restored && !candidate_restored;
+    }
+    if current.close_profit_pct.is_none() != candidate.close_profit_pct.is_none() {
+        return current.close_profit_pct.is_none() && candidate.close_profit_pct.is_some();
+    }
+    candidate.updated_at > current.updated_at
 }
 
 fn summarize_risk_events(events: &[RiskEventReadModel]) -> Vec<RiskEventSummaryReadModel> {
@@ -929,6 +1133,7 @@ fn chinese_reject_reason(reason: RejectReason) -> &'static str {
         RejectReason::AbnormalCrossExchangeSpread => "跨所价差异常",
         RejectReason::ExchangeCapacityExceeded => "交易所容量超限",
         RejectReason::ExchangePositionLimitExceeded => "交易所仓位数超限",
+        RejectReason::UnpairedExchangePosition => "未配对交易所仓位",
     }
 }
 
@@ -1081,7 +1286,10 @@ fn control_state_from_runtime(runtime: &CrossArbRuntime) -> LiveControlState {
     }
 }
 
-fn execution_summary_from_runtime(runtime: &CrossArbRuntime) -> LiveExecutionSummary {
+fn execution_summary_from_runtime(
+    runtime: &CrossArbRuntime,
+    pending_maker_orders: usize,
+) -> LiveExecutionSummary {
     let private_open_orders = private_open_orders_from_runtime(runtime);
     let strategy_open_orders = private_open_orders
         .iter()
@@ -1090,6 +1298,19 @@ fn execution_summary_from_runtime(runtime: &CrossArbRuntime) -> LiveExecutionSum
     LiveExecutionSummary {
         dry_run: runtime.state.config.execution.dry_run,
         open_execution_style: format!("{:?}", runtime.state.config.execution.open_execution_style),
+        maker_order_ttl_ms: runtime.state.config.execution.maker_order_ttl_ms,
+        max_concurrent_maker_orders: runtime.state.config.execution.max_concurrent_maker_orders,
+        pending_maker_orders,
+        maker_price_offset_ticks: runtime.state.config.execution.maker_price_offset_ticks,
+        maker_aggressive_after_cancels: runtime
+            .state
+            .config
+            .execution
+            .maker_aggressive_after_cancels,
+        maker_aggressive_step_ticks: runtime.state.config.execution.maker_aggressive_step_ticks,
+        maker_aggressive_max_ticks: runtime.state.config.execution.maker_aggressive_max_ticks,
+        maker_cooldown_after_cancels: runtime.state.config.execution.maker_cooldown_after_cancels,
+        maker_cooldown_ms: runtime.state.config.execution.maker_cooldown_ms,
         target_notional_usdt: runtime.state.config.sizing.target_notional_usdt,
         max_notional_usdt: runtime.state.config.sizing.max_notional_usdt,
         min_open_maker_taker_net_edge: runtime
@@ -1097,7 +1318,7 @@ fn execution_summary_from_runtime(runtime: &CrossArbRuntime) -> LiveExecutionSum
             .config
             .thresholds
             .min_open_maker_taker_net_edge,
-        close_threshold_pct: runtime.state.config.thresholds.max_close_spread_pct,
+        close_profit_threshold_pct: runtime.state.config.thresholds.lock_profit_dual_taker_pct,
         max_open_bundles: runtime.state.config.risk.max_open_bundles,
         max_positions_per_exchange: runtime.state.config.sizing.max_positions_per_exchange,
         enabled_exchanges: runtime
@@ -1128,6 +1349,267 @@ async fn periodic_rest_audit_loop(
         ticker.tick().await;
         let _ = run_initial_rest_audits(&private_sync, &config, &exchanges).await;
     }
+}
+
+async fn close_startup_unpaired_positions(
+    runtime: Arc<RwLock<CrossArbRuntime>>,
+    private_sync: &PrivateRuntimeSync,
+    adapters: &[Arc<dyn TradingAdapter>],
+    config: &CrossExchangeArbitrageConfig,
+    exchanges: &[ExchangeId],
+) -> Vec<StartupOrphanCloseAttempt> {
+    if config.execution.dry_run {
+        return Vec::new();
+    }
+
+    let adapters_by_exchange = adapters
+        .iter()
+        .cloned()
+        .map(|adapter| (adapter.exchange(), adapter))
+        .collect::<HashMap<_, _>>();
+    let mut attempts = Vec::new();
+
+    for attempt_index in 1..=STARTUP_ORPHAN_CLOSE_MAX_ATTEMPTS {
+        let unpaired = {
+            let guard = runtime.read().await;
+            dedupe_startup_unpaired_positions(guard.state.account_unpaired_exchange_positions())
+        };
+        if unpaired.is_empty() {
+            break;
+        }
+
+        log::warn!(
+            "cross_arb_live startup cleanup attempt {} closing {} unpaired position(s)",
+            attempt_index,
+            unpaired.len()
+        );
+
+        for position in unpaired {
+            let Some(adapter) = adapters_by_exchange.get(&position.exchange) else {
+                attempts.push(StartupOrphanCloseAttempt {
+                    exchange: position.exchange,
+                    canonical_symbol: position.canonical_symbol,
+                    position_side: position.position_side,
+                    quantity: position.quantity.abs(),
+                    client_order_id: String::new(),
+                    accepted: false,
+                    message: Some("missing trading adapter for startup orphan close".to_string()),
+                });
+                continue;
+            };
+            let client_order_id =
+                startup_orphan_close_client_id(attempt_index, &position.exchange, &position);
+            let command = ClosePositionCommand::market(
+                position.exchange.clone(),
+                position.canonical_symbol.clone(),
+                position.exchange_symbol.clone(),
+                position.position_side,
+                position.quantity.abs(),
+                client_order_id.clone(),
+                Utc::now(),
+            );
+            match adapter.close_position(command).await {
+                Ok(ack) => attempts.push(StartupOrphanCloseAttempt {
+                    exchange: position.exchange,
+                    canonical_symbol: position.canonical_symbol,
+                    position_side: position.position_side,
+                    quantity: position.quantity.abs(),
+                    client_order_id,
+                    accepted: ack.accepted,
+                    message: ack.message,
+                }),
+                Err(err) => attempts.push(StartupOrphanCloseAttempt {
+                    exchange: position.exchange,
+                    canonical_symbol: position.canonical_symbol,
+                    position_side: position.position_side,
+                    quantity: position.quantity.abs(),
+                    client_order_id,
+                    accepted: false,
+                    message: Some(err.to_string()),
+                }),
+            }
+        }
+
+        sleep(TokioDuration::from_secs(STARTUP_ORPHAN_CLOSE_SETTLE_SECS)).await;
+        let audits = run_initial_rest_audits(private_sync, config, exchanges).await;
+        let failures = audits
+            .iter()
+            .filter(|summary| !summary.ok)
+            .map(|summary| summary.exchange.clone())
+            .collect::<Vec<_>>();
+        if !failures.is_empty() {
+            log::error!(
+                "cross_arb_live startup cleanup REST verification failed after attempt {}: {}",
+                attempt_index,
+                failures.join(", ")
+            );
+            break;
+        }
+    }
+
+    attempts
+}
+
+async fn cancel_startup_strategy_open_orders(
+    private_sync: &PrivateRuntimeSync,
+    adapters: &[Arc<dyn TradingAdapter>],
+    exchanges: &[ExchangeId],
+) -> Vec<StartupStrategyOrderCancelAttempt> {
+    let adapters_by_exchange = adapters
+        .iter()
+        .cloned()
+        .map(|adapter| (adapter.exchange(), adapter))
+        .collect::<HashMap<_, _>>();
+    let mut attempts = Vec::new();
+
+    for exchange in exchanges {
+        let plan = PrivateRestAuditPlan {
+            exchange: exchange.clone(),
+            symbols: Vec::new(),
+            include_recent_fills: false,
+        };
+        let snapshot = match private_sync.run_rest_audit(&plan).await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                log::error!(
+                    "cross_arb_live startup strategy order audit failed exchange={} error={}",
+                    exchange,
+                    error
+                );
+                continue;
+            }
+        };
+        let Some(adapter) = adapters_by_exchange.get(exchange) else {
+            continue;
+        };
+
+        for order in snapshot.open_orders.into_iter().filter(|order| {
+            order
+                .client_order_id
+                .as_deref()
+                .map(is_crossarb_client_order_id)
+                .unwrap_or(false)
+        }) {
+            let command = CancelCommand {
+                exchange: order.exchange.clone(),
+                canonical_symbol: order.canonical_symbol.clone(),
+                exchange_symbol: order.exchange_symbol.clone(),
+                client_order_id: order.client_order_id.clone(),
+                exchange_order_id: order.exchange_order_id.clone(),
+                reason: Some("startup cleanup of leftover crossarb strategy order".to_string()),
+                requested_at: Utc::now(),
+            };
+            let result = adapter.cancel_order(command).await;
+            match result {
+                Ok(ack) => attempts.push(StartupStrategyOrderCancelAttempt {
+                    exchange: order.exchange,
+                    canonical_symbol: order.canonical_symbol,
+                    client_order_id: ack.client_order_id,
+                    exchange_order_id: ack.exchange_order_id,
+                    accepted: ack.accepted,
+                    message: ack.message,
+                }),
+                Err(error) => attempts.push(StartupStrategyOrderCancelAttempt {
+                    exchange: order.exchange,
+                    canonical_symbol: order.canonical_symbol,
+                    client_order_id: order.client_order_id,
+                    exchange_order_id: order.exchange_order_id,
+                    accepted: false,
+                    message: Some(error.to_string()),
+                }),
+            }
+        }
+    }
+
+    attempts
+}
+
+fn log_startup_strategy_order_cancel_attempts(attempts: &[StartupStrategyOrderCancelAttempt]) {
+    for attempt in attempts {
+        if attempt.accepted {
+            log::warn!(
+                "cross_arb_live startup strategy order cancel accepted exchange={} symbol={} client_order_id={} exchange_order_id={}",
+                attempt.exchange,
+                attempt.canonical_symbol,
+                attempt.client_order_id.as_deref().unwrap_or("-"),
+                attempt.exchange_order_id.as_deref().unwrap_or("-")
+            );
+        } else {
+            log::error!(
+                "cross_arb_live startup strategy order cancel failed exchange={} symbol={} client_order_id={} exchange_order_id={} message={}",
+                attempt.exchange,
+                attempt.canonical_symbol,
+                attempt.client_order_id.as_deref().unwrap_or("-"),
+                attempt.exchange_order_id.as_deref().unwrap_or("-"),
+                attempt.message.as_deref().unwrap_or("unknown")
+            );
+        }
+    }
+}
+
+fn dedupe_startup_unpaired_positions(positions: Vec<ExchangePosition>) -> Vec<ExchangePosition> {
+    let mut deduped: HashMap<(ExchangeId, CanonicalSymbol, PositionSide), ExchangePosition> =
+        HashMap::new();
+    for position in positions {
+        let key = (
+            position.exchange.clone(),
+            position.canonical_symbol.clone(),
+            position.position_side,
+        );
+        match deduped.get(&key) {
+            Some(existing) if existing.quantity.abs() >= position.quantity.abs() => {}
+            _ => {
+                deduped.insert(key, position);
+            }
+        }
+    }
+    deduped.into_values().collect()
+}
+
+fn startup_orphan_close_client_id(
+    attempt_index: usize,
+    exchange: &ExchangeId,
+    position: &ExchangePosition,
+) -> String {
+    let symbol = compact_order_id_symbol(&position.canonical_symbol);
+    let side = match position.position_side {
+        PositionSide::Long => "l",
+        PositionSide::Short => "s",
+        PositionSide::Net => "n",
+    };
+    format!(
+        "xsc{}{}{}{}",
+        exchange_order_id_code(exchange),
+        side,
+        attempt_index,
+        symbol
+    )
+    .chars()
+    .take(32)
+    .collect()
+}
+
+fn exchange_order_id_code(exchange: &ExchangeId) -> &'static str {
+    match exchange {
+        ExchangeId::Binance => "bn",
+        ExchangeId::Bitget => "bg",
+        ExchangeId::Gate => "gt",
+        ExchangeId::Bybit => "bb",
+        ExchangeId::Htx => "ht",
+        ExchangeId::Mexc => "mx",
+        ExchangeId::Okx => "ok",
+        ExchangeId::Other(_) => "ot",
+    }
+}
+
+fn compact_order_id_symbol(symbol: &CanonicalSymbol) -> String {
+    symbol
+        .to_string()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .take(18)
+        .collect()
 }
 
 async fn ws_market_execution_loop(
@@ -1255,6 +1737,13 @@ async fn ws_market_execution_loop(
             let _ = execution_guard
                 .cancel_expired_maker_orders(&mut runtime_guard, now)
                 .await;
+            execute_hedge_repair_tasks(
+                &mut runtime_guard,
+                &mut execution_guard,
+                &snapshots_by_symbol,
+                now,
+            )
+            .await;
             let closed_or_attempted = execute_live_close_candidates(
                 &mut runtime_guard,
                 &mut execution_guard,
@@ -1265,58 +1754,494 @@ async fn ws_market_execution_loop(
             if closed_or_attempted {
                 continue;
             }
-            if execution_guard.pending_maker_count() > 0 {
-                continue;
-            }
-
-            for symbol in &config.universe.symbols {
-                if has_active_bundle_for_symbol(&runtime_guard, symbol) {
-                    continue;
-                }
-                let Some(snapshots) = snapshots_by_symbol.get(symbol) else {
-                    continue;
-                };
-                if snapshots.len() < config.market.min_common_exchanges {
-                    continue;
-                }
-                let signals = runtime_guard.on_market_snapshots(symbol, snapshots, now);
-                for signal in signals
-                    .iter()
-                    .filter(|signal| signal.action == ArbSignalAction::Open)
-                    .take(1)
-                {
-                    let signal_canonical_symbol = signal.opportunity_id.as_ref().and_then(|id| {
-                        runtime_guard
-                            .state
-                            .opportunities
-                            .iter()
-                            .find(|opportunity| opportunity.opportunity_id == *id)
-                            .map(|opportunity| opportunity.canonical_symbol.clone())
-                    });
-                    match execution_guard
-                        .execute_open_signal(&mut runtime_guard, signal)
-                        .await
-                    {
-                        Ok(Some(_)) | Ok(None) => {}
-                        Err(error) => runtime_guard.state.risk_events.push(
-                            rustcta::strategies::cross_exchange_arbitrage::RiskEventReadModel {
-                                event_id: format!("live-open-exec-{}", now.timestamp_millis()),
-                                canonical_symbol: signal_canonical_symbol,
-                                exchange: None,
-                                reason: rustcta::strategies::cross_exchange_arbitrage::RejectReason::RouteUnhealthy,
-                                message: error.to_string(),
-                                created_at: now,
-                            },
-                        ),
-                    }
-                    break;
-                }
-                if execution_guard.pending_maker_count() > 0 {
-                    break;
-                }
-            }
+            execute_live_open_candidates(
+                &mut runtime_guard,
+                &mut execution_guard,
+                &snapshots_by_symbol,
+                now,
+            )
+            .await;
         }
     }
+}
+
+async fn execute_live_open_candidates(
+    runtime: &mut CrossArbRuntime,
+    execution: &mut CrossArbExecutionCoordinator,
+    snapshots_by_symbol: &HashMap<CanonicalSymbol, Vec<MarketSnapshot>>,
+    now: DateTime<Utc>,
+) {
+    let configured_limit = runtime
+        .state
+        .config
+        .execution
+        .max_concurrent_maker_orders
+        .max(1);
+    let available_maker_slots = configured_limit.saturating_sub(execution.pending_maker_count());
+    let available_bundle_slots = runtime
+        .state
+        .config
+        .risk
+        .max_open_bundles
+        .saturating_sub(runtime.state.open_bundles.len());
+    let max_to_submit = available_maker_slots.min(available_bundle_slots);
+    if max_to_submit == 0 {
+        return;
+    }
+
+    let mut candidates = Vec::new();
+    let mut blocked_private_stream_exchanges: HashSet<ExchangeId> = HashSet::new();
+    for symbol in runtime.state.config.universe.symbols.clone() {
+        if has_active_bundle_for_symbol(runtime, &symbol) {
+            continue;
+        }
+        let Some(snapshots) = snapshots_by_symbol.get(&symbol) else {
+            continue;
+        };
+        if snapshots.len() < runtime.state.config.market.min_common_exchanges {
+            continue;
+        }
+        let signals = runtime.on_market_snapshots(&symbol, snapshots, now);
+        if let Some(signal) = signals
+            .iter()
+            .find(|signal| signal.action == ArbSignalAction::Open)
+            .cloned()
+        {
+            let (signal_canonical_symbol, signal_exchange) =
+                signal_opportunity_context(runtime, &signal);
+            if runtime.state.config.execution.open_execution_style
+                == rustcta::strategies::cross_exchange_arbitrage::OpenExecutionStyle::MakerTaker
+                && signal_exchange
+                    .as_ref()
+                    .is_some_and(|exchange| !runtime.state.is_private_stream_ready(exchange))
+            {
+                if let Some(exchange) = signal_exchange {
+                    if blocked_private_stream_exchanges.insert(exchange.clone()) {
+                        runtime.state.risk_events.push(RiskEventReadModel {
+                            event_id: format!(
+                                "live-open-private-stream-blocked-{}-{}",
+                                exchange.as_str(),
+                                now.timestamp_millis()
+                            ),
+                            canonical_symbol: signal_canonical_symbol,
+                            exchange: Some(exchange.clone()),
+                            reason: RejectReason::RouteUnhealthy,
+                            message: format!(
+                                "maker-taker open skipped because maker exchange {} private stream is not ready",
+                                exchange
+                            ),
+                            created_at: now,
+                        });
+                    }
+                }
+                continue;
+            }
+            if let Some(opportunity) = signal.opportunity_id.as_ref().and_then(|id| {
+                runtime
+                    .state
+                    .opportunities
+                    .iter()
+                    .find(|opportunity| opportunity.opportunity_id == *id)
+            }) {
+                if execution
+                    .maker_cooldown_until_for_opportunity(opportunity)
+                    .is_some_and(|cooldown_until| cooldown_until > now)
+                {
+                    continue;
+                }
+            }
+            let rank = signal_rank(runtime, &signal);
+            candidates.push((rank, signal));
+        }
+    }
+    candidates.sort_by(|(left_rank, _), (right_rank, _)| {
+        right_rank
+            .0
+            .partial_cmp(&left_rank.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                right_rank
+                    .1
+                    .partial_cmp(&left_rank.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    let mut submitted = 0usize;
+    for (_, signal) in candidates {
+        if submitted >= max_to_submit {
+            break;
+        }
+        let (signal_canonical_symbol, signal_exchange) =
+            signal_opportunity_context(runtime, &signal);
+        if signal_canonical_symbol
+            .as_ref()
+            .is_some_and(|symbol| has_active_bundle_for_symbol(runtime, symbol))
+        {
+            continue;
+        }
+        match execution.execute_open_signal(runtime, &signal).await {
+            Ok(Some(decision)) => {
+                if decision.blocked_reason.is_none() && !decision.submitted_orders.is_empty() {
+                    let live_orders = decision
+                        .submitted_orders
+                        .iter()
+                        .filter(|ack| order_ack_is_live(ack))
+                        .count();
+                    if live_orders == 0 {
+                        runtime.state.risk_events.push(RiskEventReadModel {
+                            event_id: format!(
+                                "live-open-ack-not-live-{}-{}",
+                                now.timestamp_millis(),
+                                signal.signal_id
+                            ),
+                            canonical_symbol: signal_canonical_symbol,
+                            exchange: signal_exchange,
+                            reason: RejectReason::RouteUnhealthy,
+                            message: "maker order ack was not live; not counting as submitted"
+                                .to_string(),
+                            created_at: now,
+                        });
+                        continue;
+                    }
+                    submitted += 1;
+                    log::info!(
+                        "cross_arb_live open maker submitted symbol={} pending_makers={}/{}",
+                        signal_canonical_symbol
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| "unknown".to_string()),
+                        execution.pending_maker_count(),
+                        configured_limit
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(error) => runtime.state.risk_events.push(RiskEventReadModel {
+                event_id: format!(
+                    "live-open-exec-{}-{}",
+                    now.timestamp_millis(),
+                    signal.signal_id
+                ),
+                canonical_symbol: signal_canonical_symbol,
+                exchange: signal_exchange,
+                reason: RejectReason::RouteUnhealthy,
+                message: error.to_string(),
+                created_at: now,
+            }),
+        }
+    }
+}
+
+async fn execute_hedge_repair_tasks(
+    runtime: &mut CrossArbRuntime,
+    execution: &mut CrossArbExecutionCoordinator,
+    snapshots_by_symbol: &HashMap<CanonicalSymbol, Vec<MarketSnapshot>>,
+    now: DateTime<Utc>,
+) {
+    let tasks = runtime.state.due_hedge_repair_tasks(now);
+    for task in tasks.into_iter().take(2) {
+        let Some(command) = repair_command_from_task(runtime, &task, snapshots_by_symbol, now)
+        else {
+            runtime.state.record_hedge_repair_failed(
+                &task.task_id,
+                "no alternate taker route available for hedge repair",
+                now,
+            );
+            runtime.persist_hedge_repair_task(&task.task_id, now);
+            runtime.persist_hedge_record(&task.bundle_id, now);
+            continue;
+        };
+        let attempt_exchange = command.exchange.clone();
+        let decision = execution
+            .execute_repair_command(runtime.state.config.mode, command, now)
+            .await;
+        let submitted = decision.plan.commands.first().is_some_and(|command| {
+            decision
+                .submitted_orders
+                .iter()
+                .any(|ack| ack.client_order_id == command.client_order_id && order_ack_is_live(ack))
+        });
+        if decision.blocked_reason.is_none() && submitted {
+            runtime.state.record_hedge_repair_submitted(
+                &task.task_id,
+                attempt_exchange.clone(),
+                now,
+            );
+            runtime.persist_hedge_repair_task(&task.task_id, now);
+            runtime.persist_hedge_record(&task.bundle_id, now);
+            execution
+                .verify_submitted_hedge_order(runtime, &decision, now)
+                .await;
+            log::warn!(
+                "cross_arb_live hedge repair submitted task={} bundle={} exchange={} qty={}",
+                task.task_id,
+                task.bundle_id,
+                attempt_exchange,
+                task.quantity
+            );
+        } else {
+            runtime.state.record_hedge_repair_failed(
+                &task.task_id,
+                decision
+                    .blocked_reason
+                    .clone()
+                    .unwrap_or_else(|| "hedge repair order was not submitted".to_string()),
+                now,
+            );
+            runtime.persist_hedge_repair_task(&task.task_id, now);
+            runtime.persist_hedge_record(&task.bundle_id, now);
+        }
+    }
+}
+
+fn repair_command_from_task(
+    runtime: &CrossArbRuntime,
+    task: &HedgeRepairTaskReadModel,
+    snapshots_by_symbol: &HashMap<CanonicalSymbol, Vec<MarketSnapshot>>,
+    now: DateTime<Utc>,
+) -> Option<OrderCommand> {
+    let snapshots = snapshots_by_symbol.get(&task.canonical_symbol)?;
+    let selection = best_repair_taker_snapshot(runtime, task, snapshots)
+        .or_else(|| fallback_repair_taker_snapshot(runtime, task, snapshots))?;
+    let quantity = repair_quantity_from_position(runtime, task)?;
+    let leg = if task.reduce_only {
+        match task.position_side {
+            PositionSide::Long => BundleLeg::CloseLong,
+            PositionSide::Short => BundleLeg::CloseShort,
+            PositionSide::Net => BundleLeg::Hedge,
+        }
+    } else {
+        BundleLeg::Hedge
+    };
+    let intent = match (task.reduce_only, task.position_side) {
+        (false, PositionSide::Long) => OrderIntent::HedgeLongTaker,
+        (false, PositionSide::Short) => OrderIntent::HedgeShortTaker,
+        (true, PositionSide::Long) => OrderIntent::CloseLongTaker,
+        (true, PositionSide::Short) => OrderIntent::CloseShortTaker,
+        (_, PositionSide::Net) => OrderIntent::HedgeLongTaker,
+    };
+    let attempt = task.attempts.saturating_add(2);
+    Some(OrderCommand::new(
+        runtime.state.config.mode,
+        task.bundle_id.clone(),
+        leg,
+        attempt,
+        selection.exchange,
+        task.canonical_symbol.clone(),
+        selection.exchange_symbol,
+        intent,
+        task.side,
+        task.position_side,
+        selection.order_type,
+        quantity,
+        selection.price,
+        TimeInForce::Ioc,
+        false,
+        task.reduce_only,
+        Some(runtime.state.config.execution.taker_ioc_slippage_limit_pct),
+        now,
+    ))
+}
+
+struct RepairTakerSelection {
+    exchange: ExchangeId,
+    exchange_symbol: ExchangeSymbol,
+    price: Option<f64>,
+    order_type: OrderType,
+}
+
+fn repair_quantity_from_position(
+    runtime: &CrossArbRuntime,
+    task: &HedgeRepairTaskReadModel,
+) -> Option<f64> {
+    let position = runtime.state.position_manager.bundle(&task.bundle_id)?;
+    let tolerance = runtime.state.config.reconciliation.quantity_tolerance;
+    let quantity = if task.reduce_only {
+        match task.position_side {
+            PositionSide::Long => position.long_leg.available_to_close_qty(),
+            PositionSide::Short => position.short_leg.available_to_close_qty(),
+            PositionSide::Net => 0.0,
+        }
+        .min(task.quantity)
+    } else {
+        match task.position_side {
+            PositionSide::Long => {
+                (position.short_leg.filled_qty - position.long_leg.filled_qty).max(0.0)
+            }
+            PositionSide::Short => {
+                (position.long_leg.filled_qty - position.short_leg.filled_qty).max(0.0)
+            }
+            PositionSide::Net => 0.0,
+        }
+        .min(task.quantity)
+    };
+    (quantity > tolerance && quantity.is_finite()).then_some(quantity)
+}
+
+fn best_repair_taker_snapshot(
+    runtime: &CrossArbRuntime,
+    task: &HedgeRepairTaskReadModel,
+    snapshots: &[MarketSnapshot],
+) -> Option<RepairTakerSelection> {
+    if let Some(selection) = existing_repair_leg_snapshot(runtime, task, snapshots) {
+        return Some(selection);
+    }
+    snapshots
+        .iter()
+        .filter(|snapshot| snapshot.book.is_usable())
+        .filter(|snapshot| snapshot.book.exchange != task.failed_exchange)
+        .filter(|snapshot| {
+            runtime
+                .state
+                .is_private_stream_ready(&snapshot.book.exchange)
+        })
+        .filter_map(|snapshot| {
+            let price = match task.side {
+                OrderSide::Sell => snapshot.book.best_bid()?.price,
+                OrderSide::Buy => snapshot.book.best_ask()?.price,
+            };
+            let price = snapshot
+                .instrument
+                .as_ref()
+                .map(|instrument| {
+                    let mode = match task.side {
+                        OrderSide::Sell => RoundingMode::Floor,
+                        OrderSide::Buy => RoundingMode::Ceil,
+                    };
+                    instrument.quantize_price(price, mode)
+                })
+                .unwrap_or(price);
+            (price.is_finite() && price > 0.0).then_some((snapshot, price))
+        })
+        .max_by(|(_, left_price), (_, right_price)| match task.side {
+            OrderSide::Sell => left_price
+                .partial_cmp(right_price)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            OrderSide::Buy => right_price
+                .partial_cmp(left_price)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        })
+        .map(|(snapshot, price)| RepairTakerSelection {
+            exchange: snapshot.book.exchange.clone(),
+            exchange_symbol: snapshot.book.exchange_symbol.clone(),
+            price: Some(price),
+            order_type: OrderType::Limit,
+        })
+}
+
+fn fallback_repair_taker_snapshot(
+    runtime: &CrossArbRuntime,
+    task: &HedgeRepairTaskReadModel,
+    snapshots: &[MarketSnapshot],
+) -> Option<RepairTakerSelection> {
+    snapshots
+        .iter()
+        .find(|snapshot| {
+            snapshot.book.is_usable()
+                && snapshot.book.exchange == task.failed_exchange
+                && runtime
+                    .state
+                    .is_private_stream_ready(&snapshot.book.exchange)
+        })
+        .map(|snapshot| RepairTakerSelection {
+            exchange: snapshot.book.exchange.clone(),
+            exchange_symbol: snapshot.book.exchange_symbol.clone(),
+            price: None,
+            order_type: OrderType::Market,
+        })
+}
+
+fn existing_repair_leg_snapshot(
+    runtime: &CrossArbRuntime,
+    task: &HedgeRepairTaskReadModel,
+    snapshots: &[MarketSnapshot],
+) -> Option<RepairTakerSelection> {
+    if task.reduce_only {
+        return None;
+    }
+    let position = runtime.state.position_manager.bundle(&task.bundle_id)?;
+    let leg = match task.position_side {
+        PositionSide::Long => &position.long_leg,
+        PositionSide::Short => &position.short_leg,
+        PositionSide::Net => return None,
+    };
+    if leg.filled_qty <= runtime.state.config.reconciliation.quantity_tolerance {
+        return None;
+    }
+    let snapshot = snapshots
+        .iter()
+        .find(|snapshot| snapshot.book.is_usable() && snapshot.book.exchange == leg.exchange)?;
+    if !runtime
+        .state
+        .is_private_stream_ready(&snapshot.book.exchange)
+    {
+        return None;
+    }
+    let price = match task.side {
+        OrderSide::Sell => snapshot.book.best_bid()?.price,
+        OrderSide::Buy => snapshot.book.best_ask()?.price,
+    };
+    let price = snapshot
+        .instrument
+        .as_ref()
+        .map(|instrument| {
+            let mode = match task.side {
+                OrderSide::Sell => RoundingMode::Floor,
+                OrderSide::Buy => RoundingMode::Ceil,
+            };
+            instrument.quantize_price(price, mode)
+        })
+        .unwrap_or(price);
+    Some(RepairTakerSelection {
+        exchange: snapshot.book.exchange.clone(),
+        exchange_symbol: snapshot.book.exchange_symbol.clone(),
+        price: Some(price),
+        order_type: OrderType::Limit,
+    })
+}
+
+fn signal_opportunity_context(
+    runtime: &CrossArbRuntime,
+    signal: &ArbSignal,
+) -> (Option<CanonicalSymbol>, Option<ExchangeId>) {
+    signal
+        .opportunity_id
+        .as_ref()
+        .and_then(|id| {
+            runtime
+                .state
+                .opportunities
+                .iter()
+                .find(|opportunity| opportunity.opportunity_id == *id)
+        })
+        .map(|opportunity| {
+            (
+                Some(opportunity.canonical_symbol.clone()),
+                Some(opportunity.maker_exchange.clone()),
+            )
+        })
+        .unwrap_or((None, None))
+}
+
+fn signal_rank(runtime: &CrossArbRuntime, signal: &ArbSignal) -> (f64, f64) {
+    signal
+        .opportunity_id
+        .as_ref()
+        .and_then(|id| {
+            runtime
+                .state
+                .opportunities
+                .iter()
+                .find(|opportunity| opportunity.opportunity_id == *id)
+        })
+        .map(|opportunity| {
+            (
+                opportunity.maker_taker_net_edge,
+                opportunity.maker_book_spread_pct,
+            )
+        })
+        .unwrap_or((signal.expected_edge, 0.0))
 }
 
 async fn execute_live_close_candidates(
@@ -1344,6 +2269,13 @@ async fn execute_live_close_candidates(
         else {
             continue;
         };
+        runtime.state.record_close_candidate_metrics(
+            &candidate.bundle_id,
+            candidate.close_spread_pct,
+            candidate.close_profit_pct,
+            now,
+        );
+        runtime.persist_hedge_record(&candidate.bundle_id, now);
         match execution.execute_close_bundle(runtime, &candidate).await {
             Ok(decision) if decision.blocked_reason.is_none() => {
                 log::info!(
@@ -1433,9 +2365,13 @@ fn close_metrics_from_runtime(
                 realized_funding_pnl_usdt: metric.realized_funding_pnl_usdt,
                 close_spread_pct: metric.close_spread_pct,
                 close_profit_pct: metric.close_profit_pct,
-                close_threshold_pct: runtime.state.config.thresholds.max_close_spread_pct,
-                closeable: metric.close_spread_pct
-                    <= runtime.state.config.thresholds.max_close_spread_pct,
+                close_threshold_pct: runtime.state.config.thresholds.lock_profit_dual_taker_pct,
+                close_maker_exchange: metric.maker_close_exchange.as_str().to_string(),
+                close_maker_side: format!("{:?}", metric.maker_close_side),
+                close_maker_price: metric.maker_close_price,
+                close_maker_book_spread_pct: metric.maker_close_book_spread_pct,
+                closeable: metric.close_profit_pct
+                    >= runtime.state.config.thresholds.lock_profit_dual_taker_pct,
                 updated_at: now,
             },
         );
@@ -1864,18 +2800,16 @@ async fn run_initial_rest_audits(
             }),
         }
     }
+    private_sync
+        .reconcile_unpaired_positions_from_account_state(Utc::now())
+        .await;
     summaries
 }
 
 fn market_adapter(exchange: &ExchangeId) -> Option<Box<dyn MarketDataAdapter + Send + Sync>> {
     match exchange {
-        ExchangeId::Binance => Some(Box::new(BinanceMarketAdapter)),
-        ExchangeId::Bitget => Some(Box::new(BitgetMarketAdapter)),
-        ExchangeId::Gate => Some(Box::new(GateMarketAdapter)),
-        ExchangeId::Bybit => Some(Box::new(BybitMarketAdapter)),
-        ExchangeId::Mexc => Some(Box::new(MexcMarketAdapter)),
-        ExchangeId::Htx => Some(Box::new(HtxMarketAdapter)),
         ExchangeId::Okx | ExchangeId::Other(_) => None,
+        _ => exchange_registry::market_adapter(exchange),
     }
 }
 
@@ -2069,8 +3003,16 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
       <div class="scroll"><table id="opportunities"></table></div>
     </section>
     <section>
-      <h2>策略组合与平仓价差 <span id="bundles-count" class="muted"></span></h2>
-      <div class="scroll"><table id="bundles"></table></div>
+      <h2>对冲记录 <span id="hedge-records-count" class="muted"></span></h2>
+      <div class="scroll"><table id="hedge-records"></table></div>
+    </section>
+    <section>
+      <h2>补单任务 <span id="hedge-repair-count" class="muted"></span></h2>
+      <div class="scroll"><table id="hedge-repair"></table></div>
+    </section>
+    <section>
+      <h2>Maker成交统计 <span id="maker-stats-count" class="muted"></span></h2>
+      <div class="scroll"><table id="maker-stats"></table></div>
     </section>
     <section>
       <h2>账户余额 <span id="balances-count" class="muted"></span></h2>
@@ -2084,6 +3026,16 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
   <script>
     const fmt = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 });
     const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+    const beijingTime = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
     let data = null;
 
     async function load() {
@@ -2101,7 +3053,7 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
       const dry = d.execution.dry_run ? 'DRY RUN' : 'LIVE ORDERS';
       const mode = d.status.risk_state.mode;
       document.getElementById('subtitle').textContent =
-        `${dry} | ${mode} | 交易所 ${d.execution.enabled_exchanges.join(', ')} | 交易对 ${d.execution.enabled_symbols} | 更新 ${d.status.updated_at}`;
+        `${dry} | ${mode} | 交易所 ${d.execution.enabled_exchanges.join(', ')} | 交易对 ${d.execution.enabled_symbols} | 更新 ${time(d.status.updated_at)}`;
       metrics(d);
       rows('symbols', (d.symbols || []).slice(0, 500), [
         ['交易对', r => r.symbol],
@@ -2118,7 +3070,7 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
         ['数量', r => num(r.quantity)],
         ['开仓价', r => num(r.entry_price)],
         ['未实现盈亏', r => num(r.unrealized_pnl)],
-        ['更新时间', r => r.updated_at],
+        ['更新时间', r => time(r.updated_at)],
       ]);
       text('positions-count', d.private_positions.length);
       rows('orders', d.private_open_orders, [
@@ -2130,12 +3082,16 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
         ['数量', r => num(r.quantity)],
         ['已成交', r => num(r.filled_quantity)],
         ['客户端ID', r => r.client_order_id || ''],
-        ['更新时间', r => r.updated_at],
+        ['更新时间', r => time(r.updated_at)],
       ]);
       text('orders-count', `${d.strategy_open_orders.length} 策略 / ${d.external_open_orders.length} 外部 / ${d.private_open_orders.length} 总计`);
       rows('opportunities', d.opportunities.slice(0, 200), [
         ['交易对', r => r.symbol],
         ['最佳组合', r => r.best_route],
+        ['Maker交易所', r => r.maker_exchange],
+        ['Maker方向', r => r.maker_side],
+        ['Maker价格', r => num(r.maker_price)],
+        ['Maker本所价差', r => pct(r.maker_book_spread_pct)],
         ['开仓价差', r => pct(r.open_spread_pct)],
         ['预计净收益', r => cls(pct(r.expected_net_edge_pct), r.can_open ? 'ok' : 'warn')],
         ['名义金额', r => money.format(r.notional_usdt || 0)],
@@ -2144,32 +3100,57 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
         ['盘口年龄', r => `${r.book_age_ms}ms`],
       ]);
       text('opportunities-count', d.opportunities.length);
-      rows('bundles', d.active_bundles, [
-        ['组合ID', r => r.bundle_id],
-        ['交易对', r => r.symbol || ''],
+      const hedgeRecords = (d.hedge_records || []).filter(r => r.hedge_order_submitted_at || r.is_closed);
+      rows('hedge-records', hedgeRecords, [
+        ['开仓时间', r => time(r.opened_at || r.updated_at)],
+        ['交易对', r => sym(r.canonical_symbol)],
         ['做多交易所', r => r.long_exchange || ''],
         ['做空交易所', r => r.short_exchange || ''],
         ['状态', r => r.status],
-        ['入场净边际', r => pct(r.entry_edge_pct)],
+        ['入场净价差', r => pct(r.entry_net_edge_pct)],
         ['平仓价差', r => pct(r.close_spread_pct)],
-        ['平仓净收益', r => cls(pct(r.close_profit_pct), r.closeable ? 'ok' : 'warn')],
-        ['平仓阈值', r => pct(r.close_threshold_pct)],
-        ['可平仓', r => r.closeable ? cls('是', 'ok') : cls('否', 'warn')],
-        ['名义金额', r => money.format(r.target_notional_usdt || 0)],
-        ['更新时间', r => r.updated_at],
+        ['平仓净利润', r => pct(r.close_net_profit_pct)],
+        ['是否平仓', r => r.is_closed ? cls('是', 'ok') : '否'],
+        ['平仓时间', r => time(r.closed_at)],
+        ['更新时间', r => time(r.updated_at)],
       ]);
-      text('bundles-count', `${d.active_bundles.length} 个活动 / ${d.open_bundles.length} 个记录`);
+      text('hedge-records-count', `${hedgeRecords.length} 条 / ${d.open_bundles.length} 个组合`);
+      rows('hedge-repair', d.hedge_repair_tasks || [], [
+        ['任务ID', r => r.task_id],
+        ['交易对', r => sym(r.canonical_symbol)],
+        ['失败交易所', r => r.failed_exchange],
+        ['尝试交易所', r => r.last_attempt_exchange || ''],
+        ['方向', r => `${r.side}/${r.position_side}`],
+        ['数量', r => num(r.quantity)],
+        ['状态', r => r.status],
+        ['尝试次数', r => r.attempts],
+        ['错误', r => r.last_error || ''],
+        ['更新时间', r => time(r.updated_at)],
+      ]);
+      text('hedge-repair-count', `${(d.hedge_repair_tasks || []).length} 个任务`);
+      rows('maker-stats', d.maker_execution_stats || [], [
+        ['交易对', r => sym(r.canonical_symbol)],
+        ['交易所', r => r.exchange],
+        ['方向', r => r.side],
+        ['连续撤单', r => r.consecutive_ttl_cancels],
+        ['累计撤单', r => r.total_ttl_cancels],
+        ['累计成交', r => r.total_fills],
+        ['当前激进', r => `${r.current_aggressive_ticks} tick`],
+        ['冷却到', r => time(r.cooldown_until)],
+        ['最近事件', r => time(r.last_event_at)],
+      ]);
+      text('maker-stats-count', `${(d.maker_execution_stats || []).length} 条`);
       rows('balances', d.balances, [
         ['交易所', r => r.exchange],
         ['资产', r => r.asset],
         ['总额', r => num(r.total)],
         ['可用', r => num(r.available)],
         ['冻结', r => num(r.locked)],
-        ['更新时间', r => r.updated_at],
+        ['更新时间', r => time(r.updated_at)],
       ]);
       text('balances-count', d.balances.length);
       rows('risk', d.risk_event_summary.slice(0, 200), [
-        ['最近时间', r => r.last_at],
+        ['最近时间', r => time(r.last_at)],
         ['交易所', r => r.exchange || ''],
         ['交易对', r => r.symbol || ''],
         ['原因', r => r.reason],
@@ -2192,13 +3173,18 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
         metric('开仓组合', s.open_bundles),
         metric('每单', money.format(e.target_notional_usdt)),
         metric('开仓阈值', pct(e.min_open_maker_taker_net_edge)),
-        metric('平仓阈值', pct(e.close_threshold_pct)),
+        metric('平仓净利阈值', pct(e.close_profit_threshold_pct)),
         metric('开仓方式', e.open_execution_style),
+        metric('Maker超时', `${e.maker_order_ttl_ms}ms`),
+        metric('Maker并发', `${e.pending_maker_orders}/${e.max_concurrent_maker_orders}`),
+        metric('挂价偏移', `${e.maker_price_offset_ticks} tick`),
+        metric('撤单加价', `每${e.maker_aggressive_after_cancels}次 +${e.maker_aggressive_step_ticks}tick / max ${e.maker_aggressive_max_ticks}`),
+        metric('撤单冷却', `每${e.maker_cooldown_after_cancels}次 / ${e.maker_cooldown_ms}ms`),
         metric('最多仓位', `${s.open_bundles}/${e.max_open_bundles}`),
         metric('私有流', s.private_stream_health.length),
         metric('仓位净风险', num(s.position_summary.net_unhedged_qty || 0)),
         metric('交易所', e.enabled_exchanges.join(', ')),
-        metric('更新时间', new Date(s.updated_at).toLocaleTimeString()),
+        metric('更新时间', time(s.updated_at)),
       ].join('');
     }
 
@@ -2225,6 +3211,12 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
     }
     function num(value) { return value == null ? '' : fmt.format(Number(value)); }
     function pct(value) { return value == null ? '' : `${fmt.format(Number(value) * 100)}%`; }
+    function time(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return `${beijingTime.format(date)} 北京时间`;
+    }
     function orderOwner(id) {
       const v = (id || '').replace(/^t-/, '').toLowerCase();
       return v.startsWith('crossarb-') ? 'crossarb' : 'external';

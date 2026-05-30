@@ -1122,6 +1122,7 @@ pub struct PrivateWsRunConfig {
     pub reconnect_delay_ms: u64,
     pub heartbeat_interval_ms: u64,
     pub subscribe_interval_ms: u64,
+    pub stale_after_ms: u64,
 }
 
 impl Default for PrivateWsRunConfig {
@@ -1131,6 +1132,7 @@ impl Default for PrivateWsRunConfig {
             reconnect_delay_ms: 2_000,
             heartbeat_interval_ms: 15_000,
             subscribe_interval_ms: 50,
+            stale_after_ms: 45_000,
         }
     }
 }
@@ -4738,6 +4740,7 @@ fn parse_bitget_fill(item: &Value, received_at: DateTime<Utc>) -> Option<Private
     let trade_side = str_field(item, &["tradeSide"]).unwrap_or_default();
     let price = f64_field(item, &["fillPrice", "price"]).unwrap_or_default();
     let quantity = f64_field(item, &["fillSize", "size", "baseVolume"]).unwrap_or_default();
+    let fee_detail = bitget_fee_detail(item);
     Some(PrivateEvent::fill(
         FillEvent {
             exchange: ExchangeId::Bitget,
@@ -4753,8 +4756,9 @@ fn parse_bitget_fill(item: &Value, received_at: DateTime<Utc>) -> Option<Private
             price,
             quantity,
             quote_quantity: f64_field(item, &["quoteVolume"]).unwrap_or(price * quantity),
-            fee: f64_field(item, &["fee", "feeDetail"]),
-            fee_asset: str_field(item, &["feeCcy", "feeCoin"]),
+            fee: f64_field(item, &["fee"]).or(fee_detail.as_ref().and_then(|detail| detail.0)),
+            fee_asset: str_field(item, &["feeCcy", "feeCoin"])
+                .or_else(|| fee_detail.and_then(|detail| detail.1)),
             fee_rate: None,
             realized_pnl: f64_field(item, &["profit", "realizedPnl"]),
             reduce_only: Some(trade_side.eq_ignore_ascii_case("close")),
@@ -4762,6 +4766,14 @@ fn parse_bitget_fill(item: &Value, received_at: DateTime<Utc>) -> Option<Private
             received_at,
         },
         received_at,
+    ))
+}
+
+fn bitget_fee_detail(item: &Value) -> Option<(Option<f64>, Option<String>)> {
+    let detail = item.get("feeDetail")?.as_array()?.first()?;
+    Some((
+        f64_field(detail, &["totalFee", "fee", "totalDeductionFee"]),
+        str_field(detail, &["feeCoin", "feeCcy"]),
     ))
 }
 
@@ -5646,16 +5658,10 @@ fn gate_private_ws_payload(
 }
 
 fn gate_private_ws_symbol_groups(
-    channel: &str,
-    symbols: &[ExchangeSymbol],
+    _channel: &str,
+    _symbols: &[ExchangeSymbol],
 ) -> Vec<Vec<ExchangeSymbol>> {
-    if channel == "futures.balances" {
-        return vec![Vec::new()];
-    }
-    if symbols.is_empty() {
-        return vec![Vec::new()];
-    }
-    symbols.iter().cloned().map(|symbol| vec![symbol]).collect()
+    vec![Vec::new()]
 }
 
 fn str_field(value: &Value, keys: &[&str]) -> Option<String> {
@@ -6552,7 +6558,7 @@ mod tests {
     }
 
     #[test]
-    fn gate_private_ws_endpoint_should_authenticate_every_subscription() {
+    fn gate_private_ws_endpoint_should_subscribe_account_level_channels() {
         let endpoint = build_private_ws_endpoint(
             PrivatePerpExchange::Gate,
             PrivateWsAuth {
@@ -6572,19 +6578,23 @@ mod tests {
 
         assert_eq!(endpoint.exchange, ExchangeId::Gate);
         assert!(endpoint.login_message.is_none());
-        assert_eq!(endpoint.subscribe_messages.len(), 7);
+        assert_eq!(endpoint.subscribe_messages.len(), 4);
 
         let orders: Value = serde_json::from_str(&endpoint.subscribe_messages[0]).unwrap();
         assert_eq!(orders["channel"], "futures.orders");
         assert_eq!(orders["payload"][0], "20011");
-        assert_eq!(orders["payload"][1], "BTC_USDT");
+        assert_eq!(orders["payload"][1], "!all");
         assert_eq!(orders["auth"]["KEY"], "key");
 
-        let positions: Value = serde_json::from_str(&endpoint.subscribe_messages[4]).unwrap();
-        assert_eq!(positions["channel"], "futures.positions");
-        assert_eq!(positions["payload"][1], "BTC_USDT");
+        let usertrades: Value = serde_json::from_str(&endpoint.subscribe_messages[1]).unwrap();
+        assert_eq!(usertrades["channel"], "futures.usertrades");
+        assert_eq!(usertrades["payload"][1], "!all");
 
-        let balances: Value = serde_json::from_str(&endpoint.subscribe_messages[6]).unwrap();
+        let positions: Value = serde_json::from_str(&endpoint.subscribe_messages[2]).unwrap();
+        assert_eq!(positions["channel"], "futures.positions");
+        assert_eq!(positions["payload"][1], "!all");
+
+        let balances: Value = serde_json::from_str(&endpoint.subscribe_messages[3]).unwrap();
         assert_eq!(balances["channel"], "futures.balances");
         assert_eq!(balances["payload"].as_array().unwrap().len(), 1);
     }

@@ -8,6 +8,7 @@ use rustcta::exchanges::adapters::{
     BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
     HtxMarketAdapter, MarketAdapterInfo, MexcMarketAdapter, OkxMarketAdapter,
 };
+use rustcta::exchanges::registry::market_adapter;
 use rustcta::market::{
     CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta, MarketDataAdapter,
     MarketStateCache, RouteStatus, RuntimeMode,
@@ -238,30 +239,7 @@ fn configured_adapters(
         .universe
         .enabled_exchanges
         .iter()
-        .filter_map(|exchange| match exchange {
-            ExchangeId::Binance => {
-                Some(Box::new(BinanceMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Okx => {
-                Some(Box::new(OkxMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Bitget => {
-                Some(Box::new(BitgetMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Gate => {
-                Some(Box::new(GateMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Bybit => {
-                Some(Box::new(BybitMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Mexc => {
-                Some(Box::new(MexcMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Htx => {
-                Some(Box::new(HtxMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Other(_) => None,
-        })
+        .filter_map(market_adapter)
         .collect()
 }
 

@@ -424,7 +424,7 @@ impl CopyTradingStrategy {
 
                         // 停止心跳定时器
                         heartbeat_timer.abort();
-                        log::warn!("⚠️ WebSocket连接断开");
+                        log::warn!("⚠️ WebSocket连接断开，已处理消息 {} 条", msg_count);
                     }
                     Err(e) => {
                         log::error!("❌ WebSocket连接失败: {}", e);

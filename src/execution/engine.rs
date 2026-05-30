@@ -501,6 +501,7 @@ mod tests {
             filled_quantity: 0.1,
             hedge_price: Some(101.0),
             max_slippage_pct: Some(0.001),
+            reduce_only: false,
             filled_at: Utc::now(),
         }
     }

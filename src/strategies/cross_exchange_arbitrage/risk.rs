@@ -26,6 +26,7 @@ pub enum RejectReason {
     AbnormalCrossExchangeSpread,
     ExchangeCapacityExceeded,
     ExchangePositionLimitExceeded,
+    UnpairedExchangePosition,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,9 +140,15 @@ pub struct StrategyRiskState {
     pub paused_new_entries: bool,
     pub close_only: bool,
     pub kill_switch: bool,
+    #[serde(default = "default_true")]
+    pub private_resync_blocks_new_entries: bool,
     pub private_stream_health: HashMap<ExchangeId, PrivateStreamHealth>,
     pub triggers: Vec<RiskTriggerRecord>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -161,6 +168,7 @@ impl StrategyRiskState {
             paused_new_entries: false,
             close_only: false,
             kill_switch: false,
+            private_resync_blocks_new_entries: true,
             private_stream_health: HashMap::new(),
             triggers: Vec::new(),
             updated_at: now,
@@ -172,11 +180,13 @@ impl StrategyRiskState {
         exchange: ExchangeId,
         received_at: DateTime<Utc>,
         needs_resync: bool,
+        stale_after_ms: i64,
     ) {
         let health = self
             .private_stream_health
             .entry(exchange.clone())
-            .or_insert_with(|| PrivateStreamHealth::new(exchange.clone(), 10_000));
+            .or_insert_with(|| PrivateStreamHealth::new(exchange.clone(), stale_after_ms));
+        health.stale_after_ms = stale_after_ms;
         health.observe_event(received_at);
         if needs_resync {
             health.needs_resync = true;
@@ -197,11 +207,13 @@ impl StrategyRiskState {
         &mut self,
         exchange: ExchangeId,
         disconnected_at: DateTime<Utc>,
+        stale_after_ms: i64,
     ) {
         let health = self
             .private_stream_health
             .entry(exchange.clone())
-            .or_insert_with(|| PrivateStreamHealth::new(exchange.clone(), 10_000));
+            .or_insert_with(|| PrivateStreamHealth::new(exchange.clone(), stale_after_ms));
+        health.stale_after_ms = stale_after_ms;
         health.observe_disconnect(disconnected_at);
         self.raise_trigger(
             RiskTriggerKind::PrivateStreamDisconnected,
@@ -229,6 +241,8 @@ impl StrategyRiskState {
         &mut self,
         summary: &PortfolioExposureSummary,
         orphan_threshold: f64,
+        block_new_entries: bool,
+        close_only_after_count: usize,
         now: DateTime<Utc>,
     ) {
         if summary.orphan_qty > orphan_threshold {
@@ -239,7 +253,9 @@ impl StrategyRiskState {
                 format!("orphan exposure {:.8}", summary.orphan_qty),
                 now,
             );
-            self.close_only = true;
+            if block_new_entries && summary.orphan_bundle_count >= close_only_after_count.max(1) {
+                self.close_only = true;
+            }
         }
         self.updated_at = now;
         self.recompute_mode(now);
@@ -250,6 +266,7 @@ impl StrategyRiskState {
         exchange: ExchangeId,
         symbol: String,
         severity: ReconcileSeverity,
+        _orphan_exposure_blocks_new_entries: bool,
         now: DateTime<Utc>,
     ) {
         match severity {
@@ -264,9 +281,7 @@ impl StrategyRiskState {
                 );
                 self.paused_new_entries = true;
             }
-            ReconcileSeverity::OrderDrift
-            | ReconcileSeverity::PositionDrift
-            | ReconcileSeverity::OrphanExposure => {
+            ReconcileSeverity::OrderDrift | ReconcileSeverity::PositionDrift => {
                 self.raise_trigger(
                     RiskTriggerKind::ReconciliationDrift,
                     Some(exchange.clone()),
@@ -275,6 +290,15 @@ impl StrategyRiskState {
                     now,
                 );
                 self.close_only = true;
+            }
+            ReconcileSeverity::OrphanExposure => {
+                self.raise_trigger(
+                    RiskTriggerKind::ReconciliationDrift,
+                    Some(exchange.clone()),
+                    Some(symbol.clone()),
+                    format!("reconciliation drift: {:?}", severity),
+                    now,
+                );
             }
             ReconcileSeverity::UnknownCritical => {
                 self.raise_trigger(
@@ -371,9 +395,11 @@ impl StrategyRiskState {
             allow_new_entries: !self.paused_new_entries
                 && !self.close_only
                 && !self.kill_switch
-                && !needs_private_resync,
+                && (!needs_private_resync || !self.private_resync_blocks_new_entries),
             allow_closes: !self.kill_switch,
-            needs_reconciliation: self.close_only || self.paused_new_entries,
+            needs_reconciliation: self.close_only
+                || self.paused_new_entries
+                || (needs_private_resync && self.private_resync_blocks_new_entries),
             needs_private_resync,
             trigger_count: self.triggers.len(),
         }
@@ -386,7 +412,7 @@ impl StrategyRiskState {
             .any(|health| health.needs_resync);
         self.mode = if self.kill_switch {
             RiskOperatingMode::Halted
-        } else if self.close_only || any_resync {
+        } else if self.close_only || (any_resync && self.private_resync_blocks_new_entries) {
             RiskOperatingMode::CloseOnly
         } else if self.paused_new_entries {
             RiskOperatingMode::Degraded
@@ -532,7 +558,7 @@ mod tests {
     fn strategy_risk_state_should_enter_close_only_on_resync() {
         let now = Utc::now();
         let mut state = StrategyRiskState::new(now);
-        state.observe_private_event(ExchangeId::Binance, now, true);
+        state.observe_private_event(ExchangeId::Binance, now, true, 45_000);
 
         let decision = state.decision();
 
@@ -540,6 +566,25 @@ mod tests {
         assert!(decision.needs_private_resync);
         assert!(!decision.allow_new_entries);
         assert!(decision.allow_closes);
+    }
+
+    #[test]
+    fn strategy_risk_state_should_recover_after_healthy_private_event() {
+        let now = Utc::now();
+        let mut state = StrategyRiskState::new(now);
+        state.observe_private_event(ExchangeId::Binance, now, true, 45_000);
+        state.observe_private_event(
+            ExchangeId::Binance,
+            now + chrono::Duration::milliseconds(500),
+            false,
+            45_000,
+        );
+
+        let decision = state.decision();
+
+        assert_eq!(decision.mode, RiskOperatingMode::Normal);
+        assert!(!decision.needs_private_resync);
+        assert!(decision.allow_new_entries);
     }
 
     #[test]

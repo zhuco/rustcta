@@ -8,12 +8,12 @@ use axum::extract::State;
 use axum::response::Html;
 use axum::routing::get;
 use axum::{Json, Router};
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use clap::Parser;
 use rustcta::core::config::Config;
 use rustcta::core::types::{Balance, MarketType, OrderSide, Position, Trade};
 use rustcta::cta::account_manager::{AccountConfig, AccountManager};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_yaml::Value;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, MissedTickBehavior};
@@ -41,8 +41,41 @@ struct AppState {
     snapshot: Arc<RwLock<DashboardSnapshot>>,
 }
 
+const BEIJING_OFFSET_SECONDS: i32 = 8 * 60 * 60;
+
+fn beijing_offset() -> FixedOffset {
+    FixedOffset::east_opt(BEIJING_OFFSET_SECONDS).expect("valid Beijing UTC+8 offset")
+}
+
+fn format_beijing_time(dt: &DateTime<Utc>) -> String {
+    dt.with_timezone(&beijing_offset())
+        .format("%Y-%m-%d %H:%M:%S 北京时间")
+        .to_string()
+}
+
+fn serialize_beijing_time<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&format_beijing_time(dt))
+}
+
+fn serialize_optional_beijing_time<S>(
+    dt: &Option<DateTime<Utc>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match dt {
+        Some(dt) => serializer.serialize_some(&format_beijing_time(dt)),
+        None => serializer.serialize_none(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct DashboardSnapshot {
+    #[serde(serialize_with = "serialize_beijing_time")]
     generated_at: DateTime<Utc>,
     summary: SummaryCard,
     strategies: Vec<StrategyCard>,
@@ -92,6 +125,7 @@ struct StrategyCard {
     symbols_count: usize,
     monitored_symbols: Vec<String>,
     status: String,
+    #[serde(serialize_with = "serialize_beijing_time")]
     last_update: DateTime<Utc>,
     open_positions: usize,
     account_equity_total: f64,
@@ -106,6 +140,7 @@ struct StrategyCard {
     volume_24h: f64,
     volume_7d: f64,
     recent_trade_count: usize,
+    #[serde(serialize_with = "serialize_optional_beijing_time")]
     last_trade_at: Option<DateTime<Utc>>,
     positions: Vec<PositionRow>,
     warnings: Vec<String>,
@@ -2026,7 +2061,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
               <div class="item"><div class="k">账户PNL(运行期)</div><div class="${cls(s.account_pnl_since_start)}">${fmt(s.account_pnl_since_start)}</div></div>
               <div class="item"><div class="k">成交额 1h/24h/7d</div><div>${fmt(s.volume_1h)} / ${fmt(s.volume_24h)} / ${fmt(s.volume_7d)}</div></div>
               <div class="item"><div class="k">近1h成交笔数</div><div>${s.recent_trade_count}</div></div>
-              <div class="item"><div class="k">最后成交时间</div><div>${s.last_trade_at || '-'}</div></div>
+              <div class="item"><div class="k">最后成交时间(北京)</div><div>${s.last_trade_at || '-'}</div></div>
             </div>
             ${warnHtml}
             <div class="table-wrap">

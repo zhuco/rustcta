@@ -1,36 +1,57 @@
 mode: live_small
-
 strategy:
   name: cross_exchange_arbitrage_usdt_perp
   mode: live_small
   log_level: INFO
-
 market:
   quote_asset: USDT
   market_type: futures
   depth_levels: 5
   stale_quote_ms: 5000
   min_common_exchanges: 2
-
 thresholds:
   min_display_raw_spread: 0.001
-  min_open_maker_taker_net_edge: 0.007
-  max_open_raw_spread: 0.10
-  lock_profit_dual_taker_pct: 0.001
-  strong_lock_profit_dual_taker_pct: 0.003
+  min_open_raw_spread: 0.005
+  min_open_maker_taker_net_edge: 0.004
+  max_open_raw_spread: 0.1
+  route_overrides:
+  - long_exchange: binance
+    short_exchange: gate
+    min_open_raw_spread: 0.0065
+    min_open_maker_taker_net_edge: 0.0045
+  - long_exchange: gate
+    short_exchange: binance
+    min_open_raw_spread: 0.0065
+    min_open_maker_taker_net_edge: 0.0045
+  - long_exchange: bitget
+    short_exchange: gate
+    min_open_raw_spread: 0.006
+    min_open_maker_taker_net_edge: 0.004
+  - long_exchange: gate
+    short_exchange: bitget
+    min_open_raw_spread: 0.006
+    min_open_maker_taker_net_edge: 0.004
+  - long_exchange: binance
+    short_exchange: bitget
+    min_open_raw_spread: 0.0055
+    min_open_maker_taker_net_edge: 0.004
+  - long_exchange: bitget
+    short_exchange: binance
+    min_open_raw_spread: 0.0055
+    min_open_maker_taker_net_edge: 0.004
+  lock_profit_dual_taker_pct: 0.0015
+  strong_lock_profit_dual_taker_pct: 0.004
   max_close_spread_pct: 0.001
-
 sizing:
-  min_notional_usdt: 10.0
-  target_notional_usdt: 10.0
-  max_notional_usdt: 10.0
+  min_notional_usdt: 6.0
+  target_notional_usdt: 6.0
+  max_notional_usdt: 6.0
   exchange_equity_usdt: 50.0
   leverage: 5.0
-  max_positions_per_exchange: 50
+  max_positions_per_exchange: 20
   capital_fraction_of_smaller_equity: 1.0
-  max_symbol_notional_usdt: 10.0
+  max_symbol_notional_usdt: 6.0
   max_exchange_usage_pct: 1.0
-
 fees:
   default_maker_fee_rate: 0.0002
   default_taker_fee_rate: 0.0006
@@ -45,7 +66,6 @@ fees:
     gate:
       maker: 0.0002
       taker: 0.00075
-
 funding:
   enabled: false
   mode: settlement
@@ -54,7 +74,6 @@ funding:
   no_open_before_funding_mins: 5
   block_if_expected_funding_negative_pct: 0.001
   max_adverse_funding_rate: 0.001
-
 exchanges:
   binance:
     enabled: true
@@ -69,16 +88,17 @@ exchanges:
       reconnect_delay_ms: 2000
       heartbeat_interval_ms: 15000
       subscribe_interval_ms: 50
+      stale_after_ms: 45000
     routes:
       market_ws:
-        - wss://fstream.binance.com/ws
-        - wss://fstream.binance.com/stream
+      - wss://fstream.binance.com/ws
+      - wss://fstream.binance.com/stream
       private_ws:
-        - wss://fstream.binance.com/ws
+      - wss://fstream.binance.com/ws
       rest_public:
-        - https://fapi.binance.com
+      - https://fapi.binance.com
       rest_private:
-        - https://fapi.binance.com
+      - https://fapi.binance.com
   bitget:
     enabled: true
     operating_mode: enabled
@@ -93,22 +113,23 @@ exchanges:
       reconnect_delay_ms: 2000
       heartbeat_interval_ms: 15000
       subscribe_interval_ms: 50
+      stale_after_ms: 45000
     routes:
       market_ws:
-        - wss://ws.bitget.com/v2/ws/public
+      - wss://ws.bitget.com/v2/ws/public
       private_ws:
-        - wss://ws.bitget.com/v2/ws/private
+      - wss://ws.bitget.com/v2/ws/private
       rest_public:
-        - https://api.bitget.com
+      - https://api.bitget.com
       rest_private:
-        - https://api.bitget.com
+      - https://api.bitget.com
   gate:
     enabled: true
     operating_mode: enabled
     position_mode: hedge
     ws_batch_size: 80
     env_prefix: GATE
-    account_id: "16076371"
+    account_id: '16076371'
     demo_trading: false
     private_rest_enabled: true
     private_ws_enabled: true
@@ -117,490 +138,645 @@ exchanges:
       reconnect_delay_ms: 2000
       heartbeat_interval_ms: 15000
       subscribe_interval_ms: 50
+      stale_after_ms: 45000
     routes:
       market_ws:
-        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      - wss://fx-ws.gateio.ws/v4/ws/usdt
       private_ws:
-        - wss://fx-ws.gateio.ws/v4/ws/usdt
+      - wss://fx-ws.gateio.ws/v4/ws/usdt
       rest_public:
-        - https://api.gateio.ws/api/v4
+      - https://api.gateio.ws/api/v4
       rest_private:
-        - https://api.gateio.ws/api/v4
-
+      - https://api.gateio.ws/api/v4
 routing:
   ws_stale_limit_ms: 30000
   order_latency_p95_degrade_ms: 1200
   order_error_rate_degrade: 0.05
   auto_failover: true
   degraded_mode_blocks_new_entries: true
-
 execution:
   dry_run: false
-  open_execution_style: dual_taker
+  open_execution_style: maker_taker
   max_hedge_retries: 1
-  maker_order_ttl_ms: 5000
-  taker_ioc_slippage_limit_pct: 0.003
-
+  maker_order_ttl_ms: 20000
+  max_concurrent_maker_orders: 5
+  maker_price_offset_ticks: 0
+  maker_aggressive_after_cancels: 5
+  maker_aggressive_step_ticks: 1
+  maker_aggressive_max_ticks: 5
+  maker_cooldown_after_cancels: 10
+  maker_cooldown_ms: 120000
+  taker_ioc_slippage_limit_pct: 0.0015
 controls:
   start_paused_new_entries: true
-  start_close_only: true
-
+  start_close_only: false
 reconciliation:
   open_orders_interval_secs: 5
   positions_interval_secs: 10
   full_audit_interval_secs: 60
-  quantity_tolerance: 0.00000001
-  orphan_tolerance: 0.000001
-
+  quantity_tolerance: 1.0e-08
+  orphan_tolerance: 1.0e-06
 risk:
   stale_quote_ms: 5000
   max_book_age_ms: 5000
-  taker_slippage_buffer: 0.0005
-  max_taker_slippage_pct: 0.003
-  maker_non_fill_penalty: 0.001
-  safety_buffer: 0.001
-  max_notional_per_symbol_usdt: 10.0
-  max_open_bundles: 50
+  taker_slippage_buffer: 0.001
+  max_taker_slippage_pct: 0.0015
+  maker_non_fill_penalty: 0.0015
+  safety_buffer: 0.002
+  max_notional_per_symbol_usdt: 6.0
+  max_open_bundles: 20
   symbol_whitelist_required_live: true
   block_on_external_account_exposure: false
-
+  orphan_exposure_blocks_new_entries: true
+  orphan_close_only_after_count: 3
+  private_resync_blocks_new_entries: true
+  restored_position_blocks_new_entries: true
 persistence:
   enabled: true
   jsonl_dir: logs/cross_exchange_arbitrage/three-venues-hcr-10u-405symbols-live-small
   clickhouse_enabled: false
-
 dashboard:
   enabled: true
   bind_host: 0.0.0.0
   port: 8091
-
 alerts:
   enabled: true
   orphan_alert: true
   route_offline_alert: true
   reconcile_critical_alert: true
-
 universe:
   enabled_exchanges:
-    - binance
-    - bitget
-    - gate
+  - binance
+  - bitget
+  - gate
   symbols:
-    - EDGE/USDT
-    - ESPORTS/USDT
-    - DRIFT/USDT
-    - SPCX/USDT
-    - COTI/USDT
-    - RVN/USDT
-    - CTSI/USDT
-    - CTK/USDT
-    - HOLO/USDT
-    - NEWT/USDT
-    - ASTR/USDT
-    - MCD/USDT
-    - LQTY/USDT
-    - ALLO/USDT
-    - FLUID/USDT
-    - IOST/USDT
-    - MANTA/USDT
-    - LISTA/USDT
-    - KERNEL/USDT
-    - NBIS/USDT
-    - METIS/USDT
-    - FLUX/USDT
-    - FLOCK/USDT
-    - UAI/USDT
-    - SQD/USDT
-    - DOLO/USDT
-    - EUL/USDT
-    - DIA/USDT
-    - EPIC/USDT
-    - EWT/USDT
-    - LUMIA/USDT
-    - COW/USDT
-    - UMA/USDT
-    - ALICE/USDT
-    - OPENAI/USDT
-    - OGN/USDT
-    - TAIKO/USDT
-    - ICNT/USDT
-    - OPN/USDT
-    - TRADOOR/USDT
-    - SAPIEN/USDT
-    - PIXEL/USDT
-    - B/USDT
-    - CATI/USDT
-    - HAEDAL/USDT
-    - MUBARAK/USDT
-    - VET/USDT
-    - XTZ/USDT
-    - GUN/USDT
-    - LITE/USDT
-    - CELO/USDT
-    - KSM/USDT
-    - GAS/USDT
-    - WET/USDT
-    - REZ/USDT
-    - T/USDT
-    - AMAT/USDT
-    - MET/USDT
-    - CVX/USDT
-    - RECALL/USDT
-    - CARV/USDT
-    - TAG/USDT
-    - WAXP/USDT
-    - SCRT/USDT
-    - CAKE/USDT
-    - MYX/USDT
-    - ACU/USDT
-    - FOLKS/USDT
-    - TAC/USDT
-    - BABA/USDT
-    - 4/USDT
-    - SIGN/USDT
-    - M/USDT
-    - LINEA/USDT
-    - AT/USDT
-    - STEEM/USDT
-    - IDOL/USDT
-    - PHA/USDT
-    - INX/USDT
-    - COAI/USDT
-    - PLUME/USDT
-    - BLESS/USDT
-    - MERL/USDT
-    - TLM/USDT
-    - PUNDIX/USDT
-    - OPG/USDT
-    - SKL/USDT
-    - LAB/USDT
-    - BICO/USDT
-    - BROCCOLI/USDT
-    - PIEVERSE/USDT
-    - COHR/USDT
-    - AZTEC/USDT
-    - STORJ/USDT
-    - JOE/USDT
-    - GOAT/USDT
-    - LA/USDT
-    - RESOLV/USDT
-    - VANA/USDT
-    - APR/USDT
-    - SLP/USDT
-    - MOODENG/USDT
-    - WDC/USDT
-    - BABY/USDT
-    - LIT/USDT
-    - KAT/USDT
-    - USELESS/USDT
-    - XAI/USDT
-    - ASML/USDT
-    - SUSHI/USDT
-    - TUT/USDT
-    - RKLB/USDT
-    - IOTX/USDT
-    - QTUM/USDT
-    - THE/USDT
-    - ANKR/USDT
-    - MIRA/USDT
-    - NMR/USDT
-    - ARB/USDT
-    - XPL/USDT
-    - GRIFFAIN/USDT
-    - QNT/USDT
-    - PARTI/USDT
-    - CYS/USDT
-    - ETHW/USDT
-    - C/USDT
-    - AVA/USDT
-    - FIDA/USDT
-    - GRT/USDT
-    - SAFE/USDT
-    - ME/USDT
-    - YGG/USDT
-    - F/USDT
-    - COST/USDT
-    - KNC/USDT
-    - GPS/USDT
-    - HOME/USDT
-    - DYM/USDT
-    - BA/USDT
-    - B2/USDT
-    - BRETT/USDT
-    - CLANKER/USDT
-    - ROSE/USDT
-    - SNDK/USDT
-    - TRB/USDT
-    - TRIA/USDT
-    - Q/USDT
-    - CROSS/USDT
-    - GRASS/USDT
-    - ASR/USDT
-    - TRUST/USDT
-    - TOSHI/USDT
-    - ZBT/USDT
-    - TOWNS/USDT
-    - LAYER/USDT
-    - API3/USDT
-    - VRT/USDT
-    - BREV/USDT
-    - YB/USDT
-    - HFT/USDT
-    - VELODROME/USDT
-    - 1INCH/USDT
-    - MEME/USDT
-    - NEO/USDT
-    - RPL/USDT
-    - FORM/USDT
-    - MEGA/USDT
-    - CRO/USDT
-    - AGLD/USDT
-    - BAT/USDT
-    - RAVE/USDT
-    - ACE/USDT
-    - LSK/USDT
-    - RAY/USDT
-    - BIGTIME/USDT
-    - PYTH/USDT
-    - MRVL/USDT
-    - AWE/USDT
-    - SOON/USDT
-    - STABLE/USDT
-    - ZETA/USDT
-    - MELANIA/USDT
-    - MOCA/USDT
-    - BIRB/USDT
-    - NAORIS/USDT
-    - SSV/USDT
-    - SOPH/USDT
-    - POWER/USDT
-    - BR/USDT
-    - BOME/USDT
-    - XPIN/USDT
-    - MAV/USDT
-    - ZKC/USDT
-    - CKB/USDT
-    - SFP/USDT
-    - PRL/USDT
-    - KWEB/USDT
-    - PIPPIN/USDT
-    - POL/USDT
-    - STO/USDT
-    - VTHO/USDT
-    - CHZ/USDT
-    - TSM/USDT
-    - DASH/USDT
-    - BLUR/USDT
-    - FOGO/USDT
-    - ELSA/USDT
-    - XOM/USDT
-    - EGLD/USDT
-    - ARKM/USDT
-    - GIGGLE/USDT
-    - RARE/USDT
-    - ARK/USDT
-    - ENS/USDT
-    - UNH/USDT
-    - USTC/USDT
-    - GWEI/USDT
-    - PROM/USDT
-    - SOMI/USDT
-    - CHILLGUY/USDT
-    - DOOD/USDT
-    - W/USDT
-    - ALGO/USDT
-    - BE/USDT
-    - WOO/USDT
-    - BAN/USDT
-    - AERO/USDT
-    - SPK/USDT
-    - RUNE/USDT
-    - 0G/USDT
-    - TREE/USDT
-    - AUCTION/USDT
-    - BEAT/USDT
-    - OPEN/USDT
-    - FIGHT/USDT
-    - CBRS/USDT
-    - IOTA/USDT
-    - ROBO/USDT
-    - XPT/USDT
-    - WLFI/USDT
-    - SYRUP/USDT
-    - COMP/USDT
-    - DEXE/USDT
-    - ETC/USDT
-    - MTL/USDT
-    - TNSR/USDT
-    - ETHFI/USDT
-    - WIF/USDT
-    - CL/USDT
-    - UB/USDT
-    - ENJ/USDT
-    - APE/USDT
-    - SKYAI/USDT
-    - JUP/USDT
-    - 2Z/USDT
-    - A/USDT
-    - AAVE/USDT
-    - ACH/USDT
-    - ACT/USDT
-    - AEVO/USDT
-    - AIXBT/USDT
-    - ANIME/USDT
-    - APT/USDT
-    - AR/USDT
-    - ASTER/USDT
-    - ATH/USDT
-    - ATOM/USDT
-    - AVNT/USDT
-    - AXS/USDT
-    - BAND/USDT
-    - BARD/USDT
-    - BASED/USDT
-    - BERA/USDT
-    - BILL/USDT
-    - BIO/USDT
-    - BSB/USDT
-    - CC/USDT
-    - CFX/USDT
-    - CHIP/USDT
-    - CRV/USDT
-    - DYDX/USDT
-    - EIGEN/USDT
-    - ENA/USDT
-    - ENSO/USDT
-    - ESP/USDT
-    - FARTCOIN/USDT
-    - FIL/USDT
-    - GALA/USDT
-    - GLM/USDT
-    - GMT/USDT
-    - GMX/USDT
-    - H/USDT
-    - HBAR/USDT
-    - HUMA/USDT
-    - HYPE/USDT
-    - ICP/USDT
-    - ICX/USDT
-    - IMX/USDT
-    - INIT/USDT
-    - INJ/USDT
-    - IP/USDT
-    - JTO/USDT
-    - KAITO/USDT
-    - KGEN/USDT
-    - KITE/USDT
-    - KMNO/USDT
-    - LDO/USDT
-    - LPT/USDT
-    - MAGIC/USDT
-    - MANA/USDT
-    - MASK/USDT
-    - MEW/USDT
-    - MINA/USDT
-    - MMT/USDT
-    - MON/USDT
-    - MORPHO/USDT
-    - MOVE/USDT
-    - NEAR/USDT
-    - NIGHT/USDT
-    - NOT/USDT
-    - ONDO/USDT
-    - ONE/USDT
-    - ONT/USDT
-    - OP/USDT
-    - ORDER/USDT
-    - ORDI/USDT
-    - PENDLE/USDT
-    - PENGU/USDT
-    - PEOPLE/USDT
-    - PNUT/USDT
-    - POPCAT/USDT
-    - PROVE/USDT
-    - PUMP/USDT
-    - RENDER/USDT
-    - RIVER/USDT
-    - RSR/USDT
-    - S/USDT
-    - SAHARA/USDT
-    - SAND/USDT
-    - SEI/USDT
-    - SENT/USDT
-    - SHELL/USDT
-    - SKY/USDT
-    - SNX/USDT
-    - SPACE/USDT
-    - SPX/USDT
-    - STRK/USDT
-    - STX/USDT
-    - SUI/USDT
-    - TAO/USDT
-    - THETA/USDT
-    - TIA/USDT
-    - TON/USDT
-    - TRUMP/USDT
-    - TURBO/USDT
-    - UNI/USDT
-    - VIRTUAL/USDT
-    - WAL/USDT
-    - WCT/USDT
-    - WLD/USDT
-    - XLM/USDT
-    - ZAMA/USDT
-    - ZEC/USDT
-    - ZIL/USDT
-    - ZK/USDT
-    - ZKP/USDT
-    - ZORA/USDT
-    - ZRO/USDT
-    - ZRX/USDT
-    - AIGENSYN/USDT
-    - AIN/USDT
-    - AIO/USDT
-    - AKT/USDT
-    - ALCH/USDT
-    - ALT/USDT
-    - ARC/USDT
-    - ARIA/USDT
-    - ARPA/USDT
-    - BANANA/USDT
-    - BANANAS31/USDT
-    - BANK/USDT
-    - BAS/USDT
-    - BB/USDT
-    - BNT/USDT
-    - BSV/USDT
-    - C98/USDT
-    - CELR/USDT
-    - CETUS/USDT
-    - CFG/USDT
-    - CGPT/USDT
-    - CHR/USDT
-    - COOKIE/USDT
-    - CVC/USDT
-    - CYBER/USDT
-    - DEEP/USDT
-    - DOGS/USDT
-    - ERA/USDT
-    - FET/USDT
-    - FF/USDT
+  - EDGE/USDT
+  - ESPORTS/USDT
+  - DRIFT/USDT
+  - SPCX/USDT
+  - COTI/USDT
+  - RVN/USDT
+  - CTSI/USDT
+  - CTK/USDT
+  - HOLO/USDT
+  - NEWT/USDT
+  - ASTR/USDT
+  - MCD/USDT
+  - LQTY/USDT
+  - ALLO/USDT
+  - FLUID/USDT
+  - IOST/USDT
+  - MANTA/USDT
+  - LISTA/USDT
+  - KERNEL/USDT
+  - NBIS/USDT
+  - METIS/USDT
+  - FLUX/USDT
+  - FLOCK/USDT
+  - UAI/USDT
+  - SQD/USDT
+  - DOLO/USDT
+  - EUL/USDT
+  - DIA/USDT
+  - EPIC/USDT
+  - EWT/USDT
+  - LUMIA/USDT
+  - COW/USDT
+  - UMA/USDT
+  - ALICE/USDT
+  - OPENAI/USDT
+  - OGN/USDT
+  - TAIKO/USDT
+  - ICNT/USDT
+  - OPN/USDT
+  - TRADOOR/USDT
+  - SAPIEN/USDT
+  - PIXEL/USDT
+  - B/USDT
+  - CATI/USDT
+  - HAEDAL/USDT
+  - MUBARAK/USDT
+  - VET/USDT
+  - XTZ/USDT
+  - GUN/USDT
+  - LITE/USDT
+  - CELO/USDT
+  - KSM/USDT
+  - GAS/USDT
+  - WET/USDT
+  - REZ/USDT
+  - T/USDT
+  - AMAT/USDT
+  - MET/USDT
+  - CVX/USDT
+  - RECALL/USDT
+  - CARV/USDT
+  - TAG/USDT
+  - WAXP/USDT
+  - SCRT/USDT
+  - CAKE/USDT
+  - MYX/USDT
+  - ACU/USDT
+  - FOLKS/USDT
+  - TAC/USDT
+  - BABA/USDT
+  - 4/USDT
+  - SIGN/USDT
+  - M/USDT
+  - LINEA/USDT
+  - AT/USDT
+  - STEEM/USDT
+  - IDOL/USDT
+  - PHA/USDT
+  - INX/USDT
+  - COAI/USDT
+  - PLUME/USDT
+  - BLESS/USDT
+  - MERL/USDT
+  - TLM/USDT
+  - PUNDIX/USDT
+  - OPG/USDT
+  - SKL/USDT
+  - LAB/USDT
+  - BICO/USDT
+  - BROCCOLI/USDT
+  - PIEVERSE/USDT
+  - COHR/USDT
+  - AZTEC/USDT
+  - STORJ/USDT
+  - JOE/USDT
+  - GOAT/USDT
+  - LA/USDT
+  - RESOLV/USDT
+  - VANA/USDT
+  - APR/USDT
+  - SLP/USDT
+  - MOODENG/USDT
+  - WDC/USDT
+  - BABY/USDT
+  - LIT/USDT
+  - KAT/USDT
+  - USELESS/USDT
+  - XAI/USDT
+  - ASML/USDT
+  - SUSHI/USDT
+  - TUT/USDT
+  - RKLB/USDT
+  - IOTX/USDT
+  - QTUM/USDT
+  - THE/USDT
+  - ANKR/USDT
+  - MIRA/USDT
+  - NMR/USDT
+  - XPL/USDT
+  - GRIFFAIN/USDT
+  - QNT/USDT
+  - PARTI/USDT
+  - CYS/USDT
+  - ETHW/USDT
+  - C/USDT
+  - AVA/USDT
+  - FIDA/USDT
+  - GRT/USDT
+  - SAFE/USDT
+  - ME/USDT
+  - YGG/USDT
+  - F/USDT
+  - COST/USDT
+  - KNC/USDT
+  - GPS/USDT
+  - HOME/USDT
+  - DYM/USDT
+  - BA/USDT
+  - B2/USDT
+  - BRETT/USDT
+  - CLANKER/USDT
+  - ROSE/USDT
+  - SNDK/USDT
+  - TRB/USDT
+  - TRIA/USDT
+  - Q/USDT
+  - CROSS/USDT
+  - GRASS/USDT
+  - ASR/USDT
+  - TRUST/USDT
+  - TOSHI/USDT
+  - ZBT/USDT
+  - TOWNS/USDT
+  - LAYER/USDT
+  - API3/USDT
+  - VRT/USDT
+  - BREV/USDT
+  - YB/USDT
+  - HFT/USDT
+  - VELODROME/USDT
+  - 1INCH/USDT
+  - MEME/USDT
+  - NEO/USDT
+  - RPL/USDT
+  - FORM/USDT
+  - MEGA/USDT
+  - CRO/USDT
+  - AGLD/USDT
+  - BAT/USDT
+  - RAVE/USDT
+  - ACE/USDT
+  - LSK/USDT
+  - RAY/USDT
+  - BIGTIME/USDT
+  - PYTH/USDT
+  - MRVL/USDT
+  - AWE/USDT
+  - SOON/USDT
+  - STABLE/USDT
+  - ZETA/USDT
+  - MELANIA/USDT
+  - MOCA/USDT
+  - BIRB/USDT
+  - NAORIS/USDT
+  - SSV/USDT
+  - SOPH/USDT
+  - POWER/USDT
+  - BR/USDT
+  - BOME/USDT
+  - XPIN/USDT
+  - MAV/USDT
+  - ZKC/USDT
+  - CKB/USDT
+  - SFP/USDT
+  - PRL/USDT
+  - KWEB/USDT
+  - PIPPIN/USDT
+  - POL/USDT
+  - STO/USDT
+  - VTHO/USDT
+  - CHZ/USDT
+  - TSM/USDT
+  - DASH/USDT
+  - BLUR/USDT
+  - FOGO/USDT
+  - ELSA/USDT
+  - XOM/USDT
+  - EGLD/USDT
+  - ARKM/USDT
+  - GIGGLE/USDT
+  - RARE/USDT
+  - ARK/USDT
+  - ENS/USDT
+  - UNH/USDT
+  - USTC/USDT
+  - GWEI/USDT
+  - PROM/USDT
+  - SOMI/USDT
+  - CHILLGUY/USDT
+  - DOOD/USDT
+  - W/USDT
+  - ALGO/USDT
+  - BE/USDT
+  - WOO/USDT
+  - BAN/USDT
+  - AERO/USDT
+  - SPK/USDT
+  - RUNE/USDT
+  - 0G/USDT
+  - TREE/USDT
+  - AUCTION/USDT
+  - BEAT/USDT
+  - OPEN/USDT
+  - FIGHT/USDT
+  - CBRS/USDT
+  - IOTA/USDT
+  - ROBO/USDT
+  - XPT/USDT
+  - WLFI/USDT
+  - SYRUP/USDT
+  - COMP/USDT
+  - DEXE/USDT
+  - MTL/USDT
+  - TNSR/USDT
+  - ETHFI/USDT
+  - CL/USDT
+  - UB/USDT
+  - ENJ/USDT
+  - APE/USDT
+  - SKYAI/USDT
+  - JUP/USDT
+  - 2Z/USDT
+  - A/USDT
+  - ACH/USDT
+  - ACT/USDT
+  - AEVO/USDT
+  - AIXBT/USDT
+  - ANIME/USDT
+  - AR/USDT
+  - ASTER/USDT
+  - ATH/USDT
+  - ATOM/USDT
+  - AVNT/USDT
+  - AXS/USDT
+  - BAND/USDT
+  - BARD/USDT
+  - BASED/USDT
+  - BERA/USDT
+  - BILL/USDT
+  - BIO/USDT
+  - BSB/USDT
+  - CC/USDT
+  - CFX/USDT
+  - CHIP/USDT
+  - CRV/USDT
+  - DYDX/USDT
+  - EIGEN/USDT
+  - ENA/USDT
+  - ENSO/USDT
+  - ESP/USDT
+  - FARTCOIN/USDT
+  - GALA/USDT
+  - GLM/USDT
+  - GMT/USDT
+  - GMX/USDT
+  - H/USDT
+  - HUMA/USDT
+  - ICP/USDT
+  - ICX/USDT
+  - IMX/USDT
+  - INIT/USDT
+  - INJ/USDT
+  - IP/USDT
+  - JTO/USDT
+  - KAITO/USDT
+  - KGEN/USDT
+  - KITE/USDT
+  - KMNO/USDT
+  - LDO/USDT
+  - LPT/USDT
+  - MAGIC/USDT
+  - MANA/USDT
+  - MASK/USDT
+  - MEW/USDT
+  - MINA/USDT
+  - MMT/USDT
+  - MON/USDT
+  - MORPHO/USDT
+  - MOVE/USDT
+  - NIGHT/USDT
+  - NOT/USDT
+  - ONDO/USDT
+  - ONE/USDT
+  - ONT/USDT
+  - ORDER/USDT
+  - ORDI/USDT
+  - PENDLE/USDT
+  - PENGU/USDT
+  - PEOPLE/USDT
+  - PNUT/USDT
+  - POPCAT/USDT
+  - PROVE/USDT
+  - PUMP/USDT
+  - RENDER/USDT
+  - RIVER/USDT
+  - RSR/USDT
+  - S/USDT
+  - SAHARA/USDT
+  - SAND/USDT
+  - SEI/USDT
+  - SENT/USDT
+  - SHELL/USDT
+  - SKY/USDT
+  - SNX/USDT
+  - SPACE/USDT
+  - SPX/USDT
+  - STRK/USDT
+  - STX/USDT
+  - TAO/USDT
+  - THETA/USDT
+  - TIA/USDT
+  - TRUMP/USDT
+  - TURBO/USDT
+  - VIRTUAL/USDT
+  - WAL/USDT
+  - WCT/USDT
+  - WLD/USDT
+  - ZAMA/USDT
+  - ZEC/USDT
+  - ZIL/USDT
+  - ZK/USDT
+  - ZKP/USDT
+  - ZORA/USDT
+  - ZRO/USDT
+  - ZRX/USDT
+  - AIGENSYN/USDT
+  - AIN/USDT
+  - AIO/USDT
+  - AKT/USDT
+  - ALCH/USDT
+  - ALT/USDT
+  - ARC/USDT
+  - ARIA/USDT
+  - ARPA/USDT
+  - BANANA/USDT
+  - BANANAS31/USDT
+  - BANK/USDT
+  - BAS/USDT
+  - BB/USDT
+  - BNT/USDT
+  - BSV/USDT
+  - C98/USDT
+  - CELR/USDT
+  - CETUS/USDT
+  - CFG/USDT
+  - CGPT/USDT
+  - CHR/USDT
+  - COOKIE/USDT
+  - CVC/USDT
+  - CYBER/USDT
+  - DEEP/USDT
+  - DOGS/USDT
+  - ERA/USDT
+  - FET/USDT
+  - FF/USDT
+  - CTR/USDT
+  - FRAX/USDT
+  - G/USDT
+  - GENIUS/USDT
+  - HIVE/USDT
+  - HYPER/USDT
+  - ID/USDT
+  - ILV/USDT
+  - IN/USDT
+  - IO/USDT
+  - IRYS/USDT
+  - JASMY/USDT
+  - JCT/USDT
+  - JST/USDT
+  - KAIA/USDT
+  - KAS/USDT
+  - KAVA/USDT
+  - LYN/USDT
+  - MAGMA/USDT
+  - MANTRA/USDT
+  - MOVR/USDT
+  - NIL/USDT
+  - NXPC/USDT
+  - OG/USDT
+  - ONG/USDT
+  - ORCA/USDT
+  - PAXG/USDT
+  - POLYX/USDT
+  - POWR/USDT
+  - RED/USDT
+  - SIREN/USDT
+  - SKR/USDT
+  - SONIC/USDT
+  - SPELL/USDT
+  - STBL/USDT
+  - STG/USDT
+  - SUN/USDT
+  - SUPER/USDT
+  - US/USDT
+  - USUAL/USDT
+  - VANRY/USDT
+  - VELVET/USDT
+  - VVV/USDT
+  - XAN/USDT
+  - XAUT/USDT
+  - XMR/USDT
+  - XVS/USDT
+  - 1000000MOG/USDT
+  - 1000BONK/USDT
+  - 1000CAT/USDT
+  - 1000RATS/USDT
+  - 1000SATS/USDT
+  - 1000XEC/USDT
+  - 1MBABYDOGE/USDT
+  - ACX/USDT
+  - AGT/USDT
+  - AIA/USDT
+  - AIOT/USDT
+  - AKE/USDT
+  - ALL/USDT
+  - ALPINE/USDT
+  - AMD/USDT
+  - ARM/USDT
+  - AVAAI/USDT
+  - AVGO/USDT
+  - AXL/USDT
+  - BEAMX/USDT
+  - BEL/USDT
+  - BLUAI/USDT
+  - BMT/USDT
+  - BRKB/USDT
+  - BROCCOLIF3B/USDT
+  - BTR/USDT
+  - BULLA/USDT
+  - BZ/USDT
+  - CLO/USDT
+  - COLLECT/USDT
+  - COS/USDT
+  - CRWV/USDT
+  - CSCO/USDT
+  - D/USDT
+  - DRAM/USDT
+  - DUSK/USDT
+  - EDEN/USDT
+  - EDU/USDT
+  - EVAA/USDT
+  - EWJ/USDT
+  - EWY/USDT
+  - FHE/USDT
+  - FLOKI/USDT
+  - FLOW/USDT
+  - GE/USDT
+  - GUA/USDT
+  - HANA/USDT
+  - HEI/USDT
+  - HEMI/USDT
+  - HIGH/USDT
+  - HMSTR/USDT
+  - HOT/USDT
+  - INTC/USDT
+  - JELLYJELLY/USDT
+  - KOMA/USDT
+  - LIGHT/USDT
+  - LLY/USDT
+  - LUNA/USDT
+  - LUNC/USDT
+  - MAVIA/USDT
+  - MBOX/USDT
+  - MITO/USDT
+  - MSFT/USDT
+  - MU/USDT
+  - NFLX/USDT
+  - NFP/USDT
+  - NOM/USDT
+  - ON/USDT
+  - PI/USDT
+  - PLAY/USDT
+  - PROMPT/USDT
+  - PROS/USDT
+  - PTB/USDT
+  - QCOM/USDT
+  - RIF/USDT
+  - RLC/USDT
+  - SAGA/USDT
+  - SANTOS/USDT
+  - SCR/USDT
+  - SMCI/USDT
+  - SNOW/USDT
+  - SOLV/USDT
+  - SOXL/USDT
+  - STAR/USDT
+  - SWARMS/USDT
+  - SXT/USDT
+  - SYN/USDT
+  - TA/USDT
+  - TAKE/USDT
+  - TRUTH/USDT
+  - TURTLE/USDT
+  - TWT/USDT
+  - USAR/USDT
+  - VIC/USDT
+  - WMT/USDT
+  - XAG/USDT
+  - XAU/USDT
+  - XNY/USDT
+  - XPD/USDT
+  - XVG/USDT
+  - YFI/USDT
+  - ZEN/USDT
+  - ZEREBRO/USDT
   mode: curated_long_tail
-  target_symbol_count: 405
-  max_symbol_count: 500
+  target_symbol_count: 536
+  max_symbol_count: 536
   include_symbols: []
   exclude_symbols:
-    - BTC/USDT
-    - ETH/USDT
-    - SOL/USDT
-    - BNB/USDT
-    - XRP/USDT
-    - DOGE/USDT
-    - ADA/USDT
-    - TRX/USDT
-    - LINK/USDT
-    - AVAX/USDT
-    - LTC/USDT
-    - BCH/USDT
-    - DOT/USDT
+  - AAVE/USDT
+  - ADA/USDT
+  - APT/USDT
+  - ARB/USDT
+  - AVAX/USDT
+  - BCH/USDT
+  - BNB/USDT
+  - BTC/USDT
+  - DOGE/USDT
+  - DOT/USDT
+  - ETC/USDT
+  - ETH/USDT
+  - FIL/USDT
+  - HBAR/USDT
+  - HYPE/USDT
+  - LINK/USDT
+  - LTC/USDT
+  - NEAR/USDT
+  - OP/USDT
+  - PEPE/USDT
+  - SHIB/USDT
+  - SOL/USDT
+  - SUI/USDT
+  - TON/USDT
+  - TRX/USDT
+  - UNI/USDT
+  - WIF/USDT
+  - XLM/USDT
+  - XRP/USDT
   min_24h_quote_volume: 1000000

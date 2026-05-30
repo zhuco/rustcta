@@ -107,6 +107,24 @@ impl FeeModel {
                 + self.fee_amount(taker_exchange, FeeRole::Taker, notional_usdt),
         }
     }
+
+    pub fn estimate_dual_taker_round_trip(
+        &self,
+        long_exchange: &ExchangeId,
+        short_exchange: &ExchangeId,
+        notional_usdt: f64,
+    ) -> FeeBreakdown {
+        FeeBreakdown {
+            maker_entry_fee: 0.0,
+            taker_hedge_fee: self.fee_amount(long_exchange, FeeRole::Taker, notional_usdt)
+                + self.fee_amount(short_exchange, FeeRole::Taker, notional_usdt),
+            maker_close_fee: 0.0,
+            taker_close_fee: self.fee_amount(long_exchange, FeeRole::Taker, notional_usdt)
+                + self.fee_amount(short_exchange, FeeRole::Taker, notional_usdt),
+            emergency_close_fee: self.fee_amount(long_exchange, FeeRole::Taker, notional_usdt)
+                + self.fee_amount(short_exchange, FeeRole::Taker, notional_usdt),
+        }
+    }
 }
 
 impl Default for FeeModel {

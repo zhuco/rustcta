@@ -3,17 +3,18 @@
 //! This module owns strategy-specific adapter construction so binaries do not
 //! duplicate exchange credential, position-mode, and private stream wiring.
 
-use super::{CrossExchangeArbitrageConfig, PrivateWsRuntimeConfig};
-use crate::core::config::ApiKeys;
+use super::CrossExchangeArbitrageConfig;
 use crate::core::exchange::Exchange;
-use crate::exchanges::adapters::{
-    private_perp_trading_adapter_for_with_base_url_and_instruments, ExchangeTradingAdapter,
-    PrivatePerpExchange, PrivateRestAuth, PrivateWsAuth, PrivateWsRunConfig,
+use crate::exchanges::adapters::{PrivatePerpExchange, PrivateWsAuth, PrivateWsRunConfig};
+pub use crate::exchanges::registry::{
+    build_core_exchange_for_exchange, build_trading_adapter_for_exchange,
+    build_trading_adapter_for_exchange_with_instruments, configured_position_mode,
+    private_perp_exchange, private_rest_auth_for_exchange, private_ws_auth_for_exchange,
 };
-use crate::exchanges::{BinanceExchange, OkxExchange};
-use crate::execution::{ExecutionRouter, PositionMode, TradingAdapter};
+use crate::execution::{ExecutionRouter, TradingAdapter};
 use crate::market::{exchange_symbol_for, ExchangeId, ExchangeSymbol, InstrumentMeta};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,17 +106,12 @@ pub fn build_cross_arb_live_runtime_parts(
     let private_ws_specs = build_private_ws_runtime_specs(
         config,
         live_enabled_exchanges(config).into_iter().map(|exchange| {
-            let symbols = config
-                .universe
-                .symbols
-                .iter()
-                .map(|symbol| exchange_symbol_for(&exchange, symbol))
-                .collect::<Vec<_>>();
             let ws_instruments = instruments
                 .iter()
                 .filter(|item| item.exchange == exchange)
                 .cloned()
                 .collect::<Vec<_>>();
+            let symbols = private_ws_symbols_for_exchange(config, &exchange, &ws_instruments);
             (exchange, symbols, ws_instruments)
         }),
     )?;
@@ -127,48 +123,38 @@ pub fn build_cross_arb_live_runtime_parts(
     })
 }
 
-pub fn build_trading_adapter_for_exchange(
+fn private_ws_symbols_for_exchange(
     config: &CrossExchangeArbitrageConfig,
     exchange: &ExchangeId,
-) -> Result<Arc<dyn TradingAdapter>> {
-    build_trading_adapter_for_exchange_with_instruments(config, exchange, Vec::new())
-}
-
-pub fn build_trading_adapter_for_exchange_with_instruments(
-    config: &CrossExchangeArbitrageConfig,
-    exchange: &ExchangeId,
-    instruments: impl IntoIterator<Item = InstrumentMeta>,
-) -> Result<Arc<dyn TradingAdapter>> {
-    match exchange {
-        ExchangeId::Binance | ExchangeId::Okx => {
-            let core_exchange = build_core_exchange_for_exchange(config, exchange)?;
-            Ok(Arc::new(
-                ExchangeTradingAdapter::new(exchange.clone(), core_exchange)
-                    .with_position_mode(configured_position_mode(config, exchange))
-                    .with_instruments(instruments),
-            ))
-        }
-        ExchangeId::Bitget
-        | ExchangeId::Gate
-        | ExchangeId::Bybit
-        | ExchangeId::Mexc
-        | ExchangeId::Htx => {
-            let private_exchange = private_perp_exchange(exchange)
-                .ok_or_else(|| anyhow!("{exchange} private perpetual adapter is not registered"))?;
-            let auth = private_rest_auth_for_exchange(config, exchange)?;
-            private_perp_trading_adapter_for_with_base_url_and_instruments(
-                private_exchange,
-                auth,
-                configured_position_mode(config, exchange),
-                config
-                    .exchanges
-                    .get(exchange)
-                    .and_then(|runtime| runtime.private_rest_base_url.as_deref()),
-                instruments,
-            )
-        }
-        ExchangeId::Other(_) => anyhow::bail!("{exchange} trading adapter is not registered"),
+    instruments: &[InstrumentMeta],
+) -> Vec<ExchangeSymbol> {
+    let universe = config
+        .universe
+        .symbols
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut seen = HashSet::new();
+    let mut symbols = instruments
+        .iter()
+        .filter(|instrument| instrument.exchange == *exchange)
+        .filter(|instrument| instrument.status.allows_closes())
+        .filter(|instrument| universe.contains(&instrument.canonical_symbol))
+        .filter_map(|instrument| {
+            seen.insert(instrument.exchange_symbol.clone())
+                .then(|| instrument.exchange_symbol.clone())
+        })
+        .collect::<Vec<_>>();
+    if symbols.is_empty() {
+        symbols = config
+            .universe
+            .symbols
+            .iter()
+            .map(|symbol| exchange_symbol_for(exchange, symbol))
+            .filter(|symbol| seen.insert(symbol.clone()))
+            .collect();
     }
+    symbols
 }
 
 pub fn build_private_ws_runtime_specs(
@@ -206,79 +192,6 @@ pub fn build_private_ws_runtime_specs(
     Ok(specs)
 }
 
-pub fn private_rest_auth_for_exchange(
-    config: &CrossExchangeArbitrageConfig,
-    exchange: &ExchangeId,
-) -> Result<PrivateRestAuth> {
-    let api_keys = api_keys_for_exchange(config, exchange)?;
-    Ok(PrivateRestAuth {
-        api_key: api_keys.api_key,
-        api_secret: api_keys.api_secret,
-        passphrase: api_keys.passphrase,
-        demo_trading: config
-            .exchanges
-            .get(exchange)
-            .map(|runtime| runtime.demo_trading)
-            .unwrap_or(false),
-    })
-}
-
-pub fn private_ws_auth_for_exchange(
-    config: &CrossExchangeArbitrageConfig,
-    exchange: &ExchangeId,
-) -> Result<PrivateWsAuth> {
-    let api_keys = api_keys_for_exchange(config, exchange)?;
-    let account_id = config
-        .exchanges
-        .get(exchange)
-        .and_then(|runtime| runtime.account_id.clone())
-        .or(api_keys.memo);
-    if *exchange == ExchangeId::Gate {
-        let account_id = account_id.as_deref().ok_or_else(|| {
-            anyhow!("gate private websocket requires exchanges.gate.account_id to be set to the numeric Gate user id")
-        })?;
-        if !account_id.chars().all(|ch| ch.is_ascii_digit()) {
-            anyhow::bail!(
-                "gate private websocket account_id must be the numeric Gate user id; current value is non-numeric"
-            );
-        }
-    }
-    Ok(PrivateWsAuth {
-        api_key: api_keys.api_key,
-        api_secret: api_keys.api_secret,
-        passphrase: api_keys.passphrase,
-        account_id,
-        demo_trading: config
-            .exchanges
-            .get(exchange)
-            .map(|runtime| runtime.demo_trading)
-            .unwrap_or(false),
-    })
-}
-
-pub fn configured_position_mode(
-    config: &CrossExchangeArbitrageConfig,
-    exchange: &ExchangeId,
-) -> PositionMode {
-    config
-        .exchanges
-        .get(exchange)
-        .and_then(|runtime| runtime.position_mode.as_deref())
-        .map(position_mode_from_config)
-        .unwrap_or(PositionMode::OneWay)
-}
-
-pub fn private_perp_exchange(exchange: &ExchangeId) -> Option<PrivatePerpExchange> {
-    match exchange {
-        ExchangeId::Bitget => Some(PrivatePerpExchange::Bitget),
-        ExchangeId::Gate => Some(PrivatePerpExchange::Gate),
-        ExchangeId::Bybit => Some(PrivatePerpExchange::Bybit),
-        ExchangeId::Mexc => Some(PrivatePerpExchange::Mexc),
-        ExchangeId::Htx => Some(PrivatePerpExchange::Htx),
-        _ => None,
-    }
-}
-
 pub fn live_enabled_exchanges(config: &CrossExchangeArbitrageConfig) -> Vec<ExchangeId> {
     config
         .universe
@@ -306,76 +219,11 @@ pub fn exchange_route_status(
         .unwrap_or(crate::market::RouteStatus::Healthy)
 }
 
-fn api_keys_for_exchange(
-    config: &CrossExchangeArbitrageConfig,
-    exchange: &ExchangeId,
-) -> Result<ApiKeys> {
-    let prefix = config
-        .exchanges
-        .get(exchange)
-        .and_then(|runtime| runtime.env_prefix.as_deref())
-        .unwrap_or_else(|| exchange.as_str());
-    ApiKeys::from_env(prefix).map_err(|err| anyhow!(err.to_string()))
-}
-
-pub fn build_core_exchange_for_exchange(
-    config: &CrossExchangeArbitrageConfig,
-    exchange: &ExchangeId,
-) -> Result<Arc<dyn Exchange>> {
-    let api_keys = api_keys_for_exchange(config, exchange)?;
-    match exchange {
-        ExchangeId::Binance => Ok(Arc::new(BinanceExchange::new(
-            crate::core::config::Config {
-                name: "binance".to_string(),
-                testnet: false,
-                spot_base_url: "https://api.binance.com".to_string(),
-                futures_base_url: "https://fapi.binance.com".to_string(),
-                ws_spot_url: "wss://stream.binance.com:9443".to_string(),
-                ws_futures_url: "wss://fstream.binance.com".to_string(),
-            },
-            api_keys,
-        ))),
-        ExchangeId::Okx => Ok(Arc::new(OkxExchange::new(
-            crate::core::config::Config {
-                name: "okx".to_string(),
-                testnet: false,
-                spot_base_url: "https://www.okx.com".to_string(),
-                futures_base_url: "https://www.okx.com".to_string(),
-                ws_spot_url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
-                ws_futures_url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
-            },
-            api_keys,
-        ))),
-        _ => anyhow::bail!("{exchange} core Exchange adapter is not registered"),
-    }
-}
-
-fn position_mode_from_config(value: &str) -> PositionMode {
-    if matches!(
-        value.to_ascii_lowercase().as_str(),
-        "hedge" | "hedged" | "long_short"
-    ) {
-        PositionMode::Hedge
-    } else {
-        PositionMode::OneWay
-    }
-}
-
-impl From<PrivateWsRuntimeConfig> for PrivateWsRunConfig {
-    fn from(value: PrivateWsRuntimeConfig) -> Self {
-        Self {
-            connect_timeout_ms: value.connect_timeout_ms,
-            reconnect_delay_ms: value.reconnect_delay_ms,
-            heartbeat_interval_ms: value.heartbeat_interval_ms,
-            subscribe_interval_ms: value.subscribe_interval_ms,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cross_exchange_arbitrage::ExchangeOperatingMode;
+    use crate::execution::PositionMode;
     use crate::market::{CanonicalSymbol, ContractType, ExchangeSymbol, InstrumentStatus};
 
     #[test]
@@ -576,6 +424,51 @@ mod tests {
         std::env::remove_var("GATE_LIVE_PARTS_TEST_API_SECRET");
         std::env::remove_var("BINANCE_LIVE_PARTS_TEST_API_KEY");
         std::env::remove_var("BINANCE_LIVE_PARTS_TEST_API_SECRET");
+    }
+
+    #[test]
+    fn runtime_should_filter_private_ws_symbols_to_loaded_instruments() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.enabled_exchanges = vec![ExchangeId::Gate];
+        config.universe.symbols = vec![
+            crate::market::CanonicalSymbol::new("BTC", "USDT"),
+            crate::market::CanonicalSymbol::new("FAKE", "USDT"),
+        ];
+        let gate = config.exchanges.entry(ExchangeId::Gate).or_default();
+        gate.enabled = Some(true);
+        gate.private_ws_enabled = true;
+        gate.account_id = Some("20011".to_string());
+        gate.env_prefix = Some("GATE_FILTER_TEST".to_string());
+        std::env::set_var("GATE_FILTER_TEST_API_KEY", "key");
+        std::env::set_var("GATE_FILTER_TEST_API_SECRET", "secret");
+        let instruments = vec![crate::market::InstrumentMeta::new(
+            ExchangeId::Gate,
+            crate::market::CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+            "BTC",
+            "USDT",
+            "USDT",
+            crate::market::ContractType::LinearPerpetual,
+            1.0,
+            0.1,
+            0.001,
+            0.001,
+            5.0,
+            1,
+            3,
+            crate::market::InstrumentStatus::Trading,
+        )];
+
+        let parts = build_cross_arb_live_runtime_parts(&config, instruments).unwrap();
+
+        assert_eq!(parts.private_ws_specs.len(), 1);
+        assert_eq!(
+            parts.private_ws_specs[0].symbols,
+            vec![ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")]
+        );
+
+        std::env::remove_var("GATE_FILTER_TEST_API_KEY");
+        std::env::remove_var("GATE_FILTER_TEST_API_SECRET");
     }
 
     #[test]

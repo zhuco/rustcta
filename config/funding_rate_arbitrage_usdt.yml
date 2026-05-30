@@ -1,0 +1,24 @@
+mode: observe
+
+universe:
+  enabled_exchanges:
+    - binance
+    - bitget
+    - gate
+  quote_asset: USDT
+  contract_type: perpetual
+  symbol_allowlist: []
+  symbol_blocklist: []
+
+selection:
+  per_exchange_limit: 1
+  min_funding_rate: -0.005
+  require_next_funding_time: true
+  max_funding_snapshot_age_ms: 5000
+  min_seconds_to_settlement_at_scan: null
+  max_seconds_to_settlement_at_scan: null
+
+notifications:
+  enabled: true
+  wecom_webhook_env: FUNDING_ARB_WECOM_WEBHOOK_URL
+  wecom_webhook_url: null

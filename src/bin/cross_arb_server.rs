@@ -16,10 +16,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, ValueEnum};
-use rustcta::exchanges::adapters::{
-    BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
-    HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
-};
+use rustcta::exchanges::registry as exchange_registry;
 use rustcta::market::{
     exchange_symbol_for, mark_book_freshness, BookLevel, CanonicalSymbol, ContractType, ExchangeId,
     InstrumentMeta, InstrumentStatus, MarketDataAdapter, MarketFundingSnapshot, MarketStateCache,
@@ -2790,30 +2787,7 @@ fn configured_market_adapters(
         .universe
         .enabled_exchanges
         .iter()
-        .filter_map(|exchange| match exchange {
-            ExchangeId::Binance => {
-                Some(Box::new(BinanceMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Okx => {
-                Some(Box::new(OkxMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Bitget => {
-                Some(Box::new(BitgetMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Gate => {
-                Some(Box::new(GateMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Bybit => {
-                Some(Box::new(BybitMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Mexc => {
-                Some(Box::new(MexcMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Htx => {
-                Some(Box::new(HtxMarketAdapter) as Box<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Other(_) => None,
-        })
+        .filter_map(exchange_registry::market_adapter)
         .collect()
 }
 
@@ -2824,29 +2798,9 @@ fn configured_market_adapter_arcs(
         .universe
         .enabled_exchanges
         .iter()
-        .filter_map(|exchange| match exchange {
-            ExchangeId::Binance => {
-                Some(Arc::new(BinanceMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Okx => {
-                Some(Arc::new(OkxMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Bitget => {
-                Some(Arc::new(BitgetMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Gate => {
-                Some(Arc::new(GateMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Bybit => {
-                Some(Arc::new(BybitMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Mexc => {
-                Some(Arc::new(MexcMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Htx => {
-                Some(Arc::new(HtxMarketAdapter) as Arc<dyn MarketDataAdapter + Send + Sync>)
-            }
-            ExchangeId::Other(_) => None,
+        .filter_map(|exchange| {
+            exchange_registry::market_adapter(exchange)
+                .map(Arc::<dyn MarketDataAdapter + Send + Sync>::from)
         })
         .collect()
 }

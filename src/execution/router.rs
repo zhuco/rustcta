@@ -219,6 +219,19 @@ impl ExecutionRouter {
         adapter.cancel_order(command).await
     }
 
+    pub async fn route_get_order(
+        &self,
+        query: crate::execution::OrderQuery,
+    ) -> Result<crate::execution::OrderState> {
+        let adapter = self.adapters.get(&query.exchange).ok_or_else(|| {
+            anyhow!(
+                "missing trading adapter for exchange {}",
+                query.exchange.as_str()
+            )
+        })?;
+        adapter.get_order(query).await
+    }
+
     pub async fn route_cancel_all(&self, command: CancelAllCommand) -> Result<CancelAllAck> {
         if self.dry_run {
             return Ok(CancelAllAck::dry_run(&command, Utc::now()));

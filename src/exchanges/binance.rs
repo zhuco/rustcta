@@ -442,6 +442,22 @@ impl BinanceExchange {
         })
     }
 
+    fn order_id_lookup_param(order_id: &str) -> (&'static str, String) {
+        if !order_id.is_empty() && order_id.chars().all(|ch| ch.is_ascii_digit()) {
+            ("orderId", order_id.to_string())
+        } else {
+            ("origClientOrderId", order_id.to_string())
+        }
+    }
+
+    fn algo_order_id_lookup_param(order_id: &str) -> (&'static str, String) {
+        if !order_id.is_empty() && order_id.chars().all(|ch| ch.is_ascii_digit()) {
+            ("algoId", order_id.to_string())
+        } else {
+            ("clientAlgoId", order_id.to_string())
+        }
+    }
+
     // 辅助方法：逐个创建订单
     async fn create_orders_one_by_one(
         &self,
@@ -1576,7 +1592,8 @@ impl Exchange for BinanceExchange {
 
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), exchange_symbol);
-        params.insert("orderId".to_string(), order_id.to_string());
+        let (order_id_key, order_id_value) = Self::order_id_lookup_param(order_id);
+        params.insert(order_id_key.to_string(), order_id_value);
 
         let response: serde_json::Value = match self
             .send_signed_request("DELETE", endpoint, params.clone(), market_type)
@@ -1589,7 +1606,9 @@ impl Exchange for BinanceExchange {
                 }
                 let mut algo_params = params;
                 algo_params.remove("orderId");
-                algo_params.insert("algoId".to_string(), order_id.to_string());
+                algo_params.remove("origClientOrderId");
+                let (algo_id_key, algo_id_value) = Self::algo_order_id_lookup_param(order_id);
+                algo_params.insert(algo_id_key.to_string(), algo_id_value);
                 let primary_err_text = primary_err.to_string();
                 if primary_err_text.contains("Unknown order sent") {
                     log::debug!(
@@ -1659,7 +1678,8 @@ impl Exchange for BinanceExchange {
 
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), exchange_symbol);
-        params.insert("orderId".to_string(), order_id.to_string());
+        let (order_id_key, order_id_value) = Self::order_id_lookup_param(order_id);
+        params.insert(order_id_key.to_string(), order_id_value);
 
         let response: serde_json::Value = match self
             .send_signed_request("GET", endpoint, params.clone(), market_type)
@@ -1672,7 +1692,9 @@ impl Exchange for BinanceExchange {
                 }
                 let mut algo_params = params;
                 algo_params.remove("orderId");
-                algo_params.insert("algoId".to_string(), order_id.to_string());
+                algo_params.remove("origClientOrderId");
+                let (algo_id_key, algo_id_value) = Self::algo_order_id_lookup_param(order_id);
+                algo_params.insert(algo_id_key.to_string(), algo_id_value);
                 log::warn!("Binance 查单主路径失败，尝试 Algo 查单: {}", primary_err);
                 self.send_signed_request("GET", algo_endpoint, algo_params, market_type)
                     .await?
@@ -4600,6 +4622,22 @@ impl MessageHandler for ReconnectMessageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancel_lookup_params_should_use_client_id_for_non_numeric_ids() {
+        assert_eq!(
+            BinanceExchange::order_id_lookup_param("932769711"),
+            ("orderId", "932769711".to_string())
+        );
+        assert_eq!(
+            BinanceExchange::order_id_lookup_param("crossarb-ls-mk-1-e589299c"),
+            ("origClientOrderId", "crossarb-ls-mk-1-e589299c".to_string())
+        );
+        assert_eq!(
+            BinanceExchange::algo_order_id_lookup_param("crossarb-ls-mk-1-e589299c"),
+            ("clientAlgoId", "crossarb-ls-mk-1-e589299c".to_string())
+        );
+    }
 
     #[test]
     fn parse_execution_report_should_return_actionable_order_event() {

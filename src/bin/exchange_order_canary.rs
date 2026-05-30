@@ -4,19 +4,15 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use clap::{Parser, ValueEnum};
-use rustcta::exchanges::adapters::{
-    private_perp_trading_adapter_for_with_base_url_and_instruments, BinanceMarketAdapter,
-    BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter, HtxMarketAdapter,
-    MexcMarketAdapter,
-};
+use rustcta::exchanges::registry::market_adapter;
 use rustcta::execution::{
     ClosePositionCommand, OrderCommand, OrderCommandStatus, OrderIntent, OrderSide, OrderType,
     PositionMode, PositionSide, TimeInForce, TradingAdapter,
 };
-use rustcta::market::{CanonicalSymbol, ExchangeId, InstrumentMeta, MarketDataAdapter};
+use rustcta::market::{CanonicalSymbol, ExchangeId, InstrumentMeta};
 use rustcta::strategies::cross_exchange_arbitrage::{
     build_trading_adapter_for_exchange_with_instruments, configured_position_mode,
-    private_perp_exchange, private_rest_auth_for_exchange, CrossExchangeArbitrageConfig,
+    CrossExchangeArbitrageConfig,
 };
 use serde::Serialize;
 
@@ -428,35 +424,11 @@ fn parse_exchange(value: &str) -> Result<ExchangeId> {
     }
 }
 
-fn market_adapter(exchange: &ExchangeId) -> Option<Box<dyn MarketDataAdapter + Send + Sync>> {
-    match exchange {
-        ExchangeId::Binance => Some(Box::new(BinanceMarketAdapter)),
-        ExchangeId::Bitget => Some(Box::new(BitgetMarketAdapter)),
-        ExchangeId::Gate => Some(Box::new(GateMarketAdapter)),
-        ExchangeId::Bybit => Some(Box::new(BybitMarketAdapter)),
-        ExchangeId::Mexc => Some(Box::new(MexcMarketAdapter)),
-        ExchangeId::Htx => Some(Box::new(HtxMarketAdapter)),
-        ExchangeId::Okx | ExchangeId::Other(_) => None,
-    }
-}
-
 fn build_adapter(
     config: &CrossExchangeArbitrageConfig,
     exchange: &ExchangeId,
     instruments: impl IntoIterator<Item = InstrumentMeta>,
 ) -> Result<Arc<dyn TradingAdapter>> {
-    if let Some(private_exchange) = private_perp_exchange(exchange) {
-        return private_perp_trading_adapter_for_with_base_url_and_instruments(
-            private_exchange,
-            private_rest_auth_for_exchange(config, exchange)?,
-            configured_position_mode(config, exchange),
-            config
-                .exchanges
-                .get(exchange)
-                .and_then(|runtime| runtime.private_rest_base_url.as_deref()),
-            instruments,
-        );
-    }
     build_trading_adapter_for_exchange_with_instruments(config, exchange, instruments)
 }
 

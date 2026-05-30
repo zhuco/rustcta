@@ -17,6 +17,8 @@ pub struct MakerFill {
     pub filled_quantity: f64,
     pub hedge_price: Option<f64>,
     pub max_slippage_pct: Option<f64>,
+    #[serde(default)]
+    pub reduce_only: bool,
     pub filled_at: DateTime<Utc>,
 }
 
@@ -41,23 +43,43 @@ impl HedgePlanner {
             return None;
         }
 
-        let (intent, side, position_side) = match fill.maker_side {
-            OrderSide::Sell => (
+        let (intent, side, position_side, leg) = match (fill.reduce_only, fill.maker_side) {
+            (false, OrderSide::Sell) => (
                 OrderIntent::HedgeLongTaker,
                 OrderSide::Buy,
                 PositionSide::Long,
+                BundleLeg::Hedge,
             ),
-            OrderSide::Buy => (
+            (false, OrderSide::Buy) => (
                 OrderIntent::HedgeShortTaker,
                 OrderSide::Sell,
                 PositionSide::Short,
+                BundleLeg::Hedge,
             ),
+            (true, OrderSide::Sell) => (
+                OrderIntent::CloseShortTaker,
+                OrderSide::Buy,
+                PositionSide::Short,
+                BundleLeg::CloseShort,
+            ),
+            (true, OrderSide::Buy) => (
+                OrderIntent::CloseLongTaker,
+                OrderSide::Sell,
+                PositionSide::Long,
+                BundleLeg::CloseLong,
+            ),
+        };
+
+        let order_type = if fill.hedge_price.is_some() {
+            OrderType::Limit
+        } else {
+            OrderType::Market
         };
 
         Some(OrderCommand::new(
             fill.mode,
             fill.bundle_id.clone(),
-            BundleLeg::Hedge,
+            leg,
             1,
             fill.taker_exchange.clone(),
             fill.canonical_symbol.clone(),
@@ -65,12 +87,12 @@ impl HedgePlanner {
             intent,
             side,
             position_side,
-            OrderType::Market,
+            order_type,
             fill.filled_quantity,
             fill.hedge_price,
             TimeInForce::Ioc,
             false,
-            false,
+            fill.reduce_only,
             fill.max_slippage_pct,
             fill.filled_at,
         ))
@@ -200,14 +222,41 @@ mod tests {
             filled_quantity: 0.25,
             hedge_price: Some(100.0),
             max_slippage_pct: Some(0.001),
+            reduce_only: false,
             filled_at: now,
         })
         .unwrap();
 
         assert_eq!(command.intent, OrderIntent::HedgeLongTaker);
         assert_eq!(command.side, OrderSide::Buy);
+        assert_eq!(command.order_type, OrderType::Limit);
         assert_eq!(command.time_in_force, TimeInForce::Ioc);
         assert_eq!(command.quantity, 0.25);
+    }
+
+    #[test]
+    fn hedge_should_create_reduce_only_close_for_close_maker_fill() {
+        let now = Utc::now();
+        let command = HedgePlanner::hedge_for_maker_fill(&MakerFill {
+            bundle_id: "bundle-1".to_string(),
+            mode: RuntimeMode::LiveSmall,
+            canonical_symbol: CanonicalSymbol::new("btc", "usdt"),
+            taker_exchange: ExchangeId::Okx,
+            taker_exchange_symbol: ExchangeSymbol::new(ExchangeId::Okx, "BTC-USDT-SWAP"),
+            maker_side: OrderSide::Sell,
+            filled_quantity: 0.25,
+            hedge_price: None,
+            max_slippage_pct: Some(0.001),
+            reduce_only: true,
+            filled_at: now,
+        })
+        .unwrap();
+
+        assert_eq!(command.intent, OrderIntent::CloseShortTaker);
+        assert_eq!(command.side, OrderSide::Buy);
+        assert_eq!(command.order_type, OrderType::Market);
+        assert_eq!(command.position_side, PositionSide::Short);
+        assert!(command.reduce_only);
     }
 
     #[test]
