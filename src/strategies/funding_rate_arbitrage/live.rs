@@ -12,7 +12,7 @@ use crate::exchanges::registry::{
 use crate::execution::{
     ClosePositionCommand, ExchangeBalance, ExchangePosition, FillEvent, FillQuery, OrderAck,
     OrderCommand, OrderCommandStatus, OrderIntent, OrderSide, OrderType, PositionMode,
-    PositionSide, TimeInForce, TradingAdapter,
+    PositionSide, TimeInForce, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
     CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta, MarketDataAdapter,
@@ -398,7 +398,7 @@ async fn execute_exchange_plan(
     )
     .with_context(|| format!("{exchange} build trading adapter"))?;
     let position_mode = configured_position_mode(&config, &exchange);
-    let position_side = execution_position_side(position_mode);
+    let position_side = execution_position_side(position_mode, adapter.capabilities());
 
     if let Err(err) = preflight_account(&adapter, &instrument, position_side, &config).await {
         result.fail(err);
@@ -875,8 +875,11 @@ fn has_nonzero_position(positions: &[ExchangePosition]) -> bool {
         .any(|position| position.quantity.abs() > 1e-9)
 }
 
-fn execution_position_side(position_mode: PositionMode) -> PositionSide {
-    if position_mode.is_hedge() {
+fn execution_position_side(
+    position_mode: PositionMode,
+    capabilities: TradingCapabilities,
+) -> PositionSide {
+    if position_mode.is_hedge() && capabilities.supports_hedge_mode {
         PositionSide::Long
     } else {
         PositionSide::Net
@@ -1018,5 +1021,27 @@ mod tests {
         let next = next_scan_time(now, 55).unwrap();
 
         assert_eq!(next, Utc.with_ymd_and_hms(2026, 5, 30, 12, 55, 0).unwrap());
+    }
+
+    #[test]
+    fn execution_position_side_should_fallback_to_net_when_hedge_is_not_supported() {
+        let mut capabilities = TradingCapabilities::default();
+        capabilities.supports_hedge_mode = false;
+
+        assert_eq!(
+            execution_position_side(PositionMode::Hedge, capabilities),
+            PositionSide::Net
+        );
+    }
+
+    #[test]
+    fn execution_position_side_should_use_long_when_hedge_is_supported() {
+        let mut capabilities = TradingCapabilities::default();
+        capabilities.supports_hedge_mode = true;
+
+        assert_eq!(
+            execution_position_side(PositionMode::Hedge, capabilities),
+            PositionSide::Long
+        );
     }
 }

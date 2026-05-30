@@ -531,4 +531,27 @@ mod tests {
         assert_eq!(book.sequence, Some(6440317516));
         assert!(book.is_usable());
     }
+
+    #[test]
+    fn gate_should_parse_non_ascii_contract_name() {
+        let value = serde_json::json!({
+            "name": "草根文化_USDT",
+            "funding_rate": "-0.009172",
+            "funding_next_apply": 1780142400,
+            "quanto_multiplier": "1000",
+            "order_price_round": "0.0000001",
+            "order_size_round": "1",
+            "order_size_min": 1,
+            "status": "trading"
+        });
+
+        let instrument = parse_instrument(&value).expect("instrument");
+        assert_eq!(instrument.canonical_symbol.as_pair(), "草根文化/USDT");
+        assert_eq!(instrument.exchange_symbol.symbol, "草根文化_USDT");
+
+        let funding = parse_funding(&value, Utc::now()).expect("funding");
+        assert_eq!(funding.canonical_symbol.as_pair(), "草根文化/USDT");
+        assert_eq!(funding.exchange_symbol.unwrap().symbol, "草根文化_USDT");
+        assert_eq!(funding.funding_rate, -0.009172);
+    }
 }
