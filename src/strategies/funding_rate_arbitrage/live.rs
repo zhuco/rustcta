@@ -457,6 +457,16 @@ async fn execute_exchange_plan(
         .or(entry.mark_price)
         .ok_or_else(|| anyhow!("{exchange} has no usable reference price"))?;
     let quantity = plan_quantity(config.execution.notional_usdt, reference_price, &instrument)?;
+    let planned_notional = quantity * reference_price * contract_size(&instrument);
+    if planned_notional > config.execution.notional_usdt * 1.2 {
+        result.fail(anyhow!(
+            "planned notional {:.4} USDT exceeds requested {:.4} USDT safety cap for {}",
+            planned_notional,
+            config.execution.notional_usdt,
+            instrument.canonical_symbol
+        ));
+        return Ok(result);
+    }
     result.planned_quantity = Some(quantity);
 
     let suffix = Utc::now().timestamp_millis();
@@ -797,7 +807,7 @@ fn open_order_command(
         time_in_force: TimeInForce::Ioc,
         post_only: false,
         reduce_only: false,
-        client_order_id: format!("{}-funding-open-{suffix}", instrument.exchange.as_str()),
+        client_order_id: funding_client_order_id(&instrument.exchange, "op", suffix, None),
         max_slippage_pct: Some(config.execution.max_slippage_pct),
         status: OrderCommandStatus::Planned,
         created_at: Utc::now(),
@@ -927,7 +937,7 @@ async fn submit_market_close(
         instrument.exchange_symbol.clone(),
         position_side,
         quantity,
-        format!("{}-funding-close-market-{suffix}", exchange.as_str()),
+        funding_client_order_id(exchange, "cm", suffix, None),
         Utc::now(),
     );
     close.max_slippage_pct = Some(config.execution.max_slippage_pct);
@@ -990,10 +1000,7 @@ fn close_limit_order_command(
         time_in_force: TimeInForce::Gtc,
         post_only: false,
         reduce_only: true,
-        client_order_id: format!(
-            "{}-funding-close-limit-{suffix}-{attempt}",
-            instrument.exchange.as_str()
-        ),
+        client_order_id: funding_client_order_id(&instrument.exchange, "cl", suffix, Some(attempt)),
         max_slippage_pct: None,
         status: OrderCommandStatus::Planned,
         created_at: Utc::now(),
@@ -1182,12 +1189,46 @@ fn plan_quantity(notional: f64, price: f64, instrument: &InstrumentMeta) -> Resu
     Ok(quantity)
 }
 
+fn contract_size(instrument: &InstrumentMeta) -> f64 {
+    if instrument.contract_size.is_finite() && instrument.contract_size > 0.0 {
+        instrument.contract_size
+    } else {
+        1.0
+    }
+}
+
 fn normalize_number(value: f64) -> f64 {
     format!("{value:.12}")
         .trim_end_matches('0')
         .trim_end_matches('.')
         .parse()
         .unwrap_or(value)
+}
+
+fn funding_client_order_id(
+    exchange: &ExchangeId,
+    action: &str,
+    suffix: i64,
+    attempt: Option<u32>,
+) -> String {
+    let exchange_code = compact_exchange_code(exchange);
+    match attempt {
+        Some(attempt) => format!("fa-{exchange_code}-{action}-{suffix}-{attempt}"),
+        None => format!("fa-{exchange_code}-{action}-{suffix}"),
+    }
+}
+
+fn compact_exchange_code(exchange: &ExchangeId) -> &str {
+    match exchange {
+        ExchangeId::Binance => "bi",
+        ExchangeId::Bitget => "bg",
+        ExchangeId::Gate => "gt",
+        ExchangeId::Okx => "ok",
+        ExchangeId::Bybit => "bb",
+        ExchangeId::Mexc => "mx",
+        ExchangeId::Htx => "hx",
+        ExchangeId::Other(_) => "ot",
+    }
 }
 
 async fn sleep_until_utc(target: DateTime<Utc>) {
@@ -1345,6 +1386,24 @@ mod tests {
             execution_position_side(PositionMode::Hedge, capabilities),
             PositionSide::Long
         );
+    }
+
+    #[test]
+    fn funding_client_order_id_should_fit_binance_limit() {
+        let suffix = 1_780_217_879_939;
+        let ids = [
+            funding_client_order_id(&ExchangeId::Binance, "op", suffix, None),
+            funding_client_order_id(&ExchangeId::Binance, "cl", suffix, Some(3)),
+            funding_client_order_id(&ExchangeId::Binance, "cm", suffix, None),
+        ];
+
+        for id in ids {
+            assert!(
+                id.len() < 36,
+                "Binance requires client order id length < 36, got {} for {id}",
+                id.len()
+            );
+        }
     }
 
     #[test]

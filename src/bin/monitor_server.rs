@@ -1699,6 +1699,7 @@ async fn build_account_manager(accounts_path: &Path) -> Result<Arc<AccountManage
             id: account_id.clone(),
             exchange: item.exchange.clone(),
             api_key_env: item.env_prefix.clone(),
+            position_mode: None,
             enabled: true,
             max_positions: item
                 .settings

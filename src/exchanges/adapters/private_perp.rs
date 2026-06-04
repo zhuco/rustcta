@@ -159,6 +159,14 @@ impl PrivateRestRequestSpec {
             .join("&")
     }
 
+    pub fn raw_query_string(&self) -> String {
+        self.query
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&")
+    }
+
     pub fn body_string(&self) -> String {
         self.body.as_ref().map(Value::to_string).unwrap_or_default()
     }
@@ -1052,7 +1060,7 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
         supports_reduce_only: true,
         supports_hedge_mode: matches!(
             exchange,
-            ExchangeId::Bitget | ExchangeId::Bybit | ExchangeId::Mexc
+            ExchangeId::Bitget | ExchangeId::Gate | ExchangeId::Bybit | ExchangeId::Mexc
         ),
         supports_client_order_id: true,
         supports_leverage: true,
@@ -3417,7 +3425,7 @@ fn gate_rest_headers(
     request: &PrivateRestRequestSpec,
     timestamp_secs: i64,
 ) -> Result<BTreeMap<String, String>> {
-    let query = request.query_string();
+    let query = request.raw_query_string();
     let sign_path = if request.path.starts_with("/api/v4/") {
         request.path.clone()
     } else {
@@ -6404,6 +6412,50 @@ mod tests {
             .get_symbol_account_config(&symbol)
             .unwrap();
         assert_eq!(config.path, "/futures/usdt/positions/BTC_USDT");
+    }
+
+    #[test]
+    fn gate_signature_should_use_unescaped_query_string() {
+        let spec = GatePrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(
+                ExchangeId::Gate,
+                "草根文化_USDT",
+            )))
+            .unwrap();
+
+        assert_eq!(
+            spec.query_string(),
+            "contract=%E8%8D%89%E6%A0%B9%E6%96%87%E5%8C%96_USDT&status=open"
+        );
+        assert_eq!(
+            spec.raw_query_string(),
+            "contract=草根文化_USDT&status=open"
+        );
+
+        let transport = ReqwestPrivateRestTransport::new(
+            PrivatePerpExchange::Gate,
+            PrivateRestAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+                demo_trading: false,
+            },
+        )
+        .unwrap();
+        let headers = gate_rest_headers(&transport.auth, &spec, 1_700_000_000).unwrap();
+        let expected = gate_rest_signature(
+            "secret",
+            "GET",
+            "/api/v4/futures/usdt/orders",
+            "contract=草根文化_USDT&status=open",
+            "",
+            1_700_000_000,
+        );
+
+        assert_eq!(
+            headers.get("SIGN").map(String::as_str),
+            Some(expected.as_str())
+        );
     }
 
     #[test]

@@ -3560,6 +3560,7 @@ impl BinanceWebSocketClient {
                 "kline" => self.parse_kline_message(&json),
                 "executionReport" => self.parse_execution_report(&json), // 现货用户订单执行报告
                 "ORDER_TRADE_UPDATE" => self.parse_order_trade_update(&json), // 期货用户订单更新
+                "TRADE_LITE" => self.parse_trade_lite(&json),            // 期货轻量级成交事件
                 "outboundAccountPosition" => self.parse_account_update(&json), // 账户余额更新
                 "ACCOUNT_UPDATE" => self.parse_account_update(&json),    // 期货账户更新
                 "balanceUpdate" => self.parse_account_update(&json),     // 余额变动
@@ -3954,6 +3955,49 @@ impl BinanceWebSocketClient {
             timestamp: DateTime::from_timestamp(trade.trade_time / 1000, 0)
                 .unwrap_or_else(|| Utc::now()),
             order_id: None,
+            fee: None,
+        }))
+    }
+
+    /// 解析TRADE_LITE事件（期货轻量级成交事件）
+    fn parse_trade_lite(&self, json: &serde_json::Value) -> Result<WsMessage> {
+        let symbol = json
+            .get("s")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let quantity = json
+            .get("q")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let price = json
+            .get("p")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        let side = json.get("S").and_then(|v| v.as_str()).unwrap_or("BUY");
+        let trade_time = json
+            .get("T")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(|| Utc::now().timestamp_millis());
+
+        Ok(WsMessage::Trade(Trade {
+            id: format!("trade_{}", trade_time),
+            symbol,
+            side: match side {
+                "SELL" => OrderSide::Sell,
+                _ => OrderSide::Buy,
+            },
+            amount: quantity,
+            price,
+            timestamp: DateTime::from_timestamp(trade_time / 1000, 0).unwrap_or_else(|| Utc::now()),
+            order_id: json
+                .get("c")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
             fee: None,
         }))
     }
@@ -4702,6 +4746,34 @@ mod tests {
                 assert_eq!(position.margin_type.as_deref(), Some("isolated"));
                 assert_eq!(position.leverage, Some(10));
                 assert!((position.unrealized_pnl - 12.34).abs() < 1e-9);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_trade_lite_should_return_trade_not_unknown_error() {
+        let client =
+            BinanceWebSocketClient::new("wss://example.invalid".to_string(), MarketType::Futures);
+        let msg = r#"{
+            "e":"TRADE_LITE",
+            "E":1710000000000,
+            "T":1710000000123,
+            "s":"BNBUSDC",
+            "q":"0.01",
+            "p":"710.12",
+            "S":"SELL",
+            "c":"grid-1"
+        }"#;
+
+        let message = client.parse_binance_message(msg).expect("parse trade lite");
+        match message {
+            WsMessage::Trade(trade) => {
+                assert_eq!(trade.symbol, "BNBUSDC");
+                assert_eq!(trade.side, OrderSide::Sell);
+                assert_eq!(trade.amount, 0.01);
+                assert_eq!(trade.price, 710.12);
+                assert_eq!(trade.order_id.as_deref(), Some("grid-1"));
             }
             other => panic!("unexpected message: {:?}", other),
         }

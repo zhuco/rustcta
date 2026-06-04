@@ -102,6 +102,28 @@ fn is_same_strategy_process_running(pid: u32, strategy: &str, config_file: &str)
         && cmdline.contains(config_file)
 }
 
+async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut terminate = signal(SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result?;
+                Ok(())
+            }
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+        Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 加载环境变量
@@ -224,6 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             id: id.to_string(),
             exchange: exchange.to_string(),
             api_key_env: env_prefix.to_string(),
+            position_mode: None,
             enabled: true,
             max_positions,
             max_orders_per_symbol: max_orders,
@@ -281,7 +304,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -296,7 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.start().await?;
 
             // 保持运行直到收到停止信号
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -339,7 +362,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 log::info!("等待 Ctrl+C 以结束所有对冲网格子进程...");
-                tokio::signal::ctrl_c().await?;
+                shutdown_signal().await?;
                 log::info!("收到停止信号，开始终止子进程...");
 
                 for mut child in children {
@@ -360,7 +383,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -372,7 +395,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -384,7 +407,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -405,7 +428,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭 short ladder live 策略...");
             strategy.stop().await?;
         }
@@ -429,7 +452,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -450,7 +473,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -471,7 +494,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭震荡行情马丁策略...");
             strategy.stop().await?;
         }
@@ -492,7 +515,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭吸筹策略...");
             strategy.stop().await?;
         }
@@ -507,7 +530,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.start().await?;
 
             // 保持运行直到收到停止信号
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
@@ -521,7 +544,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.start().await?;
 
             // 等待退出信号
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到退出信号，正在停止AS策略...");
 
             strategy.stop().await?;
@@ -541,7 +564,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // 保持运行直到收到停止信号
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，跟单策略将自动关闭");
         }
         "avellaneda_stoikov" => {
@@ -573,7 +596,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭做市策略...");
             strategy.stop().await?;
         }
@@ -593,7 +616,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Grid Scale 策略已创建，开始运行...");
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭Grid Scale策略...");
             strategy.stop().await?;
         }
@@ -621,7 +644,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭 beta hedge market maker...");
             strategy.stop().await?;
         }
@@ -641,7 +664,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭订单流策略...");
             strategy.stop().await?;
         }
@@ -653,7 +676,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             strategy.start().await?;
 
-            tokio::signal::ctrl_c().await?;
+            shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭 OBI 高频剥头皮策略...");
             strategy.stop().await?;
         }

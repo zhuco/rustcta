@@ -4,6 +4,7 @@ pub mod binance;
 pub mod bitmart;
 pub mod config;
 pub mod gateway;
+pub mod gateway_exchange;
 pub mod mock;
 pub mod okx;
 pub mod registry;
@@ -15,6 +16,7 @@ pub mod hyperliquid; // Hyperliquid 永续（单向持仓）
 // 导出交易所实现
 pub use binance::BinanceExchange;
 pub use bitmart::BitmartExchange;
+pub use gateway_exchange::GatewayExchange;
 pub use mock::MockExchange;
 pub use okx::OkxExchange;
 // pub use meteora::MeteoraExchange;  // 暂时禁用

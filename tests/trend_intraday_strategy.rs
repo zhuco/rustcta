@@ -45,6 +45,7 @@ async fn build_account_manager() -> Arc<AccountManager> {
             exchange: "binance".to_string(),
             enabled: true,
             api_key_env: "BINANCE_0".to_string(),
+            position_mode: None,
             max_positions: 10,
             max_orders_per_symbol: 10,
         })

@@ -27,6 +27,8 @@ use crate::strategies::cross_exchange_arbitrage::{
     RejectReason,
 };
 
+type PositionClaimKey = (ExchangeId, CanonicalSymbol, PositionSide);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CrossArbRuntimeState {
     pub config: CrossExchangeArbitrageConfig,
@@ -90,7 +92,18 @@ impl CrossArbRuntimeState {
             .retain(|opportunity| opportunity.canonical_symbol != *canonical_symbol);
         let mut scanned = scan_opportunities(canonical_symbol, snapshots, &self.config, now);
         let existing_one_way = self.position_manager.active_one_way_exposure_keys();
+        let symbols_with_unmanaged_positions = self
+            .account_unpaired_exchange_positions()
+            .into_iter()
+            .map(|position| position.canonical_symbol)
+            .collect::<HashSet<_>>();
         for opportunity in &mut scanned {
+            if symbols_with_unmanaged_positions.contains(&opportunity.canonical_symbol) {
+                opportunity
+                    .reject_reasons
+                    .push(RejectReason::UnpairedExchangePosition);
+                opportunity.can_open = false;
+            }
             let maker_side = match opportunity.maker_side {
                 StrategyOrderSide::Buy => crate::execution::PositionSide::Long,
                 StrategyOrderSide::Sell => crate::execution::PositionSide::Short,
@@ -691,7 +704,7 @@ impl CrossArbRuntimeState {
         checked_at: DateTime<Utc>,
     ) {
         let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
-        let mut claimed = HashSet::new();
+        let mut claimed = HashMap::new();
         for long_position in exchange_positions.iter().filter(|position| {
             position.position_side == crate::execution::PositionSide::Long
                 && position.quantity.abs() > quantity_tolerance
@@ -704,22 +717,9 @@ impl CrossArbRuntimeState {
                     && position.canonical_symbol == long_position.canonical_symbol
                     && position.exchange != long_position.exchange
             }) {
-                let long_key = (
-                    long_position.exchange.clone(),
-                    long_position.canonical_symbol.clone(),
-                    long_position.position_side,
-                );
-                let short_key = (
-                    short_position.exchange.clone(),
-                    short_position.canonical_symbol.clone(),
-                    short_position.position_side,
-                );
-                if claimed.contains(&long_key) || claimed.contains(&short_key) {
-                    continue;
-                }
-                if (long_position.quantity.abs() - short_position.quantity.abs()).abs()
-                    > quantity_tolerance
-                {
+                let long_available = remaining_position_qty(&claimed, long_position);
+                let short_available = remaining_position_qty(&claimed, short_position);
+                if long_available <= quantity_tolerance || short_available <= quantity_tolerance {
                     continue;
                 }
                 if !self
@@ -733,23 +733,34 @@ impl CrossArbRuntimeState {
                 if let Some(existing_bundle_id) =
                     self.active_bundle_id_for_position_pair(long_position, short_position)
                 {
+                    let Some(restore_qty) = self.bundle_restore_quantity(
+                        &existing_bundle_id,
+                        long_available,
+                        short_available,
+                    ) else {
+                        continue;
+                    };
+                    let long_claim_position =
+                        exchange_position_with_quantity(long_position, restore_qty);
+                    let short_claim_position =
+                        exchange_position_with_quantity(short_position, restore_qty);
                     self.ensure_position_for_existing_bundle(
                         &existing_bundle_id,
-                        long_position,
-                        short_position,
+                        &long_claim_position,
+                        &short_claim_position,
                         checked_at,
                     );
                     let _ = self
                         .position_manager
                         .reconcile_bundle_open_from_exchange_positions(
                             &existing_bundle_id,
-                            exchange_positions,
+                            &[long_claim_position.clone(), short_claim_position.clone()],
                             quantity_tolerance,
                             checked_at,
                         );
                     self.upsert_open_hedge_record_for_bundle(&existing_bundle_id, checked_at);
-                    claimed.insert(long_key);
-                    claimed.insert(short_key);
+                    claim_position_qty(&mut claimed, long_position, restore_qty);
+                    claim_position_qty(&mut claimed, short_position, restore_qty);
                     continue;
                 }
 
@@ -757,56 +768,108 @@ impl CrossArbRuntimeState {
                     .preferred_open_hedge_record_for_position_pair(long_position, short_position)
                 {
                     let bundle_id = record.bundle_id.clone();
+                    let Some(restore_qty) =
+                        self.record_restore_quantity(&record, long_available, short_available)
+                    else {
+                        continue;
+                    };
+                    let long_claim_position =
+                        exchange_position_with_quantity(long_position, restore_qty);
+                    let short_claim_position =
+                        exchange_position_with_quantity(short_position, restore_qty);
                     self.restore_bundle_from_position_pair(
                         &bundle_id,
                         format!("restored-{}", bundle_id),
                         record.opened_at,
                         record.entry_net_edge_pct.unwrap_or_default(),
-                        long_position,
-                        short_position,
+                        &long_claim_position,
+                        &short_claim_position,
                         checked_at,
                     );
-                    claimed.insert(long_key);
-                    claimed.insert(short_key);
+                    claim_position_qty(&mut claimed, long_position, restore_qty);
+                    claim_position_qty(&mut claimed, short_position, restore_qty);
                     if self.config.risk.restored_position_blocks_new_entries {
                         self.set_close_only();
                     }
                     continue;
                 }
 
-                let bundle_id = format!(
-                    "restored-{}-{}-{}",
-                    long_position
-                        .canonical_symbol
-                        .to_string()
-                        .replace('/', "")
-                        .to_ascii_lowercase(),
-                    long_position.exchange.as_str(),
-                    short_position.exchange.as_str()
-                );
-                if self.open_bundles.contains_key(&bundle_id)
-                    || self.position_manager.contains_bundle(&bundle_id)
-                {
-                    continue;
-                }
-
-                self.restore_bundle_from_position_pair(
-                    &bundle_id,
-                    format!("restored-{}", bundle_id),
-                    Some(checked_at),
-                    0.0,
-                    long_position,
-                    short_position,
-                    checked_at,
-                );
-                claimed.insert(long_key);
-                claimed.insert(short_key);
-                if self.config.risk.restored_position_blocks_new_entries {
+                self.risk_events.push(RiskEventReadModel {
+                    event_id: format!(
+                        "external-position-pair-{}-{}-{}-{}",
+                        long_position
+                            .canonical_symbol
+                            .to_string()
+                            .replace('/', ""),
+                        long_position.exchange.as_str(),
+                        short_position.exchange.as_str(),
+                        checked_at.timestamp_millis()
+                    ),
+                    canonical_symbol: Some(long_position.canonical_symbol.clone()),
+                    exchange: None,
+                    reason: RejectReason::UnpairedExchangePosition,
+                    message: format!(
+                        "external account position pair ignored: long {} {} qty={} short {} {} qty={}; strategy only manages its own bundles",
+                        long_position.exchange,
+                        long_position.canonical_symbol,
+                        long_position.quantity,
+                        short_position.exchange,
+                        short_position.canonical_symbol,
+                        short_position.quantity
+                    ),
+                    created_at: checked_at,
+                });
+                if self.config.risk.orphan_exposure_blocks_new_entries {
                     self.set_close_only();
                 }
             }
         }
+        self.restore_open_single_leg_bundles_from_account_positions(
+            exchange_positions,
+            &mut claimed,
+            checked_at,
+        );
+        self.complete_satisfied_open_hedge_repair_tasks(checked_at);
+        self.ensure_open_hedge_repair_tasks(checked_at);
         self.dedupe_open_hedge_records_by_pair(checked_at);
+    }
+
+    fn bundle_restore_quantity(
+        &self,
+        bundle_id: &str,
+        long_available: f64,
+        short_available: f64,
+    ) -> Option<f64> {
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let available_qty = long_available.min(short_available);
+        if available_qty <= quantity_tolerance || !available_qty.is_finite() {
+            return None;
+        }
+        let planned_qty = self
+            .position_manager
+            .bundle(bundle_id)
+            .map(|position| planned_open_qty(position))
+            .filter(|quantity| *quantity > quantity_tolerance && quantity.is_finite());
+        let quantity = planned_qty.unwrap_or(available_qty).min(available_qty);
+        (quantity > quantity_tolerance).then_some(quantity)
+    }
+
+    fn record_restore_quantity(
+        &self,
+        record: &HedgeRecordReadModel,
+        long_available: f64,
+        short_available: f64,
+    ) -> Option<f64> {
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let available_qty = long_available.min(short_available);
+        if available_qty <= quantity_tolerance || !available_qty.is_finite() {
+            return None;
+        }
+        let repair_qty = self
+            .open_repair_quantity_for_record(&record.bundle_id)
+            .filter(|quantity| *quantity > quantity_tolerance && quantity.is_finite());
+        let quantity = repair_qty.unwrap_or(available_qty).min(available_qty);
+        (quantity > quantity_tolerance).then_some(quantity)
     }
 
     fn preferred_open_hedge_record_for_position_pair(
@@ -825,6 +888,202 @@ impl CrossArbRuntimeState {
             })
             .max_by(|left, right| compare_hedge_record_reuse_priority(left, right))
             .cloned()
+    }
+
+    fn restore_open_single_leg_bundles_from_account_positions(
+        &mut self,
+        exchange_positions: &[ExchangePosition],
+        claimed: &mut HashMap<PositionClaimKey, f64>,
+        checked_at: DateTime<Utc>,
+    ) {
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let positions = exchange_positions
+            .iter()
+            .filter(|position| {
+                matches!(
+                    position.position_side,
+                    PositionSide::Long | PositionSide::Short
+                ) && position.quantity.abs() > quantity_tolerance
+                    && position.entry_price.unwrap_or_default() > 0.0
+                    && self
+                        .config
+                        .universe
+                        .symbols
+                        .contains(&position.canonical_symbol)
+                    && self
+                        .config
+                        .universe
+                        .enabled_exchanges
+                        .contains(&position.exchange)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for position in positions {
+            if remaining_position_qty(claimed, &position) <= quantity_tolerance {
+                continue;
+            }
+            let records = self.open_hedge_records_for_single_position(&position);
+            for record in records {
+                let available_qty = remaining_position_qty(claimed, &position);
+                if available_qty <= quantity_tolerance {
+                    break;
+                }
+                let restore_qty = self
+                    .open_repair_quantity_for_record(&record.bundle_id)
+                    .unwrap_or(available_qty)
+                    .min(available_qty);
+                if restore_qty <= quantity_tolerance || !restore_qty.is_finite() {
+                    continue;
+                }
+                self.restore_bundle_from_single_position(
+                    &record,
+                    &position,
+                    restore_qty,
+                    checked_at,
+                );
+                claim_position_qty(claimed, &position, restore_qty);
+                self.set_close_only();
+            }
+        }
+    }
+
+    fn open_hedge_records_for_single_position(
+        &self,
+        position: &ExchangePosition,
+    ) -> Vec<HedgeRecordReadModel> {
+        let mut records = self
+            .hedge_records
+            .values()
+            .filter(|record| {
+                should_keep_loaded_hedge_record(record)
+                    && !self.position_manager.contains_bundle(&record.bundle_id)
+                    && record.canonical_symbol == position.canonical_symbol
+                    && self.hedge_record_can_claim_single_position_for_open_repair(record, position)
+                    && (hedge_record_expects_open_repair(record)
+                        || self.has_active_open_hedge_repair_task(&record.bundle_id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| compare_hedge_record_reuse_priority(right, left));
+        records
+    }
+
+    fn hedge_record_can_claim_single_position_for_open_repair(
+        &self,
+        record: &HedgeRecordReadModel,
+        position: &ExchangePosition,
+    ) -> bool {
+        if !hedge_record_can_claim_single_position(record, position) {
+            return false;
+        }
+
+        let active_open_tasks = self
+            .hedge_repair_tasks
+            .values()
+            .filter(|task| {
+                task.bundle_id == record.bundle_id
+                    && !task.reduce_only
+                    && !matches!(task.status, HedgeRepairTaskStatus::Completed)
+            })
+            .collect::<Vec<_>>();
+
+        if active_open_tasks.is_empty() {
+            return true;
+        }
+
+        active_open_tasks
+            .iter()
+            .any(|task| repair_task_expects_opposite_existing_leg(task, position))
+    }
+
+    fn open_repair_quantity_for_record(&self, bundle_id: &str) -> Option<f64> {
+        self.hedge_repair_tasks
+            .values()
+            .filter(|task| {
+                task.bundle_id == bundle_id
+                    && !task.reduce_only
+                    && !matches!(task.status, HedgeRepairTaskStatus::Completed)
+                    && task.quantity > 0.0
+                    && task.quantity.is_finite()
+            })
+            .map(|task| task.quantity)
+            .max_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
+    }
+
+    fn restore_bundle_from_single_position(
+        &mut self,
+        record: &HedgeRecordReadModel,
+        position: &ExchangePosition,
+        quantity: f64,
+        checked_at: DateTime<Utc>,
+    ) {
+        let bundle_id = record.bundle_id.clone();
+        let entry_price = position.entry_price.unwrap_or_default();
+        let target_notional = quantity * entry_price.max(0.0);
+        if !self.position_manager.contains_bundle(&bundle_id) {
+            let mut bundle = ArbitrageBundle::new(
+                bundle_id.clone(),
+                self.config.mode,
+                position.canonical_symbol.clone(),
+                record.long_exchange.clone(),
+                record.short_exchange.clone(),
+                position.exchange.clone(),
+                single_position_opposite_exchange(record, position),
+                target_notional,
+                checked_at,
+            );
+            bundle.status = BundleStatus::OrphanLeg;
+            bundle.open_time = record.opened_at.or(Some(checked_at));
+            self.register_bundle_position(
+                &bundle,
+                quantity,
+                record.entry_net_edge_pct.unwrap_or_default(),
+                checked_at,
+            );
+        }
+
+        let _ = self.position_manager.replace_open_leg_route(
+            &bundle_id,
+            position.position_side,
+            position.exchange.clone(),
+            position.exchange_symbol.clone(),
+            quantity,
+            checked_at,
+        );
+        let _ = self.position_manager.record_leg_fill(
+            &bundle_id,
+            position.position_side,
+            quantity,
+            entry_price,
+            0.0,
+            checked_at,
+        );
+        let _ = self.position_manager.mark_bundle_status(
+            &bundle_id,
+            BundleStatus::OrphanLeg,
+            checked_at,
+        );
+
+        let route = route_for_single_position(record, position);
+        self.open_bundles
+            .entry(bundle_id.clone())
+            .and_modify(|bundle| {
+                bundle.status = SimulatedBundleStatus::OrphanLeg;
+                bundle.route = route.clone();
+                bundle.target_notional_usdt = target_notional;
+                bundle.opened_at = bundle.opened_at.or(record.opened_at).or(Some(checked_at));
+                bundle.updated_at = checked_at;
+            })
+            .or_insert_with(|| SimulatedBundleState {
+                bundle_id: bundle_id.clone(),
+                opportunity_id: format!("restored-{}", bundle_id),
+                status: SimulatedBundleStatus::OrphanLeg,
+                route,
+                target_notional_usdt: target_notional,
+                opened_at: record.opened_at.or(Some(checked_at)),
+                updated_at: checked_at,
+            });
+        self.refresh_hedge_record_from_position(&bundle_id, checked_at);
     }
 
     fn restore_bundle_from_position_pair(
@@ -990,11 +1249,16 @@ impl CrossArbRuntimeState {
                 exchange: Some(position.exchange.clone()),
                 reason: RejectReason::UnpairedExchangePosition,
                 message: format!(
-                    "unpaired exchange position detected: exchange={} symbol={} side={:?} qty={}; close-only enabled",
+                    "unpaired exchange position detected: exchange={} symbol={} side={:?} qty={}; {}",
                     position.exchange,
                     position.canonical_symbol,
                     position.position_side,
-                    position.quantity
+                    position.quantity,
+                    if should_close_only {
+                        "close-only enabled"
+                    } else {
+                        "ignored because orphan_exposure_blocks_new_entries=false"
+                    }
                 ),
                 created_at: checked_at,
             });
@@ -1009,25 +1273,31 @@ impl CrossArbRuntimeState {
         exchange_positions: &[ExchangePosition],
     ) -> Vec<ExchangePosition> {
         let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
-        let claimed = self
+        let mut claimed = HashMap::new();
+        for bundle in self
             .position_manager
             .bundles()
             .filter(|bundle| !bundle.status.is_terminal())
-            .flat_map(|bundle| {
-                [
-                    (
+        {
+            if bundle.long_leg.filled_qty > quantity_tolerance {
+                *claimed
+                    .entry((
                         bundle.long_leg.exchange.clone(),
                         bundle.canonical_symbol.clone(),
                         PositionSide::Long,
-                    ),
-                    (
+                    ))
+                    .or_default() += bundle.long_leg.filled_qty;
+            }
+            if bundle.short_leg.filled_qty > quantity_tolerance {
+                *claimed
+                    .entry((
                         bundle.short_leg.exchange.clone(),
                         bundle.canonical_symbol.clone(),
                         PositionSide::Short,
-                    ),
-                ]
-            })
-            .collect::<std::collections::HashSet<_>>();
+                    ))
+                    .or_default() += bundle.short_leg.filled_qty;
+            }
+        }
         exchange_positions
             .iter()
             .filter(|position| {
@@ -1042,23 +1312,14 @@ impl CrossArbRuntimeState {
                         .universe
                         .enabled_exchanges
                         .contains(&position.exchange)
-                    && !claimed.contains(&(
-                        position.exchange.clone(),
-                        position.canonical_symbol.clone(),
-                        position.position_side,
-                    ))
+                    && remaining_position_qty(&claimed, position) > quantity_tolerance
             })
-            .filter(|position| {
-                !exchange_positions.iter().any(|other| {
-                    other.quantity.abs() > quantity_tolerance
-                        && other.canonical_symbol == position.canonical_symbol
-                        && other.exchange != position.exchange
-                        && other.position_side != position.position_side
-                        && (other.quantity.abs() - position.quantity.abs()).abs()
-                            <= quantity_tolerance.max(position.quantity.abs() * 0.001)
-                })
+            .map(|position| {
+                exchange_position_with_quantity(
+                    position,
+                    remaining_position_qty(&claimed, position),
+                )
             })
-            .cloned()
             .collect()
     }
 
@@ -1354,6 +1615,24 @@ impl CrossArbRuntimeState {
                 && !task.reduce_only
                 && !matches!(task.status, HedgeRepairTaskStatus::Completed)
         })
+    }
+
+    fn complete_satisfied_open_hedge_repair_tasks(&mut self, now: DateTime<Utc>) {
+        let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let bundle_ids = self
+            .hedge_repair_tasks
+            .values()
+            .filter(|task| {
+                !task.reduce_only && !matches!(task.status, HedgeRepairTaskStatus::Completed)
+            })
+            .filter_map(|task| self.position_manager.bundle(&task.bundle_id))
+            .filter(|position| position.is_fully_open(quantity_tolerance))
+            .map(|position| position.bundle_id.clone())
+            .collect::<HashSet<_>>();
+
+        for bundle_id in bundle_ids {
+            self.refresh_hedge_record_from_position(&bundle_id, now);
+        }
     }
 
     fn open_hedge_repair_command_for_position(
@@ -1730,6 +2009,132 @@ fn should_keep_loaded_hedge_record(record: &HedgeRecordReadModel) -> bool {
         && record.long_exchange != record.short_exchange
 }
 
+fn position_claim_key(position: &ExchangePosition) -> PositionClaimKey {
+    (
+        position.exchange.clone(),
+        position.canonical_symbol.clone(),
+        position.position_side,
+    )
+}
+
+fn remaining_position_qty(
+    claimed: &HashMap<PositionClaimKey, f64>,
+    position: &ExchangePosition,
+) -> f64 {
+    (position.quantity.abs()
+        - claimed
+            .get(&position_claim_key(position))
+            .copied()
+            .unwrap_or(0.0))
+    .max(0.0)
+}
+
+fn claim_position_qty(
+    claimed: &mut HashMap<PositionClaimKey, f64>,
+    position: &ExchangePosition,
+    quantity: f64,
+) {
+    let entry = claimed.entry(position_claim_key(position)).or_default();
+    *entry += quantity.max(0.0);
+}
+
+fn exchange_position_with_quantity(position: &ExchangePosition, quantity: f64) -> ExchangePosition {
+    let mut position = position.clone();
+    position.quantity = quantity;
+    position
+}
+
+fn planned_open_qty(position: &super::position::BundlePosition) -> f64 {
+    position
+        .long_leg
+        .intended_qty
+        .max(position.long_leg.filled_qty)
+        .min(
+            position
+                .short_leg
+                .intended_qty
+                .max(position.short_leg.filled_qty),
+        )
+}
+
+fn hedge_record_can_claim_single_position(
+    record: &HedgeRecordReadModel,
+    position: &ExchangePosition,
+) -> bool {
+    match position.position_side {
+        PositionSide::Long => record.long_exchange == position.exchange,
+        PositionSide::Short => record.short_exchange == position.exchange,
+        PositionSide::Net => false,
+    }
+}
+
+fn repair_task_expects_opposite_existing_leg(
+    task: &HedgeRepairTaskReadModel,
+    position: &ExchangePosition,
+) -> bool {
+    match task.position_side {
+        PositionSide::Long => position.position_side == PositionSide::Short,
+        PositionSide::Short => position.position_side == PositionSide::Long,
+        PositionSide::Net => false,
+    }
+}
+
+fn hedge_record_expects_open_repair(record: &HedgeRecordReadModel) -> bool {
+    matches!(
+        record.status,
+        HedgeRecordStatus::Hedging
+            | HedgeRecordStatus::RepairPending
+            | HedgeRecordStatus::RepairSubmitted
+            | HedgeRecordStatus::RepairFailed
+    )
+}
+
+fn single_position_opposite_exchange(
+    record: &HedgeRecordReadModel,
+    position: &ExchangePosition,
+) -> ExchangeId {
+    match position.position_side {
+        PositionSide::Long => record.short_exchange.clone(),
+        PositionSide::Short => record.long_exchange.clone(),
+        PositionSide::Net => record.short_exchange.clone(),
+    }
+}
+
+fn route_for_single_position(
+    record: &HedgeRecordReadModel,
+    position: &ExchangePosition,
+) -> StrategyRoute {
+    match position.position_side {
+        PositionSide::Long => StrategyRoute {
+            long_exchange: record.long_exchange.clone(),
+            short_exchange: record.short_exchange.clone(),
+            maker_exchange: position.exchange.clone(),
+            taker_exchange: record.short_exchange.clone(),
+            maker_side: StrategyOrderSide::Buy,
+            taker_side: StrategyOrderSide::Sell,
+            maker_leg_kind: MakerLegKind::LongMakerBuy,
+        },
+        PositionSide::Short => StrategyRoute {
+            long_exchange: record.long_exchange.clone(),
+            short_exchange: record.short_exchange.clone(),
+            maker_exchange: position.exchange.clone(),
+            taker_exchange: record.long_exchange.clone(),
+            maker_side: StrategyOrderSide::Sell,
+            taker_side: StrategyOrderSide::Buy,
+            maker_leg_kind: MakerLegKind::ShortMakerSell,
+        },
+        PositionSide::Net => StrategyRoute {
+            long_exchange: record.long_exchange.clone(),
+            short_exchange: record.short_exchange.clone(),
+            maker_exchange: position.exchange.clone(),
+            taker_exchange: record.short_exchange.clone(),
+            maker_side: StrategyOrderSide::Buy,
+            taker_side: StrategyOrderSide::Sell,
+            maker_leg_kind: MakerLegKind::LongMakerBuy,
+        },
+    }
+}
+
 fn repair_task_id(bundle_id: &str, reduce_only: bool) -> String {
     let phase = if reduce_only { "close" } else { "open" };
     format!("repair-{phase}-{bundle_id}")
@@ -1778,6 +2183,7 @@ mod tests {
         PositionSide, PrivateEvent, PrivateEventKind,
     };
     use crate::market::{BookLevel, ExchangeSymbol, OrderBook5};
+    use crate::strategies::cross_exchange_arbitrage::signal::ArbSignalAction;
 
     fn book(exchange: ExchangeId, bid: f64, ask: f64) -> OrderBook5 {
         OrderBook5::new(
@@ -2028,6 +2434,54 @@ mod tests {
     }
 
     #[test]
+    fn runtime_should_block_open_for_symbol_with_unmanaged_account_position() {
+        let now = Utc::now();
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.risk.orphan_exposure_blocks_new_entries = false;
+        config.thresholds.min_open_raw_spread = 0.0;
+        config.thresholds.min_open_maker_taker_net_edge = 0.0;
+        let mut state = CrossArbRuntimeState::new(config, now);
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        state.replace_account_positions_from_rest(
+            ExchangeId::Gate,
+            &[ExchangePosition {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: symbol.clone(),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+                position_side: PositionSide::Long,
+                quantity: 0.1,
+                entry_price: Some(100.0),
+                mark_price: None,
+                unrealized_pnl: None,
+                updated_at: now,
+            }],
+            now,
+        );
+
+        let signals = state.update_from_market_snapshots(
+            &symbol,
+            &[
+                MarketSnapshot::healthy(book(ExchangeId::Binance, 100.0, 101.0)),
+                MarketSnapshot::healthy(book(ExchangeId::Gate, 104.0, 105.0)),
+            ],
+            now,
+        );
+
+        assert!(!signals.is_empty());
+        assert!(signals
+            .iter()
+            .all(|signal| matches!(signal.action, ArbSignalAction::Noop)));
+        assert!(state.opportunities.iter().any(|opportunity| {
+            opportunity.canonical_symbol == symbol
+                && !opportunity.can_open
+                && opportunity
+                    .reject_reasons
+                    .contains(&RejectReason::UnpairedExchangePosition)
+        }));
+        assert!(!state.close_only);
+    }
+
+    #[test]
     fn runtime_should_delay_close_only_until_unpaired_threshold() {
         let now = Utc::now();
         let mut config = CrossExchangeArbitrageConfig::default();
@@ -2161,7 +2615,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_restore_should_claim_only_one_pair_when_symbol_has_extra_leg() {
+    fn runtime_restore_should_ignore_external_position_pair_when_no_strategy_record() {
         let now = Utc::now();
         let mut config = CrossExchangeArbitrageConfig::default();
         config.universe.symbols = vec![CanonicalSymbol::new("NEWT", "USDT")];
@@ -2206,10 +2660,13 @@ mod tests {
         state.restore_open_bundles_from_account_positions(&positions, now);
         let unpaired = state.unpaired_exchange_positions(&positions);
 
-        assert_eq!(state.position_manager.bundles().count(), 1);
-        assert_eq!(state.hedge_record_read_models().len(), 1);
-        assert_eq!(unpaired.len(), 1);
-        assert_eq!(unpaired[0].exchange, ExchangeId::Gate);
+        assert_eq!(state.position_manager.bundles().count(), 0);
+        assert!(state.hedge_record_read_models().is_empty());
+        assert_eq!(unpaired.len(), 3);
+        assert!(state.close_only);
+        assert!(state.risk_events.iter().any(|event| event
+            .message
+            .contains("strategy only manages its own bundles")));
     }
 
     #[test]
@@ -2299,6 +2756,243 @@ mod tests {
             HedgeRepairTaskStatus::Completed
         );
         assert!(state.hedge_repair_task_read_models().is_empty());
+    }
+
+    #[test]
+    fn runtime_restore_should_leave_residual_position_quantity_unpaired() {
+        let now = Utc::now();
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.symbols = vec![CanonicalSymbol::new("SPCX", "USDT")];
+        let mut state = CrossArbRuntimeState::new(config, now);
+        let symbol = CanonicalSymbol::new("SPCX", "USDT");
+        let original_id = "bundle-signal-crossarb-spcxusdt-gate-bitget-longmakerbuy-1";
+        state.hedge_records.insert(
+            original_id.to_string(),
+            HedgeRecordReadModel {
+                record_id: original_id.to_string(),
+                bundle_id: original_id.to_string(),
+                opened_at: Some(now - chrono::Duration::minutes(10)),
+                hedge_order_submitted_at: Some(now - chrono::Duration::minutes(10)),
+                canonical_symbol: symbol.clone(),
+                long_exchange: ExchangeId::Gate,
+                short_exchange: ExchangeId::Bitget,
+                status: HedgeRecordStatus::RepairFailed,
+                entry_net_edge_pct: Some(0.004),
+                close_spread_pct: None,
+                close_net_profit_pct: None,
+                is_closed: false,
+                closed_at: None,
+                updated_at: now - chrono::Duration::minutes(1),
+            },
+        );
+        state.hedge_repair_tasks.insert(
+            repair_task_id(original_id, false),
+            HedgeRepairTaskReadModel {
+                task_id: repair_task_id(original_id, false),
+                record_id: original_id.to_string(),
+                bundle_id: original_id.to_string(),
+                canonical_symbol: symbol.clone(),
+                failed_exchange: ExchangeId::Bitget,
+                last_attempt_exchange: Some(ExchangeId::Bitget),
+                side: ExecutionOrderSide::Sell,
+                position_side: PositionSide::Short,
+                quantity: 0.03,
+                reduce_only: false,
+                status: HedgeRepairTaskStatus::Failed,
+                attempts: 2,
+                last_error: Some("previous repair failed".to_string()),
+                created_at: now - chrono::Duration::minutes(10),
+                updated_at: now - chrono::Duration::minutes(1),
+            },
+        );
+
+        let positions = vec![
+            ExchangePosition {
+                exchange: ExchangeId::Gate,
+                canonical_symbol: symbol.clone(),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "SPCX_USDT"),
+                position_side: PositionSide::Long,
+                quantity: 0.03,
+                entry_price: Some(199.04),
+                mark_price: None,
+                unrealized_pnl: None,
+                updated_at: now,
+            },
+            ExchangePosition {
+                exchange: ExchangeId::Bitget,
+                canonical_symbol: symbol,
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "SPCXUSDT"),
+                position_side: PositionSide::Short,
+                quantity: 0.06,
+                entry_price: Some(205.405),
+                mark_price: None,
+                unrealized_pnl: None,
+                updated_at: now,
+            },
+        ];
+
+        state.restore_open_bundles_from_account_positions(&positions, now);
+
+        let position = state.position_manager.bundle(original_id).unwrap();
+        assert_eq!(position.long_leg.filled_qty, 0.03);
+        assert_eq!(position.short_leg.filled_qty, 0.03);
+        assert_eq!(
+            state.hedge_repair_tasks[&repair_task_id(original_id, false)].status,
+            HedgeRepairTaskStatus::Completed
+        );
+        let unpaired = state.unpaired_exchange_positions(&positions);
+        assert_eq!(unpaired.len(), 1);
+        assert_eq!(unpaired[0].exchange, ExchangeId::Bitget);
+        assert_eq!(unpaired[0].position_side, PositionSide::Short);
+        assert!((unpaired[0].quantity - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn runtime_restore_should_reuse_persisted_single_leg_repair_record() {
+        let now = Utc::now();
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.symbols = vec![CanonicalSymbol::new("INIT", "USDT")];
+        let mut state = CrossArbRuntimeState::new(config, now);
+        let symbol = CanonicalSymbol::new("INIT", "USDT");
+        let bundle_id = "bundle-signal-crossarb-initusdt-gate-binance-longmakerbuy-1";
+        state.hedge_records.insert(
+            bundle_id.to_string(),
+            HedgeRecordReadModel {
+                record_id: bundle_id.to_string(),
+                bundle_id: bundle_id.to_string(),
+                opened_at: Some(now - chrono::Duration::minutes(10)),
+                hedge_order_submitted_at: Some(now - chrono::Duration::minutes(10)),
+                canonical_symbol: symbol.clone(),
+                long_exchange: ExchangeId::Gate,
+                short_exchange: ExchangeId::Binance,
+                status: HedgeRecordStatus::RepairFailed,
+                entry_net_edge_pct: Some(0.004),
+                close_spread_pct: None,
+                close_net_profit_pct: None,
+                is_closed: false,
+                closed_at: None,
+                updated_at: now - chrono::Duration::minutes(1),
+            },
+        );
+        state.hedge_repair_tasks.insert(
+            repair_task_id(bundle_id, false),
+            HedgeRepairTaskReadModel {
+                task_id: repair_task_id(bundle_id, false),
+                record_id: bundle_id.to_string(),
+                bundle_id: bundle_id.to_string(),
+                canonical_symbol: symbol.clone(),
+                failed_exchange: ExchangeId::Binance,
+                last_attempt_exchange: Some(ExchangeId::Binance),
+                side: ExecutionOrderSide::Sell,
+                position_side: PositionSide::Short,
+                quantity: 70.0,
+                reduce_only: false,
+                status: HedgeRepairTaskStatus::Failed,
+                attempts: 2,
+                last_error: Some("hedge order was accepted but not filled".to_string()),
+                created_at: now - chrono::Duration::minutes(10),
+                updated_at: now - chrono::Duration::minutes(1),
+            },
+        );
+
+        let positions = vec![ExchangePosition {
+            exchange: ExchangeId::Gate,
+            canonical_symbol: symbol.clone(),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Gate, "INIT_USDT"),
+            position_side: PositionSide::Long,
+            quantity: 130.0,
+            entry_price: Some(0.153),
+            mark_price: None,
+            unrealized_pnl: None,
+            updated_at: now,
+        }];
+
+        state.restore_open_bundles_from_account_positions(&positions, now);
+
+        assert!(state.position_manager.contains_bundle(bundle_id));
+        let position = state.position_manager.bundle(bundle_id).unwrap();
+        assert_eq!(position.long_leg.exchange, ExchangeId::Gate);
+        assert_eq!(position.short_leg.exchange, ExchangeId::Binance);
+        assert_eq!(position.long_leg.filled_qty, 70.0);
+        assert_eq!(position.short_leg.filled_qty, 0.0);
+        assert_eq!(
+            state.hedge_repair_task_read_models()[0].bundle_id,
+            bundle_id
+        );
+        assert_eq!(
+            state.unpaired_exchange_positions(&positions)[0].quantity,
+            60.0
+        );
+        assert!(state.close_only);
+    }
+
+    #[test]
+    fn runtime_restore_should_not_claim_repair_leg_as_single_existing_leg() {
+        let now = Utc::now();
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.symbols = vec![CanonicalSymbol::new("SPCX", "USDT")];
+        let mut state = CrossArbRuntimeState::new(config, now);
+        let symbol = CanonicalSymbol::new("SPCX", "USDT");
+        let bundle_id = "bundle-signal-crossarb-spcxusdt-gate-bitget-longmakerbuy-1";
+        state.hedge_records.insert(
+            bundle_id.to_string(),
+            HedgeRecordReadModel {
+                record_id: bundle_id.to_string(),
+                bundle_id: bundle_id.to_string(),
+                opened_at: Some(now - chrono::Duration::minutes(10)),
+                hedge_order_submitted_at: Some(now - chrono::Duration::minutes(10)),
+                canonical_symbol: symbol.clone(),
+                long_exchange: ExchangeId::Gate,
+                short_exchange: ExchangeId::Bitget,
+                status: HedgeRecordStatus::RepairFailed,
+                entry_net_edge_pct: Some(0.004),
+                close_spread_pct: None,
+                close_net_profit_pct: None,
+                is_closed: false,
+                closed_at: None,
+                updated_at: now - chrono::Duration::minutes(1),
+            },
+        );
+        state.hedge_repair_tasks.insert(
+            repair_task_id(bundle_id, false),
+            HedgeRepairTaskReadModel {
+                task_id: repair_task_id(bundle_id, false),
+                record_id: bundle_id.to_string(),
+                bundle_id: bundle_id.to_string(),
+                canonical_symbol: symbol.clone(),
+                failed_exchange: ExchangeId::Bitget,
+                last_attempt_exchange: Some(ExchangeId::Bitget),
+                side: ExecutionOrderSide::Sell,
+                position_side: PositionSide::Short,
+                quantity: 0.03,
+                reduce_only: false,
+                status: HedgeRepairTaskStatus::Failed,
+                attempts: 2,
+                last_error: Some("previous repair failed".to_string()),
+                created_at: now - chrono::Duration::minutes(10),
+                updated_at: now - chrono::Duration::minutes(1),
+            },
+        );
+
+        let positions = vec![ExchangePosition {
+            exchange: ExchangeId::Bitget,
+            canonical_symbol: symbol.clone(),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "SPCXUSDT"),
+            position_side: PositionSide::Short,
+            quantity: 0.03,
+            entry_price: Some(205.405),
+            mark_price: None,
+            unrealized_pnl: None,
+            updated_at: now,
+        }];
+
+        state.restore_open_bundles_from_account_positions(&positions, now);
+
+        assert!(!state.position_manager.contains_bundle(bundle_id));
+        assert!(state.hedge_repair_task_read_models().is_empty());
+        let unpaired = state.unpaired_exchange_positions(&positions);
+        assert_eq!(unpaired.len(), 1);
+        assert_eq!(unpaired[0].exchange, ExchangeId::Bitget);
     }
 
     #[test]

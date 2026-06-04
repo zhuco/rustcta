@@ -95,7 +95,7 @@ symbols:
       taker_fee: 0.0004
     risk:
       max_net_notional: 1000.0
-      max_total_notional: 2000.0
+      max_total_notional: 3000.0
       margin_ratio_limit: 0.75
       funding_rate_limit: 0.003
       funding_cost_limit: 3.0
@@ -133,7 +133,7 @@ symbols:
       taker_fee: 0.0004
     risk:
       max_net_notional: 1000.0
-      max_total_notional: 2000.0
+      max_total_notional: 8500.0
       margin_ratio_limit: 0.75
       funding_rate_limit: 0.003
       funding_cost_limit: 3.0
@@ -210,7 +210,7 @@ symbols:
       taker_fee: 0.0004
     risk:
       max_net_notional: 3000.0
-      max_total_notional: 2000.0
+      max_total_notional: 7500.0
       margin_ratio_limit: 0.75
       funding_rate_limit: 0.003
       funding_cost_limit: 3.0

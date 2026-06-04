@@ -6,10 +6,10 @@ use chrono::Utc;
 use clap::{Parser, ValueEnum};
 use rustcta::exchanges::registry::market_adapter;
 use rustcta::execution::{
-    ClosePositionCommand, OrderCommand, OrderCommandStatus, OrderIntent, OrderSide, OrderType,
-    PositionMode, PositionSide, TimeInForce, TradingAdapter,
+    CancelCommand, ClosePositionCommand, OrderCommand, OrderCommandStatus, OrderIntent, OrderSide,
+    OrderType, PositionMode, PositionSide, TimeInForce, TradingAdapter,
 };
-use rustcta::market::{CanonicalSymbol, ExchangeId, InstrumentMeta};
+use rustcta::market::{CanonicalSymbol, ExchangeId, InstrumentMeta, RoundingMode};
 use rustcta::strategies::cross_exchange_arbitrage::{
     build_trading_adapter_for_exchange_with_instruments, configured_position_mode,
     CrossExchangeArbitrageConfig,
@@ -34,6 +34,8 @@ struct Args {
     symbol: String,
     #[arg(long, value_enum, default_value_t = CanarySide::Long)]
     side: CanarySide,
+    #[arg(long, value_enum, default_value_t = CanaryMode::MarketRoundTrip)]
+    mode: CanaryMode,
     #[arg(long, default_value_t = 10.0)]
     notional_usdt: f64,
     #[arg(long, default_value_t = 12.0)]
@@ -76,6 +78,12 @@ impl CanarySide {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CanaryMode {
+    MarketRoundTrip,
+    LimitPostOnly,
+}
+
 #[derive(Debug, Serialize)]
 struct CanaryReport {
     generated_at: chrono::DateTime<Utc>,
@@ -84,12 +92,14 @@ struct CanaryReport {
     exchange: String,
     symbol: String,
     side: String,
+    mode: String,
     requested_notional_usdt: f64,
     planned_quantity: f64,
     estimated_notional_usdt: f64,
     max_estimated_notional_usdt: f64,
     best_bid: f64,
     best_ask: f64,
+    planned_limit_price: Option<f64>,
     instrument: InstrumentSummary,
     account: AccountSummary,
     balances_before: usize,
@@ -100,6 +110,7 @@ struct CanaryReport {
     fills_before: usize,
     open_ack: Option<ActionAckSummary>,
     close_ack: Option<ActionAckSummary>,
+    cancel_ack: Option<CancelAckSummary>,
     positions_after: Option<usize>,
     nonzero_positions_after: Option<usize>,
     net_position_qty_after: Option<f64>,
@@ -129,6 +140,15 @@ struct AccountSummary {
 struct ActionAckSummary {
     accepted: bool,
     client_order_id: String,
+    exchange_order_id: Option<String>,
+    status: String,
+    message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CancelAckSummary {
+    accepted: bool,
+    client_order_id: Option<String>,
     exchange_order_id: Option<String>,
     status: String,
     message: Option<String>,
@@ -207,6 +227,15 @@ async fn main() -> Result<()> {
     };
     let planned_quantity = plan_quantity(args.notional_usdt, reference_price, &instrument)?;
     let estimated_notional = planned_quantity * reference_price * contract_size(&instrument);
+    let planned_limit_price = match args.mode {
+        CanaryMode::MarketRoundTrip => None,
+        CanaryMode::LimitPostOnly => Some(plan_post_only_limit_price(
+            args.side,
+            best_bid,
+            best_ask,
+            &instrument,
+        )?),
+    };
 
     let position_mode = configured_position_mode(&config, &exchange);
     let adapter = build_adapter(&config, &exchange, [instrument.clone()])?;
@@ -228,8 +257,8 @@ async fn main() -> Result<()> {
         .get_positions(Some(&instrument.exchange_symbol))
         .await
         .context("read positions before canary")?;
-    let nonzero_positions_before = nonzero_position_count(&positions_before);
-    let net_position_qty_before = net_position_qty(&positions_before);
+    let nonzero_positions_before = nonzero_position_count(&positions_before, Some(&canonical));
+    let net_position_qty_before = net_position_qty(&positions_before, Some(&canonical));
     if nonzero_positions_before > 0 {
         bail!(
             "refusing canary because {} nonzero {} positions already exist for {} (net_qty={})",
@@ -288,6 +317,7 @@ async fn main() -> Result<()> {
 
     let mut open_ack = None;
     let mut close_ack = None;
+    let mut cancel_ack = None;
     let mut positions_after = None;
     let mut nonzero_positions_after = None;
     let mut net_position_qty_after = None;
@@ -296,71 +326,148 @@ async fn main() -> Result<()> {
     if args.execute {
         let suffix = Utc::now().timestamp_millis();
         let position_side = args.side.position_side_for(position_mode);
-        let open = OrderCommand {
-            command_id: format!("cmd-{}-canary-open-{suffix}", exchange.as_str()),
-            bundle_id: format!("{}-canary-{suffix}", exchange.as_str()),
-            exchange: exchange.clone(),
-            canonical_symbol: canonical.clone(),
-            exchange_symbol: instrument.exchange_symbol.clone(),
-            intent: args.side.open_intent(),
-            side: args.side.order_side(),
-            position_side,
-            order_type: OrderType::Market,
-            quantity: planned_quantity,
-            price: None,
-            time_in_force: TimeInForce::Ioc,
-            post_only: false,
-            reduce_only: false,
-            client_order_id: format!("{}-canary-open-{suffix}", exchange.as_str()),
-            max_slippage_pct: Some(args.max_slippage_pct),
-            status: OrderCommandStatus::Planned,
-            created_at: Utc::now(),
-        };
-        let ack = adapter
-            .place_order(open)
-            .await
-            .context("place canary order")?;
-        open_ack = Some(ActionAckSummary {
-            accepted: ack.accepted,
-            client_order_id: ack.client_order_id.clone(),
-            exchange_order_id: ack.exchange_order_id.clone(),
-            status: format!("{:?}", ack.status),
-            message: ack.message.clone(),
-        });
+        match args.mode {
+            CanaryMode::MarketRoundTrip => {
+                let open = OrderCommand {
+                    command_id: format!("cmd-{}-canary-open-{suffix}", exchange.as_str()),
+                    bundle_id: format!("{}-canary-{suffix}", exchange.as_str()),
+                    exchange: exchange.clone(),
+                    canonical_symbol: canonical.clone(),
+                    exchange_symbol: instrument.exchange_symbol.clone(),
+                    intent: args.side.open_intent(),
+                    side: args.side.order_side(),
+                    position_side,
+                    order_type: OrderType::Market,
+                    quantity: planned_quantity,
+                    price: None,
+                    time_in_force: TimeInForce::Ioc,
+                    post_only: false,
+                    reduce_only: false,
+                    client_order_id: format!("{}-canary-open-{suffix}", exchange.as_str()),
+                    max_slippage_pct: Some(args.max_slippage_pct),
+                    status: OrderCommandStatus::Planned,
+                    created_at: Utc::now(),
+                };
+                let ack = adapter
+                    .place_order(open)
+                    .await
+                    .context("place canary order")?;
+                open_ack = Some(ActionAckSummary {
+                    accepted: ack.accepted,
+                    client_order_id: ack.client_order_id.clone(),
+                    exchange_order_id: ack.exchange_order_id.clone(),
+                    status: format!("{:?}", ack.status),
+                    message: ack.message.clone(),
+                });
 
-        let close = ClosePositionCommand::market(
-            exchange.clone(),
-            canonical.clone(),
-            instrument.exchange_symbol.clone(),
-            position_side,
-            planned_quantity,
-            format!("{}-canary-close-{suffix}", exchange.as_str()),
-            Utc::now(),
-        );
-        let ack = adapter
-            .close_position(close)
-            .await
-            .context("close canary position")?;
-        close_ack = Some(ActionAckSummary {
-            accepted: ack.accepted,
-            client_order_id: ack.client_order_id,
-            exchange_order_id: ack.exchange_order_id,
-            status: format!("{:?}", ack.status),
-            message: ack.message,
-        });
+                let close = ClosePositionCommand::market(
+                    exchange.clone(),
+                    canonical.clone(),
+                    instrument.exchange_symbol.clone(),
+                    position_side,
+                    planned_quantity,
+                    format!("{}-canary-close-{suffix}", exchange.as_str()),
+                    Utc::now(),
+                );
+                let ack = adapter
+                    .close_position(close)
+                    .await
+                    .context("close canary position")?;
+                close_ack = Some(ActionAckSummary {
+                    accepted: ack.accepted,
+                    client_order_id: ack.client_order_id,
+                    exchange_order_id: ack.exchange_order_id,
+                    status: format!("{:?}", ack.status),
+                    message: ack.message,
+                });
 
-        let positions = adapter
-            .get_positions(Some(&instrument.exchange_symbol))
-            .await
-            .context("read positions after canary")?;
-        let orders = adapter
-            .get_open_orders(Some(&instrument.exchange_symbol))
-            .await
-            .context("read open orders after canary")?;
-        positions_after = Some(positions.len());
-        nonzero_positions_after = Some(nonzero_position_count(&positions));
-        net_position_qty_after = Some(net_position_qty(&positions));
-        open_orders_after = Some(orders.len());
+                let positions = adapter
+                    .get_positions(Some(&instrument.exchange_symbol))
+                    .await
+                    .context("read positions after canary")?;
+                let orders = adapter
+                    .get_open_orders(Some(&instrument.exchange_symbol))
+                    .await
+                    .context("read open orders after canary")?;
+                positions_after = Some(positions.len());
+                nonzero_positions_after =
+                    Some(nonzero_position_count(&positions, Some(&canonical)));
+                net_position_qty_after = Some(net_position_qty(&positions, Some(&canonical)));
+                open_orders_after = Some(orders.len());
+            }
+            CanaryMode::LimitPostOnly => {
+                let limit_price =
+                    planned_limit_price.ok_or_else(|| anyhow!("planned limit price is missing"))?;
+                let open_client_order_id =
+                    format!("{}-canary-limit-open-{suffix}", exchange.as_str());
+                let open = OrderCommand {
+                    command_id: format!("cmd-{}-canary-limit-open-{suffix}", exchange.as_str()),
+                    bundle_id: format!("{}-canary-limit-{suffix}", exchange.as_str()),
+                    exchange: exchange.clone(),
+                    canonical_symbol: canonical.clone(),
+                    exchange_symbol: instrument.exchange_symbol.clone(),
+                    intent: args.side.open_intent(),
+                    side: args.side.order_side(),
+                    position_side,
+                    order_type: OrderType::Limit,
+                    quantity: planned_quantity,
+                    price: Some(limit_price),
+                    time_in_force: TimeInForce::Gtc,
+                    post_only: true,
+                    reduce_only: false,
+                    client_order_id: open_client_order_id.clone(),
+                    max_slippage_pct: None,
+                    status: OrderCommandStatus::Planned,
+                    created_at: Utc::now(),
+                };
+                let ack = adapter
+                    .place_order(open)
+                    .await
+                    .context("place post-only canary limit order")?;
+                open_ack = Some(ActionAckSummary {
+                    accepted: ack.accepted,
+                    client_order_id: ack.client_order_id.clone(),
+                    exchange_order_id: ack.exchange_order_id.clone(),
+                    status: format!("{:?}", ack.status),
+                    message: ack.message.clone(),
+                });
+
+                let cancel = CancelCommand {
+                    exchange: exchange.clone(),
+                    canonical_symbol: canonical.clone(),
+                    exchange_symbol: instrument.exchange_symbol.clone(),
+                    client_order_id: Some(open_client_order_id),
+                    exchange_order_id: ack.exchange_order_id,
+                    reason: Some("post-only canary cleanup".to_string()),
+                    requested_at: Utc::now(),
+                };
+                let ack = adapter
+                    .cancel_order(cancel)
+                    .await
+                    .context("cancel post-only canary limit order")?;
+                cancel_ack = Some(CancelAckSummary {
+                    accepted: ack.accepted,
+                    client_order_id: ack.client_order_id,
+                    exchange_order_id: ack.exchange_order_id,
+                    status: format!("{:?}", ack.status),
+                    message: ack.message,
+                });
+
+                let positions = adapter
+                    .get_positions(Some(&instrument.exchange_symbol))
+                    .await
+                    .context("read positions after post-only canary")?;
+                let orders = adapter
+                    .get_open_orders(Some(&instrument.exchange_symbol))
+                    .await
+                    .context("read open orders after post-only canary")?;
+                positions_after = Some(positions.len());
+                nonzero_positions_after =
+                    Some(nonzero_position_count(&positions, Some(&canonical)));
+                net_position_qty_after = Some(net_position_qty(&positions, Some(&canonical)));
+                open_orders_after = Some(orders.len());
+            }
+        }
     }
 
     let report = CanaryReport {
@@ -370,12 +477,14 @@ async fn main() -> Result<()> {
         exchange: exchange.as_str().to_string(),
         symbol: canonical.to_string(),
         side: format!("{:?}", args.side).to_ascii_lowercase(),
+        mode: format!("{:?}", args.mode).to_ascii_lowercase(),
         requested_notional_usdt: args.notional_usdt,
         planned_quantity,
         estimated_notional_usdt: estimated_notional,
         max_estimated_notional_usdt: args.max_estimated_notional_usdt,
         best_bid,
         best_ask,
+        planned_limit_price,
         instrument: InstrumentSummary {
             exchange_symbol: instrument.exchange_symbol.symbol.clone(),
             contract_size: contract_size(&instrument),
@@ -398,6 +507,7 @@ async fn main() -> Result<()> {
         fills_before: fills_before.len(),
         open_ack,
         close_ack,
+        cancel_ack,
         positions_after,
         nonzero_positions_after,
         net_position_qty_after,
@@ -461,6 +571,29 @@ fn contract_size(instrument: &InstrumentMeta) -> f64 {
     }
 }
 
+fn plan_post_only_limit_price(
+    side: CanarySide,
+    best_bid: f64,
+    best_ask: f64,
+    instrument: &InstrumentMeta,
+) -> Result<f64> {
+    if !best_bid.is_finite() || best_bid <= 0.0 || !best_ask.is_finite() || best_ask <= 0.0 {
+        bail!("invalid orderbook for limit canary: bid={best_bid}, ask={best_ask}");
+    }
+    let raw = match side {
+        CanarySide::Long => best_bid * 0.90,
+        CanarySide::Short => best_ask * 1.10,
+    };
+    let price = match side {
+        CanarySide::Long => instrument.quantize_price(raw, RoundingMode::Floor),
+        CanarySide::Short => instrument.quantize_price(raw, RoundingMode::Ceil),
+    };
+    if !price.is_finite() || price <= 0.0 {
+        bail!("planned post-only limit price is invalid: {price}");
+    }
+    Ok(price)
+}
+
 fn normalize_number(value: f64) -> f64 {
     format!("{value:.12}")
         .trim_end_matches('0')
@@ -469,17 +602,27 @@ fn normalize_number(value: f64) -> f64 {
         .unwrap_or(value)
 }
 
-fn nonzero_position_count(positions: &[rustcta::execution::ExchangePosition]) -> usize {
+fn nonzero_position_count(
+    positions: &[rustcta::execution::ExchangePosition],
+    symbol: Option<&CanonicalSymbol>,
+) -> usize {
     positions
         .iter()
-        .filter(|position| position.quantity.abs() > 1e-9)
+        .filter(|position| {
+            symbol.is_none_or(|symbol| position.canonical_symbol == *symbol)
+                && position.quantity.abs() > 1e-9
+        })
         .count()
 }
 
-fn net_position_qty(positions: &[rustcta::execution::ExchangePosition]) -> f64 {
+fn net_position_qty(
+    positions: &[rustcta::execution::ExchangePosition],
+    symbol: Option<&CanonicalSymbol>,
+) -> f64 {
     normalize_number(
         positions
             .iter()
+            .filter(|position| symbol.is_none_or(|symbol| position.canonical_symbol == *symbol))
             .map(|position| match position.position_side {
                 PositionSide::Long | PositionSide::Net => position.quantity,
                 PositionSide::Short => -position.quantity,

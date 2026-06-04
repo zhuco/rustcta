@@ -408,25 +408,14 @@ impl GridEngine {
 
     fn refresh_risk(&mut self) {
         let position = &self.state.position;
-        let (long_qty, short_qty, mark_price, funding_rate) = if self.config.grid.strict_pairing {
-            // 严格配对模式忽略历史仓位敞口，避免因旧仓导致开仓网格被风险拦截
-            (0.0, 0.0, 0.0, 0.0)
-        } else {
-            (
-                position.long_qty,
-                position.short_qty,
-                position.mark_price,
-                self.state.funding_rate,
-            )
-        };
         self.state.risk = RiskState::evaluate(
             &self.config.risk,
-            long_qty,
-            short_qty,
-            mark_price,
+            position.long_qty,
+            position.short_qty,
+            position.mark_price,
             position.equity,
             position.maintenance_margin,
-            funding_rate,
+            self.state.funding_rate,
         );
         if self.state.risk.flags.only_close {
             self.cancel_open_orders();
@@ -710,9 +699,6 @@ impl GridEngine {
     }
 
     fn available_for_close(&self, side: OrderSide) -> f64 {
-        if self.config.grid.strict_pairing {
-            return f64::MAX;
-        }
         match side {
             OrderSide::Buy => self.state.position.short_available,
             OrderSide::Sell => self.state.position.long_available,
@@ -1584,6 +1570,9 @@ impl GridEngine {
         if intent.is_open() && !self.allow_open_intent(intent) {
             return None;
         }
+        if intent.is_open() && self.would_exceed_total_notional(price, qty) {
+            return None;
+        }
         let side = intent.side();
         let mut price = if self.config.grid.strict_pairing {
             if price > 0.0 {
@@ -1713,14 +1702,34 @@ impl GridEngine {
     }
 
     fn allow_open_intent(&self, intent: OrderIntent) -> bool {
-        if self.config.grid.strict_pairing {
-            return !self.state.risk.flags.only_close;
-        }
         match intent {
             OrderIntent::OpenLongBuy => self.state.risk.allow_open_long(),
             OrderIntent::OpenShortSell => self.state.risk.allow_open_short(),
             _ => true,
         }
+    }
+
+    fn would_exceed_total_notional(&self, price: f64, qty: f64) -> bool {
+        let max_total = self.config.risk.max_total_notional;
+        if max_total <= 0.0 || price <= 0.0 || qty <= 0.0 {
+            return false;
+        }
+        self.current_and_pending_open_notional() + price * qty > max_total
+    }
+
+    fn current_and_pending_open_notional(&self) -> f64 {
+        let mark_price = self.state.position.mark_price.max(0.0);
+        let position_notional =
+            (self.state.position.long_qty.abs() + self.state.position.short_qty.abs()) * mark_price;
+        let pending_open_notional: f64 = self
+            .state
+            .ledger
+            .orders
+            .values()
+            .filter(|record| record.intent.is_open())
+            .map(|record| record.price.abs() * record.qty.abs())
+            .sum();
+        position_notional + pending_open_notional
     }
 
     fn next_order_id(&mut self) -> String {

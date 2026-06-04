@@ -1,0 +1,724 @@
+service_name: smart-money
+environment: local
+log_level: info
+
+postgres:
+  enabled: false
+  url_env: SMART_MONEY_POSTGRES_URL
+  max_connections: 8
+  connect_timeout_secs: 5
+  statement_timeout_ms: 30000
+
+clickhouse:
+  enabled: false
+  url: http://localhost:8123
+  database: rustcta
+  user_env: SMART_MONEY_CLICKHOUSE_USER
+  password_env: SMART_MONEY_CLICKHOUSE_PASSWORD
+  insert_batch_size: 1000
+  flush_interval_secs: 5
+
+redis:
+  enabled: false
+  url_env: SMART_MONEY_REDIS_URL
+  key_prefix: smart_money
+  pool_size: 4
+  default_ttl_secs: 300
+
+nats:
+  enabled: false
+  url_env: SMART_MONEY_NATS_URL
+  subject_prefix: smart_money
+  durable_name: smart_money_service
+  request_timeout_secs: 5
+
+binance_collector:
+  enabled: false
+  rest_base_url: https://fapi.binance.com
+  ws_base_url: wss://fstream.binance.com/ws
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+    - HYPEUSDT
+    - ZECUSDT
+  intervals:
+    - 1m
+  collect_trades: true
+  collect_orderbook: true
+  orderbook_depth: 20
+  poll_interval_secs: 5
+
+hyperliquid_wallet_ingestion:
+  enabled: false
+  api_base_url: https://api.hyperliquid.xyz
+  wallets: &smart_money_hyperliquid_wallets
+    - address: "0x632c9d55ebcca152488018b3cf80472216d1f4cc"
+      label: "Core #1 Mixed A+ / 核心 #1 混合 A+"
+      tags: ["core", "mixed", "A+"]
+      enabled: true
+      source_rank: 1
+      style: "Mixed"
+      grade: "A+"
+      initial_score: "92.2"
+      initial_weight: "1.00"
+      group_name: "Core Composite / 核心综合"
+      cluster: "ConsistentAlpha"
+    - address: "0x963deb9191d6a7dc1fb3891d472aa358b3e4b140"
+      label: "Core #2 Mixed A- / 核心 #2 混合 A-"
+      tags: ["core", "mixed", "A-"]
+      enabled: true
+      source_rank: 2
+      style: "Mixed"
+      grade: "A-"
+      initial_score: "83.0"
+      initial_weight: "0.80"
+      group_name: "Core Composite / 核心综合"
+      cluster: "ConsistentAlpha"
+    - address: "0xc850d1f1639458b47b5ce9482a73d11d95f4d89b"
+      label: "Core #3 Momentum A- / 核心 #3 动量 A-"
+      tags: ["core", "momentum", "A-"]
+      enabled: true
+      source_rank: 3
+      style: "Momentum"
+      grade: "A-"
+      initial_score: "81.0"
+      initial_weight: "0.80"
+      group_name: "Core Composite / 核心综合"
+      cluster: "Momentum"
+    - address: "0x66466428990e0f42a4c54f64bee0db6bf2336de5"
+      label: "Core #4 Swing A- / 核心 #4 波段 A-"
+      tags: ["core", "swing", "A-"]
+      enabled: true
+      source_rank: 4
+      style: "Swing"
+      grade: "A-"
+      initial_score: "83.4"
+      initial_weight: "0.80"
+      group_name: "Core Composite / 核心综合"
+      cluster: "Swing"
+    - address: "0xd60e149a795e83ff52639e3ba708521ee708d74d"
+      label: "Core #5 Mixed B / 核心 #5 混合 B"
+      tags: ["core", "mixed", "B"]
+      enabled: true
+      source_rank: 5
+      style: "Mixed"
+      grade: "B"
+      initial_score: "74.2"
+      initial_weight: "0.50"
+      group_name: "Core Composite / 核心综合"
+      cluster: "InstitutionalStyle"
+    - address: "0x8be0b9c4dbfb90f47fb94e8968dce08d3152326c"
+      label: "Core #6 Swing B+ / 核心 #6 波段 B+"
+      tags: ["core", "swing", "B+"]
+      enabled: true
+      source_rank: 6
+      style: "Swing"
+      grade: "B+"
+      initial_score: "77.5"
+      initial_weight: "0.65"
+      group_name: "Core Composite / 核心综合"
+      cluster: "Swing"
+    - address: "0xaf2c1206b22629915ff7a0fc98d171a1ef398a3f"
+      label: "Core #7 Swing B+ / 核心 #7 波段 B+"
+      tags: ["core", "swing", "B+"]
+      enabled: true
+      source_rank: 7
+      style: "Swing"
+      grade: "B+"
+      initial_score: "77.5"
+      initial_weight: "0.65"
+      group_name: "Core Composite / 核心综合"
+      cluster: "Swing"
+    - address: "0x41829013ce94b21131b68d5a7b0247bd4eefce96"
+      label: "Core #8 Swing B / 核心 #8 波段 B"
+      tags: ["core", "swing", "B"]
+      enabled: true
+      source_rank: 8
+      style: "Swing"
+      grade: "B"
+      initial_score: "74.9"
+      initial_weight: "0.50"
+      group_name: "Core Composite / 核心综合"
+      cluster: "Swing"
+    - address: "0x05c47beed53eb8b3fc14538f881d0941cbbe05a1"
+      label: "Core #9 Mixed B+ / 核心 #9 混合 B+"
+      tags: ["core", "mixed", "B+"]
+      enabled: true
+      source_rank: 9
+      style: "Mixed"
+      grade: "B+"
+      initial_score: "75.7"
+      initial_weight: "0.65"
+      group_name: "Core Composite / 核心综合"
+      cluster: "InstitutionalStyle"
+    - address: "0x085d785f5a03a6ed9b454830721cfca951c37555"
+      label: "Core #10 Momentum B- / 核心 #10 动量 B-"
+      tags: ["core", "momentum", "B-"]
+      enabled: true
+      source_rank: 10
+      style: "Momentum"
+      grade: "B-"
+      initial_score: "69.2"
+      initial_weight: "0.35"
+      group_name: "Core Composite / 核心综合"
+      cluster: "Momentum"
+    - address: "0xda830d2d83a57cea255bcfd0cf89c3e94abde0fd"
+      label: "Trend #11 B+ / 趋势 #11 B+"
+      tags: ["trend", "B+"]
+      enabled: true
+      source_rank: 11
+      style: "Trend"
+      grade: "B+"
+      initial_score: "76.1"
+      initial_weight: "0.65"
+      group_name: "Trend Followers / 趋势跟随"
+      cluster: "Trend"
+    - address: "0xe1f6b0765f27b7db17385a269069ece39f41631d"
+      label: "Trend #12 B+ / 趋势 #12 B+"
+      tags: ["trend", "B+"]
+      enabled: true
+      source_rank: 12
+      style: "Trend"
+      grade: "B+"
+      initial_score: "75.7"
+      initial_weight: "0.65"
+      group_name: "Trend Followers / 趋势跟随"
+      cluster: "Trend"
+    - address: "0x844dc38bfa4882eec8c5b85dceb08fc66a7a4fbe"
+      label: "Trend #15 B / 趋势 #15 B"
+      tags: ["trend", "B"]
+      enabled: true
+      source_rank: 15
+      style: "Trend"
+      grade: "B"
+      initial_score: "74.7"
+      initial_weight: "0.50"
+      group_name: "Trend Followers / 趋势跟随"
+      cluster: "Trend"
+    - address: "0xaede390f5b5b7cf77428030ccfc73d99a44e1602"
+      label: "Trend #16 B+ / 趋势 #16 B+"
+      tags: ["trend", "B+"]
+      enabled: true
+      source_rank: 16
+      style: "Trend"
+      grade: "B+"
+      initial_score: "76.7"
+      initial_weight: "0.65"
+      group_name: "Trend Followers / 趋势跟随"
+      cluster: "Trend"
+    - address: "0xf08208e088f89970068dc0b2deaa440f6a7d0250"
+      label: "Trend #17 B+ / 趋势 #17 B+"
+      tags: ["trend", "B+"]
+      enabled: true
+      source_rank: 17
+      style: "Trend"
+      grade: "B+"
+      initial_score: "75.7"
+      initial_weight: "0.65"
+      group_name: "Trend Followers / 趋势跟随"
+      cluster: "Trend"
+    - address: "0xe183ef47829ae1eb7234e478e418cd9fa0a511dd"
+      label: "Swing #14 B+ / 波段 #14 B+"
+      tags: ["swing", "capacity", "B+"]
+      enabled: true
+      source_rank: 14
+      style: "Swing"
+      grade: "B+"
+      initial_score: "77.6"
+      initial_weight: "0.65"
+      group_name: "Swing Capacity / 波段容量"
+      cluster: "Swing"
+    - address: "0x0696a951a96bef98d3c593c3ae772b70ee4c26e5"
+      label: "Swing #20 B+ / 波段 #20 B+"
+      tags: ["swing", "capacity", "B+"]
+      enabled: true
+      source_rank: 20
+      style: "Swing"
+      grade: "B+"
+      initial_score: "75.6"
+      initial_weight: "0.65"
+      group_name: "Swing Capacity / 波段容量"
+      cluster: "Swing"
+    - address: "0xc646851ce5d79117d5086a5aaf5c81922f94efd9"
+      label: "Swing #23 B+ / 波段 #23 B+"
+      tags: ["swing", "capacity", "B+"]
+      enabled: true
+      source_rank: 23
+      style: "Swing"
+      grade: "B+"
+      initial_score: "77.4"
+      initial_weight: "0.65"
+      group_name: "Swing Capacity / 波段容量"
+      cluster: "Swing"
+    - address: "0xa8616487ec2605c79c3ad3a3e6bcbe9d059bc774"
+      label: "Swing #26 B / 波段 #26 B"
+      tags: ["swing", "capacity", "B"]
+      enabled: true
+      source_rank: 26
+      style: "Swing"
+      grade: "B"
+      initial_score: "74.3"
+      initial_weight: "0.50"
+      group_name: "Swing Capacity / 波段容量"
+      cluster: "Swing"
+    - address: "0x2d99fe0f36c1aebd28a1a2c0e82e8ca13c2ea351"
+      label: "Swing #32 B+ / 波段 #32 B+"
+      tags: ["swing", "capacity", "B+"]
+      enabled: true
+      source_rank: 32
+      style: "Swing"
+      grade: "B+"
+      initial_score: "78.7"
+      initial_weight: "0.65"
+      group_name: "Swing Capacity / 波段容量"
+      cluster: "Swing"
+    - address: "0x3eb52cbf0cd6546ed1afe361dfbe902710a80145"
+      label: "Momentum #37 B / 动量 #37 B"
+      tags: ["momentum", "short_cycle", "B"]
+      enabled: true
+      source_rank: 37
+      style: "Momentum"
+      grade: "B"
+      initial_score: "73.2"
+      initial_weight: "0.50"
+      group_name: "Momentum Short-Cycle / 动量短周期"
+      cluster: "Momentum"
+    - address: "0xa8cbf4200595efcd94b7526d04deafe0f284af2d"
+      label: "Momentum #43 B+ / 动量 #43 B+"
+      tags: ["momentum", "short_cycle", "B+"]
+      enabled: true
+      source_rank: 43
+      style: "Momentum"
+      grade: "B+"
+      initial_score: "76.3"
+      initial_weight: "0.65"
+      group_name: "Momentum Short-Cycle / 动量短周期"
+      cluster: "Momentum"
+    - address: "0x8184e8a5cfac0a0783e389b550f84a0a8bd1b567"
+      label: "Momentum #48 B / 动量 #48 B"
+      tags: ["momentum", "short_cycle", "B"]
+      enabled: true
+      source_rank: 48
+      style: "Momentum"
+      grade: "B"
+      initial_score: "73.2"
+      initial_weight: "0.50"
+      group_name: "Momentum Short-Cycle / 动量短周期"
+      cluster: "Momentum"
+    - address: "0x6cc021e2f5e8f12d65c860df5c63f152c4e763e1"
+      label: "Momentum #49 B / 动量 #49 B"
+      tags: ["momentum", "short_cycle", "B"]
+      enabled: true
+      source_rank: 49
+      style: "Momentum"
+      grade: "B"
+      initial_score: "73.6"
+      initial_weight: "0.50"
+      group_name: "Momentum Short-Cycle / 动量短周期"
+      cluster: "Momentum"
+    - address: "0xb5101614ad71468a041a83e64d8b834aa17a1ed6"
+      label: "Momentum #64 B / 动量 #64 B"
+      tags: ["momentum", "short_cycle", "B"]
+      enabled: true
+      source_rank: 64
+      style: "Momentum"
+      grade: "B"
+      initial_score: "72.2"
+      initial_weight: "0.50"
+      group_name: "Momentum Short-Cycle / 动量短周期"
+      cluster: "Momentum"
+    - address: "0x88a0511a229643ae6e4ef263a08297343e11bf63"
+      label: "Consistency #47 Mixed B / 高一致性 #47 混合 B"
+      tags: ["consistency", "mixed", "B"]
+      enabled: true
+      source_rank: 47
+      style: "Mixed"
+      grade: "B"
+      initial_score: "74.2"
+      initial_weight: "0.50"
+      group_name: "High Consistency / 高一致性"
+      cluster: "InstitutionalStyle"
+    - address: "0xbb088e9852e18b1df8890d8d0f48bdcec0ab0964"
+      label: "Consistency #61 Mixed B / 高一致性 #61 混合 B"
+      tags: ["consistency", "mixed", "B"]
+      enabled: true
+      source_rank: 61
+      style: "Mixed"
+      grade: "B"
+      initial_score: "73.1"
+      initial_weight: "0.50"
+      group_name: "High Consistency / 高一致性"
+      cluster: "InstitutionalStyle"
+    - address: "0x854d7b77b762b2ca07b1ccc21e2a19eb1ccc34c7"
+      label: "Consistency #58 Mixed B / 高一致性 #58 混合 B"
+      tags: ["consistency", "mixed", "B"]
+      enabled: true
+      source_rank: 58
+      style: "Mixed"
+      grade: "B"
+      initial_score: "73.1"
+      initial_weight: "0.50"
+      group_name: "High Consistency / 高一致性"
+      cluster: "InstitutionalStyle"
+    - address: "0x82786b1a0a7a5e31f17f2ecff68b00df645ac0a4"
+      label: "Consistency #60 Mixed B / 高一致性 #60 混合 B"
+      tags: ["consistency", "mixed", "B"]
+      enabled: true
+      source_rank: 60
+      style: "Mixed"
+      grade: "B"
+      initial_score: "71.5"
+      initial_weight: "0.50"
+      group_name: "High Consistency / 高一致性"
+      cluster: "InstitutionalStyle"
+    - address: "0xb87e055a70d4a82e4ba93dd5f86c5082f3d25c72"
+      label: "Consistency #27 Mixed B / 高一致性 #27 混合 B"
+      tags: ["consistency", "mixed", "B"]
+      enabled: true
+      source_rank: 27
+      style: "Mixed"
+      grade: "B"
+      initial_score: "70.9"
+      initial_weight: "0.50"
+      group_name: "High Consistency / 高一致性"
+      cluster: "InstitutionalStyle"
+    - address: "0xebd7c4b3677a4480fb5f69ac2f51c51d66a19990"
+      label: "Whale #13 Mixed B+"
+      tags: ["representative_whale", "active_30d", "mixed", "B+"]
+      enabled: true
+      source_rank: 13
+      style: "Mixed"
+      grade: "B+"
+      initial_score: "75.7"
+      initial_weight: "0.65"
+      group_name: "Representative Whales"
+      cluster: "InstitutionalStyle"
+    - address: "0x05df8c46c75a06ee097c0a90f9fbe8a11a4eba39"
+      label: "Whale #19 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 19
+      style: "Trend"
+      grade: "B"
+      initial_score: "73.9"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x36e6dab460411e402aed071915a21f5c2ff9f223"
+      label: "Whale #22 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 22
+      style: "Trend"
+      grade: "B"
+      initial_score: "74.5"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x4f9140107e42982d3f86eae7474f56bc373ade31"
+      label: "Whale #24 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 24
+      style: "Trend"
+      grade: "B"
+      initial_score: "73.7"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x8e6c25f50d4be1e649e61b331a804d11b07a5c08"
+      label: "Whale #30 Trend B+"
+      tags: ["representative_whale", "active_30d", "trend", "B+"]
+      enabled: true
+      source_rank: 30
+      style: "Trend"
+      grade: "B+"
+      initial_score: "75.0"
+      initial_weight: "0.65"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0xf09c63a2b47d7b383ecc517a295727312384eaed"
+      label: "Whale #31 Trend B+"
+      tags: ["representative_whale", "active_30d", "trend", "B+"]
+      enabled: true
+      source_rank: 31
+      style: "Trend"
+      grade: "B+"
+      initial_score: "75.0"
+      initial_weight: "0.65"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x149d35ed0e25ec4b760c28055f744fdd02af1764"
+      label: "Whale #35 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 35
+      style: "Trend"
+      grade: "B"
+      initial_score: "74.8"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0xc7f3611b6a7566961f3abc8db6fe4700d6b8a380"
+      label: "Whale #40 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 40
+      style: "Trend"
+      grade: "B"
+      initial_score: "73.0"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x3662dd1d493d1d3cf6a65cb8e4ce2bfb01f63b3c"
+      label: "Whale #42 Trend B+"
+      tags: ["representative_whale", "active_30d", "trend", "B+"]
+      enabled: true
+      source_rank: 42
+      style: "Trend"
+      grade: "B+"
+      initial_score: "76.1"
+      initial_weight: "0.65"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x9a0825ca6c4c577a1202a8fae3b8f044c1d5711d"
+      label: "Whale #44 Swing B"
+      tags: ["representative_whale", "active_30d", "swing", "B"]
+      enabled: true
+      source_rank: 44
+      style: "Swing"
+      grade: "B"
+      initial_score: "74.3"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Swing"
+    - address: "0xee621cac3443ea9511e4b6050d92ee2a8b80f93d"
+      label: "Whale #45 Mixed B"
+      tags: ["representative_whale", "active_30d", "mixed", "B"]
+      enabled: true
+      source_rank: 45
+      style: "Mixed"
+      grade: "B"
+      initial_score: "71.6"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "InstitutionalStyle"
+    - address: "0xcdfcfd848d6539aa75263adba82884c58bdc2aaf"
+      label: "Whale #52 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 52
+      style: "Trend"
+      grade: "B"
+      initial_score: "73.0"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x3f3192097db8fc6043e459db7926a4d8a26c155b"
+      label: "Whale #53 Swing B"
+      tags: ["representative_whale", "active_30d", "swing", "B"]
+      enabled: true
+      source_rank: 53
+      style: "Swing"
+      grade: "B"
+      initial_score: "72.3"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Swing"
+    - address: "0x9312e0a61f21affbd5be821f436f8fdf6b6f6663"
+      label: "Whale #54 Mixed B"
+      tags: ["representative_whale", "active_30d", "mixed", "B"]
+      enabled: true
+      source_rank: 54
+      style: "Mixed"
+      grade: "B"
+      initial_score: "72.5"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "InstitutionalStyle"
+    - address: "0xa2ecada0b45ad16625865843c9fc5e7c985a2e42"
+      label: "Whale #56 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 56
+      style: "Trend"
+      grade: "B"
+      initial_score: "73.0"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x6f713fd42f173b163a9fbbcdbe6b26c7dbd6b2a2"
+      label: "Whale #57 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 57
+      style: "Trend"
+      grade: "B"
+      initial_score: "72.5"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0xb36c7e6e58e38ad608748e6a00bda29dbeaec96a"
+      label: "Whale #59 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 59
+      style: "Trend"
+      grade: "B"
+      initial_score: "72.0"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0x1223776bf953ee798a53a34109de5e680cf58180"
+      label: "Whale #62 Mixed B"
+      tags: ["representative_whale", "active_30d", "mixed", "B"]
+      enabled: true
+      source_rank: 62
+      style: "Mixed"
+      grade: "B"
+      initial_score: "72.5"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "InstitutionalStyle"
+    - address: "0xccf6a4da71795428e13a0d1330293c735b66ec07"
+      label: "Whale #63 Swing B"
+      tags: ["representative_whale", "active_30d", "swing", "B"]
+      enabled: true
+      source_rank: 63
+      style: "Swing"
+      grade: "B"
+      initial_score: "71.6"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Swing"
+    - address: "0xf191539a2c4ba0af951438bb6abfa0625c7df2ef"
+      label: "Whale #66 Trend B"
+      tags: ["representative_whale", "active_30d", "trend", "B"]
+      enabled: true
+      source_rank: 66
+      style: "Trend"
+      grade: "B"
+      initial_score: "72.0"
+      initial_weight: "0.50"
+      group_name: "Representative Whales"
+      cluster: "Trend"
+    - address: "0xac26cf5f3c46b5e102048c65b977d2551b72a9c7"
+      label: "Vault #1 Long HYPE BTC Short Garbage"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2001
+      style: "Vault"
+      grade: "Vault-A"
+      initial_score: "85.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+    - address: "0xd6e56265890b76413d1d527eb9b75e334c0c5b42"
+      label: "Vault #2 HyperGrowth"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2002
+      style: "Vault"
+      grade: "Vault-A"
+      initial_score: "83.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+    - address: "0x060d01aa996003b3731a992462d7f0ba68bf3b04"
+      label: "Vault #3 Edge Hedge"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2003
+      style: "Vault"
+      grade: "Vault-A"
+      initial_score: "81.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+    - address: "0xca230e816bdb34a46960c2f978a30a563d1ae9e0"
+      label: "Vault #4 Hyperrr"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2004
+      style: "Vault"
+      grade: "Vault-A"
+      initial_score: "80.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+    - address: "0x7048b287889c5913d59f812795d7fd5d724be77a"
+      label: "Vault #5 Equinox Blackalgo"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2005
+      style: "Vault"
+      grade: "Vault-B+"
+      initial_score: "78.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+    - address: "0x780825f3f0ad6799e304fb843387934c1fa06e70"
+      label: "Vault #6 AILAB TEST ULTRA"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2006
+      style: "Vault"
+      grade: "Vault-B+"
+      initial_score: "76.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+    - address: "0x27d33e77c8e6335089f56e399bf706ae9ad402b9"
+      label: "Vault #7 Martyrbit"
+      tags: ["vault", "strict_vault", "active_30d", "apr_50_plus", "tvl_1m_plus"]
+      enabled: true
+      source_rank: 2007
+      style: "Vault"
+      grade: "Vault-B"
+      initial_score: "74.0"
+      initial_weight: "0.50"
+      group_name: "Vault Monitoring"
+      cluster: "Vault"
+  ingest_positions: true
+  ingest_fills: true
+  poll_interval_secs: 30
+  lookback_days: 30
+
+portfolio:
+  enabled: false
+  dry_run: true
+  close_only: false
+  rebalance_interval_secs: 60
+  alpha_stale_after_secs: 120
+  constraints:
+    initial_capital_usdt: "2000"
+    standard_entry_notional_usdt: "1000"
+    max_leverage: "10"
+    max_gross_notional_usdt: "20000"
+    max_single_asset_gross_share: "0.35"
+  symbol_overrides: {}
+
+monitor:
+  enabled: true
+  bind_addr: 127.0.0.1:8095
+  database_path: logs/smart_money_monitor.sqlite
+  hyperliquid_api_base_url: https://api.hyperliquid.xyz
+  binance_rest_base_url: https://fapi.binance.com
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+    - HYPEUSDT
+    - ZECUSDT
+  simulation_interval_secs: 60
+  order_notional_usdt: "1000"
+  max_symbol_position_notional_usdt: "1000"
+  max_total_position_notional_usdt: "5000"
+  simulation_position_reset_at: "2026-06-04T02:20:00+00:00"
+  wallet_fill_lookback_secs: 900
+  copy_max_fill_age_secs: 120
+  min_wallet_trade_notional_usdt: "250"
+  copy_signal_threshold: "0.65"
+  synthetic_activity_enabled: false
+  wallets: *smart_money_hyperliquid_wallets

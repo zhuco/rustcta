@@ -527,6 +527,8 @@ pub struct ExecutionConfig {
     pub taker_ioc_slippage_limit_pct: f64,
     #[serde(default)]
     pub open_execution_style: OpenExecutionStyle,
+    #[serde(default = "default_close_execution_style")]
+    pub close_execution_style: OpenExecutionStyle,
 }
 
 impl Default for ExecutionConfig {
@@ -544,6 +546,7 @@ impl Default for ExecutionConfig {
             maker_cooldown_ms: default_maker_cooldown_ms(),
             taker_ioc_slippage_limit_pct: 0.003,
             open_execution_style: OpenExecutionStyle::MakerTaker,
+            close_execution_style: default_close_execution_style(),
         }
     }
 }
@@ -570,6 +573,10 @@ fn default_maker_cooldown_after_cancels() -> u32 {
 
 fn default_maker_cooldown_ms() -> u64 {
     120_000
+}
+
+fn default_close_execution_style() -> OpenExecutionStyle {
+    OpenExecutionStyle::DualTaker
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1273,6 +1280,11 @@ mod tests {
             config.execution.open_execution_style,
             OpenExecutionStyle::MakerTaker
         );
+        assert_eq!(
+            config.execution.close_execution_style,
+            OpenExecutionStyle::DualTaker
+        );
+        assert_eq!(config.thresholds.lock_profit_dual_taker_pct, 0.001);
         assert_eq!(config.execution.maker_order_ttl_ms, 20_000);
         assert_eq!(config.execution.max_concurrent_maker_orders, 5);
         assert_eq!(config.execution.maker_cooldown_after_cancels, 10);
@@ -1282,7 +1294,9 @@ mod tests {
         assert_eq!(config.sizing.max_notional_usdt, 6.0);
         assert_eq!(config.sizing.max_positions_per_exchange, 20);
         assert_eq!(config.risk.max_open_bundles, 20);
-        assert!(config.controls.start_paused_new_entries);
+        assert!(!config.controls.start_paused_new_entries);
+        assert!(!config.risk.block_on_external_account_exposure);
+        assert!(!config.risk.orphan_exposure_blocks_new_entries);
         assert_eq!(
             config
                 .exchanges

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{sleep, timeout, Duration, Instant};
 
 use crate::core::types::{MarketType, WsMessage};
 use crate::core::websocket::WebSocketClient;
@@ -17,6 +17,8 @@ use super::config::{
     StrategyMeta, WebSocketRuntimeConfig,
 };
 use super::controller::{run_loop, UserStreamEvent};
+
+const STOP_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MultiRuntimeConfig {
@@ -153,7 +155,22 @@ impl MultiHedgedGridStrategy {
 
         let mut handles = self.handles.lock().await;
         for handle in handles.drain(..) {
-            handle.abort();
+            let mut handle = handle;
+            match timeout(Duration::from_secs(STOP_TIMEOUT_SECS), &mut handle).await {
+                Ok(join_result) => {
+                    if let Err(err) = join_result {
+                        log::warn!("[multi_hedged_grid] stop join failed: {}", err);
+                    }
+                }
+                Err(_) => {
+                    log::warn!(
+                        "[multi_hedged_grid] stop timed out after {}s; aborting task",
+                        STOP_TIMEOUT_SECS
+                    );
+                    handle.abort();
+                    let _ = handle.await;
+                }
+            }
         }
         Ok(())
     }
@@ -223,6 +240,9 @@ async fn shared_user_stream_task(
                             break;
                         }
                     }
+                    Ok(WsMessage::Position(_))
+                    | Ok(WsMessage::Balance(_))
+                    | Ok(WsMessage::Trade(_)) => {}
                     _ => {}
                 },
                 Ok(None) => break,

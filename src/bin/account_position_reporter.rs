@@ -450,6 +450,7 @@ async fn build_account_manager(config: &ReporterConfig) -> Result<AccountManager
         id: config.account_id.clone(),
         exchange: config.exchange.clone(),
         api_key_env: config.env_prefix.clone(),
+        position_mode: None,
         enabled: true,
         max_positions: 10,
         max_orders_per_symbol: 20,

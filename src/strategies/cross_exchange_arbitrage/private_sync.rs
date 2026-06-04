@@ -146,6 +146,9 @@ impl PrivateRuntimeSync {
                             .unwrap_or_else(|| "hedge order was not submitted".to_string()),
                         decision.plan.created_at,
                     );
+                    if !command.reduce_only {
+                        runtime.state.set_close_only();
+                    }
                     runtime.persist_hedge_repair_task(
                         &hedge_repair_task_id(&command.bundle_id, command.reduce_only),
                         decision.plan.created_at,

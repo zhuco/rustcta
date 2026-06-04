@@ -3,7 +3,13 @@ use crate::core::{
     error::ExchangeError,
     types::*,
 };
+use crate::exchanges::adapters::{
+    private_perp_trading_adapter_for_with_instruments, PrivateRestAuth,
+};
+use crate::exchanges::registry::{market_adapter, private_perp_exchange};
 use crate::exchanges::*;
+use crate::execution::PositionMode;
+use crate::market::ExchangeId;
 use crate::Exchange;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -18,6 +24,8 @@ pub struct AccountConfig {
     pub exchange: String,
     pub enabled: bool,
     pub api_key_env: String,
+    #[serde(default)]
+    pub position_mode: Option<String>,
     pub max_positions: u32,
     pub max_orders_per_symbol: u32,
 }
@@ -100,23 +108,66 @@ impl AccountManager {
         let api_keys = ApiKeys::from_env(&account_config.api_key_env)?;
 
         // 创建交易所实例
-        let exchange: Box<dyn Exchange> = match account_config.exchange.as_str() {
-            "binance" => {
-                log::info!("🔍🔍 AccountManager: 创建 Binance 交易所实例");
-                let binance = BinanceExchange::new(self.exchange_config.clone(), api_keys);
-                log::info!("🔍🔍 AccountManager: 将 BinanceExchange 装箱为 Box<dyn Exchange>");
-                Box::new(binance)
-            }
-            "okx" => Box::new(OkxExchange::new(self.exchange_config.clone(), api_keys)),
-            "bitmart" => Box::new(BitmartExchange::new(self.exchange_config.clone(), api_keys)),
-            "hyperliquid" => Box::new(HyperliquidExchange::new(
-                self.exchange_config.clone(),
-                api_keys,
-            )),
-            _ => {
-                return Err(ExchangeError::UnsupportedExchange(
-                    account_config.exchange.clone(),
-                ));
+        let exchange_id = ExchangeId::from(account_config.exchange.as_str());
+        let exchange: Box<dyn Exchange> = if let Some(private_exchange) =
+            private_perp_exchange(&exchange_id)
+        {
+            let market = market_adapter(&exchange_id).ok_or_else(|| {
+                ExchangeError::UnsupportedExchange(account_config.exchange.clone())
+            })?;
+            let instruments = market
+                .load_instruments()
+                .await
+                .map_err(|err| ExchangeError::Other(err.to_string()))?;
+            let position_mode = account_config
+                .position_mode
+                .as_deref()
+                .map(parse_position_mode)
+                .unwrap_or_else(|| default_private_perp_position_mode(&exchange_id));
+            let auth = PrivateRestAuth {
+                api_key: api_keys.api_key,
+                api_secret: api_keys.api_secret,
+                passphrase: api_keys.passphrase,
+                demo_trading: false,
+            };
+            let trading = private_perp_trading_adapter_for_with_instruments(
+                private_exchange,
+                auth,
+                position_mode,
+                instruments.clone(),
+            )
+            .map_err(|err| ExchangeError::Other(err.to_string()))?;
+            log::info!(
+                "🔍 AccountManager: 创建 {} private-perp 网关实例 position_mode={:?}",
+                exchange_id,
+                position_mode
+            );
+            Box::new(GatewayExchange::new(
+                exchange_id.clone(),
+                market,
+                trading,
+                instruments,
+                position_mode,
+            ))
+        } else {
+            match account_config.exchange.as_str() {
+                "binance" => {
+                    log::info!("🔍🔍 AccountManager: 创建 Binance 交易所实例");
+                    let binance = BinanceExchange::new(self.exchange_config.clone(), api_keys);
+                    log::info!("🔍🔍 AccountManager: 将 BinanceExchange 装箱为 Box<dyn Exchange>");
+                    Box::new(binance)
+                }
+                "okx" => Box::new(OkxExchange::new(self.exchange_config.clone(), api_keys)),
+                "bitmart" => Box::new(BitmartExchange::new(self.exchange_config.clone(), api_keys)),
+                "hyperliquid" => Box::new(HyperliquidExchange::new(
+                    self.exchange_config.clone(),
+                    api_keys,
+                )),
+                _ => {
+                    return Err(ExchangeError::UnsupportedExchange(
+                        account_config.exchange.clone(),
+                    ));
+                }
             }
         };
 
@@ -161,6 +212,7 @@ impl AccountManager {
                 id: account_id.to_string(),
                 exchange: "unknown".to_string(),
                 api_key_env: "".to_string(),
+                position_mode: None,
                 enabled: true,
                 max_positions: 10,
                 max_orders_per_symbol: 20,
@@ -363,5 +415,19 @@ impl AccountManager {
         } else {
             Ok(open_orders.values().flatten().cloned().collect())
         }
+    }
+}
+
+fn parse_position_mode(value: &str) -> PositionMode {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "hedge" | "dual" | "dual_plus" | "dual_side" | "long_short" => PositionMode::Hedge,
+        _ => PositionMode::OneWay,
+    }
+}
+
+fn default_private_perp_position_mode(exchange: &ExchangeId) -> PositionMode {
+    match exchange {
+        ExchangeId::Gate => PositionMode::Hedge,
+        _ => PositionMode::OneWay,
     }
 }

@@ -9,7 +9,7 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     Mutex,
 };
-use tokio::time::{interval, sleep, Duration, Instant};
+use tokio::time::{interval, sleep, timeout, Duration, Instant};
 
 use crate::core::error::ExchangeError;
 use crate::core::types::{
@@ -28,6 +28,7 @@ use super::engine::{
 const MAX_BATCH_ORDERS: usize = 5;
 const WS_FILL_MICRO_BATCH_MS: u64 = 8;
 const MISSING_ORDER_GRACE_MS: u64 = 5_000;
+const STOP_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Default)]
 struct OrderMap {
@@ -161,7 +162,22 @@ impl SolusdcHedgedGridStrategy {
 
         let mut guard = self.handles.lock().await;
         for handle in guard.drain(..) {
-            handle.abort();
+            let mut handle = handle;
+            match timeout(Duration::from_secs(STOP_TIMEOUT_SECS), &mut handle).await {
+                Ok(join_result) => {
+                    if let Err(err) = join_result {
+                        log::warn!("[solusdc_hedged_grid] stop join failed: {}", err);
+                    }
+                }
+                Err(_) => {
+                    log::warn!(
+                        "[solusdc_hedged_grid] stop timed out after {}s; aborting task",
+                        STOP_TIMEOUT_SECS
+                    );
+                    handle.abort();
+                    let _ = handle.await;
+                }
+            }
         }
 
         if self.config.execution.shutdown_cancel_all {
@@ -1095,6 +1111,9 @@ pub(super) fn spawn_user_stream_listener(
                                         break;
                                     }
                                 }
+                                Ok(WsMessage::Position(_))
+                                | Ok(WsMessage::Balance(_))
+                                | Ok(WsMessage::Trade(_)) => {}
                                 _ => {}
                             },
                             Ok(None) => {

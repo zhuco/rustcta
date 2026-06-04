@@ -846,6 +846,7 @@ mod solusdc_hedged_grid {
         config.grid.grid_spacing_abs = Some(0.5);
         config.grid.levels_per_side = 3;
         config.grid.strict_pairing = false;
+        config.risk.max_total_notional = 10_000.0;
         let levels = config.grid.levels_per_side;
 
         let mut engine = GridEngine::new(config, true).expect("engine");
@@ -950,7 +951,7 @@ mod solusdc_hedged_grid {
         config.grid.grid_spacing_pct = 0.0;
         config.grid.order_qty = Some(0.011);
         config.grid.strict_pairing = false;
-        config.risk.max_total_notional = 2000.0;
+        config.risk.max_total_notional = 10_000.0;
         config.risk.max_net_notional = 2000.0;
         let levels = config.grid.levels_per_side;
 
@@ -980,6 +981,78 @@ mod solusdc_hedged_grid {
             .count();
         assert_eq!(open_longs, levels);
         assert_eq!(open_shorts, levels);
+    }
+
+    #[test]
+    fn strict_pairing_should_respect_real_inventory_risk() {
+        let mut config = test_config();
+        config.grid.strict_pairing = true;
+        config.risk.max_total_notional = 1_000.0;
+        config.risk.max_net_notional = 1_000.0;
+
+        let mut engine = GridEngine::new(config, true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 8.0,
+            short_qty: 8.0,
+            long_entry_price: 100.0,
+            short_entry_price: 100.0,
+            long_available: 8.0,
+            short_available: 8.0,
+            equity: 10_000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        });
+        engine.rebuild_grid(&snapshot(100.0));
+
+        assert!(
+            engine
+                .buy_orders()
+                .iter()
+                .all(|order| order.intent != OrderIntent::OpenLongBuy),
+            "strict pairing must not seed open longs over total limit"
+        );
+        assert!(
+            engine
+                .sell_orders()
+                .iter()
+                .all(|order| order.intent != OrderIntent::OpenShortSell),
+            "strict pairing must not seed open shorts over total limit"
+        );
+    }
+
+    #[test]
+    fn max_total_notional_should_include_pending_open_orders() {
+        let mut config = test_config();
+        config.grid.strict_pairing = true;
+        config.grid.order_qty = Some(0.1);
+        config.grid.levels_per_side = 3;
+        config.risk.max_total_notional = 125.0;
+        config.risk.max_net_notional = 1_000.0;
+
+        let mut engine = GridEngine::new(config, true).expect("engine");
+        engine.update_position(PositionState {
+            long_qty: 0.5,
+            short_qty: 0.5,
+            long_entry_price: 100.0,
+            short_entry_price: 100.0,
+            long_available: 0.5,
+            short_available: 0.5,
+            equity: 10_000.0,
+            maintenance_margin: 0.0,
+            mark_price: 100.0,
+        });
+        engine.rebuild_grid(&snapshot(100.0));
+
+        let open_count = engine
+            .buy_orders()
+            .iter()
+            .chain(engine.sell_orders().iter())
+            .filter(|order| order.intent.is_open())
+            .count();
+        assert!(
+            open_count < 6,
+            "pending opens should consume max_total_notional budget"
+        );
     }
 
     #[test]

@@ -266,7 +266,7 @@ impl StrategyRiskState {
         exchange: ExchangeId,
         symbol: String,
         severity: ReconcileSeverity,
-        _orphan_exposure_blocks_new_entries: bool,
+        orphan_exposure_blocks_new_entries: bool,
         now: DateTime<Utc>,
     ) {
         match severity {
@@ -299,6 +299,9 @@ impl StrategyRiskState {
                     format!("reconciliation drift: {:?}", severity),
                     now,
                 );
+                if orphan_exposure_blocks_new_entries {
+                    self.close_only = true;
+                }
             }
             ReconcileSeverity::UnknownCritical => {
                 self.raise_trigger(

@@ -407,6 +407,7 @@ impl CrossArbExecutionCoordinator {
                     "hedge order submitted but REST readback failed",
                     now,
                 );
+                runtime.state.set_close_only();
                 runtime.persist_hedge_repair_task(
                     &hedge_repair_task_id(&command.bundle_id, command.reduce_only),
                     now,
@@ -434,6 +435,7 @@ impl CrossArbExecutionCoordinator {
                     ),
                     now,
                 );
+                runtime.state.set_close_only();
                 runtime.persist_hedge_repair_task(
                     &hedge_repair_task_id(&command.bundle_id, command.reduce_only),
                     now,
@@ -449,6 +451,7 @@ impl CrossArbExecutionCoordinator {
                 ),
                 now,
             );
+            runtime.state.set_close_only();
             runtime.persist_hedge_repair_task(
                 &hedge_repair_task_id(&command.bundle_id, command.reduce_only),
                 now,
@@ -651,6 +654,16 @@ impl CrossArbExecutionCoordinator {
                                 )),
                                 acknowledged_at: now,
                             };
+                            runtime.state.risk_events.push(super::RiskEventReadModel {
+                                event_id: format!("maker-ttl-terminal-{}", now.timestamp_millis()),
+                                canonical_symbol: Some(command.canonical_symbol.clone()),
+                                exchange: Some(command.exchange.clone()),
+                                reason: super::RejectReason::RouteUnhealthy,
+                                message: ack.message.clone().unwrap_or_else(|| {
+                                    "maker TTL cancel treated as terminal".to_string()
+                                }),
+                                created_at: now,
+                            });
                             runtime
                                 .state
                                 .ingest_order_state(cancelled_order_state_from_ack(
@@ -963,7 +976,7 @@ impl CrossArbExecutionCoordinator {
             .position_manager
             .bundle(&candidate.bundle_id)
             .map(|bundle| bundle.status);
-        if runtime.state.config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
+        if close_uses_dual_taker(&runtime.state.config) {
             runtime.state.position_manager.reserve_bundle_close_qty(
                 &candidate.bundle_id,
                 candidate.quantity,
@@ -1010,9 +1023,7 @@ impl CrossArbExecutionCoordinator {
                 created_at: decision.plan.created_at,
             });
             if decision.submitted_orders.is_empty() {
-                if runtime.state.config.execution.open_execution_style
-                    == OpenExecutionStyle::DualTaker
-                {
+                if close_uses_dual_taker(&runtime.state.config) {
                     let _ = runtime.state.position_manager.release_bundle_close_qty(
                         &candidate.bundle_id,
                         candidate.quantity,
@@ -1209,9 +1220,7 @@ pub fn live_close_metrics_for_bundle(
     let denominator = position.target_notional_usdt.max(1.0);
     let close_profit_pct = (gross_spread_pnl_usdt + position.realized_funding_pnl()
         - position.open_fee_paid()
-        - close_fee_est
-        - runtime.state.config.risk.taker_slippage_buffer * target_notional_usdt
-        - runtime.state.config.risk.safety_buffer * target_notional_usdt)
+        - close_fee_est)
         / denominator;
     Some(LiveCloseCandidate {
         bundle_id: bundle_id.to_string(),
@@ -1322,7 +1331,7 @@ fn close_fee_role_for_leg(
     short_book_spread_pct: f64,
     leg: PositionSide,
 ) -> super::FeeRole {
-    if config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
+    if close_uses_dual_taker(config) {
         return super::FeeRole::Taker;
     }
     let maker_leg = if long_book_spread_pct >= short_book_spread_pct {
@@ -1383,7 +1392,7 @@ fn close_commands_from_candidate(
     runtime: &CrossArbRuntime,
     candidate: &LiveCloseCandidate,
 ) -> Vec<OrderCommand> {
-    if runtime.state.config.execution.open_execution_style != OpenExecutionStyle::DualTaker {
+    if !close_uses_dual_taker(&runtime.state.config) {
         return vec![close_maker_command_from_candidate(runtime, candidate)];
     }
 
@@ -1430,6 +1439,10 @@ fn close_commands_from_candidate(
             candidate.generated_at,
         ),
     ]
+}
+
+fn close_uses_dual_taker(config: &super::CrossExchangeArbitrageConfig) -> bool {
+    config.execution.close_execution_style == OpenExecutionStyle::DualTaker
 }
 
 fn close_maker_command_from_candidate(
@@ -1756,19 +1769,24 @@ fn live_fill_net_edge(
 
 fn fill_for_tracked_leg(fill: &FillEvent, leg: BundleLeg) -> FillEvent {
     let mut normalized = fill.clone();
-    if matches!(
-        leg,
-        BundleLeg::CloseLong
-            | BundleLeg::CloseShort
-            | BundleLeg::EmergencyCloseLong
-            | BundleLeg::EmergencyCloseShort
-    ) {
-        normalized.reduce_only = Some(true);
-        normalized.position_side = match leg {
-            BundleLeg::CloseLong | BundleLeg::EmergencyCloseLong => PositionSide::Long,
-            BundleLeg::CloseShort | BundleLeg::EmergencyCloseShort => PositionSide::Short,
-            _ => normalized.position_side,
-        };
+    match leg {
+        BundleLeg::Long => {
+            normalized.reduce_only = Some(false);
+            normalized.position_side = PositionSide::Long;
+        }
+        BundleLeg::Short => {
+            normalized.reduce_only = Some(false);
+            normalized.position_side = PositionSide::Short;
+        }
+        BundleLeg::CloseLong | BundleLeg::EmergencyCloseLong => {
+            normalized.reduce_only = Some(true);
+            normalized.position_side = PositionSide::Long;
+        }
+        BundleLeg::CloseShort | BundleLeg::EmergencyCloseShort => {
+            normalized.reduce_only = Some(true);
+            normalized.position_side = PositionSide::Short;
+        }
+        _ => {}
     }
     normalized
 }
@@ -1954,6 +1972,9 @@ fn update_runtime_after_hedge_decision(runtime: &mut CrossArbRuntime, decision: 
                     .unwrap_or_else(|| "hedge order was not submitted".to_string()),
                 decision.plan.created_at,
             );
+            if !command.reduce_only {
+                runtime.state.set_close_only();
+            }
             runtime.persist_hedge_repair_task(
                 &hedge_repair_task_id(&command.bundle_id, command.reduce_only),
                 decision.plan.created_at,
@@ -2867,6 +2888,235 @@ mod tests {
             .risk_events
             .iter()
             .any(|event| event.message.contains("treated as terminal")));
+    }
+
+    #[test]
+    fn cross_arb_close_should_use_dual_taker_when_open_uses_maker_taker() {
+        let now = Utc::now();
+        let mut config = super::super::CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.execution.open_execution_style = OpenExecutionStyle::MakerTaker;
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        let runtime = CrossArbRuntime::new(config, now);
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let candidate = LiveCloseCandidate {
+            bundle_id: "bundle-close-dual-taker".to_string(),
+            canonical_symbol: symbol.clone(),
+            long_exchange: ExchangeId::Binance,
+            short_exchange: ExchangeId::Bitget,
+            long_exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+            short_exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            quantity: 0.001,
+            target_notional_usdt: 100.0,
+            gross_spread_pnl_usdt: 0.2,
+            realized_funding_pnl_usdt: 0.0,
+            open_fee_paid_usdt: 0.02,
+            close_fee_est_usdt: 0.1,
+            close_spread_pct: 0.001,
+            close_profit_pct: 0.0012,
+            maker_close_exchange: ExchangeId::Binance,
+            maker_close_exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+            maker_close_side: OrderSide::Sell,
+            maker_close_position_side: PositionSide::Long,
+            maker_close_price: 100_000.0,
+            maker_close_book_spread_pct: 0.0001,
+            taker_close_exchange: ExchangeId::Bitget,
+            taker_close_exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+            taker_close_side: OrderSide::Buy,
+            taker_close_position_side: PositionSide::Short,
+            generated_at: now,
+        };
+
+        let commands = close_commands_from_candidate(&runtime, &candidate);
+
+        assert_eq!(commands.len(), 2);
+        assert!(commands
+            .iter()
+            .all(|command| command.order_type == OrderType::Market));
+        assert!(commands
+            .iter()
+            .all(|command| command.time_in_force == TimeInForce::Ioc));
+        assert!(commands.iter().all(|command| command.reduce_only));
+        assert_eq!(commands[0].intent, OrderIntent::CloseLongTaker);
+        assert_eq!(commands[0].side, OrderSide::Sell);
+        assert_eq!(commands[0].position_side, PositionSide::Long);
+        assert_eq!(commands[1].intent, OrderIntent::CloseShortTaker);
+        assert_eq!(commands[1].side, OrderSide::Buy);
+        assert_eq!(commands[1].position_side, PositionSide::Short);
+    }
+
+    #[test]
+    fn cross_arb_close_profit_should_use_prices_and_fees_without_extra_buffers() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut config = super::super::CrossExchangeArbitrageConfig::default();
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        config.risk.taker_slippage_buffer = 0.01;
+        config.risk.safety_buffer = 0.02;
+        let mut runtime = CrossArbRuntime::new(config, now);
+        let bundle_id = "bundle-close-profit";
+        let mut bundle = ArbitrageBundle::new(
+            bundle_id,
+            RuntimeMode::Simulation,
+            symbol.clone(),
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            100.0,
+            now,
+        );
+        bundle.status = BundleStatus::OpenSimulated;
+        runtime
+            .state
+            .register_bundle_position(&bundle, 1.0, 0.01, now);
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Long, 1.0, 100.0, 0.05, now)
+            .unwrap();
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Short, 1.0, 102.0, 0.05, now)
+            .unwrap();
+        runtime.state.open_bundles.insert(
+            bundle_id.to_string(),
+            SimulatedBundleState {
+                bundle_id: bundle_id.to_string(),
+                opportunity_id: "opportunity-close-profit".to_string(),
+                status: SimulatedBundleStatus::OpenSimulated,
+                route: super::super::state::StrategyRoute {
+                    long_exchange: ExchangeId::Binance,
+                    short_exchange: ExchangeId::Okx,
+                    maker_exchange: ExchangeId::Binance,
+                    taker_exchange: ExchangeId::Okx,
+                    maker_side: super::super::state::OrderSide::Buy,
+                    taker_side: super::super::state::OrderSide::Sell,
+                    maker_leg_kind: super::super::state::MakerLegKind::LongMakerBuy,
+                },
+                target_notional_usdt: 100.0,
+                opened_at: Some(now),
+                updated_at: now,
+            },
+        );
+
+        let candidate = live_close_metrics_for_bundle(
+            &runtime,
+            bundle_id,
+            &[
+                super::super::MarketSnapshot::healthy(book(ExchangeId::Binance, 100.25, 100.35)),
+                super::super::MarketSnapshot::healthy(book(ExchangeId::Okx, 101.75, 101.85)),
+            ],
+            now,
+        )
+        .expect("close metrics");
+
+        assert!((candidate.gross_spread_pnl_usdt - 0.4).abs() < 1e-9);
+        assert!((candidate.open_fee_paid_usdt - 0.1).abs() < 1e-9);
+        assert!((candidate.close_fee_est_usdt - 0.1).abs() < 1e-9);
+        assert!((candidate.close_profit_pct - 0.002).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cross_arb_repair_fill_should_force_command_side_when_exchange_reports_net() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("INIT", "USDT");
+        let mut runtime =
+            CrossArbRuntime::new(super::super::CrossExchangeArbitrageConfig::default(), now);
+        let bundle_id = "bundle-repair-net-side";
+        let mut bundle = ArbitrageBundle::new(
+            bundle_id,
+            RuntimeMode::Simulation,
+            symbol.clone(),
+            ExchangeId::Gate,
+            ExchangeId::Binance,
+            ExchangeId::Gate,
+            ExchangeId::Binance,
+            10.0,
+            now,
+        );
+        bundle.status = BundleStatus::OrphanLeg;
+        runtime
+            .state
+            .register_bundle_position(&bundle, 130.0, 0.005, now);
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Long, 130.0, 0.084, 0.0, now)
+            .unwrap();
+        runtime.state.open_bundles.insert(
+            bundle_id.to_string(),
+            SimulatedBundleState {
+                bundle_id: bundle_id.to_string(),
+                opportunity_id: "restored-bundle-repair-net-side".to_string(),
+                status: SimulatedBundleStatus::OrphanLeg,
+                route: super::super::state::StrategyRoute {
+                    long_exchange: ExchangeId::Gate,
+                    short_exchange: ExchangeId::Binance,
+                    maker_exchange: ExchangeId::Gate,
+                    taker_exchange: ExchangeId::Binance,
+                    maker_side: super::super::state::OrderSide::Buy,
+                    taker_side: super::super::state::OrderSide::Sell,
+                    maker_leg_kind: super::super::state::MakerLegKind::LongMakerBuy,
+                },
+                target_notional_usdt: 10.0,
+                opened_at: Some(now),
+                updated_at: now,
+            },
+        );
+
+        let command = OrderCommand::new(
+            RuntimeMode::Simulation,
+            bundle_id,
+            BundleLeg::Short,
+            2,
+            ExchangeId::Bitget,
+            symbol.clone(),
+            ExchangeSymbol::new(ExchangeId::Bitget, "INITUSDT"),
+            OrderIntent::HedgeShortTaker,
+            OrderSide::Sell,
+            PositionSide::Short,
+            OrderType::Market,
+            130.0,
+            None,
+            TimeInForce::Ioc,
+            false,
+            false,
+            None,
+            now,
+        );
+        let tracked = tracked_order(&command);
+        let fill = FillEvent {
+            exchange: ExchangeId::Bitget,
+            canonical_symbol: symbol,
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Bitget, "INITUSDT"),
+            trade_id: "repair-fill-net".to_string(),
+            client_order_id: Some(command.client_order_id.clone()),
+            exchange_order_id: Some("bitget-order-1".to_string()),
+            side: OrderSide::Sell,
+            position_side: PositionSide::Net,
+            liquidity: FillLiquidity::Taker,
+            price: 0.083,
+            quantity: 130.0,
+            quote_quantity: 10.79,
+            fee: Some(0.0),
+            fee_asset: Some("USDT".to_string()),
+            fee_rate: None,
+            realized_pnl: None,
+            reduce_only: Some(false),
+            filled_at: now,
+            received_at: now,
+        };
+
+        apply_tracked_private_fill_to_runtime(&mut runtime, &tracked, &fill, now);
+
+        let position = runtime.state.position_manager.bundle(bundle_id).unwrap();
+        assert_eq!(position.short_leg.exchange, ExchangeId::Bitget);
+        assert_eq!(position.short_leg.filled_qty, 130.0);
+        assert!(position.is_fully_open(runtime.state.config.reconciliation.quantity_tolerance));
+        assert!(runtime.state.risk_events.is_empty());
     }
 
     fn maker_fill_from_command(command: &OrderCommand) -> FillEvent {

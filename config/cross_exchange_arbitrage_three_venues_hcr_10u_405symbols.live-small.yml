@@ -39,7 +39,7 @@ thresholds:
     short_exchange: binance
     min_open_raw_spread: 0.0055
     min_open_maker_taker_net_edge: 0.004
-  lock_profit_dual_taker_pct: 0.0015
+  lock_profit_dual_taker_pct: 0.001
   strong_lock_profit_dual_taker_pct: 0.004
   max_close_spread_pct: 0.001
 sizing:
@@ -157,6 +157,7 @@ routing:
 execution:
   dry_run: false
   open_execution_style: maker_taker
+  close_execution_style: dual_taker
   max_hedge_retries: 1
   maker_order_ttl_ms: 20000
   max_concurrent_maker_orders: 5
@@ -169,7 +170,7 @@ execution:
   taker_ioc_slippage_limit_pct: 0.0015
 controls:
   start_paused_new_entries: true
-  start_close_only: false
+  start_close_only: true
 reconciliation:
   open_orders_interval_secs: 5
   positions_interval_secs: 10
@@ -187,7 +188,7 @@ risk:
   max_open_bundles: 20
   symbol_whitelist_required_live: true
   block_on_external_account_exposure: false
-  orphan_exposure_blocks_new_entries: true
+  orphan_exposure_blocks_new_entries: false
   orphan_close_only_after_count: 3
   private_resync_blocks_new_entries: true
   restored_position_blocks_new_entries: true

@@ -1,6 +1,6 @@
 [package]
 name = "rustcta"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 default-run = "rustcta"
 
@@ -48,6 +48,7 @@ axum = { version = "0.7", features = ["json"] }
 tower-http = { version = "0.6", features = ["cors"] }
 dashmap = "6.1"
 hashbrown = "0.15"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [[bin]]
 name = "rustcta"

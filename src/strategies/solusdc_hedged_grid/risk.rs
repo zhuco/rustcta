@@ -47,6 +47,10 @@ impl RiskState {
         if max_net_notional > 0.0 && net_notional < -max_net_notional {
             flags.block_open_short = true;
         }
+        if limits.max_total_notional > 0.0 && total_notional > limits.max_total_notional {
+            flags.block_risk_opens = true;
+            flags.only_close = true;
+        }
         if margin_ratio > limits.margin_ratio_limit {
             flags.block_risk_opens = true;
             flags.only_close = true;

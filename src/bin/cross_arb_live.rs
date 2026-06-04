@@ -15,10 +15,9 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::exchanges::registry as exchange_registry;
 use rustcta::execution::{
-    is_crossarb_client_order_id, BundleLeg, CancelCommand, ClosePositionCommand, ExchangeBalance,
-    ExchangePosition, ExecutionEngine, ExecutionRouter, OrderCommand, OrderIntent, OrderSide,
-    OrderSnapshot, OrderType, PositionMode, PositionSide, PositionSnapshot, TimeInForce,
-    TradeFeeSnapshot, TradingAdapter,
+    is_crossarb_client_order_id, BundleLeg, CancelCommand, ExchangeBalance, ExecutionEngine,
+    ExecutionRouter, OrderCommand, OrderIntent, OrderSide, OrderSnapshot, OrderType, PositionMode,
+    PositionSide, PositionSnapshot, TimeInForce, TradeFeeSnapshot, TradingAdapter,
 };
 use rustcta::market::{
     exchange_symbol_for, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
@@ -101,17 +100,6 @@ struct RestAuditSummary {
 }
 
 #[derive(Debug, Clone)]
-struct StartupOrphanCloseAttempt {
-    exchange: ExchangeId,
-    canonical_symbol: CanonicalSymbol,
-    position_side: PositionSide,
-    quantity: f64,
-    client_order_id: String,
-    accepted: bool,
-    message: Option<String>,
-}
-
-#[derive(Debug, Clone)]
 struct StartupStrategyOrderCancelAttempt {
     exchange: ExchangeId,
     canonical_symbol: CanonicalSymbol,
@@ -121,8 +109,7 @@ struct StartupStrategyOrderCancelAttempt {
     message: Option<String>,
 }
 
-const STARTUP_ORPHAN_CLOSE_MAX_ATTEMPTS: usize = 3;
-const STARTUP_ORPHAN_CLOSE_SETTLE_SECS: u64 = 3;
+const STARTUP_ORDER_CANCEL_SETTLE_SECS: u64 = 3;
 
 #[derive(Debug, Clone, Serialize)]
 struct AccountPrepSummary {
@@ -271,6 +258,7 @@ struct LiveControlState {
 struct LiveExecutionSummary {
     dry_run: bool,
     open_execution_style: String,
+    close_execution_style: String,
     maker_order_ttl_ms: u64,
     max_concurrent_maker_orders: usize,
     pending_maker_orders: usize,
@@ -328,14 +316,31 @@ async fn main() -> Result<()> {
     .await?;
     println!("{}", serde_json::to_string_pretty(&report)?);
     if !report.live_ready {
-        return Err(anyhow!(
-            "live bootstrap is not ready; inspect blocking_reasons"
-        ));
+        if args.run && report.only_blocks_on_external_exposure() {
+            log::warn!(
+                "live bootstrap found external exposure/open orders; starting runtime in close-only mode without taking over external positions: {}",
+                report.blocking_reasons.join("; ")
+            );
+        } else {
+            return Err(anyhow!(
+                "live bootstrap is not ready; inspect blocking_reasons"
+            ));
+        }
     }
     if args.run {
         run_live(config, args.skip_private_audit).await?;
     }
     Ok(())
+}
+
+impl LiveBootstrapReport {
+    fn only_blocks_on_external_exposure(&self) -> bool {
+        !self.blocking_reasons.is_empty()
+            && self
+                .blocking_reasons
+                .iter()
+                .all(|reason| reason.contains("startup audit found nonzero_positions="))
+    }
 }
 
 async fn bootstrap_live(
@@ -375,7 +380,7 @@ async fn bootstrap_live(
                 .await;
         log_startup_strategy_order_cancel_attempts(&startup_cancel_attempts);
         if !startup_cancel_attempts.is_empty() {
-            sleep(TokioDuration::from_secs(STARTUP_ORPHAN_CLOSE_SETTLE_SECS)).await;
+            sleep(TokioDuration::from_secs(STARTUP_ORDER_CANCEL_SETTLE_SECS)).await;
             rest_audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
         }
     }
@@ -395,7 +400,7 @@ async fn bootstrap_live(
                 && (audit.nonzero_positions > 0 || audit.open_orders > 0)
             {
                 blocking_reasons.push(format!(
-                    "{} startup audit found nonzero_positions={} open_orders={}; restart in close-only/reconcile mode before allowing new entries",
+                    "{} startup audit found nonzero_positions={} open_orders={}; runtime may start close-only but new entries stay blocked until external exposure is cleared",
                     audit.exchange, audit.nonzero_positions, audit.open_orders
                 ));
             } else if audit.nonzero_positions > 0 || audit.open_orders > 0 {
@@ -512,40 +517,7 @@ async fn run_live(
                 .await;
         if !startup_cancel_attempts.is_empty() {
             log_startup_strategy_order_cancel_attempts(&startup_cancel_attempts);
-            sleep(TokioDuration::from_secs(STARTUP_ORPHAN_CLOSE_SETTLE_SECS)).await;
-            audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
-        }
-        let startup_close_attempts = close_startup_unpaired_positions(
-            runtime.clone(),
-            &private_sync,
-            &parts.adapters,
-            &config,
-            &enabled_exchanges,
-        )
-        .await;
-        if !startup_close_attempts.is_empty() {
-            for attempt in &startup_close_attempts {
-                if attempt.accepted {
-                    log::warn!(
-                        "cross_arb_live startup orphan close submitted exchange={} symbol={} side={:?} qty={} client_order_id={}",
-                        attempt.exchange,
-                        attempt.canonical_symbol,
-                        attempt.position_side,
-                        attempt.quantity,
-                        attempt.client_order_id
-                    );
-                } else {
-                    log::error!(
-                        "cross_arb_live startup orphan close failed exchange={} symbol={} side={:?} qty={} client_order_id={} message={}",
-                        attempt.exchange,
-                        attempt.canonical_symbol,
-                        attempt.position_side,
-                        attempt.quantity,
-                        attempt.client_order_id,
-                        attempt.message.as_deref().unwrap_or("unknown")
-                    );
-                }
-            }
+            sleep(TokioDuration::from_secs(STARTUP_ORDER_CANCEL_SETTLE_SECS)).await;
             audits = run_initial_rest_audits(&private_sync, &config, &enabled_exchanges).await;
         }
         let dirty_exchanges = audits
@@ -573,33 +545,36 @@ async fn run_live(
             guard.state.account_unpaired_exchange_positions()
         };
         if remaining_unpaired.is_empty() {
-            let mut guard = runtime.write().await;
-            if !startup_close_attempts.is_empty()
-                && guard.state.close_only
-                && !guard.state.kill_switch
-                && !config.controls.start_close_only
-                && guard.state.open_bundles.is_empty()
-            {
-                guard.state.clear_close_only();
-            }
+            log::info!("cross_arb_live startup audit found no unmanaged account positions");
         } else {
-            let mut guard = runtime.write().await;
-            guard.state.set_close_only();
-            log::error!(
-                "cross_arb_live startup still has {} unpaired position(s) after cleanup; keeping close-only: {}",
-                remaining_unpaired.len(),
-                remaining_unpaired
-                    .iter()
-                    .map(|position| format!(
+            let details = remaining_unpaired
+                .iter()
+                .map(|position| {
+                    format!(
                         "{} {} {:?} qty={}",
                         position.exchange,
                         position.canonical_symbol,
                         position.position_side,
                         position.quantity
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            if config.risk.orphan_exposure_blocks_new_entries {
+                let mut guard = runtime.write().await;
+                guard.state.set_close_only();
+                log::error!(
+                    "cross_arb_live startup found {} unmanaged account position(s); keeping close-only and leaving them untouched: {}",
+                    remaining_unpaired.len(),
+                    details
+                );
+            } else {
+                log::warn!(
+                    "cross_arb_live startup found {} unmanaged account position(s); continuing because orphan_exposure_blocks_new_entries=false and leaving them untouched: {}",
+                    remaining_unpaired.len(),
+                    details
+                );
+            }
         }
         if !strategy_order_exchanges.is_empty() {
             let mut guard = runtime.write().await;
@@ -618,10 +593,10 @@ async fn run_live(
         {
             let mut guard = runtime.write().await;
             guard.state.set_close_only();
-            return Err(anyhow!(
-                "initial private REST audit found existing exposure/open orders without restored state: {}; new entries blocked. Configure affected exchange operating_mode=close_only or reconcile state before live run",
+            log::error!(
+                "initial private REST audit found existing exposure/open orders without restored state: {}; starting close-only and blocking new entries",
                 dirty_exchanges.join(", ")
-            ));
+            );
         } else if !dirty_exchanges.is_empty() {
             log::warn!(
                 "cross_arb_live initial audit observed external account exposure but continuing because block_on_external_account_exposure=false: {}",
@@ -1298,6 +1273,10 @@ fn execution_summary_from_runtime(
     LiveExecutionSummary {
         dry_run: runtime.state.config.execution.dry_run,
         open_execution_style: format!("{:?}", runtime.state.config.execution.open_execution_style),
+        close_execution_style: format!(
+            "{:?}",
+            runtime.state.config.execution.close_execution_style
+        ),
         maker_order_ttl_ms: runtime.state.config.execution.maker_order_ttl_ms,
         max_concurrent_maker_orders: runtime.state.config.execution.max_concurrent_maker_orders,
         pending_maker_orders,
@@ -1349,105 +1328,6 @@ async fn periodic_rest_audit_loop(
         ticker.tick().await;
         let _ = run_initial_rest_audits(&private_sync, &config, &exchanges).await;
     }
-}
-
-async fn close_startup_unpaired_positions(
-    runtime: Arc<RwLock<CrossArbRuntime>>,
-    private_sync: &PrivateRuntimeSync,
-    adapters: &[Arc<dyn TradingAdapter>],
-    config: &CrossExchangeArbitrageConfig,
-    exchanges: &[ExchangeId],
-) -> Vec<StartupOrphanCloseAttempt> {
-    if config.execution.dry_run {
-        return Vec::new();
-    }
-
-    let adapters_by_exchange = adapters
-        .iter()
-        .cloned()
-        .map(|adapter| (adapter.exchange(), adapter))
-        .collect::<HashMap<_, _>>();
-    let mut attempts = Vec::new();
-
-    for attempt_index in 1..=STARTUP_ORPHAN_CLOSE_MAX_ATTEMPTS {
-        let unpaired = {
-            let guard = runtime.read().await;
-            dedupe_startup_unpaired_positions(guard.state.account_unpaired_exchange_positions())
-        };
-        if unpaired.is_empty() {
-            break;
-        }
-
-        log::warn!(
-            "cross_arb_live startup cleanup attempt {} closing {} unpaired position(s)",
-            attempt_index,
-            unpaired.len()
-        );
-
-        for position in unpaired {
-            let Some(adapter) = adapters_by_exchange.get(&position.exchange) else {
-                attempts.push(StartupOrphanCloseAttempt {
-                    exchange: position.exchange,
-                    canonical_symbol: position.canonical_symbol,
-                    position_side: position.position_side,
-                    quantity: position.quantity.abs(),
-                    client_order_id: String::new(),
-                    accepted: false,
-                    message: Some("missing trading adapter for startup orphan close".to_string()),
-                });
-                continue;
-            };
-            let client_order_id =
-                startup_orphan_close_client_id(attempt_index, &position.exchange, &position);
-            let command = ClosePositionCommand::market(
-                position.exchange.clone(),
-                position.canonical_symbol.clone(),
-                position.exchange_symbol.clone(),
-                position.position_side,
-                position.quantity.abs(),
-                client_order_id.clone(),
-                Utc::now(),
-            );
-            match adapter.close_position(command).await {
-                Ok(ack) => attempts.push(StartupOrphanCloseAttempt {
-                    exchange: position.exchange,
-                    canonical_symbol: position.canonical_symbol,
-                    position_side: position.position_side,
-                    quantity: position.quantity.abs(),
-                    client_order_id,
-                    accepted: ack.accepted,
-                    message: ack.message,
-                }),
-                Err(err) => attempts.push(StartupOrphanCloseAttempt {
-                    exchange: position.exchange,
-                    canonical_symbol: position.canonical_symbol,
-                    position_side: position.position_side,
-                    quantity: position.quantity.abs(),
-                    client_order_id,
-                    accepted: false,
-                    message: Some(err.to_string()),
-                }),
-            }
-        }
-
-        sleep(TokioDuration::from_secs(STARTUP_ORPHAN_CLOSE_SETTLE_SECS)).await;
-        let audits = run_initial_rest_audits(private_sync, config, exchanges).await;
-        let failures = audits
-            .iter()
-            .filter(|summary| !summary.ok)
-            .map(|summary| summary.exchange.clone())
-            .collect::<Vec<_>>();
-        if !failures.is_empty() {
-            log::error!(
-                "cross_arb_live startup cleanup REST verification failed after attempt {}: {}",
-                attempt_index,
-                failures.join(", ")
-            );
-            break;
-        }
-    }
-
-    attempts
 }
 
 async fn cancel_startup_strategy_open_orders(
@@ -1545,71 +1425,6 @@ fn log_startup_strategy_order_cancel_attempts(attempts: &[StartupStrategyOrderCa
             );
         }
     }
-}
-
-fn dedupe_startup_unpaired_positions(positions: Vec<ExchangePosition>) -> Vec<ExchangePosition> {
-    let mut deduped: HashMap<(ExchangeId, CanonicalSymbol, PositionSide), ExchangePosition> =
-        HashMap::new();
-    for position in positions {
-        let key = (
-            position.exchange.clone(),
-            position.canonical_symbol.clone(),
-            position.position_side,
-        );
-        match deduped.get(&key) {
-            Some(existing) if existing.quantity.abs() >= position.quantity.abs() => {}
-            _ => {
-                deduped.insert(key, position);
-            }
-        }
-    }
-    deduped.into_values().collect()
-}
-
-fn startup_orphan_close_client_id(
-    attempt_index: usize,
-    exchange: &ExchangeId,
-    position: &ExchangePosition,
-) -> String {
-    let symbol = compact_order_id_symbol(&position.canonical_symbol);
-    let side = match position.position_side {
-        PositionSide::Long => "l",
-        PositionSide::Short => "s",
-        PositionSide::Net => "n",
-    };
-    format!(
-        "xsc{}{}{}{}",
-        exchange_order_id_code(exchange),
-        side,
-        attempt_index,
-        symbol
-    )
-    .chars()
-    .take(32)
-    .collect()
-}
-
-fn exchange_order_id_code(exchange: &ExchangeId) -> &'static str {
-    match exchange {
-        ExchangeId::Binance => "bn",
-        ExchangeId::Bitget => "bg",
-        ExchangeId::Gate => "gt",
-        ExchangeId::Bybit => "bb",
-        ExchangeId::Htx => "ht",
-        ExchangeId::Mexc => "mx",
-        ExchangeId::Okx => "ok",
-        ExchangeId::Other(_) => "ot",
-    }
-}
-
-fn compact_order_id_symbol(symbol: &CanonicalSymbol) -> String {
-    symbol
-        .to_string()
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .map(|ch| ch.to_ascii_lowercase())
-        .take(18)
-        .collect()
 }
 
 async fn ws_market_execution_loop(
@@ -1948,11 +1763,37 @@ async fn execute_hedge_repair_tasks(
                 "no alternate taker route available for hedge repair",
                 now,
             );
+            if !task.reduce_only {
+                runtime.state.set_close_only();
+            }
             runtime.persist_hedge_repair_task(&task.task_id, now);
             runtime.persist_hedge_record(&task.bundle_id, now);
             continue;
         };
         let attempt_exchange = command.exchange.clone();
+        if !command.reduce_only
+            && runtime
+                .state
+                .update_bundle_open_leg_route(
+                    &command.bundle_id,
+                    command.position_side,
+                    command.exchange.clone(),
+                    command.exchange_symbol.clone(),
+                    command.quantity,
+                    now,
+                )
+                .is_err()
+        {
+            runtime.state.record_hedge_repair_failed(
+                &task.task_id,
+                "could not update open hedge repair leg route before submitting order",
+                now,
+            );
+            runtime.state.set_close_only();
+            runtime.persist_hedge_repair_task(&task.task_id, now);
+            runtime.persist_hedge_record(&task.bundle_id, now);
+            continue;
+        }
         let decision = execution
             .execute_repair_command(runtime.state.config.mode, command, now)
             .await;
@@ -1989,6 +1830,9 @@ async fn execute_hedge_repair_tasks(
                     .unwrap_or_else(|| "hedge repair order was not submitted".to_string()),
                 now,
             );
+            if !task.reduce_only {
+                runtime.state.set_close_only();
+            }
             runtime.persist_hedge_repair_task(&task.task_id, now);
             runtime.persist_hedge_record(&task.bundle_id, now);
         }
@@ -2011,6 +1855,10 @@ fn repair_command_from_task(
             PositionSide::Short => BundleLeg::CloseShort,
             PositionSide::Net => BundleLeg::Hedge,
         }
+    } else if matches!(task.position_side, PositionSide::Long) {
+        BundleLeg::Long
+    } else if matches!(task.position_side, PositionSide::Short) {
+        BundleLeg::Short
     } else {
         BundleLeg::Hedge
     };
@@ -2084,13 +1932,14 @@ fn best_repair_taker_snapshot(
     task: &HedgeRepairTaskReadModel,
     snapshots: &[MarketSnapshot],
 ) -> Option<RepairTakerSelection> {
-    if let Some(selection) = existing_repair_leg_snapshot(runtime, task, snapshots) {
+    if let Some(selection) = planned_repair_leg_snapshot(runtime, task, snapshots) {
         return Some(selection);
     }
     snapshots
         .iter()
         .filter(|snapshot| snapshot.book.is_usable())
         .filter(|snapshot| snapshot.book.exchange != task.failed_exchange)
+        .filter(|snapshot| open_repair_exchange_is_allowed(runtime, task, &snapshot.book.exchange))
         .filter(|snapshot| {
             runtime
                 .state
@@ -2140,6 +1989,7 @@ fn fallback_repair_taker_snapshot(
         .find(|snapshot| {
             snapshot.book.is_usable()
                 && snapshot.book.exchange == task.failed_exchange
+                && open_repair_exchange_is_allowed(runtime, task, &snapshot.book.exchange)
                 && runtime
                     .state
                     .is_private_stream_ready(&snapshot.book.exchange)
@@ -2152,7 +2002,7 @@ fn fallback_repair_taker_snapshot(
         })
 }
 
-fn existing_repair_leg_snapshot(
+fn planned_repair_leg_snapshot(
     runtime: &CrossArbRuntime,
     task: &HedgeRepairTaskReadModel,
     snapshots: &[MarketSnapshot],
@@ -2166,9 +2016,6 @@ fn existing_repair_leg_snapshot(
         PositionSide::Short => &position.short_leg,
         PositionSide::Net => return None,
     };
-    if leg.filled_qty <= runtime.state.config.reconciliation.quantity_tolerance {
-        return None;
-    }
     let snapshot = snapshots
         .iter()
         .find(|snapshot| snapshot.book.is_usable() && snapshot.book.exchange == leg.exchange)?;
@@ -2199,6 +2046,29 @@ fn existing_repair_leg_snapshot(
         price: Some(price),
         order_type: OrderType::Limit,
     })
+}
+
+fn open_repair_exchange_is_allowed(
+    runtime: &CrossArbRuntime,
+    task: &HedgeRepairTaskReadModel,
+    exchange: &ExchangeId,
+) -> bool {
+    if task.reduce_only {
+        return true;
+    }
+    let Some(position) = runtime.state.position_manager.bundle(&task.bundle_id) else {
+        return false;
+    };
+    let tolerance = runtime.state.config.reconciliation.quantity_tolerance;
+    match task.position_side {
+        PositionSide::Long => {
+            *exchange != position.short_leg.exchange || position.short_leg.filled_qty <= tolerance
+        }
+        PositionSide::Short => {
+            *exchange != position.long_leg.exchange || position.long_leg.filled_qty <= tolerance
+        }
+        PositionSide::Net => false,
+    }
 }
 
 fn signal_opportunity_context(
@@ -3175,6 +3045,7 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
         metric('开仓阈值', pct(e.min_open_maker_taker_net_edge)),
         metric('平仓净利阈值', pct(e.close_profit_threshold_pct)),
         metric('开仓方式', e.open_execution_style),
+        metric('平仓方式', e.close_execution_style),
         metric('Maker超时', `${e.maker_order_ttl_ms}ms`),
         metric('Maker并发', `${e.pending_maker_orders}/${e.max_concurrent_maker_orders}`),
         metric('挂价偏移', `${e.maker_price_offset_ticks} tick`),
@@ -3242,7 +3113,7 @@ const LIVE_DASHBOARD_HTML: &str = r#"<!doctype html>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustcta::market::RuntimeMode;
+    use rustcta::market::{BookLevel, OrderBook5, RuntimeMode};
 
     #[test]
     fn live_runner_market_adapter_should_exclude_okx_for_current_live_plan() {
@@ -3274,5 +3145,85 @@ mod tests {
                 .get(&exchange)
                 .is_some_and(|runtime| runtime.private_ws_enabled));
         }
+    }
+
+    #[test]
+    fn live_runner_repair_should_not_use_existing_opposite_leg_exchange() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("SPCX", "USDT");
+        let mut runtime = CrossArbRuntime::new(CrossExchangeArbitrageConfig::default(), now);
+        runtime
+            .state
+            .update_private_stream_health(ExchangeId::Gate, now, false);
+        runtime
+            .state
+            .update_private_stream_health(ExchangeId::Binance, now, false);
+        let mut bundle = rustcta::execution::ArbitrageBundle::new(
+            "bundle-spcx-repair",
+            RuntimeMode::LiveSmall,
+            symbol.clone(),
+            ExchangeId::Gate,
+            ExchangeId::Binance,
+            ExchangeId::Gate,
+            ExchangeId::Binance,
+            6.0,
+            now,
+        );
+        bundle.status = rustcta::execution::BundleStatus::OrphanLeg;
+        runtime
+            .state
+            .register_bundle_position(&bundle, 0.03, 0.02, now);
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(
+                "bundle-spcx-repair",
+                PositionSide::Long,
+                0.03,
+                199.0,
+                0.0,
+                now,
+            )
+            .unwrap();
+        let task = HedgeRepairTaskReadModel {
+            task_id: "repair-open-bundle-spcx-repair".to_string(),
+            record_id: "bundle-spcx-repair".to_string(),
+            bundle_id: "bundle-spcx-repair".to_string(),
+            canonical_symbol: symbol.clone(),
+            failed_exchange: ExchangeId::Binance,
+            last_attempt_exchange: None,
+            side: OrderSide::Sell,
+            position_side: PositionSide::Short,
+            quantity: 0.03,
+            reduce_only: false,
+            status: rustcta::strategies::cross_exchange_arbitrage::HedgeRepairTaskStatus::Pending,
+            attempts: 0,
+            last_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let snapshots = vec![
+            MarketSnapshot::healthy(test_book(ExchangeId::Gate, symbol.clone(), 199.0, 200.0)),
+            MarketSnapshot::healthy(test_book(ExchangeId::Binance, symbol.clone(), 198.0, 199.0)),
+        ];
+
+        let selection = best_repair_taker_snapshot(&runtime, &task, &snapshots).unwrap();
+
+        assert_eq!(selection.exchange, ExchangeId::Binance);
+        assert_ne!(selection.exchange, ExchangeId::Gate);
+    }
+
+    fn test_book(exchange: ExchangeId, symbol: CanonicalSymbol, bid: f64, ask: f64) -> OrderBook5 {
+        OrderBook5::new(
+            exchange.clone(),
+            symbol.clone(),
+            exchange_symbol_for(&exchange, &symbol),
+            vec![BookLevel::new(bid, 1.0)],
+            vec![BookLevel::new(ask, 1.0)],
+            Utc::now(),
+            Utc::now(),
+            Some(1),
+            None,
+        )
     }
 }

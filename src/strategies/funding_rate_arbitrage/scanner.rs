@@ -135,6 +135,7 @@ pub async fn scan_exchange(
         .into_iter()
         .filter(|snapshot| symbol_allowed(&snapshot.canonical_symbol, config))
         .filter_map(|snapshot| candidate_from_snapshot(snapshot, config, now))
+        .filter(|candidate| candidate_orderable(candidate, &instruments, config))
         .collect::<Vec<_>>();
 
     candidates.sort_by(|left, right| {
@@ -247,6 +248,65 @@ fn symbol_allowed(symbol: &CanonicalSymbol, config: &FundingRateArbitrageConfig)
     allowlist.is_empty() || allowlist.contains(&normalized)
 }
 
+fn candidate_orderable(
+    candidate: &FundingCandidate,
+    instruments: &[InstrumentMeta],
+    config: &FundingRateArbitrageConfig,
+) -> bool {
+    let Some(instrument) = instruments.iter().find(|instrument| {
+        instrument.is_tradeable_usdt_perpetual()
+            && instrument.canonical_symbol == candidate.canonical_symbol
+            && candidate
+                .exchange_symbol
+                .as_ref()
+                .map(|symbol| instrument.exchange_symbol.symbol == *symbol)
+                .unwrap_or(true)
+    }) else {
+        return true;
+    };
+    let Some(price) = candidate.mark_price.or(candidate.index_price) else {
+        return true;
+    };
+    planned_quantity(config.execution.notional_usdt, price, instrument).is_some()
+}
+
+fn planned_quantity(notional: f64, price: f64, instrument: &InstrumentMeta) -> Option<f64> {
+    if !notional.is_finite() || notional <= 0.0 || !price.is_finite() || price <= 0.0 {
+        return None;
+    }
+    let contract_size = if instrument.contract_size.is_finite() && instrument.contract_size > 0.0 {
+        instrument.contract_size
+    } else {
+        1.0
+    };
+    let quantity_step = if instrument.quantity_step.is_finite() && instrument.quantity_step > 0.0 {
+        instrument.quantity_step
+    } else {
+        1.0
+    };
+    let min_quantity_for_notional = if instrument.min_notional > 0.0 {
+        instrument.min_notional / (price * contract_size)
+    } else {
+        0.0
+    };
+    let raw_quantity = (notional / (price * contract_size))
+        .max(instrument.min_qty)
+        .max(min_quantity_for_notional);
+    let steps = (raw_quantity / quantity_step).ceil().max(1.0);
+    let quantity = steps * quantity_step;
+    let normalized = instrument.normalize_order_input(
+        quantity,
+        Some(price),
+        crate::market::RoundingMode::Floor,
+        crate::market::RoundingMode::Nearest,
+    );
+    if !normalized.is_valid() {
+        return None;
+    }
+    let planned_notional = normalized.quantity * price * contract_size;
+    (planned_notional <= notional * 1.2).then_some(normalized.quantity)
+}
+
 fn normalized_symbol_set(values: &[String]) -> HashSet<String> {
     values.iter().map(|value| normalize_symbol(value)).collect()
 }
@@ -285,7 +345,7 @@ pub fn require_observe_mode(config: &FundingRateArbitrageConfig) -> Result<()> {
 mod tests {
     use chrono::Duration;
 
-    use crate::market::ExchangeSymbol;
+    use crate::market::{ContractType, ExchangeSymbol, InstrumentStatus};
 
     use super::*;
 
@@ -339,5 +399,44 @@ mod tests {
             &CanonicalSymbol::new("eth", "usdt"),
             &config
         ));
+    }
+
+    #[test]
+    fn candidate_orderable_should_skip_below_min_quantity_for_ten_usdt() {
+        let mut config = FundingRateArbitrageConfig::default();
+        config.execution.notional_usdt = 10.0;
+        let candidate = FundingCandidate {
+            exchange: ExchangeId::Gate,
+            canonical_symbol: CanonicalSymbol::new("草根文化", "USDT"),
+            exchange_symbol: Some("草根文化_USDT".to_string()),
+            funding_rate: -0.01,
+            funding_rate_pct: -1.0,
+            predicted_funding_rate: None,
+            mark_price: Some(10.0),
+            index_price: None,
+            next_funding_time: Some(Utc::now() + Duration::minutes(5)),
+            seconds_to_settlement: Some(300),
+            snapshot_age_ms: 0,
+            qualifies: true,
+        };
+        let instrument = InstrumentMeta::new(
+            ExchangeId::Gate,
+            CanonicalSymbol::new("草根文化", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Gate, "草根文化_USDT"),
+            "草根文化",
+            "USDT",
+            "USDT",
+            ContractType::LinearPerpetual,
+            10.0,
+            0.01,
+            1.0,
+            1.0,
+            0.0,
+            2,
+            0,
+            InstrumentStatus::Trading,
+        );
+
+        assert!(!candidate_orderable(&candidate, &[instrument], &config));
     }
 }

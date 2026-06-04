@@ -60,7 +60,7 @@ support instead of relying on exchange names.
 | Binance | `BinanceMarketAdapter` | `ExchangeTradingAdapter` over `BinanceExchange` | Production key is currently configured by the operator. |
 | OKX | `OkxMarketAdapter` | `ExchangeTradingAdapter` over `OkxExchange` | Excluded from the current live-small plan due to insufficient simulation data. |
 | Bitget | `BitgetMarketAdapter` | `PrivatePerpTradingAdapter<BitgetPrivatePerpProtocol>` | Supports Demo Trading through `demo_trading` and demo WebSocket URL overrides. Countdown cancel-all is not exposed by this adapter. |
-| Gate | `GateMarketAdapter` | `PrivatePerpTradingAdapter<GatePrivatePerpProtocol>` | Supports Futures TestNet endpoint overrides, decimal-size REST header, price-only order amendments, and countdown cancel-all. Gate is treated as one-way/net-position for strategy safety. |
+| Gate | `GateMarketAdapter` | `PrivatePerpTradingAdapter<GatePrivatePerpProtocol>` | Supports Futures TestNet endpoint overrides, decimal-size REST header, price-only order amendments, countdown cancel-all, and hedge-side strategy semantics. Position-mode switching is not exposed yet; accounts should be preconfigured on Gate before live execution. |
 
 ## Recent Low-Frequency Safety Interfaces
 
