@@ -1,4 +1,7 @@
 use clap::{Arg, Command};
+use rustcta::live_preflight::{
+    api_permissions_from_env, render_human_report, run_live_preflight, LiveReadinessState,
+};
 use rustcta::strategies::common::application::strategy::{Strategy, StrategyInstance};
 use rustcta::strategies::range_grid::application::risk as range_risk;
 use rustcta::{
@@ -155,8 +158,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .short('s')
             .long("strategy")
             .value_name("STRATEGY")
-            .help("策略类型: trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, short_ladder_live, mean_reversion, sideways_martingale, accumulation, poisson, as, copy_trading, avellaneda_stoikov, market_making, grid_scale, orderflow, beta_hedge_market_maker, obi_scalper")
-            .required(true))
+            .help("策略类型: spot_spot_taker_arbitrage, cross_exchange_arbitrage, funding_rate_arbitrage, trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, short_ladder_live, mean_reversion, range_grid, accumulation, poisson, avellaneda_stoikov, beta_hedge_market_maker")
+            .required(false)
+            .default_value("spot_spot_taker_arbitrage"))
+        .arg(Arg::new("preflight")
+            .long("preflight")
+            .action(clap::ArgAction::SetTrue)
+            .help("Run read-only small-capital live preflight and exit"))
         .arg(Arg::new("config")
             .short('c')
             .long("config")
@@ -172,6 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let strategy_type = matches.get_one::<String>("strategy").unwrap();
     let config_file = matches.get_one::<String>("config").unwrap();
     let single_symbol = matches.get_one::<String>("symbol").cloned();
+    let preflight = matches.get_flag("preflight");
 
     let _process_lock = if matches!(
         strategy_type.as_str(),
@@ -181,6 +190,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+
+    if preflight {
+        let exit_code = run_cli_preflight(strategy_type, config_file).await?;
+        std::process::exit(exit_code);
+    }
 
     // 读取策略配置文件获取日志级别
     let strategy_config_content = std::fs::read_to_string(config_file)?;
@@ -307,6 +321,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             shutdown_signal().await?;
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
+        }
+        "cross_exchange_arbitrage" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: rustcta::strategies::cross_exchange_arbitrage::CrossExchangeArbitrageConfig =
+                serde_yaml::from_str(&file_content)?;
+            log::info!("cross_exchange_arbitrage detection-only strategy is starting...");
+
+            let detection_task = tokio::spawn(
+                rustcta::strategies::cross_exchange_arbitrage::run_cross_exchange_arbitrage_detection_only(
+                    config,
+                ),
+            );
+
+            tokio::select! {
+                result = detection_task => {
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => return Err(err.into()),
+                        Err(err) => return Err(format!("cross_exchange_arbitrage task failed: {err}").into()),
+                    }
+                }
+                result = shutdown_signal() => {
+                    result?;
+                    log::info!("收到停止信号，正在关闭 cross_exchange_arbitrage detection-only 策略...");
+                }
+            }
+        }
+        "spot_spot_taker_arbitrage" => {
+            let file_content = std::fs::read_to_string(config_file)?;
+            let config: SpotSpotTakerArbitrageConfig = serde_yaml::from_str(&file_content)?;
+            let strategy = SpotSpotTakerArbitrageStrategy::new(config)?;
+            log::info!("spot_spot_taker_arbitrage paper-only strategy is starting...");
+
+            let strategy_task = tokio::spawn(strategy.start());
+            tokio::select! {
+                result = strategy_task => {
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => return Err(err.into()),
+                        Err(err) => return Err(format!("spot_spot_taker_arbitrage task failed: {err}").into()),
+                    }
+                }
+                result = shutdown_signal() => {
+                    result?;
+                    log::info!("收到停止信号，正在关闭 spot_spot_taker_arbitrage paper 策略...");
+                }
+            }
         }
         "trend_grid" => {
             // 从文件读取配置
@@ -477,27 +538,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
-        "sideways_martingale" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: SidewaysMartingaleConfig = serde_yaml::from_str(&file_content)?;
-
-            let risk_evaluator =
-                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
-
-            let deps = StrategyDepsBuilder::new()
-                .with_account_manager(account_manager.clone())
-                .with_risk_evaluator(risk_evaluator)
-                .build()?;
-
-            let strategy = SidewaysMartingaleStrategy::create(config, deps)?;
-            log::info!("震荡行情马丁策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭震荡行情马丁策略...");
-            strategy.stop().await?;
-        }
         "accumulation" => {
             let file_content = std::fs::read_to_string(config_file)?;
             let config: AccumulationConfig = serde_yaml::from_str(&file_content)?;
@@ -534,39 +574,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
-        "as" => {
-            // 从文件读取配置
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: ASConfig = serde_yaml::from_str(&file_content)?;
-            let strategy = AutomatedScalpingStrategy::new(config, account_manager);
-
-            // 运行策略
-            strategy.start().await?;
-
-            // 等待退出信号
-            shutdown_signal().await?;
-            log::info!("收到退出信号，正在停止AS策略...");
-
-            strategy.stop().await?;
-            log::info!("AS策略已停止");
-        }
-        "copy_trading" => {
-            // 从文件读取配置
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: CopyTradingConfig = serde_yaml::from_str(&file_content)?;
-            let strategy = CopyTradingStrategy::new(config, account_manager);
-            log::info!("跟单策略已创建，开始运行...");
-
-            // 运行策略
-            if let Err(e) = strategy.start().await {
-                log::error!("跟单策略启动失败: {}", e);
-                return Err(format!("跟单策略启动失败: {}", e).into());
-            }
-
-            // 保持运行直到收到停止信号
-            shutdown_signal().await?;
-            log::info!("收到停止信号，跟单策略将自动关闭");
-        }
         "avellaneda_stoikov" => {
             // 从文件读取配置
             let file_content = std::fs::read_to_string(config_file)?;
@@ -578,47 +585,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 运行策略
             strategy.run_until_shutdown().await?;
             log::info!("A-S策略已停止");
-        }
-        "market_making" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: MarketMakingConfig = serde_yaml::from_str(&file_content)?;
-
-            let risk_evaluator =
-                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
-
-            let deps = StrategyDepsBuilder::new()
-                .with_account_manager(account_manager.clone())
-                .with_risk_evaluator(risk_evaluator)
-                .build()?;
-
-            let strategy = ProMarketMakingStrategy::create(config, deps)?;
-            log::info!("专业做市策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭做市策略...");
-            strategy.stop().await?;
-        }
-        "grid_scale" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: GridScaleConfig = serde_yaml::from_str(&file_content)?;
-
-            let risk_evaluator =
-                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
-
-            let deps = StrategyDepsBuilder::new()
-                .with_account_manager(account_manager.clone())
-                .with_risk_evaluator(risk_evaluator)
-                .build()?;
-
-            let strategy = GridScaleStrategy::create(config, deps)?;
-            log::info!("Grid Scale 策略已创建，开始运行...");
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭Grid Scale策略...");
-            strategy.stop().await?;
         }
         "beta_hedge_market_maker" => {
             let file_content = std::fs::read_to_string(config_file)?;
@@ -648,38 +614,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭 beta hedge market maker...");
             strategy.stop().await?;
         }
-        "orderflow" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: OrderflowConfig = serde_yaml::from_str(&file_content)?;
-
-            let risk_evaluator = build_unified_risk_evaluator(config.name.clone(), None, None);
-
-            let deps = StrategyDepsBuilder::new()
-                .with_account_manager(account_manager.clone())
-                .with_risk_evaluator(risk_evaluator)
-                .build()?;
-
-            let strategy = OrderflowStrategy::create(config, deps)?;
-            log::info!("订单流策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭订单流策略...");
-            strategy.stop().await?;
-        }
-        "obi_scalper" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: ObiScalperConfig = serde_yaml::from_str(&file_content)?;
-            let strategy = ObiScalperStrategy::new(config, account_manager.clone());
-            log::info!("OBI 高频剥头皮策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭 OBI 高频剥头皮策略...");
-            strategy.stop().await?;
-        }
         _ => {
             log::error!("未知策略类型: {}", strategy_type);
             return Err(format!("未知策略类型: {}", strategy_type).into());
@@ -687,4 +621,109 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+async fn run_cli_preflight(
+    strategy_type: &str,
+    config_file: &str,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    if strategy_type != "spot_spot_taker_arbitrage" {
+        return Err(format!(
+            "--preflight currently supports spot_spot_taker_arbitrage, got {strategy_type}"
+        )
+        .into());
+    }
+    let file_content = std::fs::read_to_string(config_file)?;
+    let config: SpotSpotTakerArbitrageConfig = serde_yaml::from_str(&file_content)?;
+    let preflight_config = config.live_preflight.clone();
+    let inventory =
+        rustcta::strategies::spot_spot_taker_arbitrage::PaperInventory::from_config(&config)?;
+    let fee_model = rustcta::execution::FeeModel::load_or_default(&config.fee_config_path);
+    let disabled_registry =
+        rustcta::risk::DisabledRegistry::load_or_empty(&config.disabled_registry_path);
+    let state = LiveReadinessState {
+        trading_mode: config.trading_mode.clone(),
+        live_trading_enabled: config.live_trading_enabled,
+        dry_run: config.dry_run,
+        monitoring_enabled: config.monitoring.enabled,
+        recorder_enabled: config.enable_csv_recording || config.enable_database_recording,
+        kill_switch_available: true,
+        kill_switch_active: false,
+        emergency_stop_configured: config.max_daily_loss > 0.0,
+        max_daily_loss: Some(config.max_daily_loss),
+        max_order_latency_ms: Some(config.max_book_latency_ms),
+        symbol_rules: Vec::new(),
+        inventory: inventory
+            .balances_snapshot()
+            .into_iter()
+            .map(|(exchange, asset, balance)| rustcta::web::InventoryView {
+                exchange: exchange.as_str().to_string(),
+                market_type: rustcta::exchanges::unified::MarketType::Spot,
+                asset,
+                total: balance.total,
+                available: balance.available,
+                locked_by_exchange: balance.locked_by_exchange,
+                locally_reserved: balance.locally_reserved,
+                effective_available: balance.effective_available(),
+                unmanaged_quantity: 0.0,
+                valuation_usdt: None,
+            })
+            .collect(),
+        fees: fee_model
+            .summary_rates()
+            .into_iter()
+            .map(|rate| rustcta::web::FeeView {
+                exchange: rate.exchange,
+                market_type: rate.market_type,
+                symbol: rate.symbol,
+                maker_fee_bps: rate.maker_fee_bps,
+                taker_fee_bps: rate.taker_fee_bps,
+                source: rate.source,
+                platform_discount_enabled: rate.platform_discount_enabled,
+                platform_token: rate.platform_token,
+                updated_at: rate.updated_at,
+            })
+            .collect(),
+        books: Vec::new(),
+        exchanges: Vec::new(),
+        disabled_symbols: disabled_registry
+            .disabled_symbols()
+            .into_iter()
+            .map(|item| item.symbol)
+            .collect(),
+        disabled_exchanges: disabled_registry
+            .disabled_exchanges()
+            .into_iter()
+            .map(|item| item.exchange)
+            .collect(),
+        disabled_exchange_symbols: disabled_registry
+            .disabled_exchange_symbols()
+            .into_iter()
+            .map(|item| (item.exchange, item.market_type, item.symbol))
+            .collect(),
+        unmanaged_positions: disabled_registry
+            .unmanaged_positions()
+            .iter()
+            .map(|position| {
+                (
+                    position.exchange.clone(),
+                    position.market_type,
+                    position.symbol.clone(),
+                    position.asset.clone(),
+                    position.quantity,
+                )
+            })
+            .collect(),
+        api_permissions: api_permissions_from_env(&preflight_config.exchanges),
+        recorder: rustcta::web::RecorderHealthView {
+            book_recording_enabled: config.websocket.record_books,
+            opportunity_recording_enabled: true,
+            trade_recording_enabled: true,
+            output_paths: vec![config.jsonl_path, config.csv_path],
+            ..rustcta::web::RecorderHealthView::default()
+        },
+    };
+    let report = run_live_preflight(preflight_config, &state);
+    println!("{}", render_human_report(&report));
+    Ok(if report.has_failures() { 1 } else { 0 })
 }

@@ -1,0 +1,41 @@
+spot_control_snapshot:
+  max_snapshot_age_ms: 2000
+  max_book_age_ms: 1000
+  max_balance_age_ms: 5000
+  max_symbol_rule_age_seconds: 86400
+  max_fee_age_seconds: 3600
+  require_exchange_health: true
+  require_balance_reconciliation_clean: true
+  fail_on_unknown_order_ownership: true
+  fail_on_unknown_inventory_ownership: true
+
+runtime_publisher:
+  enabled: false
+  polling:
+    balances_interval_ms: 5000
+    open_orders_interval_ms: 3000
+    recent_fills_interval_ms: 5000
+    symbol_rules_interval_seconds: 3600
+    fee_interval_seconds: 1800
+    reconciliation_interval_ms: 5000
+    snapshot_interval_ms: 1000
+  limits:
+    maximum_concurrent_requests_per_exchange: 2
+    minimum_request_spacing_ms: 100
+    jitter_ms: 100
+    exponential_backoff_initial_ms: 500
+    exponential_backoff_max_ms: 30000
+    pause_after_rate_limit_ms: 60000
+  consistency:
+    max_book_age_ms: 1000
+    max_balance_age_ms: 10000
+    max_open_orders_age_ms: 10000
+    max_fee_age_seconds: 3600
+    max_symbol_rule_age_seconds: 86400
+    max_component_time_skew_ms: 10000
+  snapshot_store:
+    enabled: true
+    backend: jsonl
+    path: data/spot_control_snapshots.jsonl
+    require_persistence_for_write_commands: true
+    maximum_retained_snapshots_per_symbol: 10000

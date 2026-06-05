@@ -1,0 +1,182 @@
+mode: simulation
+trading_mode: paper
+enable_live_trading: false
+max_live_notional_per_trade:
+enabled_symbols: []
+enabled_exchanges: []
+
+strategy:
+  name: cross_exchange_arbitrage
+  mode: simulation
+  log_level: INFO
+
+market:
+  quote_asset: USDT
+  market_type: spot
+  depth_levels: 5
+  stale_quote_ms: 2000
+  min_common_exchanges: 2
+
+thresholds:
+  min_display_raw_spread: 0.0001
+  min_open_raw_spread: 0.0005
+  min_open_maker_taker_net_edge: 0.0005
+  max_open_raw_spread: 0.10
+  lock_profit_dual_taker_pct: 0.003
+  strong_lock_profit_dual_taker_pct: 0.005
+  max_close_spread_pct: 0.001
+
+sizing:
+  min_notional_usdt: 20.0
+  target_notional_usdt: 100.0
+  max_notional_usdt: 100.0
+  exchange_equity_usdt: 1000.0
+  leverage: 1.0
+  max_positions_per_exchange: 10
+  capital_fraction_of_smaller_equity: 0.10
+  max_symbol_notional_usdt: 500.0
+  max_exchange_usage_pct: 0.25
+
+fees:
+  default_maker_fee_rate: 0.0002
+  default_taker_fee_rate: 0.0005
+  use_account_fee_api: false
+  per_exchange:
+    binance:
+      maker: 0.0002
+      taker: 0.0005
+    okx:
+      maker: 0.0002
+      taker: 0.0005
+
+funding:
+  enabled: false
+  mode: disabled
+  expected_holding_hours: 0.0
+  refresh_secs: 60
+  no_open_before_funding_mins: 0
+  block_if_expected_funding_negative_pct: 0.0
+  max_adverse_funding_rate: 0.0
+
+exchanges:
+  binance:
+    enabled: true
+    operating_mode: enabled
+    private_rest_enabled: false
+    private_ws_enabled: false
+  okx:
+    enabled: true
+    operating_mode: enabled
+    private_rest_enabled: false
+    private_ws_enabled: false
+
+routing:
+  ws_stale_limit_ms: 30000
+  order_latency_p95_degrade_ms: 1200
+  order_error_rate_degrade: 0.05
+  auto_failover: true
+  degraded_mode_blocks_new_entries: true
+
+execution:
+  dry_run: true
+  max_hedge_retries: 0
+  maker_order_ttl_ms: 5000
+  max_concurrent_maker_orders: 1
+  taker_ioc_slippage_limit_pct: 0.003
+  open_execution_style: maker_taker
+  close_execution_style: dual_taker
+
+controls:
+  start_paused_new_entries: true
+  start_close_only: false
+
+reconciliation:
+  open_orders_interval_secs: 30
+  positions_interval_secs: 30
+  full_audit_interval_secs: 300
+  quantity_tolerance: 0.00000001
+  orphan_tolerance: 0.000001
+
+risk:
+  stale_quote_ms: 2000
+  max_book_age_ms: 2000
+  taker_slippage_buffer: 0.0005
+  max_taker_slippage_pct: 0.003
+  maker_non_fill_penalty: 0.001
+  safety_buffer: 0.001
+  max_notional_per_symbol_usdt: 500.0
+  max_notional_per_exchange_usdt: 1000.0
+  max_total_notional_usdt: 2000.0
+  max_single_leg_exposure_usdt: 500.0
+  max_open_bundles: 1
+  max_open_positions: 5
+  max_loss_per_trade_usdt: 25.0
+  max_daily_loss_usdt: 100.0
+  max_drawdown_usdt: 250.0
+  max_spread_loss_bps: 25.0
+  max_hold_seconds: 300
+  max_rest_failure_rate: 0.05
+  max_order_reject_rate: 0.02
+  max_cancel_failure_rate: 0.02
+  max_private_stream_delay_ms: 5000
+  max_balance_reconciliation_mismatch_usdt: 5.0
+  symbol_whitelist_required_live: true
+
+persistence:
+  enabled: true
+  jsonl_dir: logs/cross_exchange_arbitrage
+  clickhouse_enabled: false
+  stop_live_on_unavailable: true
+
+dashboard:
+  enabled: false
+  bind_host: 127.0.0.1
+  port: 8090
+
+alerts:
+  enabled: false
+  orphan_alert: false
+  route_offline_alert: false
+  reconcile_critical_alert: false
+
+universe:
+  enabled_exchanges:
+    - binance
+    - okx
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+    - SOL/USDT
+  mode: static
+
+detection:
+  enabled: true
+  exchanges:
+    - binance
+    - okx
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+  depth_levels: 5
+  stale_book_ms: 2000
+  estimated_notional_usdt: 100.0
+  estimated_slippage_bps: 2.0
+  safety_buffer_bps: 3.0
+  min_net_spread_bps: 5.0
+  record_rejected: true
+  symbol_mappings:
+    okx:
+      BTCUSDT: BTC-USDT
+      ETHUSDT: ETH-USDT
+      SOLUSDT: SOL-USDT
+  recorder:
+    enabled: true
+    jsonl_path: logs/cross_exchange_arbitrage/opportunities.jsonl
+  paper_trading:
+    enabled: false
+    config_path: config/paper_trading.yml
+    execution_mode: taker_taker
+    maker_timeout_ms: 2000
+    min_executable_depth_usdt: 20.0
+    execution_jsonl_path: logs/cross_exchange_arbitrage/paper_executions.jsonl

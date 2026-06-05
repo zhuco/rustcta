@@ -5,12 +5,16 @@
 //! ledgers without placing real exchange orders.
 
 pub mod adapter;
+pub mod balance_reconciliation;
 pub mod bundle;
 pub mod command;
 pub mod engine;
+pub mod fee_model;
 pub mod hedge;
 pub mod idempotency;
 pub mod ledger;
+pub mod live_dry_run;
+pub mod order_reconciliation;
 pub mod reconciler;
 pub mod recovery;
 pub mod router;
@@ -19,12 +23,16 @@ pub mod user_stream;
 
 pub use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol, RouteStatus, RuntimeMode};
 pub use adapter::*;
+pub use balance_reconciliation::*;
 pub use bundle::*;
 pub use command::*;
 pub use engine::*;
+pub use fee_model::*;
 pub use hedge::*;
 pub use idempotency::*;
 pub use ledger::*;
+pub use live_dry_run::*;
+pub use order_reconciliation::*;
 pub use reconciler::*;
 pub use recovery::*;
 pub use router::*;

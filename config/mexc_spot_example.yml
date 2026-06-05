@@ -1,0 +1,57 @@
+# MEXC Spot unified exchange adapter example.
+# Credentials are read from environment variables by default:
+# MEXC_API_KEY and MEXC_API_SECRET.
+
+exchange: mexc
+market_type: spot
+adapter: mexc_spot
+enabled: true
+
+api_key: ${MEXC_API_KEY}
+api_secret: ${MEXC_API_SECRET}
+
+base_url: https://api.mexc.com
+websocket_url: wss://wbs-api.mexc.com/ws
+testnet: false
+sandbox: false
+
+# Keep true until preflight, permissions, notional limits, and logs are verified.
+dry_run: true
+enable_private_stream: false
+
+recv_window: 5000
+stale_book_ms: 10000
+reconnect_interval_ms: 1000
+max_reconnect_attempts: 10
+order_timeout_ms: 10000
+request_timeout_ms: 10000
+orderbook_depth: 5
+log_raw_messages: false
+
+enabled_symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - DKAUSDT
+  - PACTUSDT
+  - CUDISUSDT
+  - TURBOSUSDT
+
+fee_override:
+  maker_fee_rate: 0.001
+  taker_fee_rate: 0.001
+
+rate_limit:
+  max_requests_per_second: 8
+  burst: 10
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+  optional:
+    - trade_fee
+
+notes:
+  - MEXC symbols use compact internal format such as BTCUSDT.
+  - Post-only is sent as LIMIT_MAKER; IOC and FOK are sent as limit orders with timeInForce.
+  - Private Spot user stream is currently exposed as unsupported in this adapter; use REST polling until implemented.

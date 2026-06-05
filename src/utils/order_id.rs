@@ -218,7 +218,6 @@ impl OrderIdGenerator {
             "trend_grid" | "trend_grid_v2" => "TG2".to_string(),
             "funding_rate_arbitrage" => "FRA".to_string(),
             "poisson_market_maker" => "PMM".to_string(),
-            "copy_trading" => "CPY".to_string(),
             "cross_exchange_arbitrage" => "CEA".to_string(),
             _ => {
                 // 生成缩写：取每个单词的首字母
@@ -240,7 +239,6 @@ impl OrderIdGenerator {
             "TG2" => "trend_grid_v2".to_string(),
             "FRA" => "funding_rate_arbitrage".to_string(),
             "PMM" => "poisson_market_maker".to_string(),
-            "CPY" => "copy_trading".to_string(),
             "CEA" => "cross_exchange_arbitrage".to_string(),
             _ => format!("unknown_{}", code),
         }

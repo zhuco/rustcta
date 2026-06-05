@@ -3,19 +3,30 @@
 //! This module owns strategy-specific adapter construction so binaries do not
 //! duplicate exchange credential, position-mode, and private stream wiring.
 
-use super::CrossExchangeArbitrageConfig;
+use super::market_data::{
+    build_subscription_plan, normalize_orderbook_snapshot, normalize_symbol, MarketDataBookStore,
+};
+use super::recorder::OpportunityRecorder;
+use super::spread_engine::SpreadEngine;
+use super::types::{DetectionMetrics, OpportunityDecision};
+use super::{CrossExchangeArbitrageConfig, OpenExecutionStyle, TradingMode};
 use crate::core::exchange::Exchange;
-use crate::exchanges::adapters::{PrivatePerpExchange, PrivateWsAuth, PrivateWsRunConfig};
+use crate::exchanges::private_perp::{PrivatePerpExchange, PrivateWsAuth, PrivateWsRunConfig};
 pub use crate::exchanges::registry::{
     build_core_exchange_for_exchange, build_trading_adapter_for_exchange,
     build_trading_adapter_for_exchange_with_instruments, configured_position_mode,
     private_perp_exchange, private_rest_auth_for_exchange, private_ws_auth_for_exchange,
 };
+use crate::exchanges::unified::{ExchangeClient, OrderBookSnapshot};
+use crate::exchanges::{BinanceSpotClient, BinanceSpotConfig, OkxSpotClient, OkxSpotConfig};
 use crate::execution::{ExecutionRouter, TradingAdapter};
-use crate::market::{exchange_symbol_for, ExchangeId, ExchangeSymbol, InstrumentMeta};
-use anyhow::Result;
+use crate::market::{
+    exchange_symbol_for, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
+};
+use anyhow::{anyhow, Context, Result};
 use std::collections::HashSet;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateWsRuntimeSpec {
@@ -38,6 +49,402 @@ pub struct CrossArbLiveRuntimeParts {
     pub adapters: Vec<Arc<dyn TradingAdapter>>,
     pub private_ws_specs: Vec<PrivateWsRuntimeSpec>,
     pub binance_private_ws_specs: Vec<BinancePrivateWsRuntimeSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LiveTradingSafetyError {
+    #[error("live trading is disabled")]
+    LiveTradingDisabled,
+    #[error("live trading requires enable_live_trading=true")]
+    LiveTradingNotEnabled,
+    #[error("max_live_notional_per_trade is missing or invalid")]
+    MissingMaxLiveNotional,
+    #[error("enabled_symbols is empty")]
+    MissingEnabledSymbols,
+    #[error("enabled_exchanges is empty")]
+    MissingEnabledExchanges,
+    #[error("api keys are missing or invalid")]
+    MissingApiKeys,
+    #[error("exchange connectivity check failed")]
+    ExchangeConnectivity,
+    #[error("public websocket data is stale")]
+    PublicWebSocketStale,
+    #[error("private user stream is unhealthy")]
+    PrivateStreamUnhealthy,
+    #[error("REST order endpoint dry-run check failed")]
+    RestOrderDryRun,
+    #[error("balances are unavailable")]
+    BalancesUnavailable,
+    #[error("balance reconciliation failed")]
+    BalanceReconciliationFailed,
+    #[error("symbol mapping check failed")]
+    SymbolMapping,
+    #[error("min order size check failed")]
+    MinOrderSize,
+    #[error("tick size check failed")]
+    TickSize,
+    #[error("lot size check failed")]
+    LotSize,
+    #[error("fee model is not loaded")]
+    FeeModelNotLoaded,
+    #[error("database recorder is unhealthy")]
+    RecorderUnhealthy,
+    #[error("live trading starts with taker-taker only")]
+    MakerFirstDisabled,
+    #[error("notional exceeds max_live_notional_per_trade")]
+    MaxNotionalExceeded,
+    #[error("symbol is not live-enabled")]
+    SymbolNotEnabled,
+    #[error("exchange is not live-enabled")]
+    ExchangeNotEnabled,
+    #[error("symbol already has an active live trade")]
+    ActiveSymbolTrade,
+    #[error("global active trade limit reached")]
+    ActiveTradeLimit,
+    #[error("kill switch is active")]
+    KillSwitch,
+    #[error("critical risk event is active")]
+    CriticalRiskEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveTradingSafetyReport {
+    pub enabled_symbols: Vec<CanonicalSymbol>,
+    pub enabled_exchanges: Vec<ExchangeId>,
+    pub max_live_notional_per_trade: String,
+    pub max_total_active_trades: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LiveTradingPreflightState {
+    pub api_keys_valid: bool,
+    pub exchange_connectivity_ok: bool,
+    pub public_ws_fresh: bool,
+    pub private_stream_fresh: bool,
+    pub rest_order_dry_run_ok: bool,
+    pub balances_loaded: bool,
+    pub balance_reconciliation_passed: bool,
+    pub symbol_mapping_valid: bool,
+    pub min_order_size_valid: bool,
+    pub tick_size_valid: bool,
+    pub lot_size_valid: bool,
+    pub fee_model_loaded: bool,
+    pub database_recorder_healthy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LivePreTradeCheck {
+    pub symbol: CanonicalSymbol,
+    pub buy_exchange: ExchangeId,
+    pub sell_exchange: ExchangeId,
+    pub notional_usdt: f64,
+    pub active_trades_for_symbol: usize,
+    pub active_trades_total: usize,
+    pub kill_switch_active: bool,
+    pub critical_risk_event_active: bool,
+}
+
+pub fn validate_live_trading_preflight(
+    config: &CrossExchangeArbitrageConfig,
+    state: &LiveTradingPreflightState,
+) -> std::result::Result<LiveTradingSafetyReport, LiveTradingSafetyError> {
+    if config.trading_mode != TradingMode::Live {
+        return Err(LiveTradingSafetyError::LiveTradingDisabled);
+    }
+    if !config.enable_live_trading {
+        return Err(LiveTradingSafetyError::LiveTradingNotEnabled);
+    }
+    let max_live_notional = config
+        .max_live_notional_per_trade
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or(LiveTradingSafetyError::MissingMaxLiveNotional)?;
+    if config.enabled_symbols.is_empty() {
+        return Err(LiveTradingSafetyError::MissingEnabledSymbols);
+    }
+    if config.enabled_exchanges.is_empty() {
+        return Err(LiveTradingSafetyError::MissingEnabledExchanges);
+    }
+    if config.execution.open_execution_style != OpenExecutionStyle::DualTaker {
+        return Err(LiveTradingSafetyError::MakerFirstDisabled);
+    }
+    for exchange in &config.enabled_exchanges {
+        if !config.fees.per_exchange.contains_key(exchange) {
+            return Err(LiveTradingSafetyError::FeeModelNotLoaded);
+        }
+    }
+    if !state.api_keys_valid {
+        return Err(LiveTradingSafetyError::MissingApiKeys);
+    }
+    if !state.exchange_connectivity_ok {
+        return Err(LiveTradingSafetyError::ExchangeConnectivity);
+    }
+    if !state.public_ws_fresh {
+        return Err(LiveTradingSafetyError::PublicWebSocketStale);
+    }
+    if !state.private_stream_fresh {
+        return Err(LiveTradingSafetyError::PrivateStreamUnhealthy);
+    }
+    if !state.rest_order_dry_run_ok {
+        return Err(LiveTradingSafetyError::RestOrderDryRun);
+    }
+    if !state.balances_loaded {
+        return Err(LiveTradingSafetyError::BalancesUnavailable);
+    }
+    if !state.balance_reconciliation_passed {
+        return Err(LiveTradingSafetyError::BalanceReconciliationFailed);
+    }
+    if !state.symbol_mapping_valid {
+        return Err(LiveTradingSafetyError::SymbolMapping);
+    }
+    if !state.min_order_size_valid {
+        return Err(LiveTradingSafetyError::MinOrderSize);
+    }
+    if !state.tick_size_valid {
+        return Err(LiveTradingSafetyError::TickSize);
+    }
+    if !state.lot_size_valid {
+        return Err(LiveTradingSafetyError::LotSize);
+    }
+    if !state.fee_model_loaded {
+        return Err(LiveTradingSafetyError::FeeModelNotLoaded);
+    }
+    if !state.database_recorder_healthy {
+        return Err(LiveTradingSafetyError::RecorderUnhealthy);
+    }
+    log_live_safety_startup(config, max_live_notional);
+    Ok(LiveTradingSafetyReport {
+        enabled_symbols: config.enabled_symbols.clone(),
+        enabled_exchanges: config.enabled_exchanges.clone(),
+        max_live_notional_per_trade: format!("{max_live_notional:.8}"),
+        max_total_active_trades: config.risk.max_open_positions,
+    })
+}
+
+pub fn evaluate_live_pre_trade_safety(
+    config: &CrossExchangeArbitrageConfig,
+    state: &LiveTradingPreflightState,
+    check: &LivePreTradeCheck,
+) -> std::result::Result<(), LiveTradingSafetyError> {
+    validate_live_trading_preflight(config, state)?;
+    log::info!(
+        "cross-arb live pre-trade risk check symbol={} buy_exchange={} sell_exchange={} notional={} active_symbol={} active_total={} kill_switch={} critical_risk={}",
+        check.symbol,
+        check.buy_exchange,
+        check.sell_exchange,
+        check.notional_usdt,
+        check.active_trades_for_symbol,
+        check.active_trades_total,
+        check.kill_switch_active,
+        check.critical_risk_event_active
+    );
+    if check.kill_switch_active {
+        return Err(LiveTradingSafetyError::KillSwitch);
+    }
+    if check.critical_risk_event_active {
+        return Err(LiveTradingSafetyError::CriticalRiskEvent);
+    }
+    if !config.enabled_symbols.contains(&check.symbol) {
+        return Err(LiveTradingSafetyError::SymbolNotEnabled);
+    }
+    if !config.enabled_exchanges.contains(&check.buy_exchange)
+        || !config.enabled_exchanges.contains(&check.sell_exchange)
+    {
+        return Err(LiveTradingSafetyError::ExchangeNotEnabled);
+    }
+    if check.notional_usdt
+        > config
+            .max_live_notional_per_trade
+            .expect("preflight checked max_live_notional_per_trade")
+    {
+        return Err(LiveTradingSafetyError::MaxNotionalExceeded);
+    }
+    if check.active_trades_for_symbol > 0 {
+        return Err(LiveTradingSafetyError::ActiveSymbolTrade);
+    }
+    if check.active_trades_total >= config.risk.max_open_positions {
+        return Err(LiveTradingSafetyError::ActiveTradeLimit);
+    }
+    Ok(())
+}
+
+fn log_live_safety_startup(config: &CrossExchangeArbitrageConfig, max_live_notional: f64) {
+    log::warn!(
+        "cross-arb live safety limits trading_mode={:?} enable_live_trading={} max_live_notional_per_trade={} enabled_symbols={:?} enabled_exchanges={:?} max_open_positions={} max_total_notional={} max_daily_loss={} max_drawdown={} taker_ioc_slippage_limit_pct={}",
+        config.trading_mode,
+        config.enable_live_trading,
+        max_live_notional,
+        config.enabled_symbols,
+        config.enabled_exchanges,
+        config.risk.max_open_positions,
+        config.risk.max_total_notional_usdt,
+        config.risk.max_daily_loss_usdt,
+        config.risk.max_drawdown_usdt,
+        config.execution.taker_ioc_slippage_limit_pct
+    );
+}
+
+pub async fn run_cross_exchange_arbitrage_detection_only(
+    config: CrossExchangeArbitrageConfig,
+) -> Result<()> {
+    config
+        .validate()
+        .context("invalid cross-exchange arbitrage config")?;
+    if config.mode.allows_live_orders() {
+        return Err(anyhow!(
+            "cross_exchange_arbitrage CLI path is detection-only; live modes are disabled"
+        ));
+    }
+    if !config.execution.dry_run {
+        return Err(anyhow!(
+            "cross_exchange_arbitrage detection requires execution.dry_run=true"
+        ));
+    }
+    if !config.detection.enabled {
+        log::warn!("cross_exchange_arbitrage detection is disabled by config");
+        return futures_util::future::pending::<Result<()>>().await;
+    }
+
+    let plan = build_subscription_plan(&config);
+    for subscription in &plan {
+        log::info!(
+            "cross_exchange_arbitrage subscribing public spot books: exchange={} symbols={:?}",
+            subscription.exchange,
+            subscription.symbols
+        );
+    }
+    if config.detection.paper_trading.enabled {
+        log::info!(
+            "paper trading flag is enabled for future execution simulation; live orders remain disabled"
+        );
+    }
+
+    let (tx, mut rx) = mpsc::channel::<(ExchangeId, OrderBookSnapshot)>(4096);
+    start_spot_orderbook_subscriptions(&plan, tx).await?;
+
+    let mut store = MarketDataBookStore::new();
+    let engine = SpreadEngine::from_config(&config);
+    let mut recorder = OpportunityRecorder::new(config.detection.recorder.clone());
+    let mut metrics = DetectionMetrics::default();
+    let symbols = config
+        .detection
+        .symbols
+        .iter()
+        .filter_map(|symbol| normalize_symbol(symbol))
+        .collect::<Vec<_>>();
+
+    log::info!(
+        "cross_exchange_arbitrage detection started: exchanges={:?} symbols={:?} min_net_spread_bps={} live_orders=false",
+        config.detection.exchanges,
+        config.detection.symbols,
+        config.detection.min_net_spread_bps
+    );
+
+    while let Some((exchange, snapshot)) = rx.recv().await {
+        metrics.observe_book();
+        let Some(book) = normalize_orderbook_snapshot(
+            exchange.clone(),
+            snapshot,
+            &config.detection.symbol_mappings,
+        ) else {
+            log::warn!("ignored unmapped order book from {}", exchange);
+            continue;
+        };
+        let symbol = book.symbol.clone();
+        store.update(book);
+        for opportunity in engine.scan_symbol(
+            &store,
+            &symbol,
+            &config.detection.exchanges,
+            chrono::Utc::now(),
+        ) {
+            if opportunity.decision == OpportunityDecision::Rejected
+                && !config.detection.record_rejected
+            {
+                continue;
+            }
+            if opportunity.accepted() {
+                log::info!(
+                    "cross_exchange_arbitrage opportunity accepted symbol={} buy={}@{} sell={}@{} net_bps={:.4} notional={:.2}",
+                    opportunity.symbol,
+                    opportunity.buy_exchange,
+                    opportunity.buy_price,
+                    opportunity.sell_exchange,
+                    opportunity.sell_price,
+                    opportunity.estimated_net_spread_bps,
+                    opportunity.estimated_notional
+                );
+            } else {
+                log::debug!(
+                    "cross_exchange_arbitrage opportunity rejected symbol={} buy={} sell={} net_bps={:.4} reason={}",
+                    opportunity.symbol,
+                    opportunity.buy_exchange,
+                    opportunity.sell_exchange,
+                    opportunity.estimated_net_spread_bps,
+                    opportunity.reason
+                );
+            }
+            recorder
+                .record(opportunity)
+                .context("failed to record cross-exchange arbitrage opportunity")?;
+        }
+        log::trace!(
+            "cross_exchange_arbitrage metrics books={} recorded={} accepted={} rejected={} symbols={}",
+            metrics.books_received,
+            recorder.metrics().opportunities_recorded,
+            recorder.metrics().opportunities_accepted,
+            recorder.metrics().opportunities_rejected,
+            symbols.len()
+        );
+    }
+
+    Ok(())
+}
+
+async fn start_spot_orderbook_subscriptions(
+    plan: &[super::market_data::MarketDataSubscription],
+    tx: mpsc::Sender<(ExchangeId, OrderBookSnapshot)>,
+) -> Result<()> {
+    for subscription in plan {
+        match subscription.exchange {
+            ExchangeId::Binance => {
+                let client = BinanceSpotClient::new(BinanceSpotConfig::default());
+                let mut rx = client
+                    .subscribe_orderbook(subscription.symbols.clone())
+                    .await
+                    .context("failed to subscribe Binance Spot order book")?;
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    while let Some(book) = rx.recv().await {
+                        if tx.send((ExchangeId::Binance, book)).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            ExchangeId::Okx => {
+                let client = OkxSpotClient::new(OkxSpotConfig::default());
+                let mut rx = client
+                    .subscribe_orderbook(subscription.symbols.clone())
+                    .await
+                    .context("failed to subscribe OKX Spot order book")?;
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    while let Some(book) = rx.recv().await {
+                        if tx.send((ExchangeId::Okx, book)).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            ref other => {
+                log::warn!(
+                    "cross_exchange_arbitrage detection currently skips unsupported spot exchange {}",
+                    other
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn build_cross_arb_execution_router(
@@ -140,10 +547,8 @@ fn private_ws_symbols_for_exchange(
         .filter(|instrument| instrument.exchange == *exchange)
         .filter(|instrument| instrument.status.allows_closes())
         .filter(|instrument| universe.contains(&instrument.canonical_symbol))
-        .filter_map(|instrument| {
-            seen.insert(instrument.exchange_symbol.clone())
-                .then(|| instrument.exchange_symbol.clone())
-        })
+        .filter(|instrument| seen.insert(instrument.exchange_symbol.clone()))
+        .map(|instrument| instrument.exchange_symbol.clone())
         .collect::<Vec<_>>();
     if symbols.is_empty() {
         symbols = config
@@ -193,9 +598,13 @@ pub fn build_private_ws_runtime_specs(
 }
 
 pub fn live_enabled_exchanges(config: &CrossExchangeArbitrageConfig) -> Vec<ExchangeId> {
-    config
-        .universe
-        .enabled_exchanges
+    let configured =
+        if config.trading_mode == TradingMode::Live && !config.enabled_exchanges.is_empty() {
+            &config.enabled_exchanges
+        } else {
+            &config.universe.enabled_exchanges
+        };
+    configured
         .iter()
         .filter(|exchange| {
             config
@@ -257,6 +666,18 @@ mod tests {
             exchange_route_status(&config, &ExchangeId::Bitget),
             crate::market::RouteStatus::CloseOnly
         );
+    }
+
+    #[test]
+    fn live_runtime_should_use_explicit_enabled_exchange_allowlist() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.trading_mode = TradingMode::Live;
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Okx];
+        config.enabled_exchanges = vec![ExchangeId::Binance];
+
+        let exchanges = live_enabled_exchanges(&config);
+
+        assert_eq!(exchanges, vec![ExchangeId::Binance]);
     }
 
     #[test]
@@ -477,5 +898,128 @@ mod tests {
         let exchange_symbol = crate::market::exchange_symbol_for(&ExchangeId::Gate, &symbol);
 
         assert_eq!(exchange_symbol.symbol, "BTC_USDT");
+    }
+
+    fn live_config() -> CrossExchangeArbitrageConfig {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = crate::market::RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(crate::market::RuntimeMode::LiveSmall);
+        config.trading_mode = TradingMode::Live;
+        config.enable_live_trading = true;
+        config.max_live_notional_per_trade = Some(100.0);
+        config.enabled_symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+        config.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Okx];
+        config.universe.enabled_exchanges = config.enabled_exchanges.clone();
+        config.universe.symbols = config.enabled_symbols.clone();
+        config.execution.open_execution_style = OpenExecutionStyle::DualTaker;
+        for exchange in config.universe.enabled_exchanges.clone() {
+            let runtime = config.exchanges.entry(exchange).or_default();
+            runtime.enabled = Some(true);
+            runtime.private_rest_enabled = true;
+            runtime.private_ws_enabled = true;
+        }
+        config
+    }
+
+    fn healthy_preflight() -> LiveTradingPreflightState {
+        LiveTradingPreflightState {
+            api_keys_valid: true,
+            exchange_connectivity_ok: true,
+            public_ws_fresh: true,
+            private_stream_fresh: true,
+            rest_order_dry_run_ok: true,
+            balances_loaded: true,
+            balance_reconciliation_passed: true,
+            symbol_mapping_valid: true,
+            min_order_size_valid: true,
+            tick_size_valid: true,
+            lot_size_valid: true,
+            fee_model_loaded: true,
+            database_recorder_healthy: true,
+        }
+    }
+
+    fn pre_trade(notional_usdt: f64) -> LivePreTradeCheck {
+        LivePreTradeCheck {
+            symbol: CanonicalSymbol::new("BTC", "USDT"),
+            buy_exchange: ExchangeId::Binance,
+            sell_exchange: ExchangeId::Okx,
+            notional_usdt,
+            active_trades_for_symbol: 0,
+            active_trades_total: 0,
+            kill_switch_active: false,
+            critical_risk_event_active: false,
+        }
+    }
+
+    #[test]
+    fn live_mode_should_be_disabled_by_default() {
+        let config = CrossExchangeArbitrageConfig::default();
+
+        assert_eq!(config.trading_mode, TradingMode::Paper);
+        assert!(!config.enable_live_trading);
+        assert_eq!(
+            validate_live_trading_preflight(&config, &healthy_preflight()).unwrap_err(),
+            LiveTradingSafetyError::LiveTradingDisabled
+        );
+    }
+
+    #[test]
+    fn missing_api_keys_should_prevent_live_startup() {
+        let config = live_config();
+        let mut state = healthy_preflight();
+        state.api_keys_valid = false;
+
+        assert_eq!(
+            validate_live_trading_preflight(&config, &state).unwrap_err(),
+            LiveTradingSafetyError::MissingApiKeys
+        );
+    }
+
+    #[test]
+    fn unhealthy_private_stream_should_prevent_live_startup() {
+        let config = live_config();
+        let mut state = healthy_preflight();
+        state.private_stream_fresh = false;
+
+        assert_eq!(
+            validate_live_trading_preflight(&config, &state).unwrap_err(),
+            LiveTradingSafetyError::PrivateStreamUnhealthy
+        );
+    }
+
+    #[test]
+    fn balance_mismatch_should_prevent_live_startup() {
+        let config = live_config();
+        let mut state = healthy_preflight();
+        state.balance_reconciliation_passed = false;
+
+        assert_eq!(
+            validate_live_trading_preflight(&config, &state).unwrap_err(),
+            LiveTradingSafetyError::BalanceReconciliationFailed
+        );
+    }
+
+    #[test]
+    fn max_notional_should_be_enforced_before_live_order() {
+        let config = live_config();
+
+        assert_eq!(
+            evaluate_live_pre_trade_safety(&config, &healthy_preflight(), &pre_trade(101.0))
+                .unwrap_err(),
+            LiveTradingSafetyError::MaxNotionalExceeded
+        );
+    }
+
+    #[test]
+    fn kill_switch_should_block_new_live_orders() {
+        let config = live_config();
+        let mut check = pre_trade(50.0);
+        check.kill_switch_active = true;
+
+        assert_eq!(
+            evaluate_live_pre_trade_safety(&config, &healthy_preflight(), &check).unwrap_err(),
+            LiveTradingSafetyError::KillSwitch
+        );
     }
 }

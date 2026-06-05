@@ -74,8 +74,16 @@ fn orphan_recovery_action(
     }
 }
 
-fn required_tables() -> [&'static str; 11] {
+fn required_tables() -> [&'static str; 19] {
     [
+        "arbitrage_market_snapshots",
+        "arbitrage_opportunities",
+        "arbitrage_orders",
+        "arbitrage_fills",
+        "arbitrage_positions",
+        "arbitrage_pnl",
+        "arbitrage_risk_events",
+        "exchange_health_events",
         "cross_arb_market_books_sampled",
         "cross_arb_funding_snapshots",
         "cross_arb_opportunities",

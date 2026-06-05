@@ -1,0 +1,77 @@
+# Unified Spot exchange adapter bundle.
+# Live trading remains disabled by default.
+
+trading_mode: paper
+enable_live_trading: false
+
+exchanges:
+  mexc:
+    enabled: true
+    market_type: spot
+    adapter: mexc_spot
+    api_key: ${MEXC_API_KEY}
+    api_secret: ${MEXC_API_SECRET}
+    base_url: https://api.mexc.com
+    websocket_url: wss://wbs-api.mexc.com/ws
+    dry_run: true
+    enable_private_stream: false
+    stale_book_ms: 10000
+    reconnect_interval_ms: 1000
+    max_reconnect_attempts: 10
+    order_timeout_ms: 10000
+    request_timeout_ms: 10000
+    recv_window: 5000
+    orderbook_depth: 5
+    enabled_symbols:
+      - BTCUSDT
+      - ETHUSDT
+      - DKAUSDT
+      - CUDISUSDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 8
+      burst: 10
+    log_raw_messages: false
+
+  coinex:
+    enabled: true
+    market_type: spot
+    adapter: coinex_spot
+    api_key: ${COINEX_API_KEY}
+    api_secret: ${COINEX_API_SECRET}
+    base_url: https://api.coinex.com/v2
+    websocket_url: wss://socket.coinex.com/v2/spot
+    dry_run: true
+    enable_private_stream: false
+    stale_book_ms: 10000
+    reconnect_interval_ms: 1000
+    max_reconnect_attempts: 10
+    order_timeout_ms: 10000
+    request_timeout_ms: 10000
+    orderbook_depth: 5
+    enabled_symbols:
+      - BTCUSDT
+      - ETHUSDT
+      - CUDISUSDT
+      - GWEIUSDT
+      - PIPEUSDT
+      - TURBOSUSDT
+      - SAROSUSDT
+    symbol_mappings:
+      BTCUSDT: BTCUSDT
+      CUDISUSDT: CUDISUSDT
+    fee_override:
+      maker_fee_rate: 0.002
+      taker_fee_rate: 0.002
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 8
+    log_raw_messages: false
+
+spot_risk_defaults:
+  max_live_notional_per_trade: 0
+  require_balance_reservation: true
+  stale_book_ms: 10000
+  reject_without_symbol_rule: true

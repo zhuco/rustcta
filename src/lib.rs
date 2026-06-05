@@ -4,14 +4,20 @@
 
 pub mod analysis;
 pub mod backtest;
+pub mod control;
 pub mod core;
 pub mod cta;
+pub mod data;
 pub mod exchanges;
 pub mod execution;
+pub mod live_preflight;
 pub mod market;
+pub mod risk;
+pub mod scanner;
 pub mod smart_money;
 pub mod strategies;
 pub mod utils;
+pub mod web;
 
 // 选择性导出，避免命名冲突
 pub use core::{

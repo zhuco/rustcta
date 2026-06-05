@@ -1,0 +1,42 @@
+# OKX Spot unified exchange adapter example.
+# Credentials are read from environment variables by default:
+# OKX_SPOT_API_KEY, OKX_SPOT_API_SECRET, and OKX_SPOT_PASSPHRASE.
+
+exchange: okx
+market_type: spot
+adapter: okx_spot
+
+rest_base_url: https://www.okx.com
+public_ws_url: wss://ws.okx.com:8443/ws/v5/public
+private_ws_url: wss://ws.okx.com:8443/ws/v5/private
+
+api_key_env: OKX_SPOT_API_KEY
+api_secret_env: OKX_SPOT_API_SECRET
+passphrase_env: OKX_SPOT_PASSPHRASE
+
+# Keep true until REST permissions, private WebSocket auth, and order logs are verified.
+dry_run: true
+
+orderbook_depth: 5
+stale_after_ms: 10000
+reconnect_delay_ms: 1000
+
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+
+symbol_mappings:
+  BTCUSDT: BTC-USDT
+  ETHUSDT: ETH-USDT
+
+permissions:
+  required:
+    - trade
+    - read
+  optional:
+    - fee_rate
+
+notes:
+  - Internal symbols use BTCUSDT format; OKX symbols use BTC-USDT format.
+  - Market buys send tgtCcy=base_ccy so unified quantity means base asset quantity.
+  - User streams subscribe to SPOT orders and account balance updates after private WebSocket login.

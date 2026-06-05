@@ -5,7 +5,7 @@ use super::{
     CrossArbExecutionCoordinator, CrossArbRuntime, PrivateWsRuntimeSpec,
 };
 use crate::core::types::MarketType;
-use crate::exchanges::adapters::run_private_ws_with_url_and_instruments;
+use crate::exchanges::private_perp::run_private_ws_with_url_and_instruments;
 use crate::execution::{
     parse_binance_futures_user_data_event, ExchangeBalance, ExchangeErrorClass, ExchangePosition,
     FillEvent, FillQuery, OrderState, PositionSide, PrivateErrorEvent, PrivateEvent,
@@ -429,7 +429,7 @@ pub fn disconnected_event(
 
 pub async fn run_binance_futures_private_ws(
     exchange: Arc<dyn crate::core::exchange::Exchange>,
-    config: crate::exchanges::adapters::PrivateWsRunConfig,
+    config: crate::exchanges::private_perp::PrivateWsRunConfig,
     tx: mpsc::Sender<PrivateEvent>,
 ) -> Result<()> {
     loop {
@@ -459,7 +459,7 @@ pub async fn run_binance_futures_private_ws(
 
 async fn run_binance_futures_private_ws_once(
     exchange: Arc<dyn crate::core::exchange::Exchange>,
-    config: crate::exchanges::adapters::PrivateWsRunConfig,
+    config: crate::exchanges::private_perp::PrivateWsRunConfig,
     tx: mpsc::Sender<PrivateEvent>,
 ) -> Result<()> {
     let listen_key = exchange

@@ -340,6 +340,8 @@ fn compact_exchange_code(exchange: &ExchangeId) -> String {
         ExchangeId::Gate => "gt".to_string(),
         ExchangeId::Bybit => "bb".to_string(),
         ExchangeId::Mexc => "mx".to_string(),
+        ExchangeId::CoinEx => "cx".to_string(),
+        ExchangeId::KuCoin => "kc".to_string(),
         ExchangeId::Htx => "htx".to_string(),
         ExchangeId::Other(value) => {
             let compact = value

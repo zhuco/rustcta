@@ -52,8 +52,7 @@ This checklist summarizes the implementation state against
 
 Known non-blocking warning:
 
-- `src/strategies/copy_trading.rs:303` has an existing unused assignment warning
-  for `msg_count`.
+- None recorded for the current arbitrage-focused build.
 
 ## Must Complete Before Real Orders
 

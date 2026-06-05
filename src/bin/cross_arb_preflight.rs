@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::core::exchange::Exchange;
 use rustcta::core::types::MarketType;
-use rustcta::exchanges::adapters::private_trading_support_for;
 use rustcta::exchanges::registry::{market_adapter, private_perp_exchange};
+use rustcta::exchanges::trading_adapters::private_trading_support_for;
 use rustcta::market::{exchange_symbol_for, ExchangeId, MarketDataAdapter, RuntimeMode};
 use rustcta::strategies::cross_exchange_arbitrage::{
     build_core_exchange_for_exchange, build_trading_adapter_for_exchange, live_enabled_exchanges,
@@ -638,6 +638,8 @@ fn build_private_exchange(
         | ExchangeId::Gate
         | ExchangeId::Bybit
         | ExchangeId::Mexc
+        | ExchangeId::CoinEx
+        | ExchangeId::KuCoin
         | ExchangeId::Htx
         | ExchangeId::Other(_) => Ok(None),
     }

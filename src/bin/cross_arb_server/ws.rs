@@ -213,6 +213,12 @@ fn build_public_ws_endpoint(
                 send_interval_ms: 20,
             }
         }
+        ExchangeId::CoinEx | ExchangeId::KuCoin => {
+            return Err(anyhow!(
+                "unsupported public ws exchange in legacy perp ws server: {}",
+                exchange.as_str()
+            ));
+        }
         ExchangeId::Other(other) => {
             return Err(anyhow!("unsupported public ws exchange: {other}"));
         }

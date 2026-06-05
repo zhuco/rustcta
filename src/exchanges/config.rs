@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::exchanges::adapters::PrivateWsRunConfig;
+use crate::exchanges::private_perp::PrivateWsRunConfig;
 use crate::execution::PositionMode;
 use crate::market::ExchangeId;
 

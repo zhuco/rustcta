@@ -1,0 +1,97 @@
+fees:
+  fallback:
+    spot:
+      maker_bps: 20
+      taker_bps: 20
+      fee_asset: quote
+    perpetual:
+      maker_bps: 2
+      taker_bps: 5
+      fee_asset: quote
+
+  defaults:
+    mexc:
+      spot:
+        maker_bps: 0
+        taker_bps: 5
+        fee_asset: quote
+      perpetual:
+        maker_bps: 0
+        taker_bps: 2
+        fee_asset: quote
+    coinex:
+      spot:
+        maker_bps: 20
+        taker_bps: 20
+        fee_asset: quote
+      perpetual:
+        maker_bps: 3
+        taker_bps: 5
+        fee_asset: quote
+    gateio:
+      spot:
+        maker_bps: 10
+        taker_bps: 10
+        fee_asset: quote
+      perpetual:
+        maker_bps: 2
+        taker_bps: 5
+        fee_asset: quote
+    bitget:
+      spot:
+        maker_bps: 10
+        taker_bps: 10
+        fee_asset: quote
+      perpetual:
+        maker_bps: 2
+        taker_bps: 6
+        fee_asset: quote
+    binance:
+      spot:
+        maker_bps: 10
+        taker_bps: 10
+        fee_asset: quote
+      perpetual:
+        maker_bps: 2
+        taker_bps: 5
+        fee_asset: quote
+    okx:
+      spot:
+        maker_bps: 8
+        taker_bps: 10
+        fee_asset: quote
+      perpetual:
+        maker_bps: 2
+        taker_bps: 5
+        fee_asset: quote
+
+  symbol_overrides:
+    - exchange: mexc
+      market_type: spot
+      symbol: CUDISUSDT
+      maker_bps: 0
+      taker_bps: 3
+      fee_asset: quote
+      reason: "special campaign fee"
+
+  platform_tokens:
+    - exchange: gateio
+      token: GT
+      enabled: false
+      discount_multiplier: 0.8
+    - exchange: bitget
+      token: BGB
+      enabled: false
+      discount_multiplier: 0.8
+    - exchange: binance
+      token: BNB
+      enabled: true
+      discount_multiplier: 0.75
+    - exchange: coinex
+      token: CET
+      enabled: false
+      discount_multiplier: 0.8
+    - exchange: okx
+      token: OKB
+      enabled: false
+      discount_multiplier: 1.0

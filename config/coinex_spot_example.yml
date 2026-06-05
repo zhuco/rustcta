@@ -1,0 +1,62 @@
+# CoinEx Spot unified exchange adapter example.
+# Credentials are read from environment variables by default:
+# COINEX_API_KEY and COINEX_API_SECRET.
+
+exchange: coinex
+market_type: spot
+adapter: coinex_spot
+enabled: true
+
+api_key: ${COINEX_API_KEY}
+api_secret: ${COINEX_API_SECRET}
+
+base_url: https://api.coinex.com/v2
+websocket_url: wss://socket.coinex.com/v2/spot
+testnet: false
+sandbox: false
+
+# Keep true until preflight, permissions, notional limits, and logs are verified.
+dry_run: true
+enable_private_stream: false
+
+stale_book_ms: 10000
+reconnect_interval_ms: 1000
+max_reconnect_attempts: 10
+order_timeout_ms: 10000
+request_timeout_ms: 10000
+orderbook_depth: 5
+log_raw_messages: false
+
+enabled_symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - CUDISUSDT
+  - GWEIUSDT
+  - PIPEUSDT
+  - TURBOSUSDT
+  - SAROSUSDT
+
+symbol_mappings:
+  BTCUSDT: BTCUSDT
+  CUDISUSDT: CUDISUSDT
+
+fee_override:
+  maker_fee_rate: 0.002
+  taker_fee_rate: 0.002
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 8
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+  optional:
+    - fee_rate
+
+notes:
+  - Internal symbols use compact format such as BTCUSDT.
+  - The mapping table is generic and can map venue-specific aliases into compact internal symbols.
+  - Post-only is currently unsupported by the adapter unless CoinEx support is verified for the target account/API version.
+  - Private Spot user stream is currently exposed as unsupported in this adapter; use REST polling until implemented.

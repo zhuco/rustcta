@@ -4,14 +4,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    load_jsonl_storage_events, scan_opportunities, ArbSignal, BundleReadModel,
+    load_jsonl_storage_events, scan_opportunities, ArbSignal, ArbitrageFillRecord,
+    ArbitrageMarketSnapshotRecord, ArbitrageOrderRecord, AsyncJsonlStorageSink, BundleReadModel,
     CrossArbDashboardStatus, CrossArbStorageEvent, CrossExchangeArbitrageConfig,
     HedgeRecordReadModel, HedgeRecordStatus, HedgeRepairTaskReadModel, HedgeRepairTaskStatus,
-    InMemoryStorageSink, JsonlStorageSink, MakerLegKind, MarketSnapshot, Opportunity,
-    OpportunityReadModel, OrderSide as StrategyOrderSide, PortfolioExposureSummary,
-    PositionManager, PrivateStreamHealthReadModel, RiskEventReadModel, RiskStateReadModel,
-    RouteReadModel, SimulatedBundleState, SimulatedBundleStatus, StorageSink, StrategyRiskState,
-    StrategyRoute,
+    InMemoryStorageSink, MakerLegKind, MarketSnapshot, Opportunity, OpportunityReadModel,
+    OrderSide as StrategyOrderSide, PortfolioExposureSummary, PositionManager,
+    PrivateStreamHealthReadModel, RiskEventReadModel, RiskStateReadModel, RouteReadModel,
+    SimulatedBundleState, SimulatedBundleStatus, StorageSink, StrategyRiskState, StrategyRoute,
 };
 use crate::execution::{
     AccountSyncState, ArbitrageBundle, BundleLeg, ExchangePosition, FillEvent, OrderCommand,
@@ -1882,18 +1882,26 @@ impl CrossArbRuntimeState {
 pub struct CrossArbRuntime {
     pub state: CrossArbRuntimeState,
     pub storage: InMemoryStorageSink,
-    persistent_storage: Option<JsonlStorageSink>,
+    persistent_storage: Option<AsyncJsonlStorageSink>,
 }
 
 impl CrossArbRuntime {
     pub fn new(config: CrossExchangeArbitrageConfig, now: DateTime<Utc>) -> Self {
         let persistent_storage = if config.persistence.enabled {
-            JsonlStorageSink::for_day(&config.persistence.jsonl_dir, now).ok()
+            AsyncJsonlStorageSink::for_day(&config.persistence.jsonl_dir, now).ok()
         } else {
             None
         };
+        let mut state = CrossArbRuntimeState::new(config, now);
+        if state.config.mode.allows_live_orders()
+            && state.config.persistence.enabled
+            && state.config.persistence.stop_live_on_unavailable
+            && persistent_storage.is_none()
+        {
+            state.risk_state.set_close_only(now);
+        }
         Self {
-            state: CrossArbRuntimeState::new(config, now),
+            state,
             storage: InMemoryStorageSink::default(),
             persistent_storage,
         }
@@ -1905,6 +1913,14 @@ impl CrossArbRuntime {
         snapshots: &[MarketSnapshot],
         now: DateTime<Utc>,
     ) -> Vec<ArbSignal> {
+        for snapshot in snapshots {
+            let event =
+                CrossArbStorageEvent::MarketSnapshot(ArbitrageMarketSnapshotRecord::from(snapshot));
+            self.storage.record(event.clone(), now);
+            if let Some(storage) = self.persistent_storage.as_mut() {
+                storage.record(event, now);
+            }
+        }
         let signals = self
             .state
             .update_from_market_snapshots(canonical_symbol, snapshots, now);
@@ -1916,19 +1932,46 @@ impl CrossArbRuntime {
         {
             self.storage
                 .record(CrossArbStorageEvent::Opportunity(opportunity.clone()), now);
+            if let Some(storage) = self.persistent_storage.as_mut() {
+                storage.record(CrossArbStorageEvent::Opportunity(opportunity.clone()), now);
+            }
         }
         for signal in &signals {
             self.storage
                 .record(CrossArbStorageEvent::Signal(signal.clone()), now);
+            if let Some(storage) = self.persistent_storage.as_mut() {
+                storage.record(CrossArbStorageEvent::Signal(signal.clone()), now);
+            }
         }
         signals
     }
 
     pub fn on_private_event(&mut self, event: PrivateEvent) {
         let recorded_at = event.received_at;
+        log_live_private_event(&self.state.config, &event);
+        let typed_event = match &event.kind {
+            PrivateEventKind::Order(order) => Some(CrossArbStorageEvent::OrderTransition(
+                ArbitrageOrderRecord::from(order),
+            )),
+            PrivateEventKind::Fill(fill) => {
+                Some(CrossArbStorageEvent::Fill(ArbitrageFillRecord::from(fill)))
+            }
+            _ => None,
+        };
         self.state.ingest_private_event(event.clone());
-        self.storage
-            .record(CrossArbStorageEvent::PrivateEvent(event), recorded_at);
+        self.storage.record(
+            CrossArbStorageEvent::PrivateEvent(event.clone()),
+            recorded_at,
+        );
+        if let Some(storage) = self.persistent_storage.as_mut() {
+            storage.record(CrossArbStorageEvent::PrivateEvent(event), recorded_at);
+        }
+        if let Some(typed_event) = typed_event {
+            self.storage.record(typed_event.clone(), recorded_at);
+            if let Some(storage) = self.persistent_storage.as_mut() {
+                storage.record(typed_event, recorded_at);
+            }
+        }
     }
 
     pub fn persist_hedge_record(&mut self, bundle_id: &str, recorded_at: DateTime<Utc>) {
@@ -1962,6 +2005,63 @@ impl CrossArbRuntime {
                 storage.record(CrossArbStorageEvent::HedgeRepairTask(task), recorded_at);
             }
         }
+    }
+}
+
+fn log_live_private_event(config: &CrossExchangeArbitrageConfig, event: &PrivateEvent) {
+    if !config.mode.allows_live_orders() {
+        return;
+    }
+    match &event.kind {
+        PrivateEventKind::Order(order) => {
+            log::warn!(
+                "cross-arb live order update exchange={} symbol={} client_order_id={:?} exchange_order_id={:?} side={:?} position_side={:?} status={:?} filled_quantity={} average_fill_price={:?} updated_at={}",
+                order.exchange,
+                order.canonical_symbol,
+                order.client_order_id,
+                order.exchange_order_id,
+                order.side,
+                order.position_side,
+                order.status,
+                order.filled_quantity,
+                order.average_fill_price,
+                order.updated_at
+            );
+        }
+        PrivateEventKind::Fill(fill) => {
+            log::warn!(
+                "cross-arb live fill exchange={} symbol={} trade_id={} client_order_id={:?} exchange_order_id={:?} side={:?} position_side={:?} liquidity={:?} price={} quantity={} fee={:?} fee_asset={:?} received_at={}",
+                fill.exchange,
+                fill.canonical_symbol,
+                fill.trade_id,
+                fill.client_order_id,
+                fill.exchange_order_id,
+                fill.side,
+                fill.position_side,
+                fill.liquidity,
+                fill.price,
+                fill.quantity,
+                fill.fee,
+                fill.fee_asset,
+                fill.received_at
+            );
+        }
+        PrivateEventKind::StreamDisconnected { reason, .. } => {
+            log::error!(
+                "cross-arb live private stream disconnected exchange={} reason={:?}",
+                event.exchange,
+                reason
+            );
+        }
+        PrivateEventKind::Error(error) => {
+            log::error!(
+                "cross-arb live private stream error exchange={} class={:?} message={}",
+                event.exchange,
+                error.class,
+                error.message
+            );
+        }
+        _ => {}
     }
 }
 

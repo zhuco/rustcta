@@ -1,0 +1,38 @@
+# Binance Spot unified exchange adapter example.
+# Credentials are read from environment variables by default:
+# BINANCE_SPOT_API_KEY and BINANCE_SPOT_API_SECRET.
+
+exchange: binance
+market_type: spot
+adapter: binance_spot
+
+rest_base_url: https://api.binance.com
+public_ws_base_url: wss://stream.binance.com:9443
+private_ws_base_url: wss://stream.binance.com:9443
+
+api_key_env: BINANCE_SPOT_API_KEY
+api_secret_env: BINANCE_SPOT_API_SECRET
+
+# Keep true until preflight, account permissions, notional limits, and logs are verified.
+dry_run: true
+
+recv_window_ms: 5000
+orderbook_depth: 5
+stale_after_ms: 10000
+reconnect_delay_ms: 1000
+
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+
+permissions:
+  required:
+    - spot_trading
+    - read_account
+  optional:
+    - trade_fee
+
+notes:
+  - Market orders, limit orders, LIMIT_MAKER post-only orders, IOC, and FOK are supported.
+  - User streams require a valid listen key and API key; order placement also requires API secret.
+  - This adapter normalizes Binance Spot responses into unified RustCTA exchange types.

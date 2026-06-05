@@ -1,8 +1,8 @@
 //! Configuration contracts for cross-exchange arbitrage simulation.
 
 use super::fees::ExchangeFeeRates;
-use crate::exchanges::adapters::PrivateWsRunConfig;
 use crate::exchanges::config::{ExchangeRegistryConfig, ExchangeRuntimeSettings};
+use crate::exchanges::private_perp::PrivateWsRunConfig;
 use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,6 +11,16 @@ use std::collections::HashMap;
 #[serde(deny_unknown_fields)]
 pub struct CrossExchangeArbitrageConfig {
     pub mode: RuntimeMode,
+    #[serde(default)]
+    pub trading_mode: TradingMode,
+    #[serde(default)]
+    pub enable_live_trading: bool,
+    #[serde(default)]
+    pub max_live_notional_per_trade: Option<f64>,
+    #[serde(default)]
+    pub enabled_symbols: Vec<CanonicalSymbol>,
+    #[serde(default)]
+    pub enabled_exchanges: Vec<ExchangeId>,
     #[serde(default)]
     pub strategy: StrategyConfig,
     #[serde(default)]
@@ -37,12 +47,19 @@ pub struct CrossExchangeArbitrageConfig {
     #[serde(default)]
     pub alerts: AlertConfig,
     pub universe: UniverseConfig,
+    #[serde(default)]
+    pub detection: DetectionConfig,
 }
 
 impl Default for CrossExchangeArbitrageConfig {
     fn default() -> Self {
         Self {
             mode: RuntimeMode::Simulation,
+            trading_mode: TradingMode::Paper,
+            enable_live_trading: false,
+            max_live_notional_per_trade: None,
+            enabled_symbols: Vec::new(),
+            enabled_exchanges: Vec::new(),
             strategy: StrategyConfig::default(),
             market: MarketConfig::default(),
             thresholds: ThresholdConfig::default(),
@@ -59,6 +76,7 @@ impl Default for CrossExchangeArbitrageConfig {
             dashboard: DashboardConfig::default(),
             alerts: AlertConfig::default(),
             universe: UniverseConfig::default(),
+            detection: DetectionConfig::default(),
         }
     }
 }
@@ -148,6 +166,35 @@ impl CrossExchangeArbitrageConfig {
                 });
             }
         }
+        if self.trading_mode == TradingMode::Live {
+            if !self.mode.allows_live_orders() {
+                return Err(ConfigValidationError::LiveTradingRequiresLiveRuntimeMode);
+            }
+            if !self.enable_live_trading {
+                return Err(ConfigValidationError::LiveTradingNotEnabled);
+            }
+            if self
+                .max_live_notional_per_trade
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .is_none()
+            {
+                return Err(ConfigValidationError::MissingMaxLiveNotional);
+            }
+            if self.enabled_symbols.is_empty() {
+                return Err(ConfigValidationError::MissingLiveEnabledSymbols);
+            }
+            if self.enabled_exchanges.is_empty() {
+                return Err(ConfigValidationError::MissingLiveEnabledExchanges);
+            }
+            if self.execution.open_execution_style != OpenExecutionStyle::DualTaker {
+                return Err(ConfigValidationError::LiveTradingRequiresDualTaker);
+            }
+            if self.execution.taker_ioc_slippage_limit_pct <= 0.0
+                || !self.execution.taker_ioc_slippage_limit_pct.is_finite()
+            {
+                return Err(ConfigValidationError::LiveTradingRequiresSlippageLimit);
+            }
+        }
         if self.mode.allows_live_orders()
             && self.risk.symbol_whitelist_required_live
             && self.universe.symbols.is_empty()
@@ -165,7 +212,7 @@ impl CrossExchangeArbitrageConfig {
                         exchange: exchange.clone(),
                     });
                 }
-                if self.execution.dry_run == false
+                if !self.execution.dry_run
                     && runtime
                         .map(|runtime| !runtime.private_rest_enabled)
                         .unwrap_or(false)
@@ -196,7 +243,23 @@ impl CrossExchangeArbitrageConfig {
                 }
             }
         }
-        if self.risk.max_open_bundles == 0 {
+        if self.risk.max_open_bundles == 0
+            || self.risk.max_notional_per_symbol_usdt <= 0.0
+            || self.risk.max_notional_per_exchange_usdt <= 0.0
+            || self.risk.max_total_notional_usdt <= 0.0
+            || self.risk.max_single_leg_exposure_usdt <= 0.0
+            || self.risk.max_open_positions == 0
+            || self.risk.max_loss_per_trade_usdt <= 0.0
+            || self.risk.max_daily_loss_usdt <= 0.0
+            || self.risk.max_drawdown_usdt <= 0.0
+            || self.risk.max_spread_loss_bps <= 0.0
+            || self.risk.max_hold_seconds <= 0
+            || !(0.0..=1.0).contains(&self.risk.max_rest_failure_rate)
+            || !(0.0..=1.0).contains(&self.risk.max_order_reject_rate)
+            || !(0.0..=1.0).contains(&self.risk.max_cancel_failure_rate)
+            || self.risk.max_private_stream_delay_ms <= 0
+            || self.risk.max_balance_reconciliation_mismatch_usdt < 0.0
+        {
             return Err(ConfigValidationError::InvalidRisk);
         }
         if self.execution.maker_order_ttl_ms == 0
@@ -241,6 +304,20 @@ pub enum ConfigValidationError {
     InvalidThreshold,
     #[error("sizing values must be positive and max >= min")]
     InvalidSizing,
+    #[error("live trading requires a live runtime mode")]
+    LiveTradingRequiresLiveRuntimeMode,
+    #[error("live trading requires enable_live_trading=true")]
+    LiveTradingNotEnabled,
+    #[error("live trading requires explicit max_live_notional_per_trade")]
+    MissingMaxLiveNotional,
+    #[error("live trading requires explicit enabled_symbols")]
+    MissingLiveEnabledSymbols,
+    #[error("live trading requires explicit enabled_exchanges")]
+    MissingLiveEnabledExchanges,
+    #[error("live trading starts with taker-taker only")]
+    LiveTradingRequiresDualTaker,
+    #[error("live trading requires positive taker IOC slippage limit")]
+    LiveTradingRequiresSlippageLimit,
     #[error("live mode requires an explicit symbol whitelist")]
     LiveModeRequiresWhitelist,
     #[error("missing fee config for exchange {0}")]
@@ -262,6 +339,14 @@ pub enum ConfigValidationError {
     InvalidRisk,
     #[error("execution values must be positive and internally consistent")]
     InvalidExecution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TradingMode {
+    #[default]
+    Paper,
+    Live,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -824,9 +909,53 @@ pub struct RiskConfig {
     pub max_taker_slippage_pct: f64,
     pub maker_non_fill_penalty: f64,
     pub safety_buffer: f64,
+    #[serde(alias = "max_notional_per_symbol")]
     pub max_notional_per_symbol_usdt: f64,
+    #[serde(
+        default = "default_max_notional_per_exchange_usdt",
+        alias = "max_notional_per_exchange"
+    )]
+    pub max_notional_per_exchange_usdt: f64,
+    #[serde(
+        default = "default_max_total_notional_usdt",
+        alias = "max_total_notional"
+    )]
+    pub max_total_notional_usdt: f64,
+    #[serde(
+        default = "default_max_single_leg_exposure_usdt",
+        alias = "max_single_leg_exposure"
+    )]
+    pub max_single_leg_exposure_usdt: f64,
     #[serde(default = "default_max_open_bundles")]
     pub max_open_bundles: usize,
+    #[serde(default = "default_max_open_positions")]
+    pub max_open_positions: usize,
+    #[serde(
+        default = "default_max_loss_per_trade_usdt",
+        alias = "max_loss_per_trade"
+    )]
+    pub max_loss_per_trade_usdt: f64,
+    #[serde(default = "default_max_daily_loss_usdt", alias = "max_daily_loss")]
+    pub max_daily_loss_usdt: f64,
+    #[serde(default = "default_max_drawdown_usdt", alias = "max_drawdown")]
+    pub max_drawdown_usdt: f64,
+    #[serde(default = "default_max_spread_loss_bps")]
+    pub max_spread_loss_bps: f64,
+    #[serde(default = "default_max_hold_seconds")]
+    pub max_hold_seconds: i64,
+    #[serde(default = "default_max_rest_failure_rate")]
+    pub max_rest_failure_rate: f64,
+    #[serde(default = "default_max_order_reject_rate")]
+    pub max_order_reject_rate: f64,
+    #[serde(default = "default_max_cancel_failure_rate")]
+    pub max_cancel_failure_rate: f64,
+    #[serde(default = "default_max_private_stream_delay_ms")]
+    pub max_private_stream_delay_ms: i64,
+    #[serde(
+        default = "default_max_balance_reconciliation_mismatch_usdt",
+        alias = "max_balance_reconciliation_mismatch"
+    )]
+    pub max_balance_reconciliation_mismatch_usdt: f64,
     #[serde(default = "default_true")]
     pub symbol_whitelist_required_live: bool,
     #[serde(default)]
@@ -851,7 +980,22 @@ impl Default for RiskConfig {
             maker_non_fill_penalty: 0.001,
             safety_buffer: 0.001,
             max_notional_per_symbol_usdt: 2_000.0,
+            max_notional_per_exchange_usdt: default_max_notional_per_exchange_usdt(),
+            max_total_notional_usdt: default_max_total_notional_usdt(),
+            max_single_leg_exposure_usdt: default_max_single_leg_exposure_usdt(),
             max_open_bundles: default_max_open_bundles(),
+            max_open_positions: default_max_open_positions(),
+            max_loss_per_trade_usdt: default_max_loss_per_trade_usdt(),
+            max_daily_loss_usdt: default_max_daily_loss_usdt(),
+            max_drawdown_usdt: default_max_drawdown_usdt(),
+            max_spread_loss_bps: default_max_spread_loss_bps(),
+            max_hold_seconds: default_max_hold_seconds(),
+            max_rest_failure_rate: default_max_rest_failure_rate(),
+            max_order_reject_rate: default_max_order_reject_rate(),
+            max_cancel_failure_rate: default_max_cancel_failure_rate(),
+            max_private_stream_delay_ms: default_max_private_stream_delay_ms(),
+            max_balance_reconciliation_mismatch_usdt:
+                default_max_balance_reconciliation_mismatch_usdt(),
             symbol_whitelist_required_live: true,
             block_on_external_account_exposure: false,
             orphan_exposure_blocks_new_entries: true,
@@ -868,6 +1012,62 @@ fn default_one() -> usize {
 
 fn default_max_open_bundles() -> usize {
     3
+}
+
+fn default_max_notional_per_exchange_usdt() -> f64 {
+    5_000.0
+}
+
+fn default_max_total_notional_usdt() -> f64 {
+    10_000.0
+}
+
+fn default_max_single_leg_exposure_usdt() -> f64 {
+    2_000.0
+}
+
+fn default_max_open_positions() -> usize {
+    10
+}
+
+fn default_max_loss_per_trade_usdt() -> f64 {
+    100.0
+}
+
+fn default_max_daily_loss_usdt() -> f64 {
+    500.0
+}
+
+fn default_max_drawdown_usdt() -> f64 {
+    1_000.0
+}
+
+fn default_max_spread_loss_bps() -> f64 {
+    25.0
+}
+
+fn default_max_hold_seconds() -> i64 {
+    300
+}
+
+fn default_max_rest_failure_rate() -> f64 {
+    0.05
+}
+
+fn default_max_order_reject_rate() -> f64 {
+    0.02
+}
+
+fn default_max_cancel_failure_rate() -> f64 {
+    0.02
+}
+
+fn default_max_private_stream_delay_ms() -> i64 {
+    5_000
+}
+
+fn default_max_balance_reconciliation_mismatch_usdt() -> f64 {
+    10.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -919,6 +1119,8 @@ pub struct PersistenceConfig {
     pub enabled: bool,
     pub jsonl_dir: String,
     pub clickhouse_enabled: bool,
+    #[serde(default = "default_true")]
+    pub stop_live_on_unavailable: bool,
 }
 
 impl Default for PersistenceConfig {
@@ -927,6 +1129,7 @@ impl Default for PersistenceConfig {
             enabled: true,
             jsonl_dir: "logs/cross_exchange_arbitrage".to_string(),
             clickhouse_enabled: false,
+            stop_live_on_unavailable: true,
         }
     }
 }
@@ -967,6 +1170,144 @@ impl Default for AlertConfig {
             reconcile_critical_alert: true,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectionConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_detection_exchanges")]
+    pub exchanges: Vec<ExchangeId>,
+    #[serde(default = "default_detection_symbols")]
+    pub symbols: Vec<String>,
+    #[serde(default = "default_detection_depth_levels")]
+    pub depth_levels: u16,
+    #[serde(default = "default_detection_stale_book_ms")]
+    pub stale_book_ms: i64,
+    #[serde(default = "default_detection_estimated_notional_usdt")]
+    pub estimated_notional_usdt: f64,
+    #[serde(default)]
+    pub estimated_slippage_bps: f64,
+    #[serde(default)]
+    pub safety_buffer_bps: f64,
+    #[serde(default = "default_detection_min_net_spread_bps")]
+    pub min_net_spread_bps: f64,
+    #[serde(default = "default_true")]
+    pub record_rejected: bool,
+    #[serde(default)]
+    pub symbol_mappings: HashMap<ExchangeId, HashMap<String, String>>,
+    #[serde(default)]
+    pub recorder: DetectionRecorderConfig,
+    #[serde(default)]
+    pub paper_trading: DetectionPaperTradingConfig,
+}
+
+impl Default for DetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            exchanges: default_detection_exchanges(),
+            symbols: default_detection_symbols(),
+            depth_levels: default_detection_depth_levels(),
+            stale_book_ms: default_detection_stale_book_ms(),
+            estimated_notional_usdt: default_detection_estimated_notional_usdt(),
+            estimated_slippage_bps: 0.0,
+            safety_buffer_bps: 0.0,
+            min_net_spread_bps: default_detection_min_net_spread_bps(),
+            record_rejected: true,
+            symbol_mappings: HashMap::new(),
+            recorder: DetectionRecorderConfig::default(),
+            paper_trading: DetectionPaperTradingConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectionRecorderConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_detection_jsonl_path")]
+    pub jsonl_path: String,
+}
+
+impl Default for DetectionRecorderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            jsonl_path: default_detection_jsonl_path(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct DetectionPaperTradingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub config_path: Option<String>,
+    #[serde(default)]
+    pub execution_mode: PaperExecutionMode,
+    #[serde(default = "default_paper_maker_timeout_ms")]
+    pub maker_timeout_ms: u64,
+    #[serde(default = "default_paper_min_executable_depth_usdt")]
+    pub min_executable_depth_usdt: f64,
+    #[serde(default = "default_paper_execution_jsonl_path")]
+    pub execution_jsonl_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PaperExecutionMode {
+    #[default]
+    TakerTaker,
+    MakerFirstThenTakerHedge,
+    MakerMakerDisabledByDefault,
+}
+
+fn default_paper_maker_timeout_ms() -> u64 {
+    2_000
+}
+
+fn default_paper_min_executable_depth_usdt() -> f64 {
+    20.0
+}
+
+fn default_paper_execution_jsonl_path() -> String {
+    "logs/cross_exchange_arbitrage/paper_executions.jsonl".to_string()
+}
+
+fn default_detection_exchanges() -> Vec<ExchangeId> {
+    vec![ExchangeId::Binance, ExchangeId::Okx]
+}
+
+fn default_detection_symbols() -> Vec<String> {
+    ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn default_detection_depth_levels() -> u16 {
+    5
+}
+
+fn default_detection_stale_book_ms() -> i64 {
+    2_000
+}
+
+fn default_detection_estimated_notional_usdt() -> f64 {
+    100.0
+}
+
+fn default_detection_min_net_spread_bps() -> f64 {
+    5.0
+}
+
+fn default_detection_jsonl_path() -> String {
+    "logs/cross_exchange_arbitrage/opportunities.jsonl".to_string()
 }
 
 #[cfg(test)]
@@ -1294,7 +1635,7 @@ mod tests {
         assert_eq!(config.sizing.max_notional_usdt, 6.0);
         assert_eq!(config.sizing.max_positions_per_exchange, 20);
         assert_eq!(config.risk.max_open_bundles, 20);
-        assert!(!config.controls.start_paused_new_entries);
+        assert!(config.controls.start_paused_new_entries);
         assert!(!config.risk.block_on_external_account_exposure);
         assert!(!config.risk.orphan_exposure_blocks_new_entries);
         assert_eq!(

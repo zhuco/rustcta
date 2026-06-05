@@ -1,0 +1,45 @@
+five_exchange_spot_scanner:
+  enabled: true
+
+  exchanges:
+    gateio: future_live_execution_candidate
+    bitget: future_live_execution_candidate
+    mexc: scan_only
+    coinex: scan_only
+    kucoin: scan_only
+
+  notionals_usdt:
+    - 1
+    - 2
+    - 5
+    - 10
+    - 25
+    - 50
+
+  minimum_exchange_coverage: 2
+  require_fresh_books: true
+  max_book_age_ms: 1000
+
+  execution_analysis:
+    taker_taker: true
+    maker_taker_expected_value: true
+    maker_taker_execution: false
+    live_execution: false
+
+  statistics:
+    minimum_samples_for_medium_confidence: 1000
+    minimum_samples_for_high_confidence: 10000
+
+  hedge_policy:
+    enabled: true
+    recommendation_only: true
+    default_policy: no_hedge
+    allow_real_hedge_execution: false
+
+  regime:
+    enabled: true
+    use_explainable_rules_only: true
+
+  limits:
+    maximum_recommended_hedge_ratio: 1.0
+    minimum_confidence_for_recommendation: medium

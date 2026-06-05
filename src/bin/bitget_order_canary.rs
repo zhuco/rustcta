@@ -4,10 +4,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use clap::{Parser, ValueEnum};
 use rustcta::core::config::ApiKeys;
-use rustcta::exchanges::adapters::{
-    private_perp_trading_adapter_for_with_instruments, BitgetMarketAdapter, PrivatePerpExchange,
-    PrivateRestAuth,
-};
+use rustcta::exchanges::market_adapters::BitgetMarketAdapter;
+use rustcta::exchanges::private_perp::{PrivatePerpExchange, PrivateRestAuth};
+use rustcta::exchanges::trading_adapters::private_perp_trading_adapter_for_with_instruments;
 use rustcta::execution::{
     ClosePositionCommand, OrderCommand, OrderCommandStatus, OrderIntent, OrderSide, OrderType,
     PositionMode, PositionSide, TimeInForce,

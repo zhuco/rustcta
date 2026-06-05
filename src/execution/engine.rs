@@ -149,6 +149,56 @@ impl ExecutionEngine {
         if request.quantity <= 0.0 || !request.quantity.is_finite() {
             return ExecutionPlan::blocked(request, "invalid execution quantity", false);
         }
+        if request.mode.allows_live_orders()
+            && matches!(request.action, ExecutionAction::Open)
+            && request.open_with_dual_taker
+        {
+            if request
+                .max_slippage_pct
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .is_none()
+            {
+                return ExecutionPlan::blocked(
+                    request,
+                    "live taker-taker requires max slippage protection",
+                    false,
+                );
+            }
+            if self.long_taker_limit_price(request).is_none()
+                || self.short_taker_limit_price(request).is_none()
+            {
+                return ExecutionPlan::blocked(
+                    request,
+                    "live taker-taker requires explicit IOC limit prices",
+                    false,
+                );
+            }
+        }
+        if request.mode.allows_live_orders()
+            && matches!(
+                request.action,
+                ExecutionAction::Close | ExecutionAction::EmergencyClose
+            )
+        {
+            if request
+                .max_slippage_pct
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .is_none()
+            {
+                return ExecutionPlan::blocked(
+                    request,
+                    "live taker close requires max slippage protection",
+                    false,
+                );
+            }
+            if request.taker_price.is_none() {
+                return ExecutionPlan::blocked(
+                    request,
+                    "live taker close requires explicit IOC limit price",
+                    false,
+                );
+            }
+        }
 
         let commands = match request.action {
             ExecutionAction::Open if request.open_with_dual_taker => {
@@ -209,6 +259,26 @@ impl ExecutionEngine {
         }
 
         let command = HedgePlanner::hedge_for_maker_fill(fill);
+        if fill.mode.allows_live_orders()
+            && command.is_some()
+            && (fill.hedge_price.is_none()
+                || fill
+                    .max_slippage_pct
+                    .filter(|value| value.is_finite() && *value > 0.0)
+                    .is_none())
+        {
+            return ExecutionPlan {
+                request_id: format!("hedge-{}", fill.bundle_id),
+                mode: fill.mode,
+                commands: Vec::new(),
+                blocked_reason: Some(
+                    "live maker hedge requires explicit IOC limit price and max slippage"
+                        .to_string(),
+                ),
+                requires_reconcile: false,
+                created_at: fill.filled_at,
+            };
+        }
         ExecutionPlan {
             request_id: format!("hedge-{}", fill.bundle_id),
             mode: fill.mode,
@@ -255,9 +325,14 @@ impl ExecutionEngine {
         }
 
         for command in decision.plan.commands.clone() {
-            match self.router.route_order(command).await {
-                Ok(ack) => decision.submitted_orders.push(ack),
+            log_live_order_submission(mode, &command);
+            match self.router.route_order(command.clone()).await {
+                Ok(ack) => {
+                    log_live_order_ack(mode, &command, &ack);
+                    decision.submitted_orders.push(ack);
+                }
                 Err(error) => {
+                    log_live_order_rejection(mode, &command, &error.to_string());
                     decision.plan.blocked_reason = Some(error.to_string());
                     decision.blocked_reason = Some(error.to_string());
                     decision.plan.requires_reconcile = true;
@@ -309,9 +384,9 @@ impl ExecutionEngine {
                 OrderIntent::HedgeLongTaker,
                 OrderSide::Buy,
                 PositionSide::Long,
-                OrderType::Market,
+                OrderType::Limit,
                 request.quantity,
-                None,
+                self.long_taker_limit_price(request),
                 TimeInForce::Ioc,
                 false,
                 false,
@@ -329,9 +404,9 @@ impl ExecutionEngine {
                 OrderIntent::HedgeShortTaker,
                 OrderSide::Sell,
                 PositionSide::Short,
-                OrderType::Market,
+                OrderType::Limit,
                 request.quantity,
-                None,
+                self.short_taker_limit_price(request),
                 TimeInForce::Ioc,
                 false,
                 false,
@@ -339,6 +414,22 @@ impl ExecutionEngine {
                 request.generated_at,
             ),
         ]
+    }
+
+    fn long_taker_limit_price(&self, request: &ExecutionRequest) -> Option<f64> {
+        if request.maker_side == OrderSide::Buy {
+            request.maker_price
+        } else {
+            request.taker_price
+        }
+    }
+
+    fn short_taker_limit_price(&self, request: &ExecutionRequest) -> Option<f64> {
+        if request.maker_side == OrderSide::Sell {
+            request.maker_price
+        } else {
+            request.taker_price
+        }
     }
 
     fn close_taker_command(
@@ -380,7 +471,11 @@ impl ExecutionEngine {
             intent,
             request.taker_side,
             position_side,
-            OrderType::Market,
+            if request.mode.allows_live_orders() {
+                OrderType::Limit
+            } else {
+                OrderType::Market
+            },
             request.quantity,
             request.taker_price,
             TimeInForce::Ioc,
@@ -390,6 +485,84 @@ impl ExecutionEngine {
             request.generated_at,
         ))
     }
+}
+
+fn log_live_order_submission(mode: RuntimeMode, command: &OrderCommand) {
+    if !mode.allows_live_orders() {
+        return;
+    }
+    log::warn!(
+        "cross-arb live submitted order command_id={} bundle_id={} exchange={} symbol={} side={:?} position_side={:?} intent={:?} order_type={:?} tif={:?} quantity={} price={:?} max_slippage_pct={:?} reduce_only={} post_only={} client_order_id={}",
+        command.command_id,
+        command.bundle_id,
+        command.exchange,
+        command.canonical_symbol,
+        command.side,
+        command.position_side,
+        command.intent,
+        command.order_type,
+        command.time_in_force,
+        command.quantity,
+        command.price,
+        command.max_slippage_pct,
+        command.reduce_only,
+        command.post_only,
+        command.client_order_id
+    );
+    if is_hedge_intent(command.intent) {
+        log::warn!(
+            "cross-arb live hedge submitted bundle_id={} exchange={} symbol={} intent={:?} quantity={} price={:?}",
+            command.bundle_id,
+            command.exchange,
+            command.canonical_symbol,
+            command.intent,
+            command.quantity,
+            command.price
+        );
+    }
+}
+
+fn log_live_order_ack(mode: RuntimeMode, command: &OrderCommand, ack: &OrderAck) {
+    if !mode.allows_live_orders() {
+        return;
+    }
+    log::warn!(
+        "cross-arb live order update command_id={} bundle_id={} exchange={} symbol={} client_order_id={} exchange_order_id={:?} accepted={} status={:?} message={:?}",
+        command.command_id,
+        command.bundle_id,
+        ack.exchange,
+        command.canonical_symbol,
+        ack.client_order_id,
+        ack.exchange_order_id,
+        ack.accepted,
+        ack.status,
+        ack.message
+    );
+}
+
+fn log_live_order_rejection(mode: RuntimeMode, command: &OrderCommand, reason: &str) {
+    if !mode.allows_live_orders() {
+        return;
+    }
+    log::error!(
+        "cross-arb live order rejected command_id={} bundle_id={} exchange={} symbol={} intent={:?} reason={}",
+        command.command_id,
+        command.bundle_id,
+        command.exchange,
+        command.canonical_symbol,
+        command.intent,
+        reason
+    );
+}
+
+fn is_hedge_intent(intent: OrderIntent) -> bool {
+    matches!(
+        intent,
+        OrderIntent::HedgeLongTaker
+            | OrderIntent::HedgeShortTaker
+            | OrderIntent::EmergencyCloseLongTaker
+            | OrderIntent::EmergencyCloseShortTaker
+    )
 }
 
 #[cfg(test)]
@@ -581,6 +754,7 @@ mod tests {
         let engine = ExecutionEngine::new(router);
         let mut request = request(RuntimeMode::LiveSmall);
         request.open_with_dual_taker = true;
+        request.taker_price = Some(101.0);
 
         let decision = engine.execute_request(request).await;
 
@@ -592,17 +766,34 @@ mod tests {
         assert_eq!(long.exchange, ExchangeId::Binance);
         assert_eq!(long.side, OrderSide::Buy);
         assert_eq!(long.position_side, PositionSide::Long);
-        assert_eq!(long.order_type, OrderType::Market);
+        assert_eq!(long.order_type, OrderType::Limit);
+        assert_eq!(long.price, Some(100.0));
         assert_eq!(long.time_in_force, TimeInForce::Ioc);
         assert!(!long.post_only);
         assert!(!long.reduce_only);
         assert_eq!(short.exchange, ExchangeId::Okx);
         assert_eq!(short.side, OrderSide::Sell);
         assert_eq!(short.position_side, PositionSide::Short);
-        assert_eq!(short.order_type, OrderType::Market);
+        assert_eq!(short.order_type, OrderType::Limit);
+        assert_eq!(short.price, Some(101.0));
         assert_eq!(short.time_in_force, TimeInForce::Ioc);
         assert!(!short.post_only);
         assert!(!short.reduce_only);
+    }
+
+    #[tokio::test]
+    async fn engine_should_block_live_dual_taker_without_ioc_limit_prices() {
+        let engine = ExecutionEngine::new(ExecutionRouter::new(false));
+        let mut request = request(RuntimeMode::LiveSmall);
+        request.open_with_dual_taker = true;
+        request.taker_price = None;
+
+        let decision = engine.execute_request(request).await;
+
+        assert_eq!(
+            decision.blocked_reason.as_deref(),
+            Some("live taker-taker requires explicit IOC limit prices")
+        );
     }
 
     #[tokio::test]

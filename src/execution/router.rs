@@ -1,3 +1,5 @@
+#![allow(clippy::items_after_test_module)]
+
 use crate::execution::{
     AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
     CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand,

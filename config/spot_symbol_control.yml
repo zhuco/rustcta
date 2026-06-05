@@ -1,0 +1,51 @@
+spot_symbol_control:
+  enabled: true
+  require_write_auth: true
+  command_store_path: data/control_commands.jsonl
+  audit_store_path: data/control_audit.jsonl
+  lifecycle_store_path: data/managed_spot_symbols.jsonl
+  require_liquidation_confirmation: true
+
+  default_enable_mode: LiveDryRun
+  allow_future_small_live: false
+
+  enable_validation:
+    require_fresh_books: true
+    max_book_age_ms: 1000
+    require_fee_model: true
+    require_symbol_rules: true
+    require_inventory_for_future_small_live: true
+
+  disable_defaults:
+    cancel_active_orders: true
+    include_managed_inventory_only: true
+    maximum_slippage_bps: 30
+    maximum_liquidation_loss_usdt: 2
+
+  market_liquidation:
+    use_ioc_limit_only: true
+    allow_unbounded_market_order: false
+    stop_on_any_failure: true
+
+  passive_liquidation:
+    enabled: true
+    post_only_required: true
+    price_mode: best_ask
+    reprice_interval_ms: 5000
+    order_timeout_ms: 15000
+    maximum_duration_seconds: 3600
+    maximum_active_orders_per_exchange: 1
+    maximum_liquidation_loss_usdt: 2
+    minimum_order_notional_usdt: 1
+    stop_on_partial_fill_reconciliation_error: true
+
+  runtime_snapshot:
+    max_snapshot_age_ms: 2000
+    max_book_age_ms: 1000
+    max_balance_age_ms: 5000
+    max_symbol_rule_age_seconds: 86400
+    max_fee_age_seconds: 3600
+    require_exchange_health: true
+    require_balance_reconciliation_clean: true
+    fail_on_unknown_order_ownership: true
+    fail_on_unknown_inventory_ownership: true

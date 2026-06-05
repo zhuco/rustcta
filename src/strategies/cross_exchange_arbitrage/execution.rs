@@ -3,7 +3,7 @@
 use super::{
     ArbSignal, ArbSignalAction, CrossArbRuntime, CrossArbRuntimeState,
     MakerExecutionStatsReadModel, MarketSnapshot, OpenExecutionStyle, Opportunity, PositionError,
-    SimulatedBundleState, SimulatedBundleStatus, StorageSink,
+    RiskConfig, SimulatedBundleState, SimulatedBundleStatus, StorageSink,
 };
 use crate::execution::{
     deterministic_client_order_id, normalize_client_order_id, ArbitrageBundle, BundleLeg,
@@ -20,6 +20,19 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
+
+use crate::exchanges::paper::PaperExchangeClient;
+use crate::exchanges::unified::{
+    CancelOrderRequest as UnifiedCancelOrderRequest, ExchangeClient as UnifiedExchangeClient,
+    MarketType as UnifiedMarketType, OrderBookSnapshot as UnifiedOrderBookSnapshot,
+    OrderRequest as UnifiedOrderRequest, OrderResponse as UnifiedOrderResponse,
+    OrderSide as UnifiedOrderSide, OrderStatus as UnifiedOrderStatus,
+    OrderType as UnifiedOrderType, PositionSide as UnifiedPositionSide,
+    TradeFill as UnifiedTradeFill,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackedCrossArbOrder {
@@ -2491,6 +2504,1033 @@ impl OrderSideExt for OrderSide {
 
 pub fn maker_client_order_id(mode: crate::market::RuntimeMode, bundle_id: &str) -> String {
     deterministic_client_order_id(mode, bundle_id, BundleLeg::Maker, 1)
+}
+
+#[derive(Debug, Clone)]
+pub struct PaperExecutionSettings {
+    pub mode: super::PaperExecutionMode,
+    pub maker_timeout_ms: u64,
+    pub stale_book_ms: i64,
+    pub min_executable_depth_usdt: f64,
+    pub persist_jsonl_path: Option<String>,
+    pub risk_config: Option<RiskConfig>,
+}
+
+impl PaperExecutionSettings {
+    pub fn from_config(config: &super::CrossExchangeArbitrageConfig) -> Self {
+        Self {
+            mode: config.detection.paper_trading.execution_mode,
+            maker_timeout_ms: config.detection.paper_trading.maker_timeout_ms,
+            stale_book_ms: config.detection.stale_book_ms,
+            min_executable_depth_usdt: config.detection.paper_trading.min_executable_depth_usdt,
+            persist_jsonl_path: Some(config.detection.paper_trading.execution_jsonl_path.clone()),
+            risk_config: Some(config.risk.clone()),
+        }
+    }
+
+    pub fn without_persistence(mut self) -> Self {
+        self.persist_jsonl_path = None;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PaperArbPositionState {
+    pub inventory: HashMap<(ExchangeId, CanonicalSymbol), f64>,
+    pub net_exposure: HashMap<CanonicalSymbol, f64>,
+    pub realized_pnl_usdt: f64,
+    pub unrealized_pnl_usdt: f64,
+    pub fee_paid_usdt: f64,
+    pub slippage_usdt: f64,
+    pub residual_exposures: Vec<PaperResidualExposure>,
+    pub risk_events: Vec<PaperRiskEvent>,
+}
+
+impl PaperArbPositionState {
+    fn apply_fill(
+        &mut self,
+        exchange: ExchangeId,
+        symbol: CanonicalSymbol,
+        side: UnifiedOrderSide,
+        quantity: f64,
+        fee: f64,
+        slippage: f64,
+    ) {
+        let signed_qty = match side {
+            UnifiedOrderSide::Buy => quantity,
+            UnifiedOrderSide::Sell => -quantity,
+        };
+        *self
+            .inventory
+            .entry((exchange, symbol.clone()))
+            .or_default() += signed_qty;
+        *self.net_exposure.entry(symbol).or_default() += signed_qty;
+        self.fee_paid_usdt += fee.max(0.0);
+        self.slippage_usdt += slippage;
+    }
+
+    fn record_pair_pnl(
+        &mut self,
+        buy_qty: f64,
+        buy_price: f64,
+        sell_qty: f64,
+        sell_price: f64,
+        fee: f64,
+    ) {
+        let matched_qty = buy_qty.min(sell_qty);
+        self.realized_pnl_usdt += matched_qty * (sell_price - buy_price) - fee;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaperResidualExposure {
+    pub exchange: ExchangeId,
+    pub symbol: CanonicalSymbol,
+    pub side: UnifiedOrderSide,
+    pub quantity: f64,
+    pub reason: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaperRiskEvent {
+    pub timestamp: DateTime<Utc>,
+    pub symbol: CanonicalSymbol,
+    pub exchange: ExchangeId,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaperArbOrderRecord {
+    pub exchange: ExchangeId,
+    pub order_id: String,
+    pub client_order_id: Option<String>,
+    pub symbol: String,
+    pub side: UnifiedOrderSide,
+    pub order_type: UnifiedOrderType,
+    pub status: UnifiedOrderStatus,
+    pub quantity: f64,
+    pub filled_quantity: f64,
+    pub average_price: Option<f64>,
+}
+
+impl PaperArbOrderRecord {
+    fn from_response(exchange: ExchangeId, response: UnifiedOrderResponse) -> Self {
+        Self {
+            exchange,
+            order_id: response.order_id,
+            client_order_id: response.client_order_id,
+            symbol: response.symbol,
+            side: response.side,
+            order_type: response.order_type,
+            status: response.status,
+            quantity: response.quantity,
+            filled_quantity: response.filled_quantity,
+            average_price: response.average_price,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaperArbFillRecord {
+    pub exchange: ExchangeId,
+    pub order_id: Option<String>,
+    pub side: UnifiedOrderSide,
+    pub price: f64,
+    pub quantity: f64,
+    pub fee_amount: f64,
+    pub liquidity: crate::exchanges::unified::LiquidityRole,
+}
+
+impl PaperArbFillRecord {
+    fn from_fill(exchange: ExchangeId, fill: UnifiedTradeFill) -> Self {
+        Self {
+            exchange,
+            order_id: fill.order_id,
+            side: fill.side,
+            price: fill.price,
+            quantity: fill.quantity,
+            fee_amount: fill.fee_amount.unwrap_or(0.0),
+            liquidity: fill.liquidity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaperExecutionStatus {
+    Filled,
+    PartiallyFilled,
+    Cancelled,
+    Rejected,
+    EmergencyHedged,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PaperExecutionReport {
+    pub timestamp: DateTime<Utc>,
+    pub mode: super::PaperExecutionMode,
+    pub status: PaperExecutionStatus,
+    pub opportunity: super::OpportunityRecord,
+    pub orders: Vec<PaperArbOrderRecord>,
+    pub fills: Vec<PaperArbFillRecord>,
+    pub realized_pnl_usdt: f64,
+    pub fee_paid_usdt: f64,
+    pub slippage_usdt: f64,
+    pub residual_exposures: Vec<PaperResidualExposure>,
+    pub risk_events: Vec<PaperRiskEvent>,
+    pub reason: Option<String>,
+}
+
+pub struct CrossExchangePaperExecutionEngine {
+    clients: HashMap<ExchangeId, PaperExchangeClient>,
+    settings: PaperExecutionSettings,
+    state: PaperArbPositionState,
+}
+
+struct PaperOrderSubmit<'a> {
+    exchange: &'a ExchangeId,
+    opportunity: &'a super::OpportunityRecord,
+    side: UnifiedOrderSide,
+    order_type: UnifiedOrderType,
+    quantity: f64,
+    price: Option<f64>,
+}
+
+impl CrossExchangePaperExecutionEngine {
+    pub fn new(
+        clients: HashMap<ExchangeId, PaperExchangeClient>,
+        settings: PaperExecutionSettings,
+    ) -> Self {
+        Self {
+            clients,
+            settings,
+            state: PaperArbPositionState::default(),
+        }
+    }
+
+    pub fn state(&self) -> &PaperArbPositionState {
+        &self.state
+    }
+
+    pub async fn execute_opportunity(
+        &mut self,
+        opportunity: &super::OpportunityRecord,
+    ) -> Result<PaperExecutionReport> {
+        self.evaluate_pre_trade_controls(opportunity)?;
+        match self.settings.mode {
+            super::PaperExecutionMode::TakerTaker => self.execute_taker_taker(opportunity).await,
+            super::PaperExecutionMode::MakerFirstThenTakerHedge => {
+                self.execute_maker_first_then_taker_hedge(opportunity).await
+            }
+            super::PaperExecutionMode::MakerMakerDisabledByDefault => {
+                anyhow::bail!("maker_maker execution is disabled for paper trading by default")
+            }
+        }
+    }
+
+    pub async fn emergency_hedge_residual(
+        &mut self,
+        residual: PaperResidualExposure,
+    ) -> Result<PaperExecutionReport> {
+        let now = Utc::now();
+        let mut opportunity = super::OpportunityRecord {
+            timestamp: now,
+            symbol: residual.symbol.clone(),
+            buy_exchange: residual.exchange.clone(),
+            sell_exchange: residual.exchange.clone(),
+            buy_price: 0.0,
+            sell_price: 0.0,
+            raw_spread_bps: 0.0,
+            estimated_net_spread_bps: 0.0,
+            estimated_notional: 0.0,
+            decision: super::OpportunityDecision::Rejected,
+            reason: "emergency_residual_hedge".to_string(),
+        };
+        let client = self.client(&residual.exchange)?.clone();
+        let symbol = residual.symbol.base().to_string() + residual.symbol.quote();
+        let hedge_side = opposite_side(residual.side);
+        let fills_before = client.recorded_fills()?.len();
+        let response = client
+            .place_order(UnifiedOrderRequest {
+                market_type: UnifiedMarketType::Spot,
+                symbol: symbol.clone(),
+                side: hedge_side,
+                position_side: UnifiedPositionSide::None,
+                order_type: UnifiedOrderType::Market,
+                time_in_force: None,
+                quantity: residual.quantity,
+                price: None,
+                client_order_id: Some(format!("paper-emergency-{}", now.timestamp_millis())),
+                reduce_only: false,
+            })
+            .await?;
+        opportunity.estimated_notional =
+            response.average_price.unwrap_or_default() * response.filled_quantity;
+        let fills = self.collect_new_fills(&residual.exchange, &client, fills_before)?;
+        let order = PaperArbOrderRecord::from_response(residual.exchange.clone(), response);
+        let risk_event = PaperRiskEvent {
+            timestamp: now,
+            symbol: residual.symbol.clone(),
+            exchange: residual.exchange.clone(),
+            message: format!(
+                "emergency hedge submitted for residual: {}",
+                residual.reason
+            ),
+        };
+        self.state.residual_exposures.push(residual.clone());
+        self.state.risk_events.push(risk_event.clone());
+        for fill in &fills {
+            self.state.apply_fill(
+                fill.exchange.clone(),
+                residual.symbol.clone(),
+                fill.side,
+                fill.quantity,
+                fill.fee_amount,
+                0.0,
+            );
+        }
+        let report = PaperExecutionReport {
+            timestamp: now,
+            mode: self.settings.mode,
+            status: PaperExecutionStatus::EmergencyHedged,
+            opportunity,
+            orders: vec![order],
+            fills,
+            realized_pnl_usdt: self.state.realized_pnl_usdt,
+            fee_paid_usdt: self.state.fee_paid_usdt,
+            slippage_usdt: self.state.slippage_usdt,
+            residual_exposures: self.state.residual_exposures.clone(),
+            risk_events: vec![risk_event],
+            reason: Some("emergency_hedge_residual".to_string()),
+        };
+        self.persist_report(&report)?;
+        Ok(report)
+    }
+
+    async fn execute_taker_taker(
+        &mut self,
+        opportunity: &super::OpportunityRecord,
+    ) -> Result<PaperExecutionReport> {
+        let now = Utc::now();
+        let quantity = self.quantity_for(opportunity)?;
+        self.validate_taker_taker(opportunity, quantity, now)
+            .await?;
+
+        let buy_client = self.client(&opportunity.buy_exchange)?.clone();
+        let sell_client = self.client(&opportunity.sell_exchange)?.clone();
+
+        let buy_before = buy_client.recorded_fills()?.len();
+        let buy_response = self
+            .submit_order(
+                &buy_client,
+                PaperOrderSubmit {
+                    exchange: &opportunity.buy_exchange,
+                    opportunity,
+                    side: UnifiedOrderSide::Buy,
+                    order_type: UnifiedOrderType::Market,
+                    quantity,
+                    price: None,
+                },
+            )
+            .await?;
+        let buy_fills =
+            self.collect_new_fills(&opportunity.buy_exchange, &buy_client, buy_before)?;
+        if buy_response.status != UnifiedOrderStatus::Filled {
+            let residual = residual_from_order(
+                opportunity,
+                opportunity.buy_exchange.clone(),
+                UnifiedOrderSide::Buy,
+                buy_response.filled_quantity,
+                "buy leg did not fill",
+            );
+            let mut report = self.emergency_hedge_residual(residual).await?;
+            report.orders.insert(
+                0,
+                PaperArbOrderRecord::from_response(opportunity.buy_exchange.clone(), buy_response),
+            );
+            report.fills.splice(0..0, buy_fills);
+            return Ok(report);
+        }
+
+        let sell_before = sell_client.recorded_fills()?.len();
+        let sell_response = self
+            .submit_order(
+                &sell_client,
+                PaperOrderSubmit {
+                    exchange: &opportunity.sell_exchange,
+                    opportunity,
+                    side: UnifiedOrderSide::Sell,
+                    order_type: UnifiedOrderType::Market,
+                    quantity,
+                    price: None,
+                },
+            )
+            .await?;
+        let sell_fills =
+            self.collect_new_fills(&opportunity.sell_exchange, &sell_client, sell_before)?;
+
+        let mut orders = vec![
+            PaperArbOrderRecord::from_response(opportunity.buy_exchange.clone(), buy_response),
+            PaperArbOrderRecord::from_response(
+                opportunity.sell_exchange.clone(),
+                sell_response.clone(),
+            ),
+        ];
+        let mut fills = buy_fills;
+        fills.extend(sell_fills);
+
+        if sell_response.status != UnifiedOrderStatus::Filled {
+            let residual = residual_from_order(
+                opportunity,
+                opportunity.buy_exchange.clone(),
+                UnifiedOrderSide::Buy,
+                quantity,
+                "sell leg failed after buy leg filled",
+            );
+            let hedge = self.emergency_hedge_residual(residual).await?;
+            orders.extend(hedge.orders);
+            fills.extend(hedge.fills);
+            return self.finish_report(
+                opportunity,
+                PaperExecutionStatus::EmergencyHedged,
+                orders,
+                fills,
+                Some("sell_leg_failed_emergency_hedged".to_string()),
+            );
+        }
+
+        self.finish_report(
+            opportunity,
+            PaperExecutionStatus::Filled,
+            orders,
+            fills,
+            None,
+        )
+    }
+
+    async fn execute_maker_first_then_taker_hedge(
+        &mut self,
+        opportunity: &super::OpportunityRecord,
+    ) -> Result<PaperExecutionReport> {
+        let now = Utc::now();
+        let quantity = self.quantity_for(opportunity)?;
+        let buy_client = self.client(&opportunity.buy_exchange)?.clone();
+        let sell_client = self.client(&opportunity.sell_exchange)?.clone();
+        let buy_book = buy_client
+            .get_orderbook(&compact_symbol(&opportunity.symbol), 5)
+            .await?;
+        self.ensure_fresh(&buy_book, now)?;
+        self.ensure_balance(
+            &buy_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Buy,
+            quantity,
+            opportunity.buy_price,
+        )
+        .await?;
+        self.ensure_depth(
+            &sell_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Sell,
+            quantity,
+            now,
+        )
+        .await?;
+
+        let maker_price = buy_book
+            .bids
+            .first()
+            .map(|level| level.price)
+            .ok_or_else(|| anyhow!("maker book has no bid"))?;
+        let maker_before = buy_client.recorded_fills()?.len();
+        let maker_response = self
+            .submit_order(
+                &buy_client,
+                PaperOrderSubmit {
+                    exchange: &opportunity.buy_exchange,
+                    opportunity,
+                    side: UnifiedOrderSide::Buy,
+                    order_type: UnifiedOrderType::PostOnly,
+                    quantity,
+                    price: Some(maker_price),
+                },
+            )
+            .await?;
+        let maker_order_id = maker_response.order_id.clone();
+        let mut orders = vec![PaperArbOrderRecord::from_response(
+            opportunity.buy_exchange.clone(),
+            maker_response,
+        )];
+
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_millis(self.settings.maker_timeout_ms);
+        let mut final_maker = buy_client
+            .get_order(&compact_symbol(&opportunity.symbol), &maker_order_id)
+            .await?;
+        loop {
+            if final_maker.status == UnifiedOrderStatus::Filled
+                || std::time::Instant::now() >= deadline
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            final_maker = buy_client
+                .get_order(&compact_symbol(&opportunity.symbol), &maker_order_id)
+                .await?;
+        }
+
+        if final_maker.status != UnifiedOrderStatus::Filled {
+            let _ = buy_client
+                .cancel_order(UnifiedCancelOrderRequest {
+                    market_type: UnifiedMarketType::Spot,
+                    symbol: compact_symbol(&opportunity.symbol),
+                    order_id: Some(maker_order_id.clone()),
+                    client_order_id: None,
+                })
+                .await;
+            final_maker = buy_client
+                .get_order(&compact_symbol(&opportunity.symbol), &maker_order_id)
+                .await?;
+        }
+        orders.push(PaperArbOrderRecord::from_response(
+            opportunity.buy_exchange.clone(),
+            final_maker.clone(),
+        ));
+        let mut fills =
+            self.collect_new_fills(&opportunity.buy_exchange, &buy_client, maker_before)?;
+
+        if final_maker.filled_quantity <= f64::EPSILON {
+            return self.finish_report(
+                opportunity,
+                PaperExecutionStatus::Cancelled,
+                orders,
+                fills,
+                Some("maker_timeout_cancelled".to_string()),
+            );
+        }
+
+        let hedge_qty = final_maker.filled_quantity;
+        self.ensure_depth(
+            &sell_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Sell,
+            hedge_qty,
+            Utc::now(),
+        )
+        .await?;
+        let hedge_before = sell_client.recorded_fills()?.len();
+        let hedge_response = self
+            .submit_order(
+                &sell_client,
+                PaperOrderSubmit {
+                    exchange: &opportunity.sell_exchange,
+                    opportunity,
+                    side: UnifiedOrderSide::Sell,
+                    order_type: UnifiedOrderType::Market,
+                    quantity: hedge_qty,
+                    price: None,
+                },
+            )
+            .await?;
+        orders.push(PaperArbOrderRecord::from_response(
+            opportunity.sell_exchange.clone(),
+            hedge_response.clone(),
+        ));
+        fills.extend(self.collect_new_fills(
+            &opportunity.sell_exchange,
+            &sell_client,
+            hedge_before,
+        )?);
+        let status = if hedge_response.status == UnifiedOrderStatus::Filled
+            && hedge_qty + f64::EPSILON >= quantity
+        {
+            PaperExecutionStatus::Filled
+        } else if hedge_response.status == UnifiedOrderStatus::Filled {
+            PaperExecutionStatus::PartiallyFilled
+        } else {
+            let residual = residual_from_order(
+                opportunity,
+                opportunity.buy_exchange.clone(),
+                UnifiedOrderSide::Buy,
+                hedge_qty,
+                "taker hedge failed after maker fill",
+            );
+            let hedge = self.emergency_hedge_residual(residual).await?;
+            orders.extend(hedge.orders);
+            fills.extend(hedge.fills);
+            PaperExecutionStatus::EmergencyHedged
+        };
+        self.finish_report(opportunity, status, orders, fills, None)
+    }
+
+    async fn submit_order(
+        &self,
+        client: &PaperExchangeClient,
+        submit: PaperOrderSubmit<'_>,
+    ) -> Result<UnifiedOrderResponse> {
+        let request = UnifiedOrderRequest {
+            market_type: UnifiedMarketType::Spot,
+            symbol: compact_symbol(&submit.opportunity.symbol),
+            side: submit.side,
+            position_side: UnifiedPositionSide::None,
+            order_type: submit.order_type,
+            time_in_force: None,
+            quantity: submit.quantity,
+            price: submit.price,
+            client_order_id: Some(format!(
+                "paper-xarb-{}-{}",
+                submit.exchange,
+                Utc::now().timestamp_micros()
+            )),
+            reduce_only: false,
+        };
+        log::info!(
+            "paper cross-arb submitting order exchange={} symbol={} side={:?} type={:?} qty={} price={:?}",
+            submit.exchange,
+            request.symbol,
+            request.side,
+            request.order_type,
+            request.quantity,
+            request.price
+        );
+        let response = client.place_order(request).await?;
+        log::info!(
+            "paper cross-arb order state exchange={} order_id={} status={:?} filled={} avg={:?}",
+            submit.exchange,
+            response.order_id,
+            response.status,
+            response.filled_quantity,
+            response.average_price
+        );
+        Ok(response)
+    }
+
+    async fn validate_taker_taker(
+        &self,
+        opportunity: &super::OpportunityRecord,
+        quantity: f64,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
+        let buy_client = self.client(&opportunity.buy_exchange)?;
+        let sell_client = self.client(&opportunity.sell_exchange)?;
+        self.ensure_depth(
+            buy_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Buy,
+            quantity,
+            now,
+        )
+        .await?;
+        self.ensure_depth(
+            sell_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Sell,
+            quantity,
+            now,
+        )
+        .await?;
+        self.ensure_balance(
+            buy_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Buy,
+            quantity,
+            opportunity.buy_price,
+        )
+        .await?;
+        self.ensure_balance(
+            sell_client,
+            &opportunity.symbol,
+            UnifiedOrderSide::Sell,
+            quantity,
+            opportunity.sell_price,
+        )
+        .await
+    }
+
+    async fn ensure_depth(
+        &self,
+        client: &PaperExchangeClient,
+        symbol: &CanonicalSymbol,
+        side: UnifiedOrderSide,
+        quantity: f64,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
+        let book = client.get_orderbook(&compact_symbol(symbol), 5).await?;
+        self.ensure_fresh(&book, now)?;
+        let levels = match side {
+            UnifiedOrderSide::Buy => &book.asks,
+            UnifiedOrderSide::Sell => &book.bids,
+        };
+        let mut remaining = quantity;
+        let mut notional = 0.0;
+        for level in levels {
+            let fill_qty = remaining.min(level.quantity);
+            notional += fill_qty * level.price;
+            remaining -= fill_qty;
+            if remaining <= f64::EPSILON {
+                break;
+            }
+        }
+        if remaining > f64::EPSILON || notional < self.settings.min_executable_depth_usdt {
+            anyhow::bail!(
+                "insufficient executable paper depth: symbol={} side={:?} required_qty={} depth_notional={}",
+                symbol,
+                side,
+                quantity,
+                notional
+            );
+        }
+        Ok(())
+    }
+
+    fn ensure_fresh(&self, book: &UnifiedOrderBookSnapshot, now: DateTime<Utc>) -> Result<()> {
+        if now
+            .signed_duration_since(book.received_at)
+            .num_milliseconds()
+            > self.settings.stale_book_ms
+        {
+            anyhow::bail!("stale paper order book for {}", book.symbol);
+        }
+        Ok(())
+    }
+
+    async fn ensure_balance(
+        &self,
+        client: &PaperExchangeClient,
+        symbol: &CanonicalSymbol,
+        side: UnifiedOrderSide,
+        quantity: f64,
+        price: f64,
+    ) -> Result<()> {
+        let balances = client.get_balances().await?;
+        let (base, quote) = symbol_assets(symbol);
+        let (asset, required) = match side {
+            UnifiedOrderSide::Buy => (quote, quantity * price * 1.002),
+            UnifiedOrderSide::Sell => (base, quantity),
+        };
+        let available = balances
+            .balances
+            .iter()
+            .find(|balance| balance.asset == asset)
+            .map(|balance| balance.available)
+            .unwrap_or(0.0);
+        if available + f64::EPSILON < required {
+            anyhow::bail!(
+                "insufficient paper balance asset={} required={} available={}",
+                asset,
+                required,
+                available
+            );
+        }
+        Ok(())
+    }
+
+    fn quantity_for(&self, opportunity: &super::OpportunityRecord) -> Result<f64> {
+        if opportunity.buy_price <= 0.0 || !opportunity.buy_price.is_finite() {
+            anyhow::bail!("invalid opportunity buy price");
+        }
+        let notional = opportunity
+            .estimated_notional
+            .max(self.settings.min_executable_depth_usdt);
+        Ok(notional / opportunity.buy_price)
+    }
+
+    fn client(&self, exchange: &ExchangeId) -> Result<&PaperExchangeClient> {
+        self.clients
+            .get(exchange)
+            .ok_or_else(|| anyhow!("missing paper client for exchange {exchange}"))
+    }
+
+    fn collect_new_fills(
+        &self,
+        exchange: &ExchangeId,
+        client: &PaperExchangeClient,
+        from: usize,
+    ) -> Result<Vec<PaperArbFillRecord>> {
+        Ok(client
+            .recorded_fills()?
+            .into_iter()
+            .skip(from)
+            .map(|fill| {
+                log::info!(
+                    "paper cross-arb fill exchange={} order_id={:?} side={:?} qty={} price={} fee={:?}",
+                    exchange,
+                    fill.order_id,
+                    fill.side,
+                    fill.quantity,
+                    fill.price,
+                    fill.fee_amount
+                );
+                PaperArbFillRecord::from_fill(exchange.clone(), fill)
+            })
+            .collect())
+    }
+
+    fn finish_report(
+        &mut self,
+        opportunity: &super::OpportunityRecord,
+        status: PaperExecutionStatus,
+        orders: Vec<PaperArbOrderRecord>,
+        fills: Vec<PaperArbFillRecord>,
+        reason: Option<String>,
+    ) -> Result<PaperExecutionReport> {
+        let mut buy_qty = 0.0;
+        let mut buy_notional = 0.0;
+        let mut sell_qty = 0.0;
+        let mut sell_notional = 0.0;
+        let mut fee = 0.0;
+        for fill in &fills {
+            fee += fill.fee_amount;
+            let fill_slippage = match fill.side {
+                UnifiedOrderSide::Buy => {
+                    buy_qty += fill.quantity;
+                    buy_notional += fill.quantity * fill.price;
+                    (fill.price - opportunity.buy_price) * fill.quantity
+                }
+                UnifiedOrderSide::Sell => {
+                    sell_qty += fill.quantity;
+                    sell_notional += fill.quantity * fill.price;
+                    (opportunity.sell_price - fill.price) * fill.quantity
+                }
+            };
+            self.state.apply_fill(
+                fill.exchange.clone(),
+                opportunity.symbol.clone(),
+                fill.side,
+                fill.quantity,
+                fill.fee_amount,
+                fill_slippage,
+            );
+        }
+        let avg_buy = if buy_qty > 0.0 {
+            buy_notional / buy_qty
+        } else {
+            0.0
+        };
+        let avg_sell = if sell_qty > 0.0 {
+            sell_notional / sell_qty
+        } else {
+            0.0
+        };
+        self.state
+            .record_pair_pnl(buy_qty, avg_buy, sell_qty, avg_sell, fee);
+        let trade_pnl = buy_qty.min(sell_qty) * (avg_sell - avg_buy) - fee;
+        let risk_event = self.evaluate_after_fill_controls(
+            opportunity,
+            trade_pnl,
+            avg_buy,
+            avg_sell,
+            Utc::now(),
+        );
+        if let Some(event) = risk_event {
+            self.state.risk_events.push(event);
+        }
+
+        let report = PaperExecutionReport {
+            timestamp: Utc::now(),
+            mode: self.settings.mode,
+            status,
+            opportunity: opportunity.clone(),
+            orders,
+            fills,
+            realized_pnl_usdt: self.state.realized_pnl_usdt,
+            fee_paid_usdt: self.state.fee_paid_usdt,
+            slippage_usdt: self.state.slippage_usdt,
+            residual_exposures: self.state.residual_exposures.clone(),
+            risk_events: self.state.risk_events.clone(),
+            reason,
+        };
+        self.persist_report(&report)?;
+        Ok(report)
+    }
+
+    fn evaluate_pre_trade_controls(&self, opportunity: &super::OpportunityRecord) -> Result<()> {
+        let Some(risk_config) = &self.settings.risk_config else {
+            return Ok(());
+        };
+        let portfolio = self.portfolio_risk_snapshot(opportunity);
+        let health = self.exchange_health_snapshots();
+        let decision = super::evaluate_pre_trade_risk(
+            risk_config,
+            opportunity,
+            &portfolio,
+            &health,
+            &super::KillSwitchState::default(),
+            Utc::now(),
+        );
+        if !decision.allow_new_position {
+            anyhow::bail!(
+                "paper cross-arb risk rejection before entry: action={:?} reasons={:?}",
+                decision.action,
+                decision.reasons
+            );
+        }
+        Ok(())
+    }
+
+    fn evaluate_after_fill_controls(
+        &self,
+        opportunity: &super::OpportunityRecord,
+        trade_pnl_usdt: f64,
+        avg_buy: f64,
+        avg_sell: f64,
+        now: DateTime<Utc>,
+    ) -> Option<PaperRiskEvent> {
+        let Some(risk_config) = &self.settings.risk_config else {
+            return None;
+        };
+        let current_spread_bps = if avg_buy > 0.0 && avg_sell > 0.0 {
+            (avg_sell - avg_buy) / avg_buy * 10_000.0
+        } else {
+            opportunity.estimated_net_spread_bps
+        };
+        let residual_exposure_usdt = self.residual_exposure_usdt(opportunity);
+        let position = super::OpenPositionRiskSnapshot {
+            symbol: opportunity.symbol.clone(),
+            buy_exchange: opportunity.buy_exchange.clone(),
+            sell_exchange: opportunity.sell_exchange.clone(),
+            opened_at: opportunity.timestamp,
+            entry_spread_bps: opportunity.estimated_net_spread_bps,
+            current_spread_bps,
+            residual_exposure_usdt,
+        };
+        let losses = super::LossRiskSnapshot {
+            trade_pnl_usdt,
+            daily_pnl_usdt: self.state.realized_pnl_usdt,
+            peak_equity_usdt: 0.0,
+            current_equity_usdt: self.state.realized_pnl_usdt,
+        };
+        let decision = super::evaluate_after_fill_risk(
+            risk_config,
+            &position,
+            &losses,
+            &self.exchange_health_snapshots(),
+            &super::KillSwitchState::default(),
+            now,
+        );
+        if decision.action == super::RiskAction::Allow {
+            return None;
+        }
+        Some(PaperRiskEvent {
+            timestamp: now,
+            symbol: opportunity.symbol.clone(),
+            exchange: opportunity.buy_exchange.clone(),
+            message: format!(
+                "post-fill risk action={:?} reasons={:?}",
+                decision.action, decision.reasons
+            ),
+        })
+    }
+
+    fn portfolio_risk_snapshot(
+        &self,
+        opportunity: &super::OpportunityRecord,
+    ) -> super::PortfolioRiskSnapshot {
+        let mut snapshot = super::PortfolioRiskSnapshot::default();
+        for ((exchange, symbol), quantity) in &self.state.inventory {
+            let price = if *exchange == opportunity.buy_exchange {
+                opportunity.buy_price
+            } else if *exchange == opportunity.sell_exchange {
+                opportunity.sell_price
+            } else {
+                opportunity.buy_price.max(opportunity.sell_price)
+            };
+            let notional = quantity.abs() * price.max(0.0);
+            *snapshot
+                .symbol_notional_usdt
+                .entry(symbol.clone())
+                .or_default() += notional;
+            *snapshot
+                .exchange_notional_usdt
+                .entry(exchange.clone())
+                .or_default() += notional;
+            snapshot.total_notional_usdt += notional;
+            snapshot.max_single_leg_exposure_usdt =
+                snapshot.max_single_leg_exposure_usdt.max(notional);
+        }
+        snapshot.open_positions = self
+            .state
+            .net_exposure
+            .values()
+            .filter(|quantity| quantity.abs() > f64::EPSILON)
+            .count()
+            + self.state.residual_exposures.len();
+        snapshot.residual_exposure_usdt = self.residual_exposure_usdt(opportunity);
+        snapshot
+    }
+
+    fn residual_exposure_usdt(&self, opportunity: &super::OpportunityRecord) -> f64 {
+        let price = opportunity.buy_price.max(opportunity.sell_price).max(0.0);
+        let inventory_residual = self
+            .state
+            .net_exposure
+            .get(&opportunity.symbol)
+            .copied()
+            .unwrap_or_default()
+            .abs()
+            * price;
+        let explicit_residual: f64 = self
+            .state
+            .residual_exposures
+            .iter()
+            .filter(|residual| residual.symbol == opportunity.symbol)
+            .map(|residual| residual.quantity.abs() * price)
+            .sum();
+        inventory_residual.max(explicit_residual)
+    }
+
+    fn exchange_health_snapshots(&self) -> Vec<super::ExchangeHealthSnapshot> {
+        self.clients
+            .keys()
+            .cloned()
+            .map(super::ExchangeHealthSnapshot::healthy)
+            .collect()
+    }
+
+    fn persist_report(&self, report: &PaperExecutionReport) -> Result<()> {
+        let Some(path) = &self.settings.persist_jsonl_path else {
+            return Ok(());
+        };
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        writeln!(file, "{}", serde_json::to_string(report)?)?;
+        Ok(())
+    }
+}
+
+fn residual_from_order(
+    opportunity: &super::OpportunityRecord,
+    exchange: ExchangeId,
+    side: UnifiedOrderSide,
+    quantity: f64,
+    reason: &str,
+) -> PaperResidualExposure {
+    PaperResidualExposure {
+        exchange,
+        symbol: opportunity.symbol.clone(),
+        side,
+        quantity,
+        reason: reason.to_string(),
+        created_at: Utc::now(),
+    }
+}
+
+fn opposite_side(side: UnifiedOrderSide) -> UnifiedOrderSide {
+    match side {
+        UnifiedOrderSide::Buy => UnifiedOrderSide::Sell,
+        UnifiedOrderSide::Sell => UnifiedOrderSide::Buy,
+    }
+}
+
+fn compact_symbol(symbol: &CanonicalSymbol) -> String {
+    format!("{}{}", symbol.base(), symbol.quote())
+}
+
+fn symbol_assets(symbol: &CanonicalSymbol) -> (String, String) {
+    (symbol.base().to_string(), symbol.quote().to_string())
 }
 
 #[cfg(test)]

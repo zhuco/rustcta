@@ -1,0 +1,21 @@
+mappings:
+  - exchange: okx
+    market_type: Spot
+    internal_symbol: BTCUSDT
+    exchange_symbol: BTC-USDT
+  - exchange: okx
+    market_type: Perpetual
+    internal_symbol: BTCUSDT
+    exchange_symbol: BTC-USDT-SWAP
+  - exchange: gateio
+    market_type: Spot
+    internal_symbol: BTCUSDT
+    exchange_symbol: BTC_USDT
+  - exchange: mexc
+    market_type: Spot
+    internal_symbol: BTCUSDT
+    exchange_symbol: BTCUSDT
+  - exchange: coinex
+    market_type: Spot
+    internal_symbol: BTCUSDT
+    exchange_symbol: BTCUSDT

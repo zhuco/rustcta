@@ -36,53 +36,6 @@ strategy_groups:
         enabled: true
         account: "binance_main"
         
-  # 跟单策略组
-  copy_trading:
-    name: "跟单策略"
-    enabled: true  # 启用
-    startup_delay_secs: 10
-    strategies:
-      - name: "简单跟单策略"
-        config_file: "config/copy_trading_simple.yml"
-        enabled: true
-        lead_account: "binance_main"
-        follow_account: "binance_hcr"
-  
-  # AS策略组 (自动化剥头皮)
-  as_strategies:
-    name: "AS自动化剥头皮策略"
-    enabled: false
-    startup_delay_secs: 15  # 延迟15秒启动
-    strategies:
-      - name: "ORDI剥头皮策略"
-        config_file: "config/as_ordi.yml"
-        enabled: true
-        account: "binance_hcr"
-  
-  # 马丁格尔策略组
-  martin_strategies:
-    name: "马丁格尔趋势策略"
-    enabled: false
-    startup_delay_secs: 20  # 延迟20秒启动
-    strategies:
-      - name: "LINKUSDC马丁策略"
-        config_file: "config/martin_link.yml"
-        enabled: true
-        account: "binance_hcr"
-        description: "LINK多时间框架趋势马丁策略"
-        
-      - name: "SUIUSDC马丁策略"
-        config_file: "config/martin_sui.yml"
-        enabled: true
-        account: "binance_hcr"
-        description: "SUI多时间框架趋势马丁策略"
-        
-      - name: "XRPUSDC马丁策略"
-        config_file: "config/martin_xrp.yml"
-        enabled: true
-        account: "binance_hcr"
-        description: "XRP多时间框架趋势马丁策略"
-
 # 启动设置
 startup_settings:
   # 策略间启动间隔（毫秒）
@@ -99,4 +52,4 @@ startup_settings:
   
 # 启动优先级（数字越小优先级越高）
 startup_priority:
-  1: ["copy_trading"]
+  1: ["trend_grid", "poisson_mm"]

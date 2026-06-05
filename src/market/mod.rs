@@ -47,6 +47,8 @@ pub enum ExchangeId {
     Gate,
     Bybit,
     Mexc,
+    CoinEx,
+    KuCoin,
     Htx,
     Other(String),
 }
@@ -79,6 +81,8 @@ impl ExchangeId {
             Self::Gate => "gate",
             Self::Bybit => "bybit",
             Self::Mexc => "mexc",
+            Self::CoinEx => "coinex",
+            Self::KuCoin => "kucoin",
             Self::Htx => "htx",
             Self::Other(exchange) => exchange.as_str(),
         }
@@ -94,6 +98,8 @@ impl From<&str> for ExchangeId {
             "gate" | "gateio" | "gate.io" => Self::Gate,
             "bybit" => Self::Bybit,
             "mexc" | "mxc" => Self::Mexc,
+            "coinex" | "coin_ex" => Self::CoinEx,
+            "kucoin" | "ku_coin" => Self::KuCoin,
             "htx" | "huobi" => Self::Htx,
             other => Self::Other(other.to_string()),
         }

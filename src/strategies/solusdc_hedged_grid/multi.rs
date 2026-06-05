@@ -104,28 +104,15 @@ impl MultiHedgedGridStrategy {
             let account_manager = self.account_manager.clone();
             let running = self.running.clone();
             handles.push(tokio::spawn(async move {
-                loop {
-                    if !running.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    match run_loop(
-                        runtime.clone(),
-                        account_manager.clone(),
-                        running.clone(),
-                        Some(rx),
-                    )
-                    .await
+                if running.load(Ordering::SeqCst) {
+                    if let Err(err) =
+                        run_loop(runtime, account_manager, running.clone(), Some(rx)).await
                     {
-                        Ok(_) => break,
-                        Err(err) => {
-                            log::error!("[multi_hedged_grid] symbol run_loop异常: {}", err);
-                            if !running.load(Ordering::SeqCst) {
-                                break;
-                            }
+                        log::error!("[multi_hedged_grid] symbol run_loop异常: {}", err);
+                        if running.load(Ordering::SeqCst) {
                             sleep(Duration::from_secs(30)).await;
                         }
                     }
-                    break;
                 }
             }));
         }

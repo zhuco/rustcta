@@ -1,0 +1,148 @@
+enabled: true
+trading_mode: paper
+exchanges:
+  - mexc
+  - coinex
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - CUDISUSDT
+quote_asset: USDT
+market_data_mode: websocket_cache
+
+websocket:
+  enabled: true
+  exchanges:
+    - mexc
+    - coinex
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - CUDISUSDT
+  depth: 5
+  stale_book_ms: 1000
+  reconnect_interval_ms: 1000
+  max_reconnect_attempts: 0
+  record_books: true
+  book_recording_path: data/market_books.jsonl
+  record_top_of_book_only: true
+  heartbeat_timeout_ms: 10000
+  log_raw_messages: false
+
+rest_polling:
+  enabled: false
+  interval_ms: 1000
+
+replay:
+  enabled: false
+  input_path: data/market_books.jsonl
+  speed: max
+  start_time: null
+  end_time: null
+  output_path: data/replay_report.jsonl
+
+monitoring:
+  enabled: false
+  bind_addr: "127.0.0.1:8080"
+  expose_publicly: false
+  require_token: true
+  token_env: "RUSTCTA_MONITOR_TOKEN"
+  max_recent_opportunities: 500
+  max_recent_trades: 500
+  max_recent_risk_events: 500
+  refresh_interval_ms: 1000
+
+live_preflight:
+  enabled: true
+  target_mode: small_live_taker_taker
+  exchanges:
+    - mexc
+    - coinex
+  market_type: Spot
+  symbols:
+    - CUDISUSDT
+    - BTCUSDT
+  max_live_notional_per_trade: 5
+  max_total_live_notional: 20
+  require_monitoring_enabled: true
+  require_recorder_enabled: true
+  require_websocket_fresh: true
+  max_book_age_ms: 1000
+  require_fee_model: true
+  require_disabled_registry: true
+  require_kill_switch: true
+  require_balances: true
+  require_symbol_rules: true
+  require_order_validation: true
+  require_private_stream: false
+  allow_rest_order_polling_fallback: true
+  require_api_key_read_permission: true
+  require_api_key_trade_permission: false
+  require_withdraw_permission_absent: true
+  minimum_quote_balance_usdt: 10
+  minimum_base_inventory_usdt: 0
+  fail_on_unmanaged_position_overlap: true
+
+max_notional_per_trade: 25.0
+min_notional_per_trade: 5.0
+max_notional_per_symbol: 250.0
+max_total_notional: 500.0
+min_net_spread_bps: 5.0
+taker_fee_bps_override: 10.0
+slippage_bps: 3.0
+safety_buffer_bps: 2.0
+
+stale_book_ms: 10000
+max_book_latency_ms: 10000
+min_depth_notional: 5.0
+max_active_opportunities_per_symbol: 1
+cooldown_ms_after_trade: 5000
+
+enable_database_recording: false
+enable_csv_recording: true
+jsonl_path: logs/spot_spot_taker_arbitrage/events.jsonl
+csv_path: logs/spot_spot_taker_arbitrage/events.csv
+report_interval_seconds: 30
+
+dry_run: true
+live_trading_enabled: false
+scan_interval_ms: 1000
+orderbook_depth: 5
+request_timeout_ms: 10000
+max_daily_loss: 100.0
+max_trade_loss: 10.0
+max_consecutive_rejections: 20
+
+initial_balances:
+  mexc:
+    USDT: 500.0
+    BTC: 0.02
+    ETH: 0.5
+    CUDIS: 10000.0
+  coinex:
+    USDT: 500.0
+    BTC: 0.02
+    ETH: 0.5
+    CUDIS: 10000.0
+
+mexc:
+  api_key: ${MEXC_API_KEY}
+  api_secret: ${MEXC_API_SECRET}
+  base_url: https://api.mexc.com
+  websocket_url: wss://wbs-api.mexc.com/ws
+  fee_override:
+    maker_fee_rate: 0.001
+    taker_fee_rate: 0.001
+
+coinex:
+  api_key: ${COINEX_API_KEY}
+  api_secret: ${COINEX_API_SECRET}
+  base_url: https://api.coinex.com/v2
+  websocket_url: wss://socket.coinex.com/v2/spot
+  symbol_mappings:
+    BTCUSDT: BTCUSDT
+    ETHUSDT: ETHUSDT
+    CUDISUSDT: CUDISUSDT
+  fee_override:
+    maker_fee_rate: 0.002
+    taker_fee_rate: 0.002

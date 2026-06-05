@@ -113,7 +113,7 @@ if gap_dn > max_gap_steps:
 - `sim.rs`: `SimulationEngine` 与简易回测输出。
 
 与现有系统复用点：
-- 精度处理复用 `market_making::precision::apply_precision`。
+- 精度处理复用 `market::precision` 的 `InstrumentMeta::normalize_order_input`。
 - 订单可映射至 `core::types::OrderRequest`，并使用 `params.positionSide` 指定 `LONG/SHORT`。
 - 交易对与 API 封装可直接接入现有 `AccountManager`、`Exchange` 调用。
 

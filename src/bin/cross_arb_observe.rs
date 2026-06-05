@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use rustcta::exchanges::adapters::{
+use rustcta::exchanges::market_adapters::{
     BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
     HtxMarketAdapter, MarketAdapterInfo, MexcMarketAdapter, OkxMarketAdapter,
 };
@@ -252,6 +252,11 @@ fn exchange_symbol_for(exchange: &ExchangeId, canonical: &CanonicalSymbol) -> Ex
         ExchangeId::Bybit => BybitMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Mexc => MexcMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Htx => HtxMarketAdapter.to_exchange_symbol(canonical),
+        ExchangeId::CoinEx => ExchangeSymbol::new(ExchangeId::CoinEx, canonical.as_pair()),
+        ExchangeId::KuCoin => ExchangeSymbol::new(
+            ExchangeId::KuCoin,
+            format!("{}-{}", canonical.base(), canonical.quote()),
+        ),
         ExchangeId::Other(name) => {
             ExchangeSymbol::new(ExchangeId::Other(name.clone()), canonical.to_string())
         }

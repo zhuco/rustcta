@@ -389,8 +389,6 @@ impl MultiStrategyLogger {
 
         let strategy_name = if module.contains("trend_grid") || message.contains("趋势网格") {
             "trend_grid"
-        } else if module.contains("copy_trading") || message.contains("跟单") {
-            "copy_trading"
         } else if module.contains("funding_rate") || message.contains("资金费率") {
             "funding_rate"
         } else if module.contains("cross_exchange") || message.contains("跨交易所") {

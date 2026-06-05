@@ -73,16 +73,6 @@ strategy_overrides:
     level: "INFO"
     max_file_size_mb: 10
   
-  # AS策略
-  as_ordi:
-    level: "INFO"
-    max_file_size_mb: 10
-  
-  # 跟单策略
-  copy_trading_simple:
-    level: "INFO"
-    max_file_size_mb: 10
-
 # 日志清理策略
 cleanup:
   # 是否启用自动清理

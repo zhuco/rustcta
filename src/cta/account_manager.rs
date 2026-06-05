@@ -3,10 +3,12 @@ use crate::core::{
     error::ExchangeError,
     types::*,
 };
-use crate::exchanges::adapters::{
-    private_perp_trading_adapter_for_with_instruments, PrivateRestAuth,
-};
+use crate::exchanges::private_perp::PrivateRestAuth;
 use crate::exchanges::registry::{market_adapter, private_perp_exchange};
+use crate::exchanges::trading_adapters::private_perp_trading_adapter_for_with_instruments;
+use crate::exchanges::unified::{
+    ExchangeClient, LegacyExchangeClient, MarketType as UnifiedMarketType,
+};
 use crate::exchanges::*;
 use crate::execution::PositionMode;
 use crate::market::ExchangeId;
@@ -200,6 +202,24 @@ impl AccountManager {
     /// 获取账户
     pub fn get_account(&self, account_id: &str) -> Option<Arc<AccountInfo>> {
         self.accounts.get(account_id).cloned()
+    }
+
+    /// Returns a unified `ExchangeClient` wrapper for legacy accounts.
+    ///
+    /// This is the incremental migration seam: old strategies can keep using
+    /// `core::exchange::Exchange`, while new code can depend on the unified
+    /// exchange path without forcing every adapter to be rewritten at once.
+    pub fn get_unified_exchange_client(
+        &self,
+        account_id: &str,
+        market_type: UnifiedMarketType,
+    ) -> Option<Arc<dyn ExchangeClient>> {
+        self.get_account(account_id).map(|account| {
+            Arc::new(LegacyExchangeClient::new(
+                account.exchange.clone(),
+                market_type,
+            )) as Arc<dyn ExchangeClient>
+        })
     }
 
     /// 直接添加交易所实例（用于从统一账户管理器迁移）

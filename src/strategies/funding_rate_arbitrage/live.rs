@@ -1226,6 +1226,8 @@ fn compact_exchange_code(exchange: &ExchangeId) -> &str {
         ExchangeId::Okx => "ok",
         ExchangeId::Bybit => "bb",
         ExchangeId::Mexc => "mx",
+        ExchangeId::CoinEx => "cx",
+        ExchangeId::KuCoin => "kc",
         ExchangeId::Htx => "hx",
         ExchangeId::Other(_) => "ot",
     }

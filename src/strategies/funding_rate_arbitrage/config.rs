@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::exchanges::adapters::PrivateWsRunConfig;
 use crate::exchanges::config::{ExchangeRegistryConfig, ExchangeRuntimeSettings};
+use crate::exchanges::private_perp::PrivateWsRunConfig;
 use crate::market::ExchangeId;
 use serde::{Deserialize, Serialize};
 

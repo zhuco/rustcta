@@ -5,6 +5,7 @@ Cargo.lock
 # Logs
 logs/
 *.log
+*.har
 data/
 !src/backtest/data/
 !src/backtest/data/*.rs
@@ -23,6 +24,8 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
+Robot.html
+Robot_files/
 
 # Backup files
 *.bak

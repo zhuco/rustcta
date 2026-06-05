@@ -1,6 +1,6 @@
 [package]
 name = "rustcta"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 default-run = "rustcta"
 
@@ -60,3 +60,4 @@ path = "src/bin/backtest.rs"
 
 [dev-dependencies]
 tempfile = "3.13"
+tower = "0.5"

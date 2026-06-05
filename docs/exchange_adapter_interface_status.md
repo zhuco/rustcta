@@ -1,94 +1,84 @@
 # Exchange Adapter Interface Status
 
-This note records the current exchange-adapter layout and the unified execution
-contracts used by the USDT perpetual cross-exchange arbitrage runtime.
+This note records the current adapter layout after compatibility cleanup.
 
-## Current Layout
+## Summary
 
-- `src/execution/adapter.rs` defines the unified private trading interface:
-  `TradingAdapter`, command/ack types, account snapshots, fills, leverage,
-  position mode, close-position, amendments, and countdown cancel-all.
-- `src/execution/router.rs` routes unified execution commands to registered
-  `TradingAdapter` implementations and preserves dry-run semantics.
-- `src/market/adapter.rs` defines the unified market data interface:
-  `MarketDataAdapter`, public WebSocket subscriptions, funding, instruments,
-  and orderbook snapshots.
-- `src/exchanges/adapters/*_market.rs` contains per-exchange market adapters
-  for Binance, OKX, Bitget, and Gate.
-- `src/exchanges/adapters/trading.rs` bridges older `core::Exchange`
-  implementations into `TradingAdapter` for Binance and OKX.
-- `src/exchanges/adapters/private_perp.rs` contains Bitget and Gate private
-  USDT perpetual REST/WebSocket protocol implementations behind the same
-  `PrivatePerpProtocol` and `TradingAdapter` surfaces.
+Multi-exchange Spot arbitrage is supported through unified Spot clients and the
+`spot_spot_taker_arbitrage` runtime. USDT perpetual arbitrage remains on the
+execution gateway path used by `cross_exchange_arbitrage`.
 
-The project is therefore unified at the strategy and execution boundary, but it
-is not yet fully organized as one directory per exchange. Bitget and Gate
-private perpetual code currently shares one protocol file because the strategy
-needs common request signing, REST response normalization, private WebSocket
-event parsing, precision handling, and Gate contract-size conversion.
+The old `src/exchanges/adapters/` compatibility directory has been removed.
 
-## Unified Private Trading Surface
+## Current Adapter Layout
 
-The following operations are currently expressed through the common
-`TradingAdapter` contract:
+| Area | Path | Role |
+| --- | --- | --- |
+| Unified client contracts | `src/exchanges/unified.rs` | Spot/Perpetual client model, requests, responses, user stream events |
+| Venue modules | `src/exchanges/<exchange>/` | Exchange-specific Spot or legacy core clients |
+| Market adapters | `src/exchanges/market_adapters/` | Public perpetual market-data adapters |
+| Private perpetual protocols | `src/exchanges/private_perp/` | Shared private REST/WebSocket implementation for linear perpetual venues |
+| Trading adapters | `src/exchanges/trading_adapters/` | Bridge legacy/core clients into `TradingAdapter` |
+| Gateway registry | `src/exchanges/registry.rs` | Builds gateways, market adapters, trading adapters, auth, and position mode |
+| Legacy bridge | `src/exchanges/gateway_exchange.rs` | Wraps gateway adapters for code still requiring `core::exchange::Exchange` |
 
-- Place market/limit orders.
-- Cancel one order.
-- Cancel all orders by exchange or symbol.
-- Cancel a batch of orders.
-- Read one order.
-- Read open orders.
-- Read balances.
-- Read positions.
-- Read recent fills.
-- Read trade fee snapshots.
-- Read symbol account configuration.
-- Amend an order.
-- Set leverage.
-- Set position mode where supported.
-- Close a position.
-- Set countdown/dead-man cancel-all where supported.
-- Load symbol rules from registered metadata.
+## Spot Support
 
-Capabilities are exposed by `TradingCapabilities`, so strategy code should check
-support instead of relying on exchange names.
+The Spot path is used by:
 
-## Current Exchange Coverage
+- `src/strategies/spot_spot_taker_arbitrage/`
+- `src/scanner/five_exchange_spot.rs`
+- `src/control/spot_control/`
+- `src/execution/live_dry_run.rs`
+- `src/execution/order_reconciliation.rs`
 
-| Exchange | Market Data | Private Trading | Notes |
-| --- | --- | --- | --- |
-| Binance | `BinanceMarketAdapter` | `ExchangeTradingAdapter` over `BinanceExchange` | Production key is currently configured by the operator. |
-| OKX | `OkxMarketAdapter` | `ExchangeTradingAdapter` over `OkxExchange` | Excluded from the current live-small plan due to insufficient simulation data. |
-| Bitget | `BitgetMarketAdapter` | `PrivatePerpTradingAdapter<BitgetPrivatePerpProtocol>` | Supports Demo Trading through `demo_trading` and demo WebSocket URL overrides. Countdown cancel-all is not exposed by this adapter. |
-| Gate | `GateMarketAdapter` | `PrivatePerpTradingAdapter<GatePrivatePerpProtocol>` | Supports Futures TestNet endpoint overrides, decimal-size REST header, price-only order amendments, countdown cancel-all, and hedge-side strategy semantics. Position-mode switching is not exposed yet; accounts should be preconfigured on Gate before live execution. |
+Current Spot-related venue modules include Binance, OKX, Bitget, Gate.io, MEXC,
+CoinEx, KuCoin, and Paper. Capability depth varies by venue; configs and tests
+should decide whether a venue is scan-only, paper-capable, live-dry-run capable,
+or eligible for future live submission.
 
-## Recent Low-Frequency Safety Interfaces
+## Perpetual Support
 
-Gate-specific additions:
+The perpetual path uses:
 
-- `PATCH /futures/usdt/orders/{order_id}` for price-only amendments and
-  `amend_text` updates.
-- `POST /futures/usdt/countdown_cancel_all` for dead-man cancel-all.
-- `X-Gate-Size-Decimal: 1` on Gate private REST requests.
+- `TradingAdapter`
+- `MarketDataAdapter`
+- `ExchangeGateway`
+- private perpetual protocol adapters
 
-The Gate amendment implementation intentionally rejects quantity amendments.
-Gate futures order size has signed direction semantics, while the current
-unified `AmendOrderCommand` does not carry original order side. A safe quantity
-amend needs either original-side context or a pre-read of the existing order
-before sending the amendment.
+Current perpetual coverage includes Binance, OKX, Bitget, Gate, Bybit, MEXC,
+and HTX market-data/private-protocol paths where registered.
 
-## Organization Recommendation
+## Compatibility Layer Cleanup
 
-The next structural cleanup should split `private_perp.rs` into modules without
-changing strategy-facing APIs:
+Removed:
 
-- `src/exchanges/adapters/private_perp/mod.rs`
-- `src/exchanges/adapters/private_perp/common.rs`
-- `src/exchanges/adapters/private_perp/bitget.rs`
-- `src/exchanges/adapters/private_perp/gate.rs`
-- `src/exchanges/adapters/private_perp/ws.rs`
-- `src/exchanges/adapters/private_perp/tests.rs`
+- old flat `src/exchanges/adapters/` modules
+- stale strategy references to deleted legacy strategy families
+- migration/remediation documents superseded by current architecture docs
 
-Do this after the live-small smoke test path is stable. The current single file
-keeps behavior centralized during rapid hardening, but it is already large
-enough that per-exchange modules will reduce accidental cross-exchange changes.
+Kept:
+
+- `GatewayExchange`, because parts of the existing CTA stack still accept
+  `core::exchange::Exchange`
+- legacy core clients where active strategies still use them
+- explicit conversion helpers between legacy and unified market/order types
+
+New work should not add another broad compatibility facade. Add a narrow bridge
+only when a current caller needs it and document why it cannot use the unified
+contract directly.
+
+## Validation Expectations
+
+Before enabling a venue for executable arbitrage:
+
+- verify symbol mapping and precision rules
+- verify min quantity and min notional handling
+- verify fee source and fallback source
+- run read-only balance/orderbook validation
+- run dry-run or live-dry-run order planning
+- verify private stream or reconciliation behavior
+- confirm disabled-symbol and kill-switch handling
+
+For scan-only support, the minimum bar is correct symbol normalization, fresh
+book data, fee annotation, and explicit non-executable labeling.

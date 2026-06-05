@@ -7,6 +7,152 @@
 
 CREATE DATABASE IF NOT EXISTS rustcta;
 
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_market_snapshots
+(
+    event_ts DateTime64(3, 'UTC'),
+    exchange LowCardinality(String),
+    canonical_symbol LowCardinality(String),
+    exchange_symbol String,
+    best_bid Nullable(Float64),
+    best_bid_qty Nullable(Float64),
+    best_ask Nullable(Float64),
+    best_ask_qty Nullable(Float64),
+    sequence Nullable(UInt64),
+    raw_snapshot String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (canonical_symbol, exchange, event_ts)
+TTL event_ts + INTERVAL 180 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_opportunities
+(
+    event_ts DateTime64(3, 'UTC'),
+    opportunity_id String,
+    canonical_symbol LowCardinality(String),
+    buy_exchange LowCardinality(String),
+    sell_exchange LowCardinality(String),
+    buy_price Float64,
+    sell_price Float64,
+    raw_spread_bps Float64,
+    estimated_net_spread_bps Float64,
+    estimated_notional Float64,
+    accepted Bool,
+    reject_reason LowCardinality(String),
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (canonical_symbol, accepted, event_ts)
+TTL event_ts + INTERVAL 365 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_orders
+(
+    event_ts DateTime64(3, 'UTC'),
+    exchange LowCardinality(String),
+    canonical_symbol LowCardinality(String),
+    side LowCardinality(String),
+    order_type LowCardinality(String),
+    status LowCardinality(String),
+    order_id String,
+    client_order_id String,
+    price Nullable(Float64),
+    quantity Float64,
+    filled_quantity Float64,
+    average_fill_price Nullable(Float64),
+    latency_ms Nullable(Int64),
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (canonical_symbol, exchange, client_order_id, event_ts)
+TTL event_ts + INTERVAL 365 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_fills
+(
+    event_ts DateTime64(3, 'UTC'),
+    exchange LowCardinality(String),
+    canonical_symbol LowCardinality(String),
+    side LowCardinality(String),
+    price Float64,
+    quantity Float64,
+    fee Float64,
+    fee_asset LowCardinality(String),
+    liquidity_role LowCardinality(String),
+    order_id String,
+    client_order_id String,
+    latency_ms Nullable(Int64),
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (canonical_symbol, exchange, order_id, event_ts)
+TTL event_ts + INTERVAL 365 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_positions
+(
+    event_ts DateTime64(3, 'UTC'),
+    exchange LowCardinality(String),
+    canonical_symbol LowCardinality(String),
+    base_quantity Float64,
+    notional_usdt Float64,
+    residual_quantity Float64,
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (canonical_symbol, exchange, event_ts)
+TTL event_ts + INTERVAL 365 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_pnl
+(
+    event_ts DateTime64(3, 'UTC'),
+    canonical_symbol LowCardinality(String),
+    realized_pnl_usdt Float64,
+    unrealized_pnl_usdt Float64,
+    fee_usdt Float64,
+    equity_usdt Float64,
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (canonical_symbol, event_ts)
+TTL event_ts + INTERVAL 365 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.arbitrage_risk_events
+(
+    event_ts DateTime64(3, 'UTC'),
+    scope LowCardinality(String),
+    exchange LowCardinality(String),
+    canonical_symbol LowCardinality(String),
+    risk_type LowCardinality(String),
+    action LowCardinality(String),
+    reason String,
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (risk_type, scope, event_ts)
+TTL event_ts + INTERVAL 365 DAY;
+
+CREATE TABLE IF NOT EXISTS rustcta.exchange_health_events
+(
+    event_ts DateTime64(3, 'UTC'),
+    exchange LowCardinality(String),
+    ws_stale Bool,
+    rest_failure_rate Float64,
+    order_reject_rate Float64,
+    cancel_failure_rate Float64,
+    private_stream_delay_ms Int64,
+    balance_reconciliation_mismatch_usdt Float64,
+    status LowCardinality(String),
+    raw_record String
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(event_ts)
+ORDER BY (exchange, event_ts)
+TTL event_ts + INTERVAL 180 DAY;
+
 CREATE TABLE IF NOT EXISTS rustcta.cross_arb_market_books_sampled
 (
     event_ts DateTime64(3, 'UTC'),

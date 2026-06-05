@@ -9,16 +9,20 @@ use anyhow::{anyhow, Result};
 
 use crate::core::config::{ApiKeys, Config as CoreExchangeConfig};
 use crate::core::exchange::Exchange;
-use crate::exchanges::adapters::{
-    private_perp_trading_adapter_for_with_base_url_and_instruments,
-    private_perp_trading_capabilities, BinanceMarketAdapter, BitgetMarketAdapter,
-    BybitMarketAdapter, ExchangeTradingAdapter, GateMarketAdapter, HtxMarketAdapter,
-    MexcMarketAdapter, OkxMarketAdapter, PrivatePerpExchange, PrivateRestAuth, PrivateWsAuth,
-};
 use crate::exchanges::config::{
     position_mode_from_config_value, ExchangeRegistryConfig, ExchangeRuntimeSettings,
 };
 use crate::exchanges::gateway::{ExchangeGateway, ExchangeGatewayCapabilities, GatewayKind};
+use crate::exchanges::market_adapters::{
+    BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
+    HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
+};
+use crate::exchanges::private_perp::{
+    private_perp_trading_capabilities, PrivatePerpExchange, PrivateRestAuth, PrivateWsAuth,
+};
+use crate::exchanges::trading_adapters::{
+    private_perp_trading_adapter_for_with_base_url_and_instruments, ExchangeTradingAdapter,
+};
 use crate::exchanges::{BinanceExchange, OkxExchange};
 use crate::execution::{PositionMode, TradingAdapter, TradingCapabilities};
 use crate::market::{ExchangeId, InstrumentMeta, MarketCapabilities, MarketDataAdapter};
@@ -59,6 +63,7 @@ pub fn gateway_for_exchange(exchange: &ExchangeId) -> Option<Box<dyn ExchangeGat
             PrivatePerpExchange::Htx,
             private_perp_market_adapter,
         ))),
+        ExchangeId::CoinEx | ExchangeId::KuCoin => None,
         ExchangeId::Other(_) => None,
     }
 }

@@ -1,0 +1,26 @@
+disabled:
+  symbols:
+    - symbol: TURBOSUSDT
+      reason: "manual disabled due to abnormal spread"
+      expires_at: null
+
+  exchanges:
+    - exchange: coinex
+      reason: "temporary maintenance"
+      expires_at: null
+
+  exchange_symbols:
+    - exchange: mexc
+      market_type: spot
+      symbol: DKAUSDT
+      reason: "oversold errors"
+      expires_at: "2026-06-10T00:00:00Z"
+
+unmanaged_positions:
+  - exchange: coinex
+    market_type: spot
+    symbol: PONDUSDT
+    asset: POND
+    quantity: 5000
+    reason: "legacy residual position, do not trade automatically"
+    created_at: "2026-06-04T20:20:00Z"

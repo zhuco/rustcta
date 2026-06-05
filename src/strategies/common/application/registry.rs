@@ -13,9 +13,6 @@ use crate::strategies::poisson_market_maker::{PoissonMMConfig, PoissonMarketMake
 use crate::strategies::range_grid::{
     application as range_application, RangeGridConfig, RangeGridStrategy,
 };
-use crate::strategies::sideways_martingale::{
-    SidewaysMartingaleConfig, SidewaysMartingaleStrategy,
-};
 use crate::strategies::short_ladder_live::{ShortLadderLiveConfig, ShortLadderLiveStrategy};
 use crate::strategies::trend_grid_v2::{TrendGridConfigV2, TrendGridStrategyV2};
 
@@ -66,7 +63,6 @@ impl Default for StrategyRegistry {
         registry.register("range_grid", range_grid_factory());
         registry.register("poisson", poisson_factory());
         registry.register("mean_reversion", mean_reversion_factory());
-        registry.register("sideways_martingale", sideways_martingale_factory());
         registry.register("short_ladder_live", short_ladder_live_factory());
         registry
     }
@@ -164,26 +160,6 @@ fn mean_reversion_factory(
         let deps = builder.build()?;
 
         let strategy = MeanReversionStrategy::create(config, deps)?;
-        Ok(Box::new(strategy))
-    }
-}
-
-fn sideways_martingale_factory(
-) -> impl Fn(&Value, &StrategyContext) -> Result<Box<dyn StrategyInstance>> + Send + Sync + 'static
-{
-    |config_value, ctx| {
-        let config: SidewaysMartingaleConfig = serde_yaml::from_value(config_value.clone())?;
-        let risk_evaluator = build_unified_risk_evaluator(
-            config.strategy.name.clone(),
-            ctx.global_risk.clone(),
-            None,
-        );
-
-        let mut builder = StrategyDepsBuilder::from_context(ctx);
-        builder = builder.with_risk_evaluator(risk_evaluator);
-        let deps = builder.build()?;
-
-        let strategy = SidewaysMartingaleStrategy::create(config, deps)?;
         Ok(Box::new(strategy))
     }
 }

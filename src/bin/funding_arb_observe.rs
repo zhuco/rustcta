@@ -87,7 +87,7 @@ fn configured_adapters(
 
 fn log_private_adapter_status(config: &FundingRateArbitrageConfig) {
     for exchange in &config.universe.enabled_exchanges {
-        let support = rustcta::exchanges::adapters::private_trading_support_for(exchange);
+        let support = rustcta::exchanges::trading_adapters::private_trading_support_for(exchange);
         if support.private_trading_enabled {
             log::info!(
                 "{} private trading adapter is wired, but funding_arb_observe will not place orders",

@@ -1,0 +1,189 @@
+enabled: true
+trading_mode: live_dry_run
+exchanges:
+  - gateio
+  - bitget
+symbols:
+  - ONE_EXPLICIT_SYMBOL
+quote_asset: USDT
+market_data_mode: websocket_cache
+
+websocket:
+  enabled: true
+  exchanges:
+    - gateio
+    - bitget
+  symbols:
+    - ONE_EXPLICIT_SYMBOL
+  depth: 5
+  stale_book_ms: 1000
+  reconnect_interval_ms: 1000
+  max_reconnect_attempts: 0
+  record_books: true
+  book_recording_path: data/gateio_bitget_books.jsonl
+  record_top_of_book_only: true
+  heartbeat_timeout_ms: 10000
+  log_raw_messages: false
+
+live_dry_run:
+  enabled: true
+  build_order_requests: true
+  submit_orders: false
+  max_notional_per_order: 5
+  max_total_notional: 50
+  require_preflight_pass: true
+  require_fresh_books: true
+  max_book_age_ms: 1000
+  output_path: data/live_dry_run_orders.jsonl
+
+arbitrage_scanner:
+  enabled: true
+  relationships:
+    spot_spot: true
+    spot_perp: true
+    perp_perp: true
+  execution_modes:
+    taker_taker: true
+    maker_taker_analysis: true
+    maker_taker_execution: false
+  notionals_usdt:
+    - 5
+    - 10
+    - 25
+    - 50
+  minimums:
+    tt_immediate_net_bps: 0
+    lifecycle_expected_net_bps: 0
+    return_on_capital_per_hour_bps: 0
+  lifecycle:
+    expected_convergence_bps: 0
+    expected_exit_basis_bps: 0
+    expected_exit_spread_bps: 0
+    expected_funding_net_bps: 0
+    expected_exit_fee_bps: 20
+    expected_exit_slippage_bps: 5
+    expected_inventory_rebalance_cost_bps: 5
+    expected_transfer_cost_bps: 0
+    expected_inventory_risk_bps: 5
+    expected_residual_loss_bps: 5
+    margin_risk_cost_bps: 0
+    safety_buffer_bps: 5
+    expected_holding_seconds: 3600
+  maker_taker:
+    fill_probability: 0.1
+    expected_time_to_fill_ms: 1000
+    expected_spread_at_fill_bps: 0
+    expected_hedge_slippage_bps: 5
+    expected_adverse_selection_bps: 10
+    expected_residual_loss_bps: 5
+    expected_cancel_replace_cost_bps: 1
+    expected_inventory_risk_bps: 5
+    estimated: true
+  stale_book_ms: 1000
+  quantity_rounding_tolerance: 0.00000001
+  output_path: data/arbitrage_opportunity_analytics.jsonl
+
+kill_switch:
+  enabled: true
+  allow_live_orders: false
+
+small_live_gate:
+  enabled: true
+  explicit_live_confirmation: false
+  max_notional_per_order: 5
+  max_total_notional: 50
+  enabled_symbols:
+    - ONE_EXPLICIT_SYMBOL
+  enabled_exchanges:
+    - gateio
+    - bitget
+  env_var: RUSTCTA_ENABLE_SMALL_LIVE
+
+live_preflight:
+  enabled: true
+  target_mode: small_live_taker_taker
+  exchanges:
+    - gateio
+    - bitget
+  market_type: Spot
+  symbols:
+    - ONE_EXPLICIT_SYMBOL
+  max_live_notional_per_trade: 5
+  max_total_live_notional: 50
+  require_monitoring_enabled: true
+  require_recorder_enabled: true
+  require_websocket_fresh: true
+  max_book_age_ms: 1000
+  require_fee_model: true
+  require_disabled_registry: true
+  require_kill_switch: true
+  require_balances: true
+  require_symbol_rules: true
+  require_order_validation: true
+  require_private_stream: false
+  allow_rest_order_polling_fallback: true
+  require_api_key_read_permission: true
+  require_api_key_trade_permission: false
+  require_withdraw_permission_absent: true
+  minimum_quote_balance_usdt: 10
+  minimum_base_inventory_usdt: 0
+  fail_on_unmanaged_position_overlap: true
+
+monitoring:
+  enabled: true
+  bind_addr: "127.0.0.1:8080"
+  expose_publicly: false
+  require_token: true
+  token_env: RUSTCTA_MONITOR_TOKEN
+  max_recent_opportunities: 500
+  max_recent_trades: 500
+  max_recent_risk_events: 500
+  refresh_interval_ms: 1000
+
+max_notional_per_trade: 5
+min_notional_per_trade: 1
+max_notional_per_symbol: 50
+max_total_notional: 50
+min_net_spread_bps: 5
+taker_fee_bps_override: null
+fee_config_path: config/fees.yml
+disabled_registry_path: config/disabled_symbols.yml
+slippage_bps: 3
+safety_buffer_bps: 2
+stale_book_ms: 1000
+max_book_latency_ms: 1000
+min_depth_notional: 1
+max_active_opportunities_per_symbol: 1
+cooldown_ms_after_trade: 5000
+enable_database_recording: false
+enable_csv_recording: true
+jsonl_path: logs/spot_spot_taker_arbitrage/gateio_bitget_events.jsonl
+csv_path: logs/spot_spot_taker_arbitrage/gateio_bitget_events.csv
+report_interval_seconds: 30
+dry_run: true
+live_trading_enabled: false
+scan_interval_ms: 1000
+orderbook_depth: 5
+request_timeout_ms: 10000
+max_daily_loss: 100
+max_trade_loss: 10
+max_consecutive_rejections: 20
+
+initial_balances:
+  gateio:
+    USDT: 50
+  bitget:
+    USDT: 50
+
+gateio:
+  api_key: ${GATEIO_API_KEY}
+  api_secret: ${GATEIO_API_SECRET}
+  base_url: https://api.gateio.ws/api/v4
+  websocket_url: wss://api.gateio.ws/ws/v4/
+
+bitget:
+  api_key: ${BITGET_API_KEY}
+  api_secret: ${BITGET_API_SECRET}
+  passphrase: ${BITGET_API_PASSPHRASE}
+  base_url: https://api.bitget.com
+  websocket_url: wss://ws.bitget.com/v2/ws/public
