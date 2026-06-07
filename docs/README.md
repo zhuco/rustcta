@@ -16,6 +16,8 @@ the best starting point when multiple AI agents are working in parallel.
   architecture and long-term migration direction.
 - `industrial_directory_migration_plan.md` - app/tool/strategy/runtime ownership
   map for legacy `src/bin/*.rs` entrypoints.
+- `industrial_migration_final_gates.md` - CI gates, compatibility retirement
+  matrix, and local paper end-to-end checklist.
 - `control_web_directory_migration_plan.md` - control API and Dioxus workspace
   migration boundaries.
 - `backtest_app_migration_plan.md` - `apps/backtest` and `rustcta-backtest`

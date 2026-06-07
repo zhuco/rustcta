@@ -2040,7 +2040,7 @@ checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
 
 [[package]]
 name = "rustcta"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2075,6 +2075,7 @@ dependencies = [
  "rustcta-strategy-range-grid",
  "rustcta-strategy-sdk",
  "rustcta-strategy-spot-spot-arbitrage",
+ "rustcta-supervisor",
  "secp256k1",
  "serde",
  "serde_json",
@@ -2097,7 +2098,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-backtest"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2110,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-backtest-app"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "clap",
  "rustcta-backtest",
@@ -2119,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-control-api"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "axum",
  "chrono",
@@ -2134,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-control-api-app"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -2149,7 +2150,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-core-compat"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "rustcta-exchange-api",
  "rustcta-execution-api",
@@ -2163,6 +2164,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "rustcta-execution-api",
  "rustcta-types",
  "serde",
  "serde_json",
@@ -2172,7 +2174,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-exchange-api"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2185,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-exchange-gateway"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "async-trait",
  "axum",
@@ -2219,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-execution-router"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2236,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-gateway"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -2250,7 +2252,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-industrial-cli"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -2264,7 +2266,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-reporting"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2280,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-avellaneda-stoikov"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2294,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-cross-exchange-arbitrage"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2307,7 +2309,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-funding-arbitrage"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2320,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-hedged-grid"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2333,7 +2335,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-mean-reversion"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2346,7 +2348,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-poisson-market-maker"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2360,7 +2362,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-range-grid"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2388,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-short-ladder-live"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2402,7 +2404,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-spot-spot-arbitrage"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2415,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-trend"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2429,7 +2431,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-supervisor"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "chrono",
  "serde",
@@ -2440,7 +2442,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-supervisor-app"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "axum",
@@ -2453,7 +2455,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-tools-ops"
-version = "0.3.9"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "base64",
@@ -2466,6 +2468,7 @@ dependencies = [
  "reqwest",
  "rmp-serde",
  "rustcta-reporting",
+ "rustcta-types",
  "serde",
  "serde_json",
  "serde_yaml",

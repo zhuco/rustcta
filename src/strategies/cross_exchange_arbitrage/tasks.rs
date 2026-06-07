@@ -1914,12 +1914,15 @@ impl CrossArbRuntime {
         snapshots: &[MarketSnapshot],
         now: DateTime<Utc>,
     ) -> Vec<ArbSignal> {
-        for snapshot in snapshots {
-            let event =
-                CrossArbStorageEvent::MarketSnapshot(ArbitrageMarketSnapshotRecord::from(snapshot));
-            self.storage.record(event.clone(), now);
-            if let Some(storage) = self.persistent_storage.as_mut() {
-                storage.record(event, now);
+        if self.state.config.persistence.persist_market_snapshots {
+            for snapshot in snapshots {
+                let event = CrossArbStorageEvent::MarketSnapshot(
+                    ArbitrageMarketSnapshotRecord::from(snapshot),
+                );
+                self.storage.record(event.clone(), now);
+                if let Some(storage) = self.persistent_storage.as_mut() {
+                    storage.record(event, now);
+                }
             }
         }
         let signals = self

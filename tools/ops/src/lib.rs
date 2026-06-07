@@ -4,11 +4,21 @@ use std::str::FromStr;
 
 pub mod account_position_render;
 pub mod gateio_bitget_spot_symbols;
+pub mod safety;
 pub mod ws_proxy_probe;
 
 pub use account_position_render::{run_account_position_render, AccountPositionRenderArgs};
 pub use gateio_bitget_spot_symbols::{run_gateio_bitget_spot_symbols, GateioBitgetSpotSymbolsArgs};
 pub use rustcta_reporting::{run_trend_report, TrendReportArgs};
+pub use safety::{
+    bitget_perp_order_canary_safety_plan, bitget_spot_order_canary_safety_plan,
+    cross_arb_account_audit_safety_plan, cross_arb_fee_audit_safety_plan,
+    cross_arb_order_admin_safety_plan, exchange_order_canary_safety_plan, AdminAction,
+    AdminPositionSide, BitgetPerpOrderCanarySafetyArgs, BitgetSpotOrderCanarySafetyArgs,
+    CanaryMode, CanarySide, CrossArbAccountAuditSafetyArgs, CrossArbFeeAuditSafetyArgs,
+    CrossArbOrderAdminSafetyArgs, ExchangeOrderCanarySafetyArgs, SafetyGateMode, SafetyPlan,
+    SpotSide,
+};
 pub use ws_proxy_probe::{run_ws_proxy_probe, WsProxyProbeArgs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,9 +76,21 @@ impl FromStr for LegacyBinTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegacyBinRetirement {
+    KeepWrapper,
+    Warn,
+    Alias,
+    RemoveLater,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LegacyBinMigration {
     pub source: &'static str,
     pub target: LegacyBinTarget,
+    pub compatibility: LegacyBinRetirement,
+    pub new_command: &'static str,
+    pub retirement_milestone: &'static str,
     pub rationale: &'static str,
 }
 
@@ -76,114 +98,181 @@ pub const LEGACY_BIN_MIGRATIONS: &[LegacyBinMigration] = &[
     LegacyBinMigration {
         source: "account_position_reporter.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "cargo run -p rustcta-tools-ops -- reporter account-position render",
+        retirement_milestone: "after full reporter loop and webhook behavior are root-free",
         rationale:
             "operator account reporting tool; extract non-root helpers before tools/ops ownership",
     },
     LegacyBinMigration {
         source: "backtest.rs",
         target: LegacyBinTarget::AppBacktest,
+        compatibility: LegacyBinRetirement::RemoveLater,
+        new_command: "cargo run -p rustcta-backtest-app --bin rustcta-backtest",
+        retirement_milestone: "after docs/scripts stop invoking cargo run --bin backtest",
         rationale: "offline backtest/research app executable; separate from production services",
     },
     LegacyBinMigration {
         source: "bitget_order_canary.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops canary bitget-order",
+        retirement_milestone: "after strict live-order canary confirmation parity is tested",
         rationale: "temporary live-exchange canary; migrate as documented ops tool",
     },
     LegacyBinMigration {
         source: "bitget_spot_order_canary.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops canary bitget-spot-order",
+        retirement_milestone: "after strict live-order canary confirmation parity is tested",
         rationale: "temporary live-exchange canary; migrate as documented ops tool",
     },
     LegacyBinMigration {
         source: "control_api.rs",
         target: LegacyBinTarget::AppControlApi,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "cargo run -p rustcta-control-api-app --bin rustcta-control-api",
+        retirement_milestone:
+            "after route, static hosting, command queue, and legacy read-model parity are documented",
         rationale:
             "HTTP control service belongs in apps/control-api with logic in rustcta-control-api",
     },
     LegacyBinMigration {
         source: "cross_arb_account_audit.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops audit cross-arb-account",
+        retirement_milestone: "after private-read credential/output compatibility is tested",
         rationale: "operator audit command, not a strategy runtime",
     },
     LegacyBinMigration {
         source: "cross_arb_fee_audit.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops audit cross-arb-fee",
+        retirement_milestone: "after private fill/fee output compatibility is tested",
         rationale: "operator audit command, not a strategy runtime",
     },
     LegacyBinMigration {
         source: "cross_arb_live.rs",
         target: LegacyBinTarget::StrategyRuntime,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "cargo run -p rustcta-supervisor-app --bin rustcta-supervisor -- --config config/supervisor/cross_arb_live.spec.json",
+        retirement_milestone: "after strategy runtime is root-free and supervisor launch parity is tested",
         rationale: "strategy process entrypoint should move with strategy crate/runtime wrapper",
     },
     LegacyBinMigration {
         source: "cross_arb_observe.rs",
         target: LegacyBinTarget::StrategyRuntime,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "planned supervised cross-arb observe spec",
+        retirement_milestone: "after observe output and lifecycle parity are tested",
         rationale: "strategy observation runtime should move with strategy crate/runtime wrapper",
     },
     LegacyBinMigration {
         source: "cross_arb_order_admin.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops admin cross-arb-order",
+        retirement_milestone: "after cancel/close confirmation flags and audit logging are pinned",
         rationale:
             "operator order administration tool; keep temporary live mutation status explicit",
     },
     LegacyBinMigration {
         source: "cross_arb_preflight.rs",
         target: LegacyBinTarget::AppCli,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- cross-arb preflight",
+        retirement_milestone: "after operator docs and scripts use the industrial CLI name",
         rationale: "preflight command belongs under industrial CLI composition",
     },
     LegacyBinMigration {
         source: "exchange_order_canary.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops canary exchange-order",
+        retirement_milestone: "after strict live-order canary confirmation parity is tested",
         rationale: "temporary live-exchange canary; migrate as documented ops tool",
     },
     LegacyBinMigration {
         source: "funding_arb_live.rs",
         target: LegacyBinTarget::StrategyRuntime,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "cargo run -p rustcta-supervisor-app --bin rustcta-supervisor -- --config config/supervisor/funding_arb_live.spec.json",
+        retirement_milestone: "after funding runtime is root-free and supervisor launch parity is tested",
         rationale: "strategy process entrypoint should move with strategy crate/runtime wrapper",
     },
     LegacyBinMigration {
         source: "funding_arb_observe.rs",
         target: LegacyBinTarget::StrategyRuntime,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "planned supervised funding observe spec",
+        retirement_milestone: "after observe output and lifecycle parity are tested",
         rationale: "strategy observation runtime should move with strategy crate/runtime wrapper",
     },
     LegacyBinMigration {
         source: "gateio_bitget_spot_symbols.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot",
+        retirement_milestone: "after operator docs and scripts use the tools/ops command name",
         rationale: "symbol discovery/reporting tool, not a platform service",
     },
     LegacyBinMigration {
         source: "hyperliquid_self_test.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::KeepWrapper,
+        new_command: "planned rustcta-tools-ops probe hyperliquid-self-test",
+        retirement_milestone: "after root-free non-mutating self-test behavior is extracted",
         rationale: "operator connectivity/self-test tool",
     },
     LegacyBinMigration {
         source: "short_ladder_mtf_grid.rs",
         target: LegacyBinTarget::AppBacktest,
+        compatibility: LegacyBinRetirement::RemoveLater,
+        new_command: "cargo run -p rustcta-backtest-app --bin rustcta-backtest -- short-ladder-mtf-grid",
+        retirement_milestone: "after docs/scripts stop invoking cargo run --bin short_ladder_mtf_grid",
         rationale: "offline short-ladder grid research command belongs under the backtest app",
     },
     LegacyBinMigration {
         source: "smart_money_binance_collector.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-tools-ops -- smart-money binance-collector",
+        retirement_milestone: "after operator docs and scripts use the tools/ops command name",
         rationale: "collector utility needs explicit ops ownership before service promotion",
     },
     LegacyBinMigration {
         source: "smart_money_hyperliquid_wallet_ingestion.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion",
+        retirement_milestone: "after operator docs and scripts use the tools/ops command name",
         rationale: "data ingestion tool, not a production service boundary yet",
     },
     LegacyBinMigration {
         source: "smart_money_portfolio_service.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-tools-ops -- smart-money portfolio-service",
+        retirement_milestone: "after operator docs and scripts use the tools/ops command name",
         rationale: "current behavior is dry-run portfolio config reporting, not a daemon",
     },
     LegacyBinMigration {
         source: "trend_report.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-tools-ops -- reporter trend",
+        retirement_milestone: "after operator docs and supervisor specs use the tools/ops command name",
         rationale: "operator trend reporter backed by rustcta-reporting",
     },
     LegacyBinMigration {
         source: "ws_proxy_probe.rs",
         target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Alias,
+        new_command: "cargo run -p rustcta-tools-ops -- ws-proxy-probe",
+        retirement_milestone: "after operator docs and scripts use the tools/ops command name",
         rationale: "connectivity probe tool",
     },
 ];
@@ -517,6 +606,36 @@ mod tests {
     }
 
     #[test]
+    fn compatibility_retirement_matrix_should_cover_all_decisions() {
+        for migration in LEGACY_BIN_MIGRATIONS {
+            assert!(
+                !migration.new_command.is_empty(),
+                "{} must document the replacement command",
+                migration.source
+            );
+            assert!(
+                !migration.retirement_milestone.is_empty(),
+                "{} must document its retirement milestone",
+                migration.source
+            );
+        }
+
+        for decision in [
+            LegacyBinRetirement::KeepWrapper,
+            LegacyBinRetirement::Warn,
+            LegacyBinRetirement::Alias,
+            LegacyBinRetirement::RemoveLater,
+        ] {
+            assert!(
+                LEGACY_BIN_MIGRATIONS
+                    .iter()
+                    .any(|migration| migration.compatibility == decision),
+                "retirement decision {decision:?} should be represented"
+            );
+        }
+    }
+
+    #[test]
     fn tools_ops_package_should_not_depend_on_legacy_root_crate() {
         let manifest = std::fs::read_to_string("Cargo.toml").expect("read tools/ops manifest");
         for (line_number, line) in manifest.lines().enumerate() {
@@ -560,6 +679,26 @@ mod tests {
         assert!(
             trend.rationale.contains("rustcta-reporting"),
             "trend_report should document its non-root helper crate"
+        );
+    }
+
+    #[test]
+    fn hyperliquid_self_test_should_remain_deferred_without_non_root_adapter() {
+        let migration =
+            migration_for("hyperliquid_self_test.rs").expect("hyperliquid migration entry");
+        assert_eq!(migration.target, LegacyBinTarget::ToolOps);
+        assert!(
+            migration.rationale.contains("self-test"),
+            "hyperliquid_self_test should remain classified as an ops candidate"
+        );
+
+        let legacy_source = std::fs::read_to_string("../../src/bin/hyperliquid_self_test.rs")
+            .expect("read legacy hyperliquid self-test");
+        let legacy_root_hyperliquid_exchange =
+            ["rustcta", "::exchanges::hyperliquid::HyperliquidExchange"].concat();
+        assert!(
+            legacy_source.contains(&legacy_root_hyperliquid_exchange),
+            "this guard should be revisited once hyperliquid_self_test no longer depends on the legacy root exchange"
         );
     }
 
@@ -612,6 +751,36 @@ mod tests {
         assert!(
             !config.portfolio.constraints.initial_capital_usdt.is_empty(),
             "portfolio defaults or config values should be present"
+        );
+    }
+
+    #[test]
+    fn smart_money_summaries_should_remain_bounded_dry_run_reports() {
+        let config_path = "../../config/smart_money.yml";
+
+        let binance =
+            smart_money_binance_collector_summary(config_path).expect("binance collector summary");
+        assert_eq!(binance.len(), 2);
+        assert!(binance[0].starts_with("smart_money_binance_collector dry-run:"));
+        assert_eq!(binance[1], "no Binance network connections were opened");
+
+        let hyperliquid = smart_money_hyperliquid_wallet_ingestion_summary(config_path)
+            .expect("hyperliquid wallet summary");
+        assert_eq!(hyperliquid.len(), 2);
+        assert!(hyperliquid[0].starts_with("smart_money_hyperliquid_wallet_ingestion dry-run:"));
+        assert_eq!(
+            hyperliquid[1],
+            "no Hyperliquid network connections were opened"
+        );
+
+        let portfolio =
+            smart_money_portfolio_service_summary(config_path).expect("portfolio summary");
+        assert_eq!(portfolio.len(), 3);
+        assert!(portfolio[0].starts_with("smart_money_portfolio_service dry-run:"));
+        assert!(portfolio[1].starts_with("portfolio constraints:"));
+        assert_eq!(
+            portfolio[2],
+            "no portfolio orders or network connections were created"
         );
     }
 }

@@ -1,8 +1,11 @@
 use anyhow::Result;
+use chrono::Utc;
+use tokio::sync::broadcast;
 use tokio::time::{sleep, Duration};
 
 use crate::data::{
-    BookCache, BookEvent, BookEventKind, BookHealth, BookRecorder, BookRecorderConfig, BookSource,
+    normalize_symbol, BookCache, BookEvent, BookEventKind, BookHealth, BookRecorder,
+    BookRecorderConfig, BookSource,
 };
 use crate::exchanges::unified::{ExchangeClient, MarketType, OrderBookSnapshot};
 
@@ -38,6 +41,7 @@ pub struct WebSocketBookManager {
     cache: BookCache,
     health: BookHealth,
     recorder: Option<BookRecorder>,
+    event_tx: broadcast::Sender<BookEvent>,
     config: WebSocketBookManagerConfig,
 }
 
@@ -55,10 +59,12 @@ impl WebSocketBookManager {
         } else {
             None
         };
+        let (event_tx, _) = broadcast::channel(16_384);
         Ok(Self {
             cache: BookCache::default(),
             health: BookHealth::default(),
             recorder,
+            event_tx,
             config,
         })
     }
@@ -69,10 +75,22 @@ impl WebSocketBookManager {
         recorder: Option<BookRecorder>,
         config: WebSocketBookManagerConfig,
     ) -> Self {
+        Self::with_parts_and_events(cache, health, recorder, None, config)
+    }
+
+    pub fn with_parts_and_events(
+        cache: BookCache,
+        health: BookHealth,
+        recorder: Option<BookRecorder>,
+        event_tx: Option<broadcast::Sender<BookEvent>>,
+        config: WebSocketBookManagerConfig,
+    ) -> Self {
+        let (default_event_tx, _) = broadcast::channel(16_384);
         Self {
             cache,
             health,
             recorder,
+            event_tx: event_tx.unwrap_or(default_event_tx),
             config,
         }
     }
@@ -89,6 +107,10 @@ impl WebSocketBookManager {
         self.recorder.clone()
     }
 
+    pub fn subscribe_events(&self) -> broadcast::Receiver<BookEvent> {
+        self.event_tx.subscribe()
+    }
+
     pub fn spawn_exchange<C>(&self, client: C)
     where
         C: ExchangeClient + Clone + Send + Sync + 'static,
@@ -97,6 +119,7 @@ impl WebSocketBookManager {
         let cache = self.cache.clone();
         let health = self.health.clone();
         let recorder = self.recorder.clone();
+        let event_tx = self.event_tx.clone();
         let reconnect_interval_ms = self.config.reconnect_interval_ms;
         let heartbeat_timeout_ms = self.config.heartbeat_timeout_ms;
         let max_reconnect_attempts = self.config.max_reconnect_attempts;
@@ -107,6 +130,7 @@ impl WebSocketBookManager {
                 cache,
                 health,
                 recorder,
+                event_tx,
                 reconnect_interval_ms,
                 heartbeat_timeout_ms,
                 max_reconnect_attempts,
@@ -122,6 +146,7 @@ async fn run_exchange_loop<C>(
     cache: BookCache,
     health: BookHealth,
     recorder: Option<BookRecorder>,
+    event_tx: broadcast::Sender<BookEvent>,
     reconnect_interval_ms: u64,
     heartbeat_timeout_ms: u64,
     max_reconnect_attempts: u32,
@@ -166,6 +191,7 @@ async fn run_exchange_loop<C>(
                 mark_symbols_stale(
                     &cache,
                     &health,
+                    &event_tx,
                     &exchange,
                     market_type,
                     &symbols,
@@ -193,6 +219,7 @@ async fn run_exchange_loop<C>(
                     mark_symbols_stale(
                         &cache,
                         &health,
+                        &event_tx,
                         &exchange,
                         market_type,
                         &symbols,
@@ -212,6 +239,7 @@ async fn run_exchange_loop<C>(
                     mark_symbols_stale(
                         &cache,
                         &health,
+                        &event_tx,
                         &exchange,
                         market_type,
                         &symbols,
@@ -229,19 +257,38 @@ async fn run_exchange_loop<C>(
                     attempts = 0;
                     if sequence_gap_detected(&mut last_sequence_by_symbol, &snapshot) {
                         health.mark_sequence_gap(&exchange, market_type).await;
+                        cache
+                            .mark_stale(
+                                &exchange,
+                                market_type,
+                                &snapshot.symbol,
+                                "non-monotonic websocket sequence",
+                            )
+                            .await;
+                        health
+                            .mark_symbol_stale(&exchange, market_type, &snapshot.symbol)
+                            .await;
+                        let _ = event_tx.send(stale_book_event(
+                            &exchange,
+                            market_type,
+                            &snapshot.symbol,
+                            BookEventKind::Gap,
+                            "non-monotonic websocket sequence",
+                        ));
                         log::warn!(
                             "websocket book manager non-monotonic sequence exchange={} symbol={} sequence={:?}",
                             exchange,
                             snapshot.symbol,
                             snapshot.sequence
                         );
+                        continue;
                     }
                     let event = BookEvent::from_snapshot(
                         snapshot.clone(),
                         BookSource::Websocket,
                         BookEventKind::Snapshot,
                     );
-                    cache.update_from_event(event.clone()).await;
+                    cache.update_from_event_ref(&event).await;
                     health
                         .mark_message(
                             &exchange,
@@ -257,6 +304,7 @@ async fn run_exchange_loop<C>(
                             .set_recorder_dropped_events(&exchange, recorder.dropped_events())
                             .await;
                     }
+                    let _ = event_tx.send(event);
                 }
             }
         }
@@ -268,6 +316,7 @@ async fn run_exchange_loop<C>(
 async fn mark_symbols_stale(
     cache: &BookCache,
     health: &BookHealth,
+    event_tx: &broadcast::Sender<BookEvent>,
     exchange: &str,
     market_type: MarketType,
     symbols: &[String],
@@ -280,6 +329,59 @@ async fn mark_symbols_stale(
         health
             .mark_symbol_stale(exchange, market_type, symbol)
             .await;
+        let _ = event_tx.send(stale_book_event(
+            exchange,
+            market_type,
+            symbol,
+            BookEventKind::Stale,
+            reason,
+        ));
+    }
+}
+
+fn stale_book_event(
+    exchange: &str,
+    market_type: MarketType,
+    symbol: &str,
+    event_kind: BookEventKind,
+    reason: &str,
+) -> BookEvent {
+    let now = Utc::now();
+    let exchange = exchange.trim().to_ascii_lowercase();
+    let internal_symbol = normalize_symbol(symbol);
+    BookEvent {
+        event_id: format!(
+            "{}-{}-{:?}-{}",
+            exchange,
+            internal_symbol,
+            event_kind,
+            now.timestamp_micros()
+        ),
+        exchange,
+        market_type,
+        internal_symbol: internal_symbol.clone(),
+        exchange_symbol: symbol.trim().to_ascii_uppercase(),
+        event_kind,
+        bids: Vec::new(),
+        asks: Vec::new(),
+        best_bid: None,
+        best_ask: None,
+        exchange_timestamp: None,
+        local_timestamp: now,
+        received_at: now,
+        latency_ms: None,
+        gateway_received_monotonic_ns: None,
+        strategy_received_monotonic_ns: None,
+        sequence: None,
+        first_update_id: None,
+        final_update_id: None,
+        previous_update_id: None,
+        checksum: None,
+        update_kind: Default::default(),
+        is_tradeable: false,
+        stale_reason: Some(reason.to_string()),
+        raw_message: None,
+        source: BookSource::Websocket,
     }
 }
 

@@ -20,7 +20,7 @@ selection:
 
 execution:
   scan_minute: 55
-  notional_usdt: 10.0
+  notional_usdt: 6.0
   open_seconds_before_settlement: 1
   close_seconds_after_settlement: 1
   order_readback_delay_secs: 3
@@ -32,7 +32,7 @@ execution:
 
 exchanges:
   binance:
-    enabled: true
+    enabled: false
     env_prefix: BINANCE_3
     demo_trading: false
     private_ws_enabled: false

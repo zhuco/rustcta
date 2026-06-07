@@ -3,6 +3,7 @@ use chrono::Utc;
 use super::{
     book_age_ms, configured_spot_pair, is_book_fresh, CommonSymbolRules, OpportunityRecord,
     PaperInventory, RejectionReason, SimulatedTradeRecord, SpotSpotTakerArbitrageConfig, SpotVenue,
+    TradePnlCategory,
 };
 use crate::exchanges::unified::{
     validate_min_notional, validate_quantity_step, OrderBookLevel, OrderBookSnapshot,
@@ -128,8 +129,26 @@ pub fn execute_paper_taker_taker(
     .unwrap_or(sell_leg.notional - buy_leg.notional);
     let total_fee = money::add_f64(buy_leg.fee, sell_leg.fee, "buy_fee", "sell_fee")
         .unwrap_or(buy_leg.fee + sell_leg.fee);
-    let net_pnl = money::subtract_f64(gross_pnl, total_fee, "gross_pnl", "total_fee")
-        .unwrap_or(gross_pnl - total_fee);
+    let slippage_cost = opportunity.estimated_slippage_cost;
+    let capital_cost = opportunity.estimated_capital_cost;
+    let transfer_cost = opportunity.estimated_transfer_cost;
+    let inventory_rebalance_cost = opportunity.estimated_inventory_rebalance_cost;
+    let latency_penalty_cost = opportunity.estimated_latency_penalty_cost;
+    let total_non_fee_cost = slippage_cost
+        + capital_cost
+        + transfer_cost
+        + inventory_rebalance_cost
+        + latency_penalty_cost;
+    let net_before_non_fee_cost =
+        money::subtract_f64(gross_pnl, total_fee, "gross_pnl", "total_fee")
+            .unwrap_or(gross_pnl - total_fee);
+    let net_pnl = money::subtract_f64(
+        net_before_non_fee_cost,
+        total_non_fee_cost,
+        "net_before_non_fee_cost",
+        "total_non_fee_cost",
+    )
+    .unwrap_or(net_before_non_fee_cost - total_non_fee_cost);
     inventory.add_pnl(gross_pnl, net_pnl);
 
     Ok(SimulatedTradeRecord {
@@ -145,6 +164,12 @@ pub fn execute_paper_taker_taker(
         sell_fee: sell_leg.fee,
         gross_pnl,
         net_pnl,
+        pnl_category: TradePnlCategory::Arbitrage,
+        slippage_cost,
+        capital_cost,
+        transfer_cost,
+        inventory_rebalance_cost,
+        latency_penalty_cost,
         latency_ms: buy_book
             .latency_ms
             .unwrap_or_default()

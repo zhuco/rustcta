@@ -1,6 +1,7 @@
 use crate::execution::{
-    BundleLeg, ExecutionRouter, HedgePlanner, MakerFill, OrderAck, OrderCommand, OrderIntent,
-    OrderSide, OrderType, PositionSide, TimeInForce,
+    BundleLeg, BundleLegEvent, BundleOrderLeg, BundleSubmitCommand, BundleSubmitReport,
+    ExecutionRouter, HedgePlanner, MakerFill, OneSidedExposureState, OrderAck, OrderCommand,
+    OrderIntent, OrderSide, OrderType, PositionSide, TimeInForce,
 };
 use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol, RuntimeMode};
 use chrono::{DateTime, Utc};
@@ -106,6 +107,9 @@ impl ExecutionRequest {
 pub struct EngineDecision {
     pub plan: ExecutionPlan,
     pub submitted_orders: Vec<OrderAck>,
+    pub bundle_reports: Vec<BundleSubmitReport>,
+    pub bundle_events: Vec<BundleLegEvent>,
+    pub one_sided_exposures: Vec<OneSidedExposureState>,
     pub blocked_reason: Option<String>,
     pub requires_reconcile: bool,
 }
@@ -117,6 +121,9 @@ impl EngineDecision {
             requires_reconcile: plan.requires_reconcile,
             plan,
             submitted_orders: Vec::new(),
+            bundle_reports: Vec::new(),
+            bundle_events: Vec::new(),
+            one_sided_exposures: Vec::new(),
         }
     }
 }
@@ -324,6 +331,54 @@ impl ExecutionEngine {
             return;
         }
 
+        if is_dual_taker_bundle(&decision.plan.commands) {
+            let bundle_id = decision.plan.commands[0].bundle_id.clone();
+            let bundle_command = BundleSubmitCommand::new(
+                mode,
+                bundle_id.clone(),
+                decision.plan.request_id.clone(),
+                format!("{}:{bundle_id}:dual-taker", decision.plan.request_id),
+                decision
+                    .plan
+                    .commands
+                    .iter()
+                    .cloned()
+                    .map(bundle_leg_for_command),
+                decision.plan.created_at,
+            );
+            match self.router.submit_bundle_concurrent(bundle_command).await {
+                Ok(report) => {
+                    for event in &report.events {
+                        log_bundle_event(mode, event);
+                    }
+                    decision.submitted_orders.extend(report.order_acks.clone());
+                    decision.requires_reconcile = report.requires_reconcile;
+                    decision.plan.requires_reconcile = report.requires_reconcile;
+                    if report.requires_reconcile {
+                        decision.blocked_reason = report.message.clone();
+                        decision.plan.blocked_reason = report.message.clone();
+                    }
+                    if let Some(exposure) = &report.one_sided_exposure {
+                        decision.one_sided_exposures.push(exposure.clone());
+                    }
+                    decision.bundle_events.extend(report.events.clone());
+                    decision.bundle_reports.push(report);
+                }
+                Err(error) => {
+                    log::error!(
+                        "cross-arb live bundle rejected bundle_id={} reason={}",
+                        bundle_id,
+                        error
+                    );
+                    decision.plan.blocked_reason = Some(error.to_string());
+                    decision.blocked_reason = Some(error.to_string());
+                    decision.plan.requires_reconcile = true;
+                    decision.requires_reconcile = true;
+                }
+            }
+            return;
+        }
+
         for command in decision.plan.commands.clone() {
             log_live_order_submission(mode, &command);
             match self.router.route_order(command.clone()).await {
@@ -487,6 +542,25 @@ impl ExecutionEngine {
     }
 }
 
+fn is_dual_taker_bundle(commands: &[OrderCommand]) -> bool {
+    commands.len() == 2
+        && commands.iter().all(|command| {
+            matches!(
+                command.intent,
+                OrderIntent::HedgeLongTaker | OrderIntent::HedgeShortTaker
+            )
+        })
+}
+
+fn bundle_leg_for_command(command: OrderCommand) -> BundleOrderLeg {
+    let leg = match command.position_side {
+        PositionSide::Long => BundleLeg::Long,
+        PositionSide::Short => BundleLeg::Short,
+        PositionSide::Net => BundleLeg::Taker,
+    };
+    BundleOrderLeg::new(leg, command)
+}
+
 fn log_live_order_submission(mode: RuntimeMode, command: &OrderCommand) {
     if !mode.allows_live_orders() {
         return;
@@ -552,6 +626,26 @@ fn log_live_order_rejection(mode: RuntimeMode, command: &OrderCommand, reason: &
         command.canonical_symbol,
         command.intent,
         reason
+    );
+}
+
+fn log_bundle_event(mode: RuntimeMode, event: &BundleLegEvent) {
+    if !mode.allows_live_orders() {
+        return;
+    }
+    log::warn!(
+        "cross-arb live bundle event bundle_id={} opportunity_id={} idempotency_key={} leg_id={} exchange={} client_order_id={} exchange_order_id={:?} kind={:?} accepted={} status={:?} message={:?}",
+        event.bundle_id,
+        event.opportunity_id,
+        event.idempotency_key,
+        event.leg_id,
+        event.exchange,
+        event.client_order_id,
+        event.exchange_order_id,
+        event.kind,
+        event.accepted,
+        event.status,
+        event.message
     );
 }
 

@@ -288,6 +288,18 @@ Workspace control API endpoints:
 - `POST /api/commands`
 - `GET /api/commands/:command_id`
 
+Dioxus workspace route usage:
+
+- The primary shell refreshes `workspace`, `agents`, `processes`,
+  `strategies`, `gateway/status`, and `credentials/status` first.
+- Status, config, risk, logs, fees, inventory, books, exchanges, symbols,
+  opportunities, and strategy logs prefer workspace control API routes when
+  present and retain legacy local-console read-route fallback.
+- The credential panel is read-only. It uses `/api/credentials/status` for
+  public slots and may read the legacy `/api/exchange-api-keys` status response
+  only as a redacted schema/account fallback. It does not post, delete, persist,
+  or locally store raw credential fields.
+
 ## Safety Model
 
 - The old embedded HTTP server remains opt-in through `monitoring.http_enabled=false` defaults.

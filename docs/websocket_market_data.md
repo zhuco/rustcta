@@ -12,8 +12,12 @@ Core modules:
 - `src/data/book_health.rs`: public market-data health state.
 - `src/data/book_recorder.rs`: nonblocking JSONL recorder.
 
-Strategies and scanners consume these shared data modules. They do not own
-WebSocket subscriptions or maintain independent authoritative book caches.
+Strategies and scanners consume these shared data modules. WebSocket ingestion
+owns subscriptions and publishes nonblocking `BookEvent` updates. The
+`spot_spot_taker_arbitrage` trading hot path consumes those events directly and
+keeps a small in-memory top-of-book state for the affected symbol/pair; the
+shared `BookCache` remains the read model for monitoring, preflight, debug, and
+fallback reads.
 
 ## Normalization
 
@@ -57,6 +61,14 @@ Default record mode is top-of-book only:
 ```
 
 Set `record_top_of_book_only: false` to include full depth levels.
+
+## Event-Driven Strategy Path
+
+For `market_data_mode: websocket_cache`, `scan_interval_ms` is not the trading
+decision trigger. Book events wake the spread engine, and only the updated
+symbol's directed venue pairs are recomputed. If no book event arrives before
+the interval elapses, the runtime uses that tick only for health, dashboard, and
+report maintenance.
 
 ## Configuration
 

@@ -1,8 +1,9 @@
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesResponse, BatchCancelOrdersResponse, BatchPlaceOrdersResponse, CancelAllOrdersResponse,
-    CancelOrderResponse, FeesResponse, OpenOrdersResponse, OrderBookResponse, PlaceOrderResponse,
-    PositionsResponse, QueryOrderResponse, RecentFillsResponse, SymbolRulesResponse,
+    AmendOrderResponse, BalancesResponse, BatchCancelOrdersResponse, BatchPlaceOrdersResponse,
+    CancelAllOrdersResponse, CancelOrderResponse, FeesResponse, OpenOrdersResponse,
+    OrderBookResponse, OrderListResponse, PlaceOrderResponse, PositionsResponse,
+    QueryOrderResponse, RecentFillsResponse, SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, TenantId};
 
@@ -81,6 +82,22 @@ impl GatewayProtocolResponse {
         self.require_accepted()?;
         match self.payload {
             GatewayResponsePayload::CancelOrder(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_amend_order(self) -> Result<AmendOrderResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::AmendOrder(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_order_list(self) -> Result<OrderListResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::OrderList(response) => Ok(response),
             other => Err(unexpected_payload(self.operation, other)),
         }
     }

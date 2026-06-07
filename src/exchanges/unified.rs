@@ -1147,6 +1147,8 @@ pub struct ExchangeClientCapabilities {
     pub supports_public_ws: bool,
     pub supports_private_user_stream: bool,
     pub supports_fee_api: bool,
+    #[serde(default)]
+    pub order_book: crate::data::L2BookCapability,
 }
 
 impl ExchangeClientCapabilities {
@@ -1175,6 +1177,7 @@ impl ExchangeClientCapabilities {
             supports_public_ws: true,
             supports_private_user_stream: false,
             supports_fee_api: true,
+            order_book: crate::data::L2BookCapability::best_effort_delta(None),
         }
     }
 
@@ -1203,6 +1206,7 @@ impl ExchangeClientCapabilities {
             supports_public_ws: false,
             supports_private_user_stream: false,
             supports_fee_api: true,
+            order_book: crate::data::L2BookCapability::snapshot_only(None),
         }
     }
 

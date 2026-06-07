@@ -135,7 +135,11 @@ pub(super) fn private_config(base_url: String) -> BinanceGatewayConfig {
 }
 
 pub(super) fn assert_signed_request(request: &SeenRequest) {
-    assert_eq!(request.method, "GET");
+    assert_signed_request_method(request, "GET");
+}
+
+pub(super) fn assert_signed_request_method(request: &SeenRequest, method: &str) {
+    assert_eq!(request.method, method);
     assert_eq!(request.header("X-MBX-APIKEY"), Some("test-key"));
     assert!(request.query.contains_key("timestamp"));
     assert_eq!(

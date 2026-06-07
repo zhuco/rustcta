@@ -18,6 +18,7 @@ use rustcta::market::{
     exchange_symbol_for, CanonicalSymbol, ExchangeId, ExchangeSymbol, InstrumentMeta,
     MarketDataAdapter, MarketFundingSnapshot, MarketStateCache, RoundingMode,
 };
+use rustcta::strategies::cross_exchange_arbitrage::TradingMode;
 use rustcta::strategies::cross_exchange_arbitrage::{
     build_cross_arb_live_runtime_parts, exchange_route_status, live_close_candidate_for_bundle,
     live_close_metrics_for_bundle, live_enabled_exchanges, order_ack_is_live, ArbSignal,
@@ -50,6 +51,28 @@ struct Args {
     skip_private_audit: bool,
     #[arg(long)]
     max_symbols: Option<usize>,
+    #[arg(
+        long,
+        help = "Stop the run loop after this many open maker submissions are accepted"
+    )]
+    max_open_submissions: Option<usize>,
+    #[arg(
+        long,
+        default_value_t = 30_000,
+        help = "After max open submissions is reached, keep managing maker orders until pending makers settle or this timeout elapses"
+    )]
+    max_open_submission_settle_ms: u64,
+    #[arg(
+        long,
+        help = "Stop the run loop if no open maker submission is accepted within this many milliseconds"
+    )]
+    max_open_wait_ms: Option<u64>,
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Required for non-dry-run --execute --run because it can place live orders"
+    )]
+    confirm_live_order: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,17 +82,34 @@ struct LiveBootstrapReport {
     execute_requested: bool,
     run_requested: bool,
     dry_run: bool,
+    live_order_confirmed: bool,
+    max_open_submissions: Option<usize>,
+    max_open_wait_ms: Option<u64>,
     live_ready: bool,
     blocking_reasons: Vec<String>,
     enabled_exchanges: Vec<String>,
     symbols: Vec<String>,
     instruments_loaded: usize,
+    instrument_precision_coverage: InstrumentPrecisionCoverageSummary,
     router_adapters: Vec<String>,
     private_ws_specs: Vec<PrivateWsSpecSummary>,
     binance_private_ws_specs: usize,
     account_preparation: Vec<AccountPrepSummary>,
     rest_audits: Vec<RestAuditSummary>,
     account_fee_overrides: Vec<AccountFeeOverrideSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct InstrumentPrecisionCoverageSummary {
+    expected_exchange_symbol_pairs: usize,
+    covered_exchange_symbol_pairs: usize,
+    missing_exchange_symbol_pairs: usize,
+    invalid_precision_pairs: usize,
+    min_common_exchange_symbols: usize,
+    symbols_with_insufficient_precision_coverage: usize,
+    missing_pair_samples: Vec<String>,
+    invalid_precision_pair_samples: Vec<String>,
+    insufficient_symbol_samples: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -93,6 +133,32 @@ struct RestAuditSummary {
     external_open_orders: usize,
     fills: usize,
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FinalRestAuditReport {
+    generated_at: DateTime<Utc>,
+    report_type: &'static str,
+    dry_run: bool,
+    run_exit: LiveRunExit,
+    rest_audits: Vec<RestAuditSummary>,
+    blocking_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LiveRunExit {
+    reason: LiveRunExitReason,
+    submitted_open_bundles: usize,
+    pending_makers: usize,
+    elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum LiveRunExitReason {
+    MaxOpenSubmissionsSettled,
+    DryRunSubmissionSettleTimeout,
+    MaxOpenWaitElapsed,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +191,13 @@ struct AccountFeeOverrideSummary {
     symbols: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LiveRunOptions {
+    max_open_submissions: Option<usize>,
+    max_open_submission_settle_ms: u64,
+    max_open_wait_ms: Option<u64>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -139,9 +212,18 @@ async fn main() -> Result<()> {
         .context("invalid cross arbitrage live config")?;
     validate_cross_arb_live_admission(
         config.mode,
+        config.trading_mode,
+        config.enable_live_trading,
+        config.max_live_notional_per_trade,
+        config.enabled_symbols.is_empty(),
+        config.enabled_exchanges.is_empty(),
         config.execution.dry_run,
         args.execute,
+        args.run,
         args.skip_private_audit,
+        args.confirm_live_order,
+        args.max_open_submissions,
+        args.max_open_wait_ms,
     )?;
 
     let report = bootstrap_live(
@@ -150,6 +232,9 @@ async fn main() -> Result<()> {
         args.execute,
         args.run,
         args.skip_private_audit,
+        args.confirm_live_order,
+        args.max_open_submissions,
+        args.max_open_wait_ms,
     )
     .await?;
     println!("{}", serde_json::to_string_pretty(&report)?);
@@ -166,17 +251,41 @@ async fn main() -> Result<()> {
         }
     }
     if args.run {
-        run_live(config, args.skip_private_audit).await?;
+        run_live(
+            config,
+            args.skip_private_audit,
+            LiveRunOptions {
+                max_open_submissions: args.max_open_submissions,
+                max_open_submission_settle_ms: args.max_open_submission_settle_ms,
+                max_open_wait_ms: args.max_open_wait_ms,
+            },
+        )
+        .await?;
     }
     Ok(())
 }
 
 fn validate_cross_arb_live_admission(
     mode: rustcta::market::RuntimeMode,
+    trading_mode: TradingMode,
+    enable_live_trading: bool,
+    max_live_notional_per_trade: Option<f64>,
+    enabled_symbols_empty: bool,
+    enabled_exchanges_empty: bool,
     dry_run: bool,
     execute_requested: bool,
+    run_requested: bool,
     skip_private_audit: bool,
+    confirm_live_order: bool,
+    max_open_submissions: Option<usize>,
+    max_open_wait_ms: Option<u64>,
 ) -> Result<()> {
+    if max_open_submissions.is_some_and(|value| value == 0) {
+        return Err(anyhow!("--max-open-submissions must be greater than zero"));
+    }
+    if max_open_wait_ms.is_some_and(|value| value == 0) {
+        return Err(anyhow!("--max-open-wait-ms must be greater than zero"));
+    }
     if !mode.allows_live_orders() {
         if execute_requested {
             return Err(anyhow!(
@@ -205,6 +314,51 @@ fn validate_cross_arb_live_admission(
             "execution.dry_run=false requires --execute so account writes and orders are explicit"
         ));
     }
+    if !dry_run {
+        if trading_mode != TradingMode::Live {
+            return Err(anyhow!(
+                "execution.dry_run=false requires trading_mode=live"
+            ));
+        }
+        if !enable_live_trading {
+            return Err(anyhow!(
+                "execution.dry_run=false requires enable_live_trading=true"
+            ));
+        }
+        if max_live_notional_per_trade
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .is_none()
+        {
+            return Err(anyhow!(
+                "execution.dry_run=false requires max_live_notional_per_trade > 0"
+            ));
+        }
+        if enabled_symbols_empty {
+            return Err(anyhow!(
+                "execution.dry_run=false requires explicit enabled_symbols"
+            ));
+        }
+        if enabled_exchanges_empty {
+            return Err(anyhow!(
+                "execution.dry_run=false requires explicit enabled_exchanges"
+            ));
+        }
+    }
+    if execute_requested && run_requested && !dry_run && !confirm_live_order {
+        return Err(anyhow!(
+            "--execute --run with execution.dry_run=false requires --confirm-live-order"
+        ));
+    }
+    if execute_requested && run_requested && !dry_run && max_open_submissions.is_none() {
+        return Err(anyhow!(
+            "--execute --run with execution.dry_run=false requires --max-open-submissions"
+        ));
+    }
+    if execute_requested && run_requested && !dry_run && max_open_wait_ms.is_none() {
+        return Err(anyhow!(
+            "--execute --run with execution.dry_run=false requires --max-open-wait-ms"
+        ));
+    }
     Ok(())
 }
 
@@ -224,9 +378,14 @@ async fn bootstrap_live(
     execute_requested: bool,
     run_requested: bool,
     skip_private_audit: bool,
+    live_order_confirmed: bool,
+    max_open_submissions: Option<usize>,
+    max_open_wait_ms: Option<u64>,
 ) -> Result<LiveBootstrapReport> {
     let enabled_exchanges = live_enabled_exchanges(&config);
     let instruments = load_live_instruments(&config, &enabled_exchanges).await?;
+    let instrument_precision_coverage =
+        summarize_instrument_precision_coverage(&config, &enabled_exchanges, &instruments);
     let parts = build_cross_arb_live_runtime_parts(&config, instruments.clone())?;
     let runtime = Arc::new(RwLock::new(CrossArbRuntime::new(
         config.clone(),
@@ -306,6 +465,19 @@ async fn bootstrap_live(
     if execute_requested && config.execution.dry_run {
         blocking_reasons.push("--execute requested while dry_run=true".to_string());
     }
+    if instrument_precision_coverage.invalid_precision_pairs > 0 {
+        blocking_reasons.push(format!(
+            "instrument precision metadata invalid for {} configured exchange-symbol pair(s)",
+            instrument_precision_coverage.invalid_precision_pairs
+        ));
+    }
+    if instrument_precision_coverage.symbols_with_insufficient_precision_coverage > 0 {
+        blocking_reasons.push(format!(
+            "{} symbol(s) have precision metadata on fewer than {} exchange(s)",
+            instrument_precision_coverage.symbols_with_insufficient_precision_coverage,
+            config.market.min_common_exchanges
+        ));
+    }
 
     Ok(LiveBootstrapReport {
         generated_at: Utc::now(),
@@ -313,6 +485,9 @@ async fn bootstrap_live(
         execute_requested,
         run_requested,
         dry_run: config.execution.dry_run,
+        live_order_confirmed,
+        max_open_submissions,
+        max_open_wait_ms,
         live_ready: blocking_reasons.is_empty(),
         blocking_reasons,
         enabled_exchanges: enabled_exchanges
@@ -326,6 +501,7 @@ async fn bootstrap_live(
             .map(ToString::to_string)
             .collect(),
         instruments_loaded: instruments.len(),
+        instrument_precision_coverage,
         router_adapters: parts
             .adapters
             .iter()
@@ -352,9 +528,11 @@ async fn bootstrap_live(
 async fn run_live(
     mut config: CrossExchangeArbitrageConfig,
     skip_private_audit: bool,
+    options: LiveRunOptions,
 ) -> Result<()> {
     let enabled_exchanges = live_enabled_exchanges(&config);
     let instruments = load_live_instruments(&config, &enabled_exchanges).await?;
+    validate_instrument_precision_coverage(&config, &enabled_exchanges, &instruments)?;
     let parts = build_cross_arb_live_runtime_parts(&config, instruments.clone())?;
     let runtime = Arc::new(RwLock::new(CrossArbRuntime::new(
         config.clone(),
@@ -539,16 +717,61 @@ async fn run_live(
         ));
     }
 
-    tokio::spawn(ws_market_execution_loop(
+    let run_exit = ws_market_execution_loop(
         runtime.clone(),
         execution.clone(),
         close_metrics.clone(),
         config.clone(),
-        enabled_exchanges,
+        enabled_exchanges.clone(),
         instruments,
-    ));
+        options,
+    )
+    .await;
+    if !skip_private_audit && !config.execution.dry_run {
+        run_final_rest_audit_after_live_loop(&private_sync, &config, &enabled_exchanges, run_exit)
+            .await?;
+    }
+    Ok(())
+}
 
-    futures_util::future::pending::<()>().await;
+async fn run_final_rest_audit_after_live_loop(
+    private_sync: &PrivateRuntimeSync,
+    config: &CrossExchangeArbitrageConfig,
+    exchanges: &[ExchangeId],
+    run_exit: LiveRunExit,
+) -> Result<()> {
+    let rest_audits = run_initial_rest_audits(private_sync, config, exchanges).await;
+    let mut blocking_reasons = Vec::new();
+    for audit in &rest_audits {
+        if !audit.ok {
+            blocking_reasons.push(format!(
+                "{} final private REST audit failed",
+                audit.exchange
+            ));
+        }
+        if audit.strategy_open_orders > 0 {
+            blocking_reasons.push(format!(
+                "{} final audit found {} crossarb strategy open order(s)",
+                audit.exchange, audit.strategy_open_orders
+            ));
+        }
+    }
+
+    let report = FinalRestAuditReport {
+        generated_at: Utc::now(),
+        report_type: "cross_arb_live_final_rest_audit",
+        dry_run: config.execution.dry_run,
+        run_exit,
+        rest_audits,
+        blocking_reasons,
+    };
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if !report.blocking_reasons.is_empty() {
+        return Err(anyhow!(
+            "final private REST audit is not clean: {}",
+            report.blocking_reasons.join("; ")
+        ));
+    }
     Ok(())
 }
 
@@ -670,7 +893,8 @@ async fn ws_market_execution_loop(
     config: CrossExchangeArbitrageConfig,
     exchanges: Vec<ExchangeId>,
     instruments: Vec<InstrumentMeta>,
-) {
+    options: LiveRunOptions,
+) -> LiveRunExit {
     let mut adapters: Vec<(ExchangeId, Arc<dyn MarketDataAdapter + Send + Sync>)> = Vec::new();
     for exchange in &exchanges {
         if let Some(adapter) = market_adapter(exchange) {
@@ -685,20 +909,44 @@ async fn ws_market_execution_loop(
         let mut cache = market_cache.write().await;
         let mut runtime_guard = runtime.write().await;
         let now = Utc::now();
-        for instrument in instruments {
+        for instrument in &instruments {
             cache.upsert_instrument(instrument.clone());
-            runtime_guard.record_instrument(instrument, now);
+            runtime_guard.record_instrument(instrument.clone(), now);
         }
     }
 
     let (ws_tx, mut ws_rx) = tokio::sync::mpsc::channel(16_384);
+    let available_symbols_by_exchange = instruments
+        .iter()
+        .filter(|instrument| instrument.has_valid_lot_rules())
+        .fold(
+            HashMap::<ExchangeId, Vec<ExchangeSymbol>>::new(),
+            |mut acc, instrument| {
+                acc.entry(instrument.exchange.clone())
+                    .or_default()
+                    .push(instrument.exchange_symbol.clone());
+                acc
+            },
+        );
     for (exchange, adapter) in &adapters {
-        let symbols = config
-            .universe
-            .symbols
-            .iter()
-            .map(|symbol| exchange_symbol_for(exchange, symbol))
-            .collect::<Vec<_>>();
+        let symbols = available_symbols_by_exchange
+            .get(exchange)
+            .cloned()
+            .unwrap_or_else(|| {
+                config
+                    .universe
+                    .symbols
+                    .iter()
+                    .map(|symbol| exchange_symbol_for(exchange, symbol))
+                    .collect::<Vec<_>>()
+            });
+        if symbols.is_empty() {
+            log::warn!(
+                "cross_arb_live public ws skipped exchange={} because no configured symbols have valid instrument precision metadata",
+                exchange
+            );
+            continue;
+        }
         let batch_size = config.ws_batch_size_for(exchange, 80);
         tokio::spawn(cross_arb_server_ws::run_public_ws_adapter(
             adapter.clone(),
@@ -754,6 +1002,10 @@ async fn ws_market_execution_loop(
         HashMap::new();
     let mut last_funding_refresh: Option<DateTime<Utc>> = None;
     let mut last_close_metric_persist: Option<DateTime<Utc>> = None;
+    let run_started_at = Utc::now();
+    let mut open_submission_count = 0usize;
+    let mut settling_after_open_limit_since: Option<DateTime<Utc>> = None;
+    let mut last_open_limit_settle_timeout_log: Option<DateTime<Utc>> = None;
 
     loop {
         ticker.tick().await;
@@ -819,13 +1071,106 @@ async fn ws_market_execution_loop(
             if closed_or_attempted {
                 continue;
             }
-            execute_live_open_candidates(
-                &mut runtime_guard,
-                &mut execution_guard,
-                &snapshots_by_symbol,
-                now,
-            )
-            .await;
+            if let Some(settling_since) = settling_after_open_limit_since {
+                if execution_guard.pending_maker_count() == 0 {
+                    log::info!(
+                        "cross_arb_live max open submission limit settled submitted={} limit={}",
+                        open_submission_count,
+                        options.max_open_submissions.unwrap_or_default()
+                    );
+                    return LiveRunExit {
+                        reason: LiveRunExitReason::MaxOpenSubmissionsSettled,
+                        submitted_open_bundles: open_submission_count,
+                        pending_makers: 0,
+                        elapsed_ms: now
+                            .signed_duration_since(run_started_at)
+                            .num_milliseconds()
+                            .max(0) as u64,
+                    };
+                }
+                let settle_elapsed_ms = now
+                    .signed_duration_since(settling_since)
+                    .num_milliseconds()
+                    .max(0) as u64;
+                if settle_elapsed_ms >= options.max_open_submission_settle_ms.max(1) {
+                    if config.execution.dry_run {
+                        log::warn!(
+                            "cross_arb_live max open submission settle timeout submitted={} limit={} pending_makers={} elapsed_ms={} timeout_ms={} dry_run=true",
+                            open_submission_count,
+                            options.max_open_submissions.unwrap_or_default(),
+                            execution_guard.pending_maker_count(),
+                            settle_elapsed_ms,
+                            options.max_open_submission_settle_ms.max(1)
+                        );
+                        return LiveRunExit {
+                            reason: LiveRunExitReason::DryRunSubmissionSettleTimeout,
+                            submitted_open_bundles: open_submission_count,
+                            pending_makers: execution_guard.pending_maker_count(),
+                            elapsed_ms: now
+                                .signed_duration_since(run_started_at)
+                                .num_milliseconds()
+                                .max(0) as u64,
+                        };
+                    }
+                    let should_log_timeout = last_open_limit_settle_timeout_log
+                        .map(|last| now.signed_duration_since(last).num_seconds() >= 5)
+                        .unwrap_or(true);
+                    if should_log_timeout {
+                        log::error!(
+                            "cross_arb_live max open submission settle timeout submitted={} limit={} pending_makers={} elapsed_ms={} timeout_ms={} dry_run=false; continuing until pending makers settle",
+                            open_submission_count,
+                            options.max_open_submissions.unwrap_or_default(),
+                            execution_guard.pending_maker_count(),
+                            settle_elapsed_ms,
+                            options.max_open_submission_settle_ms.max(1)
+                        );
+                        last_open_limit_settle_timeout_log = Some(now);
+                    }
+                }
+            } else {
+                if open_submission_count == 0 {
+                    if let Some(max_open_wait_ms) = options.max_open_wait_ms {
+                        let open_wait_elapsed_ms = now
+                            .signed_duration_since(run_started_at)
+                            .num_milliseconds()
+                            .max(0) as u64;
+                        if open_wait_elapsed_ms >= max_open_wait_ms.max(1) {
+                            log::warn!(
+                                "cross_arb_live max open wait elapsed without submission elapsed_ms={} limit_ms={} dry_run={}",
+                                open_wait_elapsed_ms,
+                                max_open_wait_ms.max(1),
+                                config.execution.dry_run
+                            );
+                            return LiveRunExit {
+                                reason: LiveRunExitReason::MaxOpenWaitElapsed,
+                                submitted_open_bundles: open_submission_count,
+                                pending_makers: execution_guard.pending_maker_count(),
+                                elapsed_ms: open_wait_elapsed_ms,
+                            };
+                        }
+                    }
+                }
+                let submitted = execute_live_open_candidates(
+                    &mut runtime_guard,
+                    &mut execution_guard,
+                    &snapshots_by_symbol,
+                    now,
+                )
+                .await;
+                open_submission_count += submitted;
+                if options
+                    .max_open_submissions
+                    .is_some_and(|limit| open_submission_count >= limit)
+                {
+                    settling_after_open_limit_since = Some(now);
+                    log::info!(
+                        "cross_arb_live max open submission limit reached submitted={} limit={} pending_makers={}; waiting for settlement before exit",
+                        open_submission_count,
+                        options.max_open_submissions.unwrap_or_default(),
+                        execution_guard.pending_maker_count()
+                    );
+                }
+            }
         }
     }
 }
@@ -835,7 +1180,7 @@ async fn execute_live_open_candidates(
     execution: &mut CrossArbExecutionCoordinator,
     snapshots_by_symbol: &HashMap<CanonicalSymbol, Vec<MarketSnapshot>>,
     now: DateTime<Utc>,
-) {
+) -> usize {
     let configured_limit = runtime
         .state
         .config
@@ -851,7 +1196,7 @@ async fn execute_live_open_candidates(
         .saturating_sub(runtime.state.open_bundles.len());
     let max_to_submit = available_maker_slots.min(available_bundle_slots);
     if max_to_submit == 0 {
-        return;
+        return 0;
     }
 
     let mut candidates = Vec::new();
@@ -876,6 +1221,7 @@ async fn execute_live_open_candidates(
                 signal_opportunity_context(runtime, &signal);
             if runtime.state.config.execution.open_execution_style
                 == rustcta::strategies::cross_exchange_arbitrage::OpenExecutionStyle::MakerTaker
+                && !runtime.state.config.execution.dry_run
                 && signal_exchange
                     .as_ref()
                     .is_some_and(|exchange| !runtime.state.is_private_stream_ready(exchange))
@@ -945,15 +1291,19 @@ async fn execute_live_open_candidates(
         {
             continue;
         }
+        let pending_before = execution.pending_maker_count();
         match execution.execute_open_signal(runtime, &signal).await {
             Ok(Some(decision)) => {
-                if decision.blocked_reason.is_none() && !decision.submitted_orders.is_empty() {
-                    let live_orders = decision
+                if decision.blocked_reason.is_none() {
+                    let pending_after = execution.pending_maker_count();
+                    let live_ack_count = decision
                         .submitted_orders
                         .iter()
                         .filter(|ack| order_ack_is_live(ack))
                         .count();
-                    if live_orders == 0 {
+                    let submitted_order_count =
+                        live_ack_count.max(pending_after.saturating_sub(pending_before));
+                    if submitted_order_count == 0 && !runtime.state.config.execution.dry_run {
                         runtime.state.risk_events.push(RiskEventReadModel {
                             event_id: format!(
                                 "live-open-ack-not-live-{}-{}",
@@ -969,15 +1319,20 @@ async fn execute_live_open_candidates(
                         });
                         continue;
                     }
+                    if submitted_order_count == 0 {
+                        continue;
+                    }
                     submitted += 1;
                     log::info!(
-                        "cross_arb_live open maker submitted symbol={} pending_makers={}/{}",
+                        "cross_arb_live open maker submitted symbol={} submitted_orders={} pending_makers={}/{} dry_run={}",
                         signal_canonical_symbol
                             .as_ref()
                             .map(ToString::to_string)
                             .unwrap_or_else(|| "unknown".to_string()),
+                        submitted_order_count,
                         execution.pending_maker_count(),
-                        configured_limit
+                        configured_limit,
+                        runtime.state.config.execution.dry_run
                     );
                 }
             }
@@ -996,6 +1351,7 @@ async fn execute_live_open_candidates(
             }),
         }
     }
+    submitted
 }
 
 async fn execute_hedge_repair_tasks(
@@ -1877,6 +2233,134 @@ async fn load_live_instruments(
     Ok(loaded)
 }
 
+fn validate_instrument_precision_coverage(
+    config: &CrossExchangeArbitrageConfig,
+    exchanges: &[ExchangeId],
+    instruments: &[InstrumentMeta],
+) -> Result<()> {
+    let coverage = summarize_instrument_precision_coverage(config, exchanges, instruments);
+    if coverage.invalid_precision_pairs > 0
+        || coverage.symbols_with_insufficient_precision_coverage > 0
+    {
+        return Err(anyhow!(
+            "instrument precision coverage is incomplete: expected_pairs={} covered_pairs={} missing_pairs={} invalid_precision_pairs={} insufficient_symbols={} missing_samples=[{}] invalid_samples=[{}] insufficient_symbol_samples=[{}]",
+            coverage.expected_exchange_symbol_pairs,
+            coverage.covered_exchange_symbol_pairs,
+            coverage.missing_exchange_symbol_pairs,
+            coverage.invalid_precision_pairs,
+            coverage.symbols_with_insufficient_precision_coverage,
+            coverage.missing_pair_samples.join(", "),
+            coverage.invalid_precision_pair_samples.join(", "),
+            coverage.insufficient_symbol_samples.join(", "),
+        ));
+    }
+    Ok(())
+}
+
+fn summarize_instrument_precision_coverage(
+    config: &CrossExchangeArbitrageConfig,
+    exchanges: &[ExchangeId],
+    instruments: &[InstrumentMeta],
+) -> InstrumentPrecisionCoverageSummary {
+    const SAMPLE_LIMIT: usize = 12;
+
+    let by_pair = instruments
+        .iter()
+        .map(|instrument| {
+            (
+                (
+                    instrument.exchange.clone(),
+                    instrument.canonical_symbol.clone(),
+                ),
+                instrument,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut covered_exchange_symbol_pairs = 0;
+    let mut missing_pair_samples = Vec::new();
+    let mut invalid_precision_pair_samples = Vec::new();
+    let mut valid_precision_counts_by_symbol = HashMap::<CanonicalSymbol, usize>::new();
+    let mut missing_exchange_symbol_pairs = 0;
+    let mut invalid_precision_pairs = 0;
+
+    for symbol in &config.universe.symbols {
+        for exchange in exchanges {
+            match by_pair.get(&(exchange.clone(), symbol.clone())) {
+                Some(instrument) => {
+                    covered_exchange_symbol_pairs += 1;
+                    if instrument.has_valid_lot_rules() {
+                        *valid_precision_counts_by_symbol
+                            .entry(symbol.clone())
+                            .or_default() += 1;
+                    } else {
+                        invalid_precision_pairs += 1;
+                        if invalid_precision_pair_samples.len() < SAMPLE_LIMIT {
+                            invalid_precision_pair_samples.push(format!(
+                                "{}:{} price_tick={} quantity_step={} contract_size={} min_qty={} min_notional={}",
+                                exchange,
+                                symbol,
+                                instrument.price_tick,
+                                instrument.quantity_step,
+                                instrument.contract_size,
+                                instrument.min_qty,
+                                instrument.min_notional
+                            ));
+                        }
+                    }
+                }
+                None => {
+                    missing_exchange_symbol_pairs += 1;
+                    if missing_pair_samples.len() < SAMPLE_LIMIT {
+                        missing_pair_samples.push(format!("{}:{}", exchange, symbol));
+                    }
+                }
+            }
+        }
+    }
+
+    let insufficient_symbol_samples = config
+        .universe
+        .symbols
+        .iter()
+        .filter_map(|symbol| {
+            let valid_count = valid_precision_counts_by_symbol
+                .get(symbol)
+                .copied()
+                .unwrap_or_default();
+            (valid_count < config.market.min_common_exchanges).then(|| {
+                format!(
+                    "{}:{}/{}",
+                    symbol, valid_count, config.market.min_common_exchanges
+                )
+            })
+        })
+        .take(SAMPLE_LIMIT)
+        .collect::<Vec<_>>();
+
+    InstrumentPrecisionCoverageSummary {
+        expected_exchange_symbol_pairs: exchanges.len() * config.universe.symbols.len(),
+        covered_exchange_symbol_pairs,
+        missing_exchange_symbol_pairs,
+        invalid_precision_pairs,
+        min_common_exchange_symbols: config.market.min_common_exchanges,
+        symbols_with_insufficient_precision_coverage: config
+            .universe
+            .symbols
+            .iter()
+            .filter(|symbol| {
+                valid_precision_counts_by_symbol
+                    .get(*symbol)
+                    .copied()
+                    .unwrap_or_default()
+                    < config.market.min_common_exchanges
+            })
+            .count(),
+        missing_pair_samples,
+        invalid_precision_pair_samples,
+        insufficient_symbol_samples,
+    }
+}
+
 async fn run_initial_rest_audits(
     private_sync: &PrivateRuntimeSync,
     config: &CrossExchangeArbitrageConfig,
@@ -1964,6 +2448,61 @@ mod tests {
     use super::*;
     use rustcta::market::{BookLevel, OrderBook5, RuntimeMode};
 
+    #[derive(Debug, Clone)]
+    struct AdmissionCase {
+        mode: RuntimeMode,
+        trading_mode: TradingMode,
+        enable_live_trading: bool,
+        max_live_notional_per_trade: Option<f64>,
+        enabled_symbols_empty: bool,
+        enabled_exchanges_empty: bool,
+        dry_run: bool,
+        execute_requested: bool,
+        run_requested: bool,
+        skip_private_audit: bool,
+        confirm_live_order: bool,
+        max_open_submissions: Option<usize>,
+        max_open_wait_ms: Option<u64>,
+    }
+
+    impl Default for AdmissionCase {
+        fn default() -> Self {
+            Self {
+                mode: RuntimeMode::LiveSmall,
+                trading_mode: TradingMode::Live,
+                enable_live_trading: true,
+                max_live_notional_per_trade: Some(10.0),
+                enabled_symbols_empty: false,
+                enabled_exchanges_empty: false,
+                dry_run: true,
+                execute_requested: false,
+                run_requested: false,
+                skip_private_audit: false,
+                confirm_live_order: false,
+                max_open_submissions: None,
+                max_open_wait_ms: None,
+            }
+        }
+    }
+
+    fn validate_admission(case: AdmissionCase) -> Result<()> {
+        validate_cross_arb_live_admission(
+            case.mode,
+            case.trading_mode,
+            case.enable_live_trading,
+            case.max_live_notional_per_trade,
+            case.enabled_symbols_empty,
+            case.enabled_exchanges_empty,
+            case.dry_run,
+            case.execute_requested,
+            case.run_requested,
+            case.skip_private_audit,
+            case.confirm_live_order,
+            case.max_open_submissions,
+            case.max_open_wait_ms,
+        )
+    }
+
     #[test]
     fn live_runner_market_adapter_should_exclude_okx_for_current_live_plan() {
         assert!(market_adapter(&ExchangeId::Binance).is_some());
@@ -1993,31 +2532,136 @@ mod tests {
 
     #[test]
     fn live_runner_should_admit_non_live_public_discovery_dry_run() {
-        validate_cross_arb_live_admission(RuntimeMode::Simulation, true, false, true).unwrap();
+        validate_admission(AdmissionCase {
+            mode: RuntimeMode::Simulation,
+            trading_mode: TradingMode::Paper,
+            dry_run: true,
+            execute_requested: false,
+            run_requested: true,
+            skip_private_audit: true,
+            ..AdmissionCase::default()
+        })
+        .unwrap();
     }
 
     #[test]
     fn live_runner_should_reject_non_live_execute_request() {
-        let error = validate_cross_arb_live_admission(RuntimeMode::Simulation, true, true, true)
-            .unwrap_err();
+        let error = validate_admission(AdmissionCase {
+            mode: RuntimeMode::Simulation,
+            trading_mode: TradingMode::Paper,
+            dry_run: true,
+            execute_requested: true,
+            skip_private_audit: true,
+            confirm_live_order: true,
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
 
         assert!(error.to_string().contains("--execute requires"));
     }
 
     #[test]
     fn live_runner_should_require_skip_private_audit_for_non_live_discovery() {
-        let error = validate_cross_arb_live_admission(RuntimeMode::Simulation, true, false, false)
-            .unwrap_err();
+        let error = validate_admission(AdmissionCase {
+            mode: RuntimeMode::Simulation,
+            trading_mode: TradingMode::Paper,
+            dry_run: true,
+            execute_requested: false,
+            run_requested: true,
+            skip_private_audit: false,
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
 
         assert!(error.to_string().contains("--skip-private-audit"));
     }
 
     #[test]
     fn live_runner_should_reject_execute_with_live_dry_run_config() {
-        let error = validate_cross_arb_live_admission(RuntimeMode::LiveSmall, true, true, false)
-            .unwrap_err();
+        let error = validate_admission(AdmissionCase {
+            dry_run: true,
+            execute_requested: true,
+            run_requested: true,
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
 
         assert!(error.to_string().contains("dry_run=true"));
+    }
+
+    #[test]
+    fn live_runner_should_require_confirmation_for_live_execute_run() {
+        let error = validate_admission(AdmissionCase {
+            dry_run: false,
+            execute_requested: true,
+            run_requested: true,
+            confirm_live_order: false,
+            max_open_submissions: Some(1),
+            max_open_wait_ms: Some(60_000),
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("--confirm-live-order"));
+        validate_admission(AdmissionCase {
+            dry_run: false,
+            execute_requested: true,
+            run_requested: true,
+            confirm_live_order: true,
+            max_open_submissions: Some(1),
+            max_open_wait_ms: Some(60_000),
+            ..AdmissionCase::default()
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn live_runner_should_require_live_config_for_non_dry_run() {
+        let error = validate_admission(AdmissionCase {
+            trading_mode: TradingMode::Paper,
+            dry_run: false,
+            execute_requested: true,
+            run_requested: false,
+            confirm_live_order: true,
+            max_open_submissions: Some(1),
+            max_open_wait_ms: Some(60_000),
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("trading_mode=live"));
+    }
+
+    #[test]
+    fn live_runner_should_require_submission_limit_for_live_execute_run() {
+        let error = validate_admission(AdmissionCase {
+            dry_run: false,
+            execute_requested: true,
+            run_requested: true,
+            confirm_live_order: true,
+            max_open_submissions: None,
+            max_open_wait_ms: Some(60_000),
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("--max-open-submissions"));
+    }
+
+    #[test]
+    fn live_runner_should_require_open_wait_limit_for_live_execute_run() {
+        let error = validate_admission(AdmissionCase {
+            dry_run: false,
+            execute_requested: true,
+            run_requested: true,
+            confirm_live_order: true,
+            max_open_submissions: Some(1),
+            max_open_wait_ms: None,
+            ..AdmissionCase::default()
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("--max-open-wait-ms"));
     }
 
     #[test]

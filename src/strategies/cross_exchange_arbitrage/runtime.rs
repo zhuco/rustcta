@@ -164,9 +164,6 @@ pub fn validate_live_trading_preflight(
     if config.enabled_exchanges.is_empty() {
         return Err(LiveTradingSafetyError::MissingEnabledExchanges);
     }
-    if config.execution.open_execution_style != OpenExecutionStyle::DualTaker {
-        return Err(LiveTradingSafetyError::MakerFirstDisabled);
-    }
     for exchange in &config.enabled_exchanges {
         if !config.fees.per_exchange.contains_key(exchange) {
             return Err(LiveTradingSafetyError::FeeModelNotLoaded);

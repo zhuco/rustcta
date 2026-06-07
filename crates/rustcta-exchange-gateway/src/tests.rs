@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::body::{to_bytes, Body};
@@ -90,3 +91,23 @@ mod http;
 mod mock_gateway;
 mod security;
 mod status;
+
+#[test]
+fn gateway_operation_should_parse_advanced_spot_order_operations() {
+    assert_eq!(
+        GatewayOperation::from_str("place_quote_market_order").unwrap(),
+        GatewayOperation::PlaceQuoteMarketOrder
+    );
+    assert_eq!(
+        GatewayOperation::from_str("modify_order").unwrap(),
+        GatewayOperation::AmendOrder
+    );
+    assert_eq!(
+        GatewayOperation::from_str("order_list").unwrap(),
+        GatewayOperation::PlaceOrderList
+    );
+    assert_eq!(
+        GatewayOperation::PlaceQuoteMarketOrder.as_str(),
+        "place_quote_market_order"
+    );
+}

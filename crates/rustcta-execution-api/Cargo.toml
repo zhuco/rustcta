@@ -10,7 +10,7 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 rustcta-types = { path = "../rustcta-types" }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1.0"
 
 [dev-dependencies]
-serde_json = "1.0"

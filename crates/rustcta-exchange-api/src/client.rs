@@ -1,13 +1,14 @@
 use async_trait::async_trait;
 
 use crate::{
-    BalancesRequest, BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, ExchangeClientCapabilities, ExchangeId, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClientCapabilities,
+    ExchangeId, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
+    OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse,
+    PositionsRequest, PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
     RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse,
 };
 
@@ -41,10 +42,37 @@ pub trait ExchangeClient: Send + Sync {
         request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse>;
 
+    async fn place_quote_market_order(
+        &self,
+        _request: QuoteMarketOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "place_quote_market_order",
+        })
+    }
+
     async fn cancel_order(
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse>;
+
+    async fn amend_order(
+        &self,
+        _request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "amend_order",
+        })
+    }
+
+    async fn place_order_list(
+        &self,
+        _request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        Err(ExchangeApiError::Unsupported {
+            operation: "place_order_list",
+        })
+    }
 
     async fn batch_place_orders(
         &self,

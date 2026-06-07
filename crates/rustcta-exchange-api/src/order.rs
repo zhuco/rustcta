@@ -31,6 +31,121 @@ pub struct PlaceOrderResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuoteMarketOrderRequest {
+    pub schema_version: u16,
+    pub context: RequestContext,
+    pub symbol: SymbolScope,
+    pub client_order_id: Option<String>,
+    pub side: OrderSide,
+    pub quote_quantity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AmendOrderRequest {
+    pub schema_version: u16,
+    pub context: RequestContext,
+    pub symbol: SymbolScope,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub new_client_order_id: Option<String>,
+    pub new_quantity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AmendOrderResponse {
+    pub schema_version: u16,
+    pub metadata: ResponseMetadata,
+    pub order: OrderState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderListKind {
+    Oco,
+    Oto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderListLegType {
+    Market,
+    Limit,
+    LimitMaker,
+    StopLoss,
+    StopLossLimit,
+    TakeProfit,
+    TakeProfitLimit,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderListConditionalLeg {
+    pub order_type: OrderListLegType,
+    pub price: Option<String>,
+    pub stop_price: Option<String>,
+    pub time_in_force: Option<TimeInForce>,
+    pub client_order_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderListOrderLeg {
+    pub side: OrderSide,
+    pub order_type: OrderListLegType,
+    pub quantity: String,
+    pub price: Option<String>,
+    pub stop_price: Option<String>,
+    pub time_in_force: Option<TimeInForce>,
+    pub client_order_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OrderListRequest {
+    Oco {
+        schema_version: u16,
+        context: RequestContext,
+        symbol: SymbolScope,
+        list_client_order_id: Option<String>,
+        side: OrderSide,
+        quantity: String,
+        above: OrderListConditionalLeg,
+        below: OrderListConditionalLeg,
+    },
+    Oto {
+        schema_version: u16,
+        context: RequestContext,
+        symbol: SymbolScope,
+        list_client_order_id: Option<String>,
+        working: OrderListOrderLeg,
+        pending: OrderListOrderLeg,
+    },
+}
+
+impl OrderListRequest {
+    pub fn symbol(&self) -> &SymbolScope {
+        match self {
+            Self::Oco { symbol, .. } | Self::Oto { symbol, .. } => symbol,
+        }
+    }
+
+    pub fn kind(&self) -> OrderListKind {
+        match self {
+            Self::Oco { .. } => OrderListKind::Oco,
+            Self::Oto { .. } => OrderListKind::Oto,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderListResponse {
+    pub schema_version: u16,
+    pub metadata: ResponseMetadata,
+    pub symbol: SymbolScope,
+    pub kind: OrderListKind,
+    pub order_list_id: Option<String>,
+    pub list_client_order_id: Option<String>,
+    pub list_status_type: Option<String>,
+    pub list_order_status: Option<String>,
+    pub orders: Vec<OrderState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CancelOrderRequest {
     pub schema_version: u16,
     pub context: RequestContext,

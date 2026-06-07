@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::data::{BookEvent, BookEventKind, BookSource};
+use crate::data::{BookEvent, BookEventKind, BookSource, BookUpdateKind};
 use crate::exchanges::unified::{MarketType, OrderBookLevel};
 use crate::utils::rotating_file;
 
@@ -49,7 +49,25 @@ pub struct BookRecord {
     pub local_timestamp: DateTime<Utc>,
     pub received_at: DateTime<Utc>,
     pub latency_ms: Option<i64>,
+    #[serde(default)]
+    pub gateway_received_monotonic_ns: Option<u64>,
+    #[serde(default)]
+    pub strategy_received_monotonic_ns: Option<u64>,
     pub sequence: Option<u64>,
+    #[serde(default)]
+    pub first_update_id: Option<u64>,
+    #[serde(default)]
+    pub final_update_id: Option<u64>,
+    #[serde(default)]
+    pub previous_update_id: Option<u64>,
+    #[serde(default)]
+    pub checksum: Option<i64>,
+    #[serde(default)]
+    pub update_kind: BookUpdateKind,
+    #[serde(default = "default_tradeable")]
+    pub is_tradeable: bool,
+    #[serde(default)]
+    pub stale_reason: Option<String>,
     pub source: BookSource,
 }
 
@@ -78,10 +96,23 @@ impl BookRecord {
             local_timestamp: event.local_timestamp,
             received_at: event.received_at,
             latency_ms: event.latency_ms,
+            gateway_received_monotonic_ns: event.gateway_received_monotonic_ns,
+            strategy_received_monotonic_ns: event.strategy_received_monotonic_ns,
             sequence: event.sequence,
+            first_update_id: event.first_update_id,
+            final_update_id: event.final_update_id,
+            previous_update_id: event.previous_update_id,
+            checksum: event.checksum,
+            update_kind: event.update_kind,
+            is_tradeable: event.is_tradeable,
+            stale_reason: event.stale_reason.clone(),
             source: event.source,
         }
     }
+}
+
+fn default_tradeable() -> bool {
+    true
 }
 
 #[derive(Clone)]

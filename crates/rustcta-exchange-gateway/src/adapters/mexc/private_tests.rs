@@ -1,12 +1,14 @@
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest,
-    QueryOrderRequest, RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
+    BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient,
+    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{
-    assert_signed_request, context, exchange_id, spawn_rest_server, symbol_scope,
+    assert_signed_request, assert_signed_request_method, context, exchange_id, spawn_rest_server,
+    symbol_scope,
 };
 use super::{MexcGatewayAdapter, MexcGatewayConfig};
 
@@ -26,6 +28,199 @@ async fn mexc_adapter_should_keep_private_operations_unsupported_without_credent
         .await
         .expect_err("private operation should be unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[tokio::test]
+async fn mexc_adapter_should_route_private_order_mutations() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "symbol": "BTCUSDT",
+            "orderId": 2001,
+            "clientOrderId": "LIMIT1",
+            "price": "65000",
+            "origQty": "0.02",
+            "executedQty": "0",
+            "status": "NEW",
+            "timeInForce": "GTC",
+            "type": "LIMIT",
+            "side": "BUY",
+            "transactTime": 1700000000000i64
+        }),
+        json!({
+            "symbol": "BTCUSDT",
+            "orderId": 2002,
+            "clientOrderId": "QUOTE1",
+            "price": "0",
+            "origQty": "25.5",
+            "executedQty": "0",
+            "status": "NEW",
+            "type": "MARKET",
+            "side": "BUY",
+            "transactTime": 1700000001000i64
+        }),
+        json!({
+            "symbol": "BTCUSDT",
+            "orderId": 2001,
+            "clientOrderId": "LIMIT1",
+            "status": "CANCELED"
+        }),
+        json!([
+            {"symbol": "BTCUSDT", "orderId": 2002, "clientOrderId": "QUOTE1", "status": "CANCELED"},
+            {"symbol": "BTCUSDT", "orderId": 2003, "clientOrderId": "SELL1", "status": "CANCELED"}
+        ]),
+    ])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_place_order);
+    assert!(capabilities.supports_cancel_order);
+    assert!(capabilities.supports_cancel_all_orders);
+    assert!(capabilities.supports_quote_market_order);
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("place-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            side: OrderSide::Buy,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "0.02".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect("place order");
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("2001"));
+    assert_eq!(placed.order.client_order_id.as_deref(), Some("LIMIT1"));
+    assert_eq!(placed.order.order_type, OrderType::Limit);
+
+    let quote = adapter
+        .place_quote_market_order(QuoteMarketOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("quote-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("QUOTE1".to_string()),
+            side: OrderSide::Buy,
+            quote_quantity: "25.5".to_string(),
+        })
+        .await
+        .expect("quote market order");
+    assert_eq!(quote.order.exchange_order_id.as_deref(), Some("2002"));
+    assert_eq!(quote.order.order_type, OrderType::Market);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            exchange_order_id: Some("2001".to_string()),
+        })
+        .await
+        .expect("cancel order");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+
+    let cancel_all = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect("cancel all");
+    assert_eq!(cancel_all.cancelled_count, 2);
+    assert_eq!(cancel_all.orders.len(), 2);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 4);
+
+    assert_signed_request_method(&requests[0], "POST", "/api/v3/order");
+    assert_eq!(
+        requests[0].query.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
+    );
+    assert_eq!(
+        requests[0].query.get("side").map(String::as_str),
+        Some("BUY")
+    );
+    assert_eq!(
+        requests[0].query.get("type").map(String::as_str),
+        Some("LIMIT")
+    );
+    assert_eq!(
+        requests[0].query.get("quantity").map(String::as_str),
+        Some("0.02")
+    );
+    assert_eq!(
+        requests[0].query.get("price").map(String::as_str),
+        Some("65000")
+    );
+    assert_eq!(
+        requests[0].query.get("timeInForce").map(String::as_str),
+        Some("GTC")
+    );
+    assert_eq!(
+        requests[0]
+            .query
+            .get("newClientOrderId")
+            .map(String::as_str),
+        Some("LIMIT1")
+    );
+
+    assert_signed_request_method(&requests[1], "POST", "/api/v3/order");
+    assert_eq!(
+        requests[1].query.get("type").map(String::as_str),
+        Some("MARKET")
+    );
+    assert_eq!(
+        requests[1].query.get("quoteOrderQty").map(String::as_str),
+        Some("25.5")
+    );
+    assert_eq!(
+        requests[1]
+            .query
+            .get("newClientOrderId")
+            .map(String::as_str),
+        Some("QUOTE1")
+    );
+    assert!(!requests[1].query.contains_key("quantity"));
+
+    assert_signed_request_method(&requests[2], "DELETE", "/api/v3/order");
+    assert_eq!(
+        requests[2].query.get("orderId").map(String::as_str),
+        Some("2001")
+    );
+    assert_eq!(
+        requests[2]
+            .query
+            .get("origClientOrderId")
+            .map(String::as_str),
+        Some("LIMIT1")
+    );
+
+    assert_signed_request_method(&requests[3], "DELETE", "/api/v3/openOrders");
+    assert_eq!(
+        requests[3].query.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
+    );
 }
 
 #[test]

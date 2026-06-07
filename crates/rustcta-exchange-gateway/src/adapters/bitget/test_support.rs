@@ -9,9 +9,11 @@ use tokio::net::TcpListener;
 
 #[derive(Debug, Clone)]
 pub(super) struct SeenRequest {
+    pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
     pub(super) headers: HashMap<String, String>,
+    pub(super) body: Option<Value>,
 }
 
 pub(super) async fn spawn_rest_server(
@@ -55,7 +57,9 @@ pub(super) async fn spawn_rest_server(
 
 fn parse_seen_request(request_text: &str) -> SeenRequest {
     let request_line = request_text.lines().next().unwrap_or_default();
-    let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or_default().to_string();
+    let target = request_parts.next().unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
     let query = query_text
         .split('&')
@@ -74,10 +78,17 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
             Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
         })
         .collect();
+    let body = request_text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.trim())
+        .filter(|body| !body.is_empty())
+        .and_then(|body| serde_json::from_str(body).ok());
     SeenRequest {
+        method,
         path: path.to_string(),
         query,
         headers,
+        body,
     }
 }
 
@@ -107,6 +118,11 @@ pub(super) fn symbol_scope() -> SymbolScope {
 }
 
 pub(super) fn assert_signed_bitget_request(request: &SeenRequest, path: &str) {
+    assert_signed_bitget_request_method(request, "GET", path);
+}
+
+pub(super) fn assert_signed_bitget_request_method(request: &SeenRequest, method: &str, path: &str) {
+    assert_eq!(request.method, method);
     assert_eq!(request.path, path);
     assert_eq!(
         request.headers.get("access-key").map(String::as_str),

@@ -1,13 +1,15 @@
 use chrono::{DateTime, Utc};
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeClientCapabilities,
-    FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
-    OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
-    QueryOrderRequest, QueryOrderResponse, RecentFillsRequest, RecentFillsResponse, RequestContext,
-    SymbolRulesRequest, SymbolRulesResponse,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest,
+    OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamCapabilities, PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, RequestContext, SymbolRulesRequest,
+    SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, TenantId};
 use serde::{Deserialize, Serialize};
@@ -96,6 +98,8 @@ pub struct PrivateSubscriptionAck {
     pub market_type: Option<MarketType>,
     pub account_id: AccountId,
     pub kind: PrivateStreamKind,
+    #[serde(default)]
+    pub capabilities: Option<PrivateStreamCapabilities>,
     pub subscribed_at: DateTime<Utc>,
 }
 
@@ -116,7 +120,10 @@ pub enum GatewayRequestPayload {
     GetOrderBook(OrderBookRequest),
     GetFees(FeesRequest),
     PlaceOrder(PlaceOrderRequest),
+    PlaceQuoteMarketOrder(QuoteMarketOrderRequest),
     CancelOrder(CancelOrderRequest),
+    AmendOrder(AmendOrderRequest),
+    PlaceOrderList(OrderListRequest),
     BatchPlaceOrders(BatchPlaceOrdersRequest),
     BatchCancelOrders(BatchCancelOrdersRequest),
     CancelAllOrders(CancelAllOrdersRequest),
@@ -138,7 +145,10 @@ impl GatewayRequestPayload {
             Self::GetOrderBook(_) => GatewayOperation::GetOrderBook,
             Self::GetFees(_) => GatewayOperation::GetFees,
             Self::PlaceOrder(_) => GatewayOperation::PlaceOrder,
+            Self::PlaceQuoteMarketOrder(_) => GatewayOperation::PlaceQuoteMarketOrder,
             Self::CancelOrder(_) => GatewayOperation::CancelOrder,
+            Self::AmendOrder(_) => GatewayOperation::AmendOrder,
+            Self::PlaceOrderList(_) => GatewayOperation::PlaceOrderList,
             Self::BatchPlaceOrders(_) => GatewayOperation::BatchPlaceOrders,
             Self::BatchCancelOrders(_) => GatewayOperation::BatchCancelOrders,
             Self::CancelAllOrders(_) => GatewayOperation::CancelAllOrders,
@@ -162,6 +172,8 @@ pub enum GatewayResponsePayload {
     OrderBook(OrderBookResponse),
     Fees(FeesResponse),
     PlaceOrder(PlaceOrderResponse),
+    AmendOrder(AmendOrderResponse),
+    OrderList(OrderListResponse),
     CancelOrder(CancelOrderResponse),
     BatchPlaceOrders(BatchPlaceOrdersResponse),
     BatchCancelOrders(BatchCancelOrdersResponse),

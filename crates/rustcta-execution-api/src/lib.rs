@@ -12,6 +12,7 @@ use rustcta_types::{
     TimeInForce,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 
 pub const EXECUTION_API_SCHEMA_VERSION: u16 = 1;
@@ -425,6 +426,147 @@ pub struct CancelAllAck {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ExecutionMutationKind {
+    PlaceOrder,
+    CancelOrder,
+    CancelAllOrders,
+    FeeModel,
+    LiveDryRun,
+    Reservation,
+    Idempotency,
+    Reconciliation,
+    Rejection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionDecisionOutcome {
+    Approved,
+    Rejected,
+    Recorded,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeeModelDecision {
+    pub schema_version: u16,
+    #[serde(flatten)]
+    pub identity: MutationIdentity,
+    pub command_id: String,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub maker_fee_rate: Option<f64>,
+    pub taker_fee_rate: Option<f64>,
+    pub estimated_fee_asset: Option<String>,
+    pub estimated_fee_amount: Option<f64>,
+    pub decided_at: DateTime<Utc>,
+}
+
+impl FeeModelDecision {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        self.identity.validate()?;
+        validate_required_text("command_id", &self.command_id)?;
+        validate_optional_finite_f64("maker_fee_rate", self.maker_fee_rate)?;
+        validate_optional_finite_f64("taker_fee_rate", self.taker_fee_rate)?;
+        validate_optional_positive_or_zero_f64("estimated_fee_amount", self.estimated_fee_amount)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReservationDecision {
+    pub schema_version: u16,
+    #[serde(flatten)]
+    pub identity: MutationIdentity,
+    pub command_id: String,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub asset: Option<String>,
+    pub requested_quantity: Option<f64>,
+    pub reserved_quantity: Option<f64>,
+    pub outcome: ExecutionDecisionOutcome,
+    pub reason: Option<String>,
+    pub decided_at: DateTime<Utc>,
+}
+
+impl ReservationDecision {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        self.identity.validate()?;
+        validate_required_text("command_id", &self.command_id)?;
+        validate_optional_positive_or_zero_f64("requested_quantity", self.requested_quantity)?;
+        validate_optional_positive_or_zero_f64("reserved_quantity", self.reserved_quantity)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdempotencyDecision {
+    pub schema_version: u16,
+    #[serde(flatten)]
+    pub identity: MutationIdentity,
+    pub command_id: String,
+    pub mutation_kind: ExecutionMutationKind,
+    pub outcome: ExecutionDecisionOutcome,
+    pub existing_command_id: Option<String>,
+    pub reason: Option<String>,
+    pub decided_at: DateTime<Utc>,
+}
+
+impl IdempotencyDecision {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        self.identity.validate()?;
+        validate_required_text("command_id", &self.command_id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveDryRunDecision {
+    pub schema_version: u16,
+    #[serde(flatten)]
+    pub identity: MutationIdentity,
+    pub command_id: String,
+    pub mutation_kind: ExecutionMutationKind,
+    pub gateway_mutation_blocked: bool,
+    pub message: String,
+    pub decided_at: DateTime<Utc>,
+}
+
+impl LiveDryRunDecision {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        self.identity.validate()?;
+        validate_required_text("command_id", &self.command_id)?;
+        validate_required_text("message", &self.message)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RejectionDecision {
+    pub schema_version: u16,
+    #[serde(flatten)]
+    pub identity: MutationIdentity,
+    pub command_id: String,
+    pub mutation_kind: ExecutionMutationKind,
+    pub reason: String,
+    pub rejected_at: DateTime<Utc>,
+    #[serde(default)]
+    pub metadata: Value,
+}
+
+impl RejectionDecision {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        self.identity.validate()?;
+        validate_required_text("command_id", &self.command_id)?;
+        validate_required_text("reason", &self.reason)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OrderState {
     Planned,
     Submitted,
@@ -572,6 +714,18 @@ pub struct ReconciliationEvent {
     pub reconciled_at: DateTime<Utc>,
 }
 
+impl ReconciliationEvent {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        if self.canonical_symbol.is_some() ^ self.exchange_symbol.is_some() {
+            return Err(ExecutionApiError::Validation(
+                "canonical_symbol and exchange_symbol must be supplied together".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RiskDecisionEvent {
     pub schema_version: u16,
@@ -643,6 +797,16 @@ pub fn validate_optional_positive_or_zero_f64(field: &str, value: Option<f64>) -
         Some(value) if value.is_finite() && value >= 0.0 => Ok(()),
         Some(_) => Err(ExecutionApiError::Validation(format!(
             "{field} must be finite and greater than or equal to zero"
+        ))),
+        None => Ok(()),
+    }
+}
+
+pub fn validate_optional_finite_f64(field: &str, value: Option<f64>) -> Result<()> {
+    match value {
+        Some(value) if value.is_finite() => Ok(()),
+        Some(_) => Err(ExecutionApiError::Validation(format!(
+            "{field} must be finite"
         ))),
         None => Ok(()),
     }
@@ -783,6 +947,77 @@ mod tests {
             command.validate(),
             Err(ExecutionApiError::Validation(message))
                 if message.contains("quantity")
+        ));
+    }
+
+    #[test]
+    fn execution_api_should_serialize_router_decision_identity_fields() {
+        let decision = IdempotencyDecision {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            identity: identity(),
+            command_id: "cmd-1".to_string(),
+            mutation_kind: ExecutionMutationKind::PlaceOrder,
+            outcome: ExecutionDecisionOutcome::Recorded,
+            existing_command_id: None,
+            reason: None,
+            decided_at: Utc::now(),
+        };
+        decision.validate().expect("valid decision");
+
+        let value = serde_json::to_value(&decision).expect("serializable decision");
+
+        assert_required_identity_fields(&value);
+        assert_eq!(value["mutation_kind"], "place_order");
+        assert_eq!(value["outcome"], "recorded");
+    }
+
+    #[test]
+    fn execution_api_should_reject_invalid_fee_model_decision_values() {
+        let decision = FeeModelDecision {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            identity: identity(),
+            command_id: "cmd-1".to_string(),
+            exchange_id: exchange_id(),
+            market_type: MarketType::Spot,
+            canonical_symbol: Some(canonical_symbol()),
+            maker_fee_rate: Some(f64::NAN),
+            taker_fee_rate: Some(0.001),
+            estimated_fee_asset: Some("USDT".to_string()),
+            estimated_fee_amount: Some(0.1),
+            decided_at: Utc::now(),
+        };
+
+        assert!(matches!(
+            decision.validate(),
+            Err(ExecutionApiError::Validation(message)) if message.contains("maker_fee_rate")
+        ));
+    }
+
+    #[test]
+    fn reconciliation_event_should_require_matching_symbol_scope() {
+        let event = ReconciliationEvent {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            tenant_id: TenantId::unchecked("tenant-a"),
+            account_id: AccountId::unchecked("account-a"),
+            strategy_id: Some(StrategyId::unchecked("strategy-a")),
+            run_id: Some(RunId::unchecked("run-a")),
+            exchange_id: exchange_id(),
+            market_type: MarketType::Spot,
+            canonical_symbol: Some(canonical_symbol()),
+            exchange_symbol: None,
+            client_order_id: None,
+            exchange_order_id: None,
+            expected_state: Some(OrderState::Accepted),
+            observed_state: Some(OrderState::Filled),
+            balance_snapshot: Vec::new(),
+            discrepancy: Some("missing fill".to_string()),
+            reconciled_at: Utc::now(),
+        };
+
+        assert!(matches!(
+            event.validate(),
+            Err(ExecutionApiError::Validation(message))
+                if message.contains("canonical_symbol and exchange_symbol")
         ));
     }
 

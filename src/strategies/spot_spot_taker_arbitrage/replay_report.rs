@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{OpportunityRecord, RejectionReason, SimulatedTradeRecord};
+use super::{OpportunityRecord, RejectionReason, SimulatedTradeRecord, TradePnlCategory};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpportunityDuration {
@@ -81,9 +81,31 @@ pub struct ReplayReport {
     pub average_book_age_ms: f64,
     pub stale_book_rejection_count: u64,
     pub insufficient_depth_rejection_count: u64,
+    pub theoretical_opportunities: u64,
+    pub gross_theoretical_pnl: f64,
+    pub latency_adjusted_opportunities: u64,
+    pub latency_adjusted_accepted: u64,
+    pub latency_adjusted_rejected: u64,
+    pub latency_adjusted_gross_pnl: f64,
+    pub latency_adjusted_estimated_net_pnl: f64,
+    pub actual_fill_opportunities: u64,
+    pub execution_reject_count: u64,
+    pub execution_timeout_count: u64,
+    pub partial_fill_count: u64,
+    pub one_sided_risk_count: u64,
+    pub latency_adjusted_realized_net_pnl: f64,
     pub simulated_gross_pnl: f64,
     pub simulated_net_pnl: f64,
+    pub arbitrage_net_pnl: f64,
+    pub inventory_recovery_pnl: f64,
+    pub inventory_drift_pnl: f64,
+    pub one_sided_exposure_pnl: f64,
     pub total_fees: f64,
+    pub total_slippage_cost: f64,
+    pub total_capital_cost: f64,
+    pub total_transfer_cost: f64,
+    pub total_inventory_rebalance_cost: f64,
+    pub total_latency_penalty_cost: f64,
     pub best_symbols: Vec<(String, f64)>,
     pub worst_symbols: Vec<(String, f64)>,
     pub top_opportunities: Vec<OpportunityRecord>,
@@ -102,6 +124,13 @@ pub struct ReplayReportBuilder {
     symbol_pnl: HashMap<String, f64>,
     opportunities: Vec<OpportunityRecord>,
     rejected: Vec<OpportunityRecord>,
+    latency_adjusted_opportunities: Vec<OpportunityRecord>,
+    latency_adjusted_rejected: Vec<OpportunityRecord>,
+    actual_fill_opportunities: u64,
+    execution_reject_count: u64,
+    execution_timeout_count: u64,
+    partial_fill_count: u64,
+    one_sided_risk_count: u64,
     trades: Vec<SimulatedTradeRecord>,
     durations: OpportunityDurationTracker,
 }
@@ -128,6 +157,39 @@ impl ReplayReportBuilder {
         }
     }
 
+    pub fn record_latency_adjusted_opportunity(&mut self, opportunity: OpportunityRecord) {
+        if opportunity.accepted {
+            self.latency_adjusted_opportunities.push(opportunity);
+        } else {
+            self.latency_adjusted_rejected.push(opportunity);
+        }
+    }
+
+    pub fn record_execution_result(
+        &mut self,
+        actual_fill: bool,
+        rejected: bool,
+        timed_out: bool,
+        partial_fill: bool,
+        one_sided_risk: bool,
+    ) {
+        if actual_fill {
+            self.actual_fill_opportunities += 1;
+        }
+        if rejected {
+            self.execution_reject_count += 1;
+        }
+        if timed_out {
+            self.execution_timeout_count += 1;
+        }
+        if partial_fill {
+            self.partial_fill_count += 1;
+        }
+        if one_sided_risk {
+            self.one_sided_risk_count += 1;
+        }
+    }
+
     pub fn record_trade(&mut self, trade: SimulatedTradeRecord) {
         *self.symbol_pnl.entry(trade.symbol.clone()).or_default() += trade.net_pnl;
         self.trades.push(trade);
@@ -137,6 +199,44 @@ impl ReplayReportBuilder {
         let opportunities_detected = (self.opportunities.len() + self.rejected.len()) as u64;
         let opportunities_accepted = self.opportunities.len() as u64;
         let opportunities_rejected = self.rejected.len() as u64;
+        let latency_adjusted_opportunities = (self.latency_adjusted_opportunities.len()
+            + self.latency_adjusted_rejected.len())
+            as u64;
+        let latency_adjusted_accepted = self.latency_adjusted_opportunities.len() as u64;
+        let latency_adjusted_rejected = self.latency_adjusted_rejected.len() as u64;
+        let simulated_gross_pnl = self.trades.iter().map(|trade| trade.gross_pnl).sum();
+        let simulated_net_pnl = self.trades.iter().map(|trade| trade.net_pnl).sum();
+        let arbitrage_net_pnl = self
+            .trades
+            .iter()
+            .filter(|trade| trade.pnl_category == TradePnlCategory::Arbitrage)
+            .map(|trade| trade.net_pnl)
+            .sum();
+        let inventory_recovery_pnl = self
+            .trades
+            .iter()
+            .filter(|trade| {
+                matches!(
+                    trade.pnl_category,
+                    TradePnlCategory::InventoryRecovery
+                        | TradePnlCategory::InventoryDrift
+                        | TradePnlCategory::OneSidedExposure
+                )
+            })
+            .map(|trade| trade.net_pnl)
+            .sum();
+        let inventory_drift_pnl = self
+            .trades
+            .iter()
+            .filter(|trade| trade.pnl_category == TradePnlCategory::InventoryDrift)
+            .map(|trade| trade.net_pnl)
+            .sum();
+        let one_sided_exposure_pnl = self
+            .trades
+            .iter()
+            .filter(|trade| trade.pnl_category == TradePnlCategory::OneSidedExposure)
+            .map(|trade| trade.net_pnl)
+            .sum();
         let mut rejection_reasons = HashMap::new();
         for opportunity in &self.rejected {
             if let Some(reason) = opportunity.rejection_reason {
@@ -157,6 +257,11 @@ impl ReplayReportBuilder {
         best_symbols.sort_by(|left, right| right.1.total_cmp(&left.1));
         let mut worst_symbols = best_symbols.clone();
         worst_symbols.sort_by(|left, right| left.1.total_cmp(&right.1));
+        let gross_theoretical_pnl = self
+            .opportunities
+            .iter()
+            .map(|opportunity| opportunity.estimated_gross_pnl)
+            .sum();
         let mut top_opportunities = self.opportunities;
         top_opportunities.sort_by(|left, right| {
             right
@@ -199,12 +304,50 @@ impl ReplayReportBuilder {
                 .get(&RejectionReason::InsufficientDepth)
                 .copied()
                 .unwrap_or_default(),
-            simulated_gross_pnl: self.trades.iter().map(|trade| trade.gross_pnl).sum(),
-            simulated_net_pnl: self.trades.iter().map(|trade| trade.net_pnl).sum(),
+            theoretical_opportunities: opportunities_accepted,
+            gross_theoretical_pnl,
+            latency_adjusted_opportunities,
+            latency_adjusted_accepted,
+            latency_adjusted_rejected,
+            latency_adjusted_gross_pnl: self
+                .latency_adjusted_opportunities
+                .iter()
+                .map(|opportunity| opportunity.estimated_gross_pnl)
+                .sum(),
+            latency_adjusted_estimated_net_pnl: self
+                .latency_adjusted_opportunities
+                .iter()
+                .map(|opportunity| opportunity.estimated_net_pnl)
+                .sum(),
+            actual_fill_opportunities: self.actual_fill_opportunities,
+            execution_reject_count: self.execution_reject_count,
+            execution_timeout_count: self.execution_timeout_count,
+            partial_fill_count: self.partial_fill_count,
+            one_sided_risk_count: self.one_sided_risk_count,
+            latency_adjusted_realized_net_pnl: simulated_net_pnl,
+            simulated_gross_pnl,
+            simulated_net_pnl,
+            arbitrage_net_pnl,
+            inventory_recovery_pnl,
+            inventory_drift_pnl,
+            one_sided_exposure_pnl,
             total_fees: self
                 .trades
                 .iter()
                 .map(|trade| trade.buy_fee + trade.sell_fee)
+                .sum(),
+            total_slippage_cost: self.trades.iter().map(|trade| trade.slippage_cost).sum(),
+            total_capital_cost: self.trades.iter().map(|trade| trade.capital_cost).sum(),
+            total_transfer_cost: self.trades.iter().map(|trade| trade.transfer_cost).sum(),
+            total_inventory_rebalance_cost: self
+                .trades
+                .iter()
+                .map(|trade| trade.inventory_rebalance_cost)
+                .sum(),
+            total_latency_penalty_cost: self
+                .trades
+                .iter()
+                .map(|trade| trade.latency_penalty_cost)
                 .sum(),
             best_symbols: best_symbols.into_iter().take(20).collect(),
             worst_symbols: worst_symbols.into_iter().take(20).collect(),

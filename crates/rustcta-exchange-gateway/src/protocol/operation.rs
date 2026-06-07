@@ -15,7 +15,10 @@ pub enum GatewayOperation {
     GetOrderBook,
     GetFees,
     PlaceOrder,
+    PlaceQuoteMarketOrder,
     CancelOrder,
+    AmendOrder,
+    PlaceOrderList,
     BatchPlaceOrders,
     BatchCancelOrders,
     CancelAllOrders,
@@ -37,7 +40,10 @@ impl GatewayOperation {
             Self::GetOrderBook => "get_order_book",
             Self::GetFees => "get_fees",
             Self::PlaceOrder => "place_order",
+            Self::PlaceQuoteMarketOrder => "place_quote_market_order",
             Self::CancelOrder => "cancel_order",
+            Self::AmendOrder => "amend_order",
+            Self::PlaceOrderList => "place_order_list",
             Self::BatchPlaceOrders => "batch_place_orders",
             Self::BatchCancelOrders => "batch_cancel_orders",
             Self::CancelAllOrders => "cancel_all_orders",
@@ -64,7 +70,10 @@ impl FromStr for GatewayOperation {
             "get_order_book" | "order_book" => Ok(Self::GetOrderBook),
             "get_fees" | "fees" => Ok(Self::GetFees),
             "place_order" => Ok(Self::PlaceOrder),
+            "place_quote_market_order" | "quote_market_order" => Ok(Self::PlaceQuoteMarketOrder),
             "cancel_order" => Ok(Self::CancelOrder),
+            "amend_order" | "modify_order" => Ok(Self::AmendOrder),
+            "place_order_list" | "order_list" => Ok(Self::PlaceOrderList),
             "batch_place_orders" | "batch_place_order" | "batch_place" => {
                 Ok(Self::BatchPlaceOrders)
             }

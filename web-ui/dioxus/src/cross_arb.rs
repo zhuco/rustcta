@@ -6,6 +6,7 @@ use crate::api::{
     fetch_cross_arb_settings, save_cross_arb_settings,
 };
 use crate::i18n::{s, t};
+use crate::storage::save_active_view;
 use crate::types::{
     ControlPanelView, CredentialAccountOption, CrossArbAccountRowData, CrossArbEventSummaryData,
     CrossArbExchangeConsoleRowData, CrossArbInstrumentRowData, CrossArbMarketSnapshotRowData,
@@ -470,6 +471,7 @@ pub(crate) fn CrossArbPanel(
                                                     onclick: move |_| {
                                                         api_key_exchange.set(credential_exchange.clone());
                                                         api_key_account.set(credential_account.clone());
+                                                        save_active_view(ControlPanelView::ApiKeys);
                                                         active_view.set(ControlPanelView::ApiKeys);
                                                         message.set(t(lang, "api_keys_loaded_for_edit").to_string());
                                                     },

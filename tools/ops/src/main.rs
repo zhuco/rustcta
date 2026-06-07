@@ -1,11 +1,16 @@
 use anyhow::{bail, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use rustcta_tools_ops::{
-    migrations_by_target, print_lines, run_account_position_render, run_gateio_bitget_spot_symbols,
-    run_trend_report, smart_money_binance_collector_summary,
-    smart_money_hyperliquid_wallet_ingestion_summary, smart_money_portfolio_service_summary,
-    verify_legacy_bin_migrations, AccountPositionRenderArgs, GateioBitgetSpotSymbolsArgs,
-    LegacyBinTarget, TrendReportArgs, WsProxyProbeArgs, LEGACY_BIN_MIGRATIONS,
+    bitget_perp_order_canary_safety_plan, bitget_spot_order_canary_safety_plan,
+    cross_arb_account_audit_safety_plan, cross_arb_fee_audit_safety_plan,
+    cross_arb_order_admin_safety_plan, exchange_order_canary_safety_plan, migrations_by_target,
+    print_lines, run_account_position_render, run_gateio_bitget_spot_symbols, run_trend_report,
+    smart_money_binance_collector_summary, smart_money_hyperliquid_wallet_ingestion_summary,
+    smart_money_portfolio_service_summary, verify_legacy_bin_migrations, AccountPositionRenderArgs,
+    BitgetPerpOrderCanarySafetyArgs, BitgetSpotOrderCanarySafetyArgs,
+    CrossArbAccountAuditSafetyArgs, CrossArbFeeAuditSafetyArgs, CrossArbOrderAdminSafetyArgs,
+    ExchangeOrderCanarySafetyArgs, GateioBitgetSpotSymbolsArgs, LegacyBinTarget, TrendReportArgs,
+    WsProxyProbeArgs, LEGACY_BIN_MIGRATIONS,
 };
 
 #[derive(Debug, Parser)]
@@ -41,6 +46,18 @@ enum Command {
         #[command(subcommand)]
         command: ProbeCommand,
     },
+    Canary {
+        #[command(subcommand)]
+        command: CanaryCommand,
+    },
+    Audit {
+        #[command(subcommand)]
+        command: AuditCommand,
+    },
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommand,
+    },
     WsProxyProbe(WsProxyProbeArgs),
 }
 
@@ -71,6 +88,27 @@ enum ProbeCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum CanaryCommand {
+    #[command(name = "exchange-order")]
+    Exchange(ExchangeOrderCanarySafetyArgs),
+    #[command(name = "bitget-perp-order")]
+    BitgetPerp(BitgetPerpOrderCanarySafetyArgs),
+    #[command(name = "bitget-spot-order")]
+    BitgetSpot(BitgetSpotOrderCanarySafetyArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditCommand {
+    CrossArbAccount(CrossArbAccountAuditSafetyArgs),
+    CrossArbFee(CrossArbFeeAuditSafetyArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum AdminCommand {
+    CrossArbOrder(CrossArbOrderAdminSafetyArgs),
+}
+
+#[derive(Debug, Subcommand)]
 enum AccountPositionCommand {
     Render(AccountPositionRenderArgs),
 }
@@ -94,6 +132,9 @@ async fn main() -> Result<()> {
         Command::Symbols { command } => run_symbols(command).await?,
         Command::Reporter { command } => run_reporter(command).await?,
         Command::Probe { command } => run_probe(command).await?,
+        Command::Canary { command } => run_canary(command)?,
+        Command::Audit { command } => run_audit(command)?,
+        Command::Admin { command } => run_admin(command)?,
         Command::WsProxyProbe(args) => run_ws_proxy_probe(args).await?,
     }
     Ok(())
@@ -139,6 +180,33 @@ async fn run_probe(command: ProbeCommand) -> Result<()> {
     match command {
         ProbeCommand::WsProxy(args) => run_ws_proxy_probe(args).await?,
     }
+    Ok(())
+}
+
+fn run_canary(command: CanaryCommand) -> Result<()> {
+    let report = match command {
+        CanaryCommand::Exchange(args) => exchange_order_canary_safety_plan(args)?,
+        CanaryCommand::BitgetPerp(args) => bitget_perp_order_canary_safety_plan(args)?,
+        CanaryCommand::BitgetSpot(args) => bitget_spot_order_canary_safety_plan(args)?,
+    };
+    println!("{report}");
+    Ok(())
+}
+
+fn run_audit(command: AuditCommand) -> Result<()> {
+    let report = match command {
+        AuditCommand::CrossArbAccount(args) => cross_arb_account_audit_safety_plan(args)?,
+        AuditCommand::CrossArbFee(args) => cross_arb_fee_audit_safety_plan(args)?,
+    };
+    println!("{report}");
+    Ok(())
+}
+
+fn run_admin(command: AdminCommand) -> Result<()> {
+    let report = match command {
+        AdminCommand::CrossArbOrder(args) => cross_arb_order_admin_safety_plan(args)?,
+    };
+    println!("{report}");
     Ok(())
 }
 

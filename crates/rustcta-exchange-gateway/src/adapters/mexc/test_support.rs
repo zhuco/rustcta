@@ -9,6 +9,7 @@ use tokio::net::TcpListener;
 
 #[derive(Debug, Clone)]
 pub(super) struct SeenRequest {
+    pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
     pub(super) headers: HashMap<String, String>,
@@ -55,7 +56,9 @@ pub(super) async fn spawn_rest_server(
 
 fn parse_seen_request(request_text: &str) -> SeenRequest {
     let request_line = request_text.lines().next().unwrap_or_default();
-    let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or_default().to_string();
+    let target = request_parts.next().unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
     let query = query_text
         .split('&')
@@ -75,6 +78,7 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
         })
         .collect();
     SeenRequest {
+        method,
         path: path.to_string(),
         query,
         headers,
@@ -107,6 +111,11 @@ pub(super) fn symbol_scope() -> SymbolScope {
 }
 
 pub(super) fn assert_signed_request(request: &SeenRequest, path: &str) {
+    assert_signed_request_method(request, "GET", path);
+}
+
+pub(super) fn assert_signed_request_method(request: &SeenRequest, method: &str, path: &str) {
+    assert_eq!(request.method, method);
     assert_eq!(request.path, path);
     assert_eq!(
         request.headers.get("x-mexc-apikey").map(String::as_str),

@@ -13,9 +13,7 @@ use rustcta_tools_ops::{
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
 
 #[derive(Debug, Parser)]
 #[command(name = "rustcta-industrial")]
@@ -68,6 +66,22 @@ struct CrossArbPreflightArgs {
     public_orderbook_sample: usize,
     #[arg(long, default_value_t = false)]
     full_symbol_checks: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct CrossArbPreflightBridgePlan {
+    command: &'static str,
+    legacy_binary: &'static str,
+    legacy_args: Vec<String>,
+    config: String,
+    private_readonly: bool,
+    timeout_ms: u64,
+    private_symbol_sample: usize,
+    public_orderbook_sample: usize,
+    full_symbol_checks: bool,
+    network_access: &'static str,
+    live_order_access: &'static str,
+    boundary: &'static str,
 }
 
 #[derive(Debug, Subcommand)]
@@ -254,54 +268,54 @@ async fn main() -> Result<()> {
 
 fn run_cross_arb(command: CrossArbCommand) -> Result<()> {
     match command {
-        CrossArbCommand::Preflight(args) => run_legacy_cross_arb_preflight(args)?,
+        CrossArbCommand::Preflight(args) => run_cross_arb_preflight_bridge(args)?,
     }
     Ok(())
 }
 
-fn run_legacy_cross_arb_preflight(args: CrossArbPreflightArgs) -> Result<()> {
+fn run_cross_arb_preflight_bridge(args: CrossArbPreflightArgs) -> Result<()> {
+    let plan = cross_arb_preflight_bridge_plan(args);
+    println!("{}", serde_json::to_string_pretty(&plan)?);
+    Ok(())
+}
+
+fn cross_arb_preflight_bridge_plan(args: CrossArbPreflightArgs) -> CrossArbPreflightBridgePlan {
+    let legacy_args = legacy_cross_arb_preflight_args(&args);
+    CrossArbPreflightBridgePlan {
+        command: "cross-arb preflight",
+        legacy_binary: "cross_arb_preflight",
+        legacy_args,
+        config: args.config,
+        private_readonly: args.private,
+        timeout_ms: args.timeout_ms,
+        private_symbol_sample: args.private_symbol_sample,
+        public_orderbook_sample: args.public_orderbook_sample,
+        full_symbol_checks: args.full_symbol_checks,
+        network_access: "disabled",
+        live_order_access: "disabled",
+        boundary:
+            "industrial CLI reports the legacy preflight invocation only; run cross_arb_preflight directly for networked read-only checks",
+    }
+}
+
+fn legacy_cross_arb_preflight_args(args: &CrossArbPreflightArgs) -> Vec<String> {
     let mut forwarded = vec![
-        OsString::from("--config"),
-        OsString::from(args.config),
-        OsString::from("--timeout-ms"),
-        OsString::from(args.timeout_ms.to_string()),
-        OsString::from("--private-symbol-sample"),
-        OsString::from(args.private_symbol_sample.to_string()),
-        OsString::from("--public-orderbook-sample"),
-        OsString::from(args.public_orderbook_sample.to_string()),
+        "--config".to_string(),
+        args.config.clone(),
+        "--timeout-ms".to_string(),
+        args.timeout_ms.to_string(),
+        "--private-symbol-sample".to_string(),
+        args.private_symbol_sample.to_string(),
+        "--public-orderbook-sample".to_string(),
+        args.public_orderbook_sample.to_string(),
     ];
     if args.private {
-        forwarded.push(OsString::from("--private"));
+        forwarded.push("--private".to_string());
     }
     if args.full_symbol_checks {
-        forwarded.push(OsString::from("--full-symbol-checks"));
+        forwarded.push("--full-symbol-checks".to_string());
     }
-
-    let status = match ProcessCommand::new("cross_arb_preflight")
-        .args(&forwarded)
-        .status()
-    {
-        Ok(status) => status,
-        Err(binary_error) => ProcessCommand::new("cargo")
-            .arg("run")
-            .arg("-q")
-            .arg("--bin")
-            .arg("cross_arb_preflight")
-            .arg("--")
-            .args(forwarded.iter().map(OsStr::new))
-            .status()
-            .map_err(|cargo_error| {
-                anyhow::anyhow!(
-                    "failed to run cross_arb_preflight directly ({binary_error}); cargo fallback also failed: {cargo_error}"
-                )
-            })?,
-    };
-
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("cross_arb_preflight exited with status {status}")
-    }
+    forwarded
 }
 
 fn run_migration(command: MigrationCommand) -> Result<()> {
@@ -767,6 +781,38 @@ mod tests {
         assert!(
             Args::try_parse_from(["rustcta-industrial", "ops", "admin", "cancel-order"]).is_err()
         );
+    }
+
+    #[test]
+    fn cross_arb_preflight_bridge_should_not_spawn_legacy_network_command() {
+        let args = CrossArbPreflightArgs {
+            config: "config/cross_exchange_arbitrage_usdt.yml".to_string(),
+            private: true,
+            timeout_ms: 123,
+            private_symbol_sample: 2,
+            public_orderbook_sample: 3,
+            full_symbol_checks: true,
+        };
+
+        let plan = cross_arb_preflight_bridge_plan(args);
+        let value = serde_json::to_value(plan).expect("serialize preflight bridge plan");
+
+        assert_eq!(value["command"], "cross-arb preflight");
+        assert_eq!(value["legacy_binary"], "cross_arb_preflight");
+        assert_eq!(value["network_access"], "disabled");
+        assert_eq!(value["live_order_access"], "disabled");
+        assert_eq!(value["private_readonly"], true);
+        assert_eq!(value["legacy_args"][0], "--config");
+        assert!(value["legacy_args"]
+            .as_array()
+            .expect("legacy args")
+            .iter()
+            .any(|arg| arg == "--private"));
+        assert!(value["legacy_args"]
+            .as_array()
+            .expect("legacy args")
+            .iter()
+            .any(|arg| arg == "--full-symbol-checks"));
     }
 
     #[test]

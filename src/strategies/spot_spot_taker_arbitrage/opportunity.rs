@@ -140,7 +140,7 @@ pub fn build_opportunity_with_source(
     let sell_fee_lookup = fee_model.lookup_for_side(&sell_fee_key, Some(OrderSide::Sell));
     let buy_fee_bps = buy_fee_lookup.fee_bps;
     let sell_fee_bps = sell_fee_lookup.fee_bps;
-    let spread = calculate_spread(
+    let mut spread = calculate_spread(
         buy_price,
         sell_price,
         buy_fee_bps,
@@ -148,6 +148,18 @@ pub fn build_opportunity_with_source(
         config.slippage_bps,
         config.safety_buffer_bps,
     );
+    let venue_selection = config.venue_selection.estimate_for_pair(
+        buy_exchange,
+        sell_exchange,
+        config.min_net_spread_bps,
+    );
+    let extra_cost_bps = venue_selection.capital_cost_bps
+        + venue_selection.transfer_cost_bps
+        + venue_selection.transfer_delay_penalty_bps
+        + venue_selection.inventory_rebalance_cost_bps
+        + venue_selection.latency_penalty_bps;
+    spread.estimated_cost_bps += extra_cost_bps;
+    spread.net_spread_bps -= extra_cost_bps;
     let buy_rule = rules.for_exchange(buy_exchange);
     let sell_rule = rules.for_exchange(sell_exchange);
     let target_notional =
@@ -164,6 +176,23 @@ pub fn build_opportunity_with_source(
     let sell_notional = quantity * sell_price;
     let fees =
         fee_model.calculate_buy_sell(&buy_fee_key, &sell_fee_key, buy_notional, sell_notional);
+    let estimated_slippage_cost = bps_cost(buy_notional, config.slippage_bps);
+    let estimated_capital_cost = bps_cost(buy_notional, venue_selection.capital_cost_bps);
+    let estimated_transfer_cost = bps_cost(
+        buy_notional,
+        venue_selection.transfer_cost_bps + venue_selection.transfer_delay_penalty_bps,
+    );
+    let estimated_inventory_rebalance_cost =
+        bps_cost(buy_notional, venue_selection.inventory_rebalance_cost_bps);
+    let estimated_latency_penalty_cost =
+        bps_cost(buy_notional, venue_selection.latency_penalty_bps);
+    let estimated_extra_cost = estimated_slippage_cost
+        + estimated_capital_cost
+        + estimated_transfer_cost
+        + estimated_inventory_rebalance_cost
+        + estimated_latency_penalty_cost;
+    let estimated_net_pnl = fees.net_pnl - estimated_extra_cost;
+    let estimated_total_cost = fees.total_fee + estimated_extra_cost;
     let rejection = rejection_reason(
         config,
         rules,
@@ -179,6 +208,8 @@ pub fn build_opportunity_with_source(
         spread.raw_spread_bps,
         spread.net_spread_bps,
         buy_fee_bps,
+        venue_selection.effective_min_net_spread_bps,
+        venue_selection.observe_only,
     );
     let rejection_reason = rejection.as_ref().map(|item| item.0);
     let rejection_detail = rejection.and_then(|item| item.1);
@@ -203,7 +234,19 @@ pub fn build_opportunity_with_source(
         estimated_net_spread_bps: spread.net_spread_bps,
         estimated_total_fee: fees.total_fee,
         estimated_gross_pnl: fees.gross_pnl,
-        estimated_net_pnl: fees.net_pnl,
+        estimated_net_pnl,
+        capital_cost_bps: venue_selection.capital_cost_bps,
+        transfer_cost_bps: venue_selection.transfer_cost_bps,
+        transfer_delay_penalty_bps: venue_selection.transfer_delay_penalty_bps,
+        inventory_rebalance_cost_bps: venue_selection.inventory_rebalance_cost_bps,
+        latency_penalty_bps: venue_selection.latency_penalty_bps,
+        effective_min_net_spread_bps: venue_selection.effective_min_net_spread_bps,
+        estimated_slippage_cost,
+        estimated_capital_cost,
+        estimated_transfer_cost,
+        estimated_inventory_rebalance_cost,
+        estimated_latency_penalty_cost,
+        estimated_total_cost,
         executable_notional,
         quantity,
         accepted: rejection_reason.is_none(),
@@ -215,6 +258,15 @@ pub fn build_opportunity_with_source(
         sell_book_source: sell_source,
         buy_latency_ms: buy_book.latency_ms,
         sell_latency_ms: sell_book.latency_ms,
+        lifecycle_latency: None,
+    }
+}
+
+fn bps_cost(notional: f64, bps: f64) -> f64 {
+    if notional > 0.0 && bps > 0.0 {
+        notional * bps / 10_000.0
+    } else {
+        0.0
     }
 }
 
@@ -252,6 +304,8 @@ fn rejection_reason(
     raw_spread_bps: f64,
     net_spread_bps: f64,
     buy_fee_bps: f64,
+    min_net_spread_bps: f64,
+    venue_observe_only: bool,
 ) -> Option<(RejectionReason, Option<String>)> {
     if !is_book_fresh(buy_book, config.stale_book_ms, config.max_book_latency_ms)
         || !is_book_fresh(sell_book, config.stale_book_ms, config.max_book_latency_ms)
@@ -364,12 +418,17 @@ fn rejection_reason(
             )),
         ));
     }
-    if net_spread_bps + 1e-12 < config.min_net_spread_bps {
+    if venue_observe_only {
+        return Some((
+            RejectionReason::NetSpreadBelowThreshold,
+            Some("venue_selection observe_only blocked executable opportunity".to_string()),
+        ));
+    }
+    if net_spread_bps + 1e-12 < min_net_spread_bps {
         return Some((
             RejectionReason::NetSpreadBelowThreshold,
             Some(format!(
-                "net_spread_bps={net_spread_bps:.4} below min_net_spread_bps={:.4}",
-                config.min_net_spread_bps
+                "net_spread_bps={net_spread_bps:.4} below effective_min_net_spread_bps={min_net_spread_bps:.4}",
             )),
         ));
     }

@@ -62,6 +62,64 @@ impl CoinExPublicRest {
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::GET,
+            api_key,
+            api_secret,
+            endpoint,
+            params,
+            None,
+        )
+        .await
+    }
+
+    pub async fn send_signed_post(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &Value,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::POST,
+            api_key,
+            api_secret,
+            endpoint,
+            params,
+            Some(body),
+        )
+        .await
+    }
+
+    pub async fn send_signed_delete(
+        &self,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &Value,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::DELETE,
+            api_key,
+            api_secret,
+            endpoint,
+            params,
+            Some(body),
+        )
+        .await
+    }
+
+    async fn send_signed_request(
+        &self,
+        method: reqwest::Method,
+        api_key: &str,
+        api_secret: &str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: Option<&Value>,
+    ) -> ExchangeApiResult<Value> {
         if api_key.trim().is_empty() || api_secret.trim().is_empty() {
             return Err(ExchangeApiError::Unsupported {
                 operation: "coinex.private_rest_missing_credentials",
@@ -69,18 +127,38 @@ impl CoinExPublicRest {
         }
         let request_path = build_path(endpoint, params);
         let timestamp = Utc::now().timestamp_millis().to_string();
-        let signature = sign_request(api_secret, "GET", &request_path, "", &timestamp);
-        let response = self
+        let body_text = body
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| ExchangeApiError::Serialization {
+                message: error.to_string(),
+            })?
+            .unwrap_or_default();
+        let signature = sign_request(
+            api_secret,
+            method.as_str(),
+            &request_path,
+            &body_text,
+            &timestamp,
+        );
+        let mut request = self
             .http
-            .get(format!(
-                "{}{}",
-                self.rest_base_url.trim_end_matches('/'),
-                request_path
-            ))
+            .request(
+                method,
+                format!(
+                    "{}{}",
+                    self.rest_base_url.trim_end_matches('/'),
+                    request_path
+                ),
+            )
             .header("X-COINEX-KEY", api_key)
             .header("X-COINEX-SIGN", signature)
             .header("X-COINEX-TIMESTAMP", timestamp)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json");
+        if !body_text.is_empty() {
+            request = request.body(body_text);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

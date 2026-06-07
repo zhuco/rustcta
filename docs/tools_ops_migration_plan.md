@@ -14,7 +14,8 @@ binary wrappers.
 
 `tools/ops` already exists as the workspace package `rustcta-tools-ops`. Its
 current command surface includes migration inventory plus the first migrated
-dry-run smart-money commands and the first public connectivity probe:
+dry-run smart-money commands, public/report rendering commands, and the first
+public connectivity probe:
 
 ```text
 rustcta-tools-ops legacy-bin-plan
@@ -25,6 +26,8 @@ rustcta-tools-ops smart-money portfolio-service
 rustcta-tools-ops probe ws-proxy
 rustcta-tools-ops symbols gateio-bitget-spot
 rustcta-tools-ops ws-proxy-probe
+rustcta-tools-ops reporter trend
+rustcta-tools-ops reporter account-position render
 ```
 
 `tools/ops/src/lib.rs` already classifies many legacy `src/bin/*.rs` files as
@@ -350,6 +353,15 @@ scripts/check_industrial_boundaries.sh
 
 Target command: `rustcta-tools-ops probe hyperliquid-self-test`.
 
+Status: deferred from the low-risk Task 4 implementation slice. The legacy
+binary still directly imports `rustcta::exchanges::hyperliquid::HyperliquidExchange`
+plus root `rustcta::core` types. Moving that implementation into `tools/ops`
+would require the forbidden dependency edge `rustcta-tools-ops -> rustcta`.
+It also performs private credential reads and private account reads before the
+order-safe `HYPERLIQUID_RUN_ORDERS=false` gate. Keep it as a legacy binary
+until a non-root Hyperliquid account/probe adapter is extracted or the command
+is split into a public/read-only root-free probe.
+
 Why it is still first-wave but last in the batch:
 
 - It is an ops self-test rather than a platform service.
@@ -365,12 +377,13 @@ HYPERLIQUID_RUN_ORDERS=false cargo run -p rustcta-tools-ops -- probe hyperliquid
 HYPERLIQUID_RUN_ORDERS=false cargo run --bin hyperliquid_self_test
 ```
 
-Expected acceptance: both paths keep `HYPERLIQUID_RUN_ORDERS=false` as the
-default/order-safe mode. The credentialed command may fail in an environment
-without keys, but it should fail at the same setup boundary from both paths and
-must not place or cancel orders unless `HYPERLIQUID_RUN_ORDERS=true`. The
-legacy binary currently has no CLI parser, so do not pass `--help` to the
-legacy path because it would still enter the environment/credential flow.
+Expected acceptance after the non-root adapter work exists: both paths keep
+`HYPERLIQUID_RUN_ORDERS=false` as the default/order-safe mode. The credentialed
+command may fail in an environment without keys, but it should fail at the same
+setup boundary from both paths and must not place or cancel orders unless
+`HYPERLIQUID_RUN_ORDERS=true`. The legacy binary currently has no CLI parser,
+so do not pass `--help` to the legacy path because it would still enter the
+environment/credential flow.
 
 ## Live-Order Canary Compatibility
 
@@ -413,6 +426,13 @@ For non-live validation, use configs that remain dry-run and verify the same
 blocking behavior through both names. Do not include a real `--execute
 --confirm-live-order` command as routine migration acceptance; that belongs to
 a deliberate operator canary runbook.
+
+Current migration slice status: `rustcta-tools-ops` now owns non-mutating safety
+plan commands for these canary, audit, and admin entries. The new commands
+preserve legacy flag names/defaults, validate confirmation gates and bounded
+dry-run inputs locally, and render JSON safety plans with preserved legacy
+output fields. They do not open private exchange connections, place orders,
+cancel orders, close positions, or replace the legacy live binaries.
 
 Risk note: `exchange_order_canary` can open and close USDT perpetual positions,
 `bitget_order_canary` can open and close a Bitget perpetual position, and
@@ -477,12 +497,21 @@ cargo run -p rustcta-tools-ops -- reporter trend --help
 cargo run -p rustcta-tools-ops -- reporter account-position render --help
 cargo run -p rustcta-tools-ops -- ws-proxy-probe --help
 cargo run -p rustcta-tools-ops -- probe ws-proxy --help
+cargo run -p rustcta-tools-ops -- smart-money binance-collector --config config/smart_money.yml
+cargo run -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion --config config/smart_money.yml
+cargo run -p rustcta-tools-ops -- smart-money portfolio-service --config config/smart_money.yml
 ```
 
 These smoke checks intentionally avoid public websocket/REST connections,
 private account reads, order placement, cancellations, admin actions, and
 canary execution. Public symbol/probe live cases remain manual acceptance
 commands, not default test cases.
+
+Task 4 completion note: the low-risk command slice is complete for commands
+that are already root-free and non-mutating. The tests now also assert
+smart-money dry-run summaries, migrated help surfaces, and shared legacy wrapper
+forwarding. `hyperliquid_self_test` remains classified as ToolOps but is not
+migrated in this slice because it is still root-dependent and credentialed.
 
 For legacy binaries that already use `clap`, also run:
 

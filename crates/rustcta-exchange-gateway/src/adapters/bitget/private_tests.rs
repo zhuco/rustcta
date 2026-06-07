@@ -1,12 +1,15 @@
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest,
-    QueryOrderRequest, RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
+    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
+    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{
-    assert_signed_bitget_request, context, exchange_id, spawn_rest_server, symbol_scope,
+    assert_signed_bitget_request, assert_signed_bitget_request_method, context, exchange_id,
+    spawn_rest_server, symbol_scope,
 };
 use super::{BitgetGatewayAdapter, BitgetGatewayConfig};
 
@@ -244,4 +247,150 @@ async fn bitget_adapter_should_route_private_rest_readbacks_with_signed_headers(
     assert!(requests
         .iter()
         .all(|request| !request.query.contains_key("secret")));
+}
+
+#[tokio::test]
+async fn bitget_adapter_should_route_private_order_mutations() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({"code": "00000", "data": {"orderId": "2001", "clientOid": "LIMIT1"}}),
+        json!({"code": "00000", "data": {"orderId": "2002", "clientOid": "QUOTE1"}}),
+        json!({"code": "00000", "data": {"orderId": "2001", "clientOid": "LIMIT1"}}),
+        json!({"code": "00000", "data": {"orderId": "2003", "clientOid": "CANCELALL1"}}),
+        json!({"code": "00000", "data": {"orderId": "2004", "clientOid": "AMEND1"}}),
+    ])
+    .await;
+    let adapter = BitgetGatewayAdapter::new(BitgetGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..BitgetGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_place_order);
+    assert!(capabilities.supports_cancel_order);
+    assert!(capabilities.supports_cancel_all_orders);
+    assert!(capabilities.supports_quote_market_order);
+    assert!(capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("place-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            side: OrderSide::Buy,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "0.02".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect("place order");
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("2001"));
+    assert_eq!(placed.order.client_order_id.as_deref(), Some("LIMIT1"));
+
+    let quote = adapter
+        .place_quote_market_order(QuoteMarketOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("quote-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("QUOTE1".to_string()),
+            side: OrderSide::Buy,
+            quote_quantity: "25.5".to_string(),
+        })
+        .await
+        .expect("quote order");
+    assert_eq!(quote.order.exchange_order_id.as_deref(), Some("2002"));
+    assert_eq!(quote.order.order_type, OrderType::Market);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            exchange_order_id: Some("2001".to_string()),
+        })
+        .await
+        .expect("cancel order");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+
+    let cancel_all = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect("cancel all");
+    assert_eq!(cancel_all.cancelled_count, 1);
+
+    let amended = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("AMEND1".to_string()),
+            exchange_order_id: Some("2004".to_string()),
+            new_client_order_id: None,
+            new_quantity: "0.015".to_string(),
+        })
+        .await
+        .expect("amend order");
+    assert_eq!(amended.order.exchange_order_id.as_deref(), Some("2004"));
+    assert_eq!(amended.order.client_order_id.as_deref(), Some("AMEND1"));
+    assert_eq!(amended.order.quantity, "0.015");
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 5);
+
+    assert_signed_bitget_request_method(&requests[0], "POST", "/api/v2/spot/trade/place-order");
+    let body = requests[0].body.as_ref().expect("place body");
+    assert_eq!(body["symbol"], "BTCUSDT");
+    assert_eq!(body["side"], "buy");
+    assert_eq!(body["orderType"], "limit");
+    assert_eq!(body["size"], "0.02");
+    assert_eq!(body["price"], "65000");
+    assert_eq!(body["force"], "gtc");
+    assert_eq!(body["clientOid"], "LIMIT1");
+
+    assert_signed_bitget_request_method(&requests[1], "POST", "/api/v2/spot/trade/place-order");
+    let body = requests[1].body.as_ref().expect("quote body");
+    assert_eq!(body["orderType"], "market");
+    assert_eq!(body["size"], "25.5");
+    assert_eq!(body["clientOid"], "QUOTE1");
+
+    assert_signed_bitget_request_method(&requests[2], "POST", "/api/v2/spot/trade/cancel-order");
+    let body = requests[2].body.as_ref().expect("cancel body");
+    assert_eq!(body["symbol"], "BTCUSDT");
+    assert_eq!(body["orderId"], "2001");
+    assert_eq!(body["clientOid"], "LIMIT1");
+
+    assert_signed_bitget_request_method(
+        &requests[3],
+        "POST",
+        "/api/v2/spot/trade/cancel-symbol-order",
+    );
+    let body = requests[3].body.as_ref().expect("cancel all body");
+    assert_eq!(body["symbol"], "BTCUSDT");
+
+    assert_signed_bitget_request_method(&requests[4], "POST", "/api/v3/trade/modify-order");
+    let body = requests[4].body.as_ref().expect("amend body");
+    assert_eq!(body["category"], "SPOT");
+    assert_eq!(body["symbol"], "BTCUSDT");
+    assert_eq!(body["qty"], "0.015");
+    assert_eq!(body["autoCancel"], "no");
+    assert_eq!(body["orderId"], "2004");
+    assert_eq!(body["clientOid"], "AMEND1");
 }

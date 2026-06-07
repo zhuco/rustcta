@@ -33,6 +33,8 @@ pub struct ControlApiStateSnapshot {
     pub opportunities: OpportunitiesView,
     #[serde(default)]
     pub symbols: SymbolsView,
+    #[serde(default)]
+    pub strategy_snapshots: Vec<StrategySnapshotEnvelope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +125,25 @@ pub struct StrategyProcessView {
     pub last_exit_code: Option<i32>,
     pub last_error: Option<String>,
     pub log_configured: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrategySnapshotEnvelope {
+    pub schema_version: u16,
+    pub strategy_id: String,
+    pub strategy_kind: String,
+    pub run_id: Option<String>,
+    pub status: Option<ProcessStatus>,
+    pub generated_at: DateTime<Utc>,
+    pub source: StrategySnapshotSource,
+    pub detail: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StrategySnapshotSource {
+    Supervisor,
+    LegacyDashboard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

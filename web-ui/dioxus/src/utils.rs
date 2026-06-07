@@ -90,53 +90,18 @@ pub(crate) fn fallback_exchange_schemas() -> Vec<Value> {
         json!({"exchange":"kucoin","label":"KuCoin","fields":[{"field":"api_key","label":"API Key"},{"field":"api_secret","label":"API Secret"},{"field":"passphrase","label":"API Passphrase"}]}),
         json!({"exchange":"htx","label":"HTX","fields":[{"field":"api_key","label":"API Key"},{"field":"api_secret","label":"API Secret"}]}),
         json!({"exchange":"bitmart","label":"BitMart","fields":[{"field":"api_key","label":"API Key"},{"field":"api_secret","label":"API Secret"},{"field":"passphrase","label":"Memo"}]}),
-        json!({"exchange":"hyperliquid","label":"Hyperliquid","fields":[{"field":"wallet_address","label":"Wallet Address","required":true},{"field":"is_vault_address","label":"Is Vault Address"},{"field":"api_key","label":"API Key","required":true},{"field":"api_secret","label":"API Secret / Private Key","required":true}]}),
+        json!({"exchange":"hyperliquid","label":"Hyperliquid","fields":[{"field":"api_key","label":"Wallet / API Key","required":true},{"field":"api_secret","label":"Private Key","required":true}]}),
     ]
 }
 
 pub(crate) fn normalize_exchange_api_key_schemas(mut rows: Vec<Value>) -> Vec<Value> {
-    let mut has_hyperliquid = false;
-    for row in &mut rows {
-        if canonical_exchange_name(&text_at(row, "exchange", Language::En)) == "hyperliquid" {
-            has_hyperliquid = true;
-            *row = hyperliquid_exchange_schema();
-        }
-    }
+    let has_hyperliquid = rows.iter().any(|row| {
+        canonical_exchange_name(&text_at(row, "exchange", Language::En)) == "hyperliquid"
+    });
     if !has_hyperliquid {
         rows.push(hyperliquid_exchange_schema());
     }
     rows
-}
-
-pub(crate) fn console_account_id_for_label(label: &str) -> String {
-    let trimmed = label.trim();
-    if trimmed.is_empty()
-        || trimmed.eq_ignore_ascii_case("default")
-        || trimmed.eq_ignore_ascii_case("main")
-    {
-        return "default".to_string();
-    }
-
-    let slug = trimmed
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' {
-                ch.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('_')
-        .to_string();
-    if !slug.is_empty() {
-        return slug;
-    }
-
-    let hash = trimmed.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    });
-    format!("account_{hash:016x}")
 }
 
 fn hyperliquid_exchange_schema() -> Value {
@@ -144,10 +109,8 @@ fn hyperliquid_exchange_schema() -> Value {
         "exchange": "hyperliquid",
         "label": "Hyperliquid",
         "fields": [
-            {"field": "wallet_address", "label": "Wallet Address", "required": true},
-            {"field": "is_vault_address", "label": "Is Vault Address"},
-            {"field": "api_key", "label": "API Key", "required": true},
-            {"field": "api_secret", "label": "API Secret / Private Key", "required": true}
+            {"field": "api_key", "label": "Wallet / API Key", "required": true},
+            {"field": "api_secret", "label": "Private Key", "required": true}
         ]
     })
 }

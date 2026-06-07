@@ -1,7 +1,8 @@
 use anyhow::Result;
+use tokio::sync::broadcast;
 
 use super::{BookCache, BookRecorder, SpotSpotTakerArbitrageConfig, SpotVenue};
-use crate::data::{BookHealth, WebSocketBookManager, WebSocketBookManagerConfig};
+use crate::data::{BookEvent, BookHealth, WebSocketBookManager, WebSocketBookManagerConfig};
 use crate::exchanges::bitget::BitgetSpotClient;
 use crate::exchanges::coinex::CoinExSpotClient;
 use crate::exchanges::gateio::GateIoSpotClient;
@@ -12,6 +13,13 @@ use crate::exchanges::mexc::MexcSpotClient;
 pub struct WebsocketMarketDataRuntime {
     pub recorder: Option<BookRecorder>,
     pub health: BookHealth,
+    book_event_tx: broadcast::Sender<BookEvent>,
+}
+
+impl WebsocketMarketDataRuntime {
+    pub fn subscribe_book_events(&self) -> broadcast::Receiver<BookEvent> {
+        self.book_event_tx.subscribe()
+    }
 }
 
 pub async fn start_websocket_market_data(
@@ -35,10 +43,12 @@ pub async fn start_websocket_market_data(
     };
     let shared_recorder = recorder.as_ref().map(|recorder| recorder.shared());
     let health = BookHealth::default();
-    let manager = WebSocketBookManager::with_parts(
+    let (book_event_tx, _) = broadcast::channel(16_384);
+    let manager = WebSocketBookManager::with_parts_and_events(
         cache.shared(),
         health.clone(),
         shared_recorder,
+        Some(book_event_tx.clone()),
         WebSocketBookManagerConfig {
             symbols,
             stale_book_ms: config.websocket.stale_book_ms,
@@ -88,7 +98,11 @@ pub async fn start_websocket_market_data(
     {
         manager.spawn_exchange(kucoin);
     }
-    Ok(WebsocketMarketDataRuntime { recorder, health })
+    Ok(WebsocketMarketDataRuntime {
+        recorder,
+        health,
+        book_event_tx,
+    })
 }
 
 pub async fn mark_reconnect_stale_for_test(

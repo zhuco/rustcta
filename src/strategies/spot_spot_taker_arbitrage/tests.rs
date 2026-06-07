@@ -89,6 +89,7 @@ fn config() -> SpotSpotTakerArbitrageConfig {
         small_live_gate: crate::live_preflight::SmallLiveGateConfig::default(),
         arbitrage_scanner: crate::strategies::arbitrage_core::ArbitrageScannerConfig::default(),
         inventory_rebalance: InventoryRebalanceConfig::default(),
+        venue_selection: VenueSelectionConfig::default(),
         initial_balances,
         mexc: VenueRuntimeConfig::default(),
         coinex: VenueRuntimeConfig::default(),
@@ -110,6 +111,13 @@ fn live_small_gate_config() -> SpotSpotTakerArbitrageConfig {
     cfg.small_live_gate.max_total_notional = 1_000.0;
     cfg.small_live_gate.enabled_symbols = vec!["CUDISUSDT".to_string()];
     cfg.small_live_gate.enabled_exchanges = vec!["mexc".to_string()];
+    cfg.live_preflight.enabled = true;
+    cfg.live_preflight.target_mode = "live".to_string();
+    cfg.live_preflight.exchanges = cfg.small_live_gate.enabled_exchanges.clone();
+    cfg.live_preflight.symbols = cfg.small_live_gate.enabled_symbols.clone();
+    cfg.live_preflight.max_live_notional_per_trade =
+        Some(cfg.small_live_gate.max_notional_per_order);
+    cfg.live_preflight.max_total_live_notional = Some(cfg.small_live_gate.max_total_notional);
     cfg
 }
 
@@ -1699,6 +1707,19 @@ fn blocked_inventory_rebalance_should_allow_small_budgeted_loss() {
         sell_book_source: BookSource::Rest,
         buy_latency_ms: None,
         sell_latency_ms: None,
+        lifecycle_latency: None,
+        capital_cost_bps: 0.0,
+        transfer_cost_bps: 0.0,
+        transfer_delay_penalty_bps: 0.0,
+        inventory_rebalance_cost_bps: 0.0,
+        latency_penalty_bps: 0.0,
+        effective_min_net_spread_bps: 0.0,
+        estimated_slippage_cost: 0.0,
+        estimated_capital_cost: 0.0,
+        estimated_transfer_cost: 0.0,
+        estimated_inventory_rebalance_cost: 0.0,
+        estimated_latency_penalty_cost: 0.0,
+        estimated_total_cost: 0.0,
     };
 
     let default_plans = build_inventory_rebalance_plans(
@@ -2127,6 +2148,12 @@ fn trade_loss_limit_should_trigger_auto_stop_reason() {
         sell_fee: 0.0,
         gross_pnl: -10.0,
         net_pnl: -11.0,
+        pnl_category: TradePnlCategory::Arbitrage,
+        slippage_cost: 0.0,
+        capital_cost: 0.0,
+        transfer_cost: 0.0,
+        inventory_rebalance_cost: 0.0,
+        latency_penalty_cost: 0.0,
         latency_ms: 10,
         order_book_age_ms: 10,
         execution_mode: "paper".to_string(),
@@ -2579,6 +2606,137 @@ fn opportunity_should_be_rejected_when_fee_model_makes_spread_negative() {
 }
 
 #[test]
+fn task8_different_fee_sources_should_change_net_spread() {
+    let mut cfg = config();
+    cfg.taker_fee_bps_override = None;
+    cfg.min_net_spread_bps = -10_000.0;
+    cfg.venue_selection.enabled = false;
+    let mut fee_config = FeeConfig::default();
+    fee_config
+        .symbol_overrides
+        .push(crate::execution::SymbolFeeOverride {
+            exchange: "mexc".to_string(),
+            market_type: "spot".to_string(),
+            symbol: Some("CUDISUSDT".to_string()),
+            maker_bps: 0.0,
+            taker_bps: 0.0,
+            fee_asset: Some("quote".to_string()),
+            rebate_ratio: None,
+            reason: Some("zero fee campaign".to_string()),
+        });
+    let default_fee = build_with_models(
+        &cfg,
+        &FeeModel::default(),
+        &DisabledRegistry::new(),
+        SpotVenue::Mexc,
+        SpotVenue::CoinEx,
+        &book("mexc", 0.99, 1.0, 100.0),
+        &book("coinex", 1.03, 1.04, 100.0),
+    );
+    let symbol_fee = build_with_models(
+        &cfg,
+        &FeeModel::from_config(fee_config),
+        &DisabledRegistry::new(),
+        SpotVenue::Mexc,
+        SpotVenue::CoinEx,
+        &book("mexc", 0.99, 1.0, 100.0),
+        &book("coinex", 1.03, 1.04, 100.0),
+    );
+
+    assert_eq!(default_fee.fee_source_buy, FeeSource::ConfigDefault);
+    assert_eq!(symbol_fee.fee_source_buy, FeeSource::SymbolOverride);
+    assert!(symbol_fee.estimated_net_spread_bps > default_fee.estimated_net_spread_bps);
+    assert!(symbol_fee.estimated_net_pnl > default_fee.estimated_net_pnl);
+}
+
+#[test]
+fn task8_inventory_shortage_should_block_executable_opportunity() {
+    let mut cfg = config();
+    cfg.min_net_spread_bps = 0.0;
+    cfg.initial_balances
+        .get_mut("coinex")
+        .unwrap()
+        .insert("CUDIS".to_string(), 0.0);
+    let opp = build_opportunity(
+        &cfg,
+        &rules(),
+        &PaperInventory::from_config(&cfg).unwrap(),
+        &RiskState::new(&cfg),
+        SpotVenue::Mexc,
+        SpotVenue::CoinEx,
+        &book("mexc", 0.99, 1.0, 100.0),
+        &book("coinex", 1.03, 1.04, 100.0),
+    );
+
+    assert_eq!(
+        opp.rejection_reason,
+        Some(RejectionReason::InsufficientBaseBalance)
+    );
+}
+
+#[test]
+fn task8_slow_venue_latency_penalty_should_raise_execution_threshold() {
+    let mut cfg = config();
+    cfg.exchanges = vec!["gateio".to_string(), "bitget".to_string()];
+    cfg.websocket.exchanges = cfg.exchanges.clone();
+    cfg.taker_fee_bps_override = Some(0.0);
+    cfg.min_raw_spread_bps = 0.0;
+    cfg.min_net_spread_bps = 10.0;
+    cfg.slippage_bps = 0.0;
+    cfg.safety_buffer_bps = 0.0;
+    cfg.initial_balances = HashMap::from([
+        (
+            "gateio".to_string(),
+            HashMap::from([("USDT".to_string(), 500.0), ("CUDIS".to_string(), 10_000.0)]),
+        ),
+        (
+            "bitget".to_string(),
+            HashMap::from([("USDT".to_string(), 500.0), ("CUDIS".to_string(), 10_000.0)]),
+        ),
+    ]);
+    cfg.venue_selection.venue_overrides.insert(
+        "gateio".to_string(),
+        VenueCostConfig {
+            latency_penalty_bps: Some(40.0),
+            min_net_spread_extra_bps: Some(40.0),
+            ..VenueCostConfig::default()
+        },
+    );
+    let gate_rule = rule("gateio");
+    let bitget_rule = rule("bitget");
+    let rules = CommonSymbolRules {
+        mexc: gate_rule.clone(),
+        coinex: bitget_rule.clone(),
+        gateio: Some(gate_rule),
+        bitget: Some(bitget_rule),
+        kucoin: None,
+    };
+
+    let opp = build_opportunity(
+        &cfg,
+        &rules,
+        &PaperInventory::from_config(&cfg).unwrap(),
+        &RiskState::new(&cfg),
+        SpotVenue::GateIo,
+        SpotVenue::Bitget,
+        &book("gateio", 0.9999, 1.0, 100.0),
+        &book("bitget", 1.0050, 1.0060, 100.0),
+    );
+
+    assert_eq!(opp.latency_penalty_bps, 40.0);
+    assert_eq!(opp.effective_min_net_spread_bps, 90.0);
+    assert_eq!(
+        opp.rejection_reason,
+        Some(RejectionReason::NetSpreadBelowThreshold)
+    );
+    assert!(opp
+        .rejection_detail
+        .as_deref()
+        .unwrap_or_default()
+        .contains("effective_min_net_spread_bps"));
+}
+
+#[test]
 fn opportunity_should_be_rejected_by_disabled_symbol() {
     let cfg = config();
     let disabled = DisabledRegistry::from_config(DisabledRegistryConfig {
@@ -2851,6 +3009,18 @@ fn opportunity_recording_should_write_jsonl() {
         estimated_total_fee: 0.2,
         estimated_gross_pnl: 3.0,
         estimated_net_pnl: 2.8,
+        capital_cost_bps: 0.0,
+        transfer_cost_bps: 0.0,
+        transfer_delay_penalty_bps: 0.0,
+        inventory_rebalance_cost_bps: 0.0,
+        latency_penalty_bps: 0.0,
+        effective_min_net_spread_bps: 0.0,
+        estimated_slippage_cost: 0.0,
+        estimated_capital_cost: 0.0,
+        estimated_transfer_cost: 0.0,
+        estimated_inventory_rebalance_cost: 0.0,
+        estimated_latency_penalty_cost: 0.0,
+        estimated_total_cost: 0.2,
         executable_notional: 100.0,
         quantity: 100.0,
         accepted: true,
@@ -2862,6 +3032,7 @@ fn opportunity_recording_should_write_jsonl() {
         sell_book_source: BookSource::Rest,
         buy_latency_ms: Some(1),
         sell_latency_ms: Some(1),
+        lifecycle_latency: None,
     });
     append_jsonl_for_test(&path, &event).unwrap();
     let raw = std::fs::read_to_string(path).unwrap();
@@ -2883,6 +3054,117 @@ fn rejection_reason_recording_should_group_reasons() {
 }
 
 #[test]
+fn legacy_summary_report_should_use_sdk_core_statistics() {
+    let mut report = SummaryReport::default();
+    report.symbols_scanned = 1;
+    report.record_opportunity(&OpportunityRecord {
+        timestamp: Utc::now(),
+        symbol: "CUDISUSDT".to_string(),
+        buy_exchange: "mexc".to_string(),
+        sell_exchange: "coinex".to_string(),
+        buy_price: 1.0,
+        sell_price: 1.03,
+        raw_spread_bps: 300.0,
+        buy_fee_bps: 10.0,
+        sell_fee_bps: 10.0,
+        fee_source_buy: FeeSource::ConfigDefault,
+        fee_source_sell: FeeSource::ConfigDefault,
+        platform_discount_applied: false,
+        estimated_fee_bps: 20.0,
+        estimated_slippage_bps: 2.0,
+        safety_buffer_bps: 3.0,
+        estimated_net_spread_bps: 275.0,
+        estimated_total_fee: 0.2,
+        estimated_gross_pnl: 3.0,
+        estimated_net_pnl: 2.8,
+        capital_cost_bps: 0.0,
+        transfer_cost_bps: 0.0,
+        transfer_delay_penalty_bps: 0.0,
+        inventory_rebalance_cost_bps: 0.0,
+        latency_penalty_bps: 0.0,
+        effective_min_net_spread_bps: 0.0,
+        estimated_slippage_cost: 0.0,
+        estimated_capital_cost: 0.0,
+        estimated_transfer_cost: 0.0,
+        estimated_inventory_rebalance_cost: 0.0,
+        estimated_latency_penalty_cost: 0.0,
+        estimated_total_cost: 0.2,
+        executable_notional: 100.0,
+        quantity: 100.0,
+        accepted: false,
+        rejection_reason: Some(RejectionReason::NetSpreadBelowThreshold),
+        rejection_detail: Some("net spread below threshold".to_string()),
+        buy_book_age_ms: 4,
+        sell_book_age_ms: 8,
+        buy_book_source: BookSource::Rest,
+        sell_book_source: BookSource::Rest,
+        buy_latency_ms: Some(1),
+        sell_latency_ms: Some(1),
+        lifecycle_latency: None,
+    });
+    report.record_trade(&SimulatedTradeRecord {
+        timestamp: Utc::now(),
+        symbol: "CUDISUSDT".to_string(),
+        buy_exchange: "mexc".to_string(),
+        sell_exchange: "coinex".to_string(),
+        buy_avg_price: 1.0,
+        sell_avg_price: 1.03,
+        quantity: 100.0,
+        notional: 100.0,
+        buy_fee: 0.1,
+        sell_fee: 0.1,
+        gross_pnl: 3.0,
+        net_pnl: 2.8,
+        pnl_category: TradePnlCategory::Arbitrage,
+        slippage_cost: 0.0,
+        capital_cost: 0.0,
+        transfer_cost: 0.0,
+        inventory_rebalance_cost: 0.0,
+        latency_penalty_cost: 0.0,
+        latency_ms: 12,
+        order_book_age_ms: 8,
+        execution_mode: "paper".to_string(),
+    });
+
+    assert_eq!(report.opportunities_detected, 1);
+    assert_eq!(report.opportunities_rejected, 1);
+    assert_eq!(
+        report
+            .rejection_reasons
+            .get(&RejectionReason::NetSpreadBelowThreshold),
+        Some(&1)
+    );
+    assert_eq!(report.total_fees, 0.2);
+    assert_eq!(report.symbol_net_pnl("CUDISUSDT"), 2.8);
+    assert!(report.render().contains("avg_book_age_ms=8.0"));
+}
+
+#[test]
+fn task8_summary_report_should_split_arbitrage_and_inventory_recovery_pnl() {
+    let mut report = SummaryReport::default();
+    let mut arbitrage_trade = simulated_trade_for_report(2.0);
+    arbitrage_trade.pnl_category = TradePnlCategory::Arbitrage;
+    arbitrage_trade.slippage_cost = 0.05;
+    arbitrage_trade.capital_cost = 0.02;
+    report.record_trade(&arbitrage_trade);
+
+    let mut recovery_trade = simulated_trade_for_report(-0.4);
+    recovery_trade.pnl_category = TradePnlCategory::OneSidedExposure;
+    recovery_trade.inventory_rebalance_cost = 0.03;
+    report.record_trade(&recovery_trade);
+
+    assert_eq!(report.total_arbitrage_net_pnl, 2.0);
+    assert_eq!(report.total_inventory_recovery_pnl, -0.4);
+    assert_eq!(report.total_one_sided_exposure_pnl, -0.4);
+    assert_eq!(report.total_slippage_cost, 0.05);
+    assert_eq!(report.total_capital_cost, 0.02);
+    assert_eq!(report.total_inventory_rebalance_cost, 0.03);
+    let rendered = report.render();
+    assert!(rendered.contains("arbitrage_net_pnl=2.000000"));
+    assert!(rendered.contains("inventory_recovery_pnl=-0.400000"));
+}
+
+#[test]
 fn live_trading_config_requires_explicit_real_order_flags() {
     let mut cfg = config();
     cfg.live_trading_enabled = true;
@@ -2896,6 +3178,14 @@ fn live_trading_config_requires_explicit_real_order_flags() {
     cfg.small_live_gate.explicit_live_confirmation = true;
     cfg.small_live_gate.enabled_symbols = cfg.symbols.clone();
     cfg.small_live_gate.enabled_exchanges = cfg.exchanges.clone();
+    cfg.kill_switch.allow_live_orders = true;
+    cfg.live_preflight.enabled = true;
+    cfg.live_preflight.target_mode = "live".to_string();
+    cfg.live_preflight.exchanges = cfg.small_live_gate.enabled_exchanges.clone();
+    cfg.live_preflight.symbols = cfg.small_live_gate.enabled_symbols.clone();
+    cfg.live_preflight.max_live_notional_per_trade =
+        Some(cfg.small_live_gate.max_notional_per_order);
+    cfg.live_preflight.max_total_live_notional = Some(cfg.small_live_gate.max_total_notional);
     cfg.dry_run = false;
     assert!(cfg.validate_safe_mode().is_ok());
     cfg.live_trading_enabled = false;
@@ -2909,6 +3199,33 @@ fn live_trading_config_requires_explicit_real_order_flags() {
     cfg.dry_run = true;
     assert!(cfg.validate_safe_mode().is_ok());
     cfg.live_dry_run.submit_orders = true;
+    assert!(cfg.validate_safe_mode().is_err());
+}
+
+#[test]
+fn live_trading_config_requires_preflight_and_kill_switch_alignment() {
+    let mut cfg = live_small_gate_config();
+    assert!(cfg.validate_safe_mode().is_ok());
+
+    cfg.live_preflight.enabled = false;
+    assert!(cfg.validate_safe_mode().is_err());
+    cfg.live_preflight.enabled = true;
+
+    cfg.kill_switch.allow_live_orders = false;
+    assert!(cfg.validate_safe_mode().is_err());
+    cfg.kill_switch.allow_live_orders = true;
+
+    cfg.live_dry_run.build_order_requests = false;
+    assert!(cfg.validate_safe_mode().is_err());
+    cfg.live_dry_run.build_order_requests = true;
+
+    cfg.live_preflight.max_live_notional_per_trade =
+        Some(cfg.small_live_gate.max_notional_per_order + 0.01);
+    assert!(cfg.validate_safe_mode().is_err());
+    cfg.live_preflight.max_live_notional_per_trade =
+        Some(cfg.small_live_gate.max_notional_per_order);
+
+    cfg.live_preflight.exchanges = vec!["coinex".to_string()];
     assert!(cfg.validate_safe_mode().is_err());
 }
 
@@ -2940,6 +3257,7 @@ fn live_trading_config_requires_small_live_symbols_to_be_bounded_subset() {
     let mut cfg = live_small_gate_config();
     cfg.symbols = vec!["AAAUSDT".to_string(), "BBBUSDT".to_string()];
     cfg.small_live_gate.enabled_symbols = vec!["AAAUSDT".to_string(), "BBBUSDT".to_string()];
+    cfg.live_preflight.symbols = cfg.small_live_gate.enabled_symbols.clone();
     cfg.max_enabled_arbitrage_symbols = 2;
     assert!(cfg.validate_safe_mode().is_ok());
 
@@ -2953,9 +3271,15 @@ fn live_trading_config_requires_small_live_symbols_to_be_bounded_subset() {
         "BBBUSDT".to_string(),
         "AAAUSDT".to_string(),
     ];
+    cfg.live_preflight.symbols = vec![
+        "AAAUSDT".to_string(),
+        "BBBUSDT".to_string(),
+        "AAAUSDT".to_string(),
+    ];
     assert!(cfg.validate_safe_mode().is_ok());
 
     cfg.small_live_gate.enabled_symbols = vec!["AAAUSDT".to_string(), "BBBUSDT".to_string()];
+    cfg.live_preflight.symbols = cfg.small_live_gate.enabled_symbols.clone();
     cfg.max_enabled_arbitrage_symbols = 1;
     assert!(cfg.validate_safe_mode().is_ok());
 }
@@ -3378,6 +3702,125 @@ async fn replay_output_should_be_deterministic_for_same_input() {
     assert!((first.simulated_net_pnl - second.simulated_net_pnl).abs() < 1e-9);
 }
 
+#[tokio::test]
+async fn replay_latency_should_make_opportunity_disappear() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("books.jsonl");
+    let output = dir.path().join("report.jsonl");
+    let base = Utc::now();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at("mexc", "CUDISUSDT", 0.99, 1.00, 200.0, 1, base),
+    )
+    .unwrap();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at("coinex", "CUDISUSDT", 1.08, 1.09, 200.0, 2, base),
+    )
+    .unwrap();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at(
+            "coinex",
+            "CUDISUSDT",
+            0.99,
+            1.00,
+            200.0,
+            3,
+            base + Duration::milliseconds(1),
+        ),
+    )
+    .unwrap();
+
+    let mut cfg = replay_config_with_paths(input.to_str().unwrap(), output.to_str().unwrap());
+    cfg.max_raw_spread_bps = 2_000.0;
+    cfg.replay.speed = "fixed:market=0,decision=0,submit=10,timeout=1000,seed=7".to_string();
+
+    let report = run_replay_mode(cfg).await.unwrap();
+
+    assert!(report.theoretical_opportunities > 0);
+    assert!(report.gross_theoretical_pnl > 0.0);
+    assert_eq!(report.latency_adjusted_accepted, 0);
+    assert_eq!(report.actual_fill_opportunities, 0);
+    assert!(report.one_sided_risk_count > 0);
+}
+
+#[tokio::test]
+async fn replay_ioc_should_report_partial_fill() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("books.jsonl");
+    let output = dir.path().join("report.jsonl");
+    let base = Utc::now();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at("mexc", "CUDISUSDT", 0.99, 1.00, 200.0, 1, base),
+    )
+    .unwrap();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at("coinex", "CUDISUSDT", 1.08, 1.09, 200.0, 2, base),
+    )
+    .unwrap();
+
+    let mut cfg = replay_config_with_paths(input.to_str().unwrap(), output.to_str().unwrap());
+    cfg.max_raw_spread_bps = 2_000.0;
+    cfg.replay.speed =
+        "fixed:market=0,decision=0,submit=0,partial_prob=1,partial_min=0.5,partial_max=0.5,seed=11"
+            .to_string();
+
+    let report = run_replay_mode(cfg).await.unwrap();
+
+    assert!(report.gross_theoretical_pnl > 0.0);
+    assert!(report.actual_fill_opportunities > 0);
+    assert!(report.partial_fill_count > 0);
+    assert!(report.latency_adjusted_realized_net_pnl < report.gross_theoretical_pnl);
+}
+
+#[tokio::test]
+async fn replay_random_model_should_be_stable_with_fixed_seed() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("books.jsonl");
+    let base = Utc::now();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at("mexc", "CUDISUSDT", 0.99, 1.00, 200.0, 1, base),
+    )
+    .unwrap();
+    append_book_record(
+        input.to_str().unwrap(),
+        &test_book_record_at("coinex", "CUDISUSDT", 1.08, 1.09, 200.0, 2, base),
+    )
+    .unwrap();
+
+    let first_output = dir.path().join("report_seed_1.jsonl");
+    let second_output = dir.path().join("report_seed_2.jsonl");
+    let mut first_cfg =
+        replay_config_with_paths(input.to_str().unwrap(), first_output.to_str().unwrap());
+    first_cfg.max_raw_spread_bps = 2_000.0;
+    first_cfg.replay.speed = "uniform:market_min=0,market_max=5,decision_min=0,decision_max=3,submit_min=0,submit_max=7,partial_prob=1,partial_min=0.2,partial_max=0.8,seed=99".to_string();
+    let mut second_cfg =
+        replay_config_with_paths(input.to_str().unwrap(), second_output.to_str().unwrap());
+    second_cfg.max_raw_spread_bps = 2_000.0;
+    second_cfg.replay.speed = first_cfg.replay.speed.clone();
+
+    let first = run_replay_mode(first_cfg).await.unwrap();
+    let second = run_replay_mode(second_cfg).await.unwrap();
+
+    assert_eq!(
+        first.latency_adjusted_opportunities,
+        second.latency_adjusted_opportunities
+    );
+    assert_eq!(
+        first.actual_fill_opportunities,
+        second.actual_fill_opportunities
+    );
+    assert_eq!(first.partial_fill_count, second.partial_fill_count);
+    assert!(
+        (first.latency_adjusted_realized_net_pnl - second.latency_adjusted_realized_net_pnl).abs()
+            < 1e-9
+    );
+}
+
 #[test]
 fn opportunity_duration_tracker_should_measure_continuity() {
     let mut first = test_opportunity_record(true);
@@ -3550,9 +3993,21 @@ fn test_book_record(
     quantity: f64,
     sequence: u64,
 ) -> BookRecord {
+    test_book_record_at(exchange, symbol, bid, ask, quantity, sequence, Utc::now())
+}
+
+fn test_book_record_at(
+    exchange: &str,
+    symbol: &str,
+    bid: f64,
+    ask: f64,
+    quantity: f64,
+    sequence: u64,
+    timestamp: chrono::DateTime<Utc>,
+) -> BookRecord {
     BookRecord::BookSnapshot {
-        timestamp_local: Utc::now(),
-        timestamp_exchange: Some(Utc::now()),
+        timestamp_local: timestamp,
+        timestamp_exchange: Some(timestamp),
         exchange: exchange.to_string(),
         symbol: symbol.to_string(),
         bids: vec![OrderBookLevel {
@@ -3575,6 +4030,7 @@ fn replay_config_with_paths(input_path: &str, output_path: &str) -> SpotSpotTake
     cfg.replay.enabled = true;
     cfg.replay.input_path = input_path.to_string();
     cfg.replay.output_path = output_path.to_string();
+    cfg.disabled_registry_path = "__missing_replay_test_disabled_registry.yml".to_string();
     cfg.mexc.base_url = "http://127.0.0.1:1".to_string();
     cfg.coinex.base_url = "http://127.0.0.1:1".to_string();
     cfg
@@ -3601,6 +4057,18 @@ fn test_opportunity_record(accepted: bool) -> OpportunityRecord {
         estimated_total_fee: 0.1,
         estimated_gross_pnl: 1.5,
         estimated_net_pnl: 1.4,
+        capital_cost_bps: 0.0,
+        transfer_cost_bps: 0.0,
+        transfer_delay_penalty_bps: 0.0,
+        inventory_rebalance_cost_bps: 0.0,
+        latency_penalty_bps: 0.0,
+        effective_min_net_spread_bps: 0.0,
+        estimated_slippage_cost: 0.0,
+        estimated_capital_cost: 0.0,
+        estimated_transfer_cost: 0.0,
+        estimated_inventory_rebalance_cost: 0.0,
+        estimated_latency_penalty_cost: 0.0,
+        estimated_total_cost: 0.1,
         executable_notional: 50.0,
         quantity: 50.0,
         accepted,
@@ -3612,5 +4080,32 @@ fn test_opportunity_record(accepted: bool) -> OpportunityRecord {
         sell_book_source: BookSource::Replay,
         buy_latency_ms: Some(1),
         sell_latency_ms: Some(1),
+        lifecycle_latency: None,
+    }
+}
+
+fn simulated_trade_for_report(net_pnl: f64) -> SimulatedTradeRecord {
+    SimulatedTradeRecord {
+        timestamp: Utc::now(),
+        symbol: "CUDISUSDT".to_string(),
+        buy_exchange: "mexc".to_string(),
+        sell_exchange: "coinex".to_string(),
+        buy_avg_price: 1.0,
+        sell_avg_price: 1.03,
+        quantity: 10.0,
+        notional: 10.0,
+        buy_fee: 0.01,
+        sell_fee: 0.01,
+        gross_pnl: net_pnl + 0.02,
+        net_pnl,
+        pnl_category: TradePnlCategory::Arbitrage,
+        slippage_cost: 0.0,
+        capital_cost: 0.0,
+        transfer_cost: 0.0,
+        inventory_rebalance_cost: 0.0,
+        latency_penalty_cost: 0.0,
+        latency_ms: 1,
+        order_book_age_ms: 1,
+        execution_mode: "paper".to_string(),
     }
 }

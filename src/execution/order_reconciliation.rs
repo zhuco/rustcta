@@ -46,6 +46,7 @@ pub struct OrderPollingState {
     pub symbol: String,
     pub exchange_order_id: Option<String>,
     pub client_order_id: Option<String>,
+    pub trigger: ReconciliationTrigger,
     pub attempts: u32,
     pub started_at: DateTime<Utc>,
     pub last_status: Option<OrderStatus>,
@@ -66,12 +67,28 @@ impl OrderPollingState {
             symbol: symbol.into(),
             exchange_order_id,
             client_order_id,
+            trigger: ReconciliationTrigger::StartupRecovery,
             attempts: 0,
             started_at: Utc::now(),
             last_status: None,
             last_error: None,
         }
     }
+
+    pub fn with_trigger(mut self, trigger: ReconciliationTrigger) -> Self {
+        self.trigger = trigger;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconciliationTrigger {
+    PrivateStreamLag,
+    PrivateStreamDisconnected,
+    UnknownPrivateOrderEvent,
+    StartupRecovery,
+    Manual,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,7 +139,22 @@ pub struct OrderReconciliationResult {
     pub rate_limited: bool,
     pub inconsistent_status: bool,
     pub message: String,
+    pub audit_event: OrderReconciliationAuditEvent,
     pub completed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrderReconciliationAuditEvent {
+    pub exchange: String,
+    pub symbol: String,
+    pub exchange_order_id: Option<String>,
+    pub client_order_id: Option<String>,
+    pub trigger: ReconciliationTrigger,
+    pub outcome: OrderReconciliationOutcome,
+    pub severity: ReconciliationSeverity,
+    pub source: String,
+    pub message: String,
+    pub occurred_at: DateTime<Utc>,
 }
 
 #[async_trait]
@@ -347,6 +379,15 @@ fn result(
     fills: Option<FillReconciliationResult>,
     message: impl Into<String>,
 ) -> OrderReconciliationResult {
+    let completed_at = Utc::now();
+    let message = message.into();
+    let source = if fills.is_some() {
+        "recent_fills_fallback".to_string()
+    } else if final_order.is_some() {
+        "get_order".to_string()
+    } else {
+        "rest_reconcile".to_string()
+    };
     OrderReconciliationResult {
         exchange: state.exchange.clone(),
         market_type: state.market_type,
@@ -362,8 +403,20 @@ fn result(
         order_not_found: matches!(outcome, OrderReconciliationOutcome::OrderNotFound),
         rate_limited: matches!(outcome, OrderReconciliationOutcome::RateLimited),
         inconsistent_status: matches!(outcome, OrderReconciliationOutcome::InconsistentStatus),
-        message: message.into(),
-        completed_at: Utc::now(),
+        message: message.clone(),
+        audit_event: OrderReconciliationAuditEvent {
+            exchange: state.exchange.clone(),
+            symbol: state.symbol.clone(),
+            exchange_order_id: state.exchange_order_id.clone(),
+            client_order_id: state.client_order_id.clone(),
+            trigger: state.trigger,
+            outcome,
+            severity,
+            source,
+            message,
+            occurred_at: completed_at,
+        },
+        completed_at,
     }
 }
 
@@ -561,6 +614,35 @@ mod tests {
         let result = reconcile_order(&OrderReconciliationConfig::default(), &client, state()).await;
         assert_eq!(result.outcome, OrderReconciliationOutcome::Filled);
         assert!(result.fills.is_some());
+        assert_eq!(
+            result.audit_event.trigger,
+            ReconciliationTrigger::StartupRecovery
+        );
+        assert_eq!(result.audit_event.source, "recent_fills_fallback");
+    }
+
+    #[tokio::test]
+    async fn rest_fallback_reconcile_should_emit_audit_event_with_trigger() {
+        let client = MockClient::default();
+        client
+            .orders
+            .lock()
+            .unwrap()
+            .push(Ok(Some(order(OrderStatus::PartiallyFilled))));
+        let result = reconcile_order(
+            &OrderReconciliationConfig::default(),
+            &client,
+            state().with_trigger(ReconciliationTrigger::UnknownPrivateOrderEvent),
+        )
+        .await;
+
+        assert_eq!(result.outcome, OrderReconciliationOutcome::PartiallyFilled);
+        assert_eq!(
+            result.audit_event.trigger,
+            ReconciliationTrigger::UnknownPrivateOrderEvent
+        );
+        assert_eq!(result.audit_event.source, "get_order");
+        assert_eq!(result.audit_event.client_order_id.as_deref(), Some("cid"));
     }
 
     #[tokio::test]

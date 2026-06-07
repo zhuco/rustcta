@@ -46,6 +46,12 @@ async fn in_process_gateway_client_should_expose_capabilities_and_private_subscr
         .expect("client private subscribe");
     assert_eq!(subscribed.subscriptions.len(), 1);
     assert_eq!(subscribed.subscriptions[0].subscription_id, "private-sub-1");
+    assert!(subscribed.subscriptions[0]
+        .capabilities
+        .as_ref()
+        .is_some_and(|capabilities| capabilities.supports_orders
+            && capabilities.supports_client_order_id
+            && capabilities.supports_exchange_order_id));
     assert_eq!(
         gateway
             .recorded_private_subscriptions()

@@ -63,6 +63,64 @@ impl MexcPublicRest {
         api_secret: &str,
         recv_window_ms: u64,
     ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::GET,
+            endpoint,
+            params,
+            api_key,
+            api_secret,
+            recv_window_ms,
+        )
+        .await
+    }
+
+    pub async fn send_signed_post(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::POST,
+            endpoint,
+            params,
+            api_key,
+            api_secret,
+            recv_window_ms,
+        )
+        .await
+    }
+
+    pub async fn send_signed_delete(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::DELETE,
+            endpoint,
+            params,
+            api_key,
+            api_secret,
+            recv_window_ms,
+        )
+        .await
+    }
+
+    async fn send_signed_request(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
         let mut signed_params = params.clone();
         signed_params.insert(
             "timestamp".to_string(),
@@ -74,7 +132,7 @@ impl MexcPublicRest {
         let url = build_signed_url(&self.rest_base_url, endpoint, &signed_params, &signature);
         let response = self
             .http
-            .get(url)
+            .request(method, url)
             .header("X-MEXC-APIKEY", api_key)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .send()

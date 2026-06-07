@@ -4,7 +4,8 @@ use serde_json::Value;
 use crate::{
     ControlApiStateSnapshot, FeeSummaryView, FeeVenueSummary, JsonRowsView, LogEventView, LogLevel,
     LogStreamView, OpportunitiesView, RiskEventView, RiskSeverity, RiskStatus, RiskSummaryView,
-    SymbolScannerView, SymbolsView, CONTROL_API_SCHEMA_VERSION,
+    StrategySnapshotEnvelope, StrategySnapshotSource, SymbolScannerView, SymbolsView,
+    CONTROL_API_SCHEMA_VERSION,
 };
 
 pub fn apply_legacy_dashboard_snapshot(
@@ -21,6 +22,7 @@ pub fn apply_legacy_dashboard_snapshot(
     snapshot.recent_opportunities = json_rows_from_legacy_snapshot(legacy, "opportunities");
     snapshot.opportunities = opportunities_from_legacy_snapshot(legacy);
     snapshot.symbols = symbols_from_legacy_snapshot(legacy);
+    snapshot.strategy_snapshots = strategy_snapshots_from_legacy_snapshot(legacy);
     snapshot
 }
 
@@ -177,6 +179,104 @@ pub fn symbols_from_legacy_snapshot(legacy: &Value) -> SymbolsView {
     }
 }
 
+pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySnapshotEnvelope> {
+    let generated_at = legacy
+        .get("generated_at")
+        .and_then(Value::as_str)
+        .and_then(parse_timestamp)
+        .unwrap_or_else(Utc::now);
+    let mut snapshots = Vec::new();
+
+    let spot_detail = secret_free_object([
+        ("status", legacy.get("status").cloned()),
+        ("config_summary", legacy.get("config_summary").cloned()),
+        ("spot_control", legacy.get("spot_control").cloned()),
+        (
+            "runtime_publisher",
+            legacy.get("runtime_publisher_health").cloned(),
+        ),
+        ("disabled", legacy.get("disabled").cloned()),
+        ("live_preflight", legacy.get("live_preflight").cloned()),
+        (
+            "live_dry_run_orders",
+            legacy.get("live_dry_run_orders").cloned(),
+        ),
+        (
+            "order_reconciliation",
+            legacy
+                .get("order_reconciliation_status")
+                .cloned()
+                .or_else(|| legacy.get("order_reconciliation").cloned()),
+        ),
+        (
+            "balance_reconciliation",
+            legacy.get("balance_reconciliation").cloned(),
+        ),
+    ]);
+    if !spot_detail
+        .as_object()
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        snapshots.push(StrategySnapshotEnvelope {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            strategy_id: "spot-arb-local".to_string(),
+            strategy_kind: "spot_spot_taker_arbitrage".to_string(),
+            run_id: None,
+            status: None,
+            generated_at,
+            source: StrategySnapshotSource::LegacyDashboard,
+            detail: spot_detail,
+        });
+    }
+
+    let cross_detail = secret_free_object([
+        ("status", legacy.get("status").cloned()),
+        ("config_summary", legacy.get("config_summary").cloned()),
+        (
+            "arbitrage_relationships",
+            legacy.get("arbitrage_relationships").cloned(),
+        ),
+        (
+            "arbitrage_opportunities",
+            legacy.get("arbitrage_opportunities").cloned(),
+        ),
+        (
+            "arbitrage_statistics",
+            legacy.get("arbitrage_statistics").cloned(),
+        ),
+        (
+            "market_snapshots",
+            legacy
+                .get("cross_arb_market_snapshots")
+                .cloned()
+                .or_else(|| legacy.get("market_snapshots").cloned()),
+        ),
+        (
+            "instrument_feasibility",
+            legacy.get("instrument_feasibility").cloned(),
+        ),
+        ("scanner", legacy.get("five_exchange_scanner").cloned()),
+        ("hedge_policy", legacy.get("hedge_policy").cloned()),
+    ]);
+    if !cross_detail
+        .as_object()
+        .is_some_and(serde_json::Map::is_empty)
+    {
+        snapshots.push(StrategySnapshotEnvelope {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            strategy_id: "contract-arb-local".to_string(),
+            strategy_kind: "cross_exchange_arbitrage".to_string(),
+            run_id: None,
+            status: None,
+            generated_at,
+            source: StrategySnapshotSource::LegacyDashboard,
+            detail: cross_detail,
+        });
+    }
+
+    snapshots
+}
+
 fn legacy_array_values(legacy: &Value, field: &str) -> Vec<Value> {
     legacy
         .get(field)
@@ -296,6 +396,16 @@ fn secret_free_value(value: &Value) -> Value {
     }
 }
 
+fn secret_free_object<const N: usize>(fields: [(&str, Option<Value>); N]) -> Value {
+    let object = fields
+        .into_iter()
+        .filter_map(|(field, value)| {
+            value.map(|value| (field.to_string(), secret_free_value(&value)))
+        })
+        .collect();
+    Value::Object(object)
+}
+
 fn is_sensitive_legacy_field(field: &str) -> bool {
     let lower = field.to_ascii_lowercase();
     let key_parts = ["api", "key"];
@@ -309,4 +419,8 @@ fn is_sensitive_legacy_field(field: &str) -> bool {
         || lower == raw_secret_field
         || lower == pass_field
         || lower == auth_field
+        || lower == "secret"
+        || lower == "token"
+        || lower == "access_token"
+        || lower == "refresh_token"
 }

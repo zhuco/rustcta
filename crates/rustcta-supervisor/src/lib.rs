@@ -34,6 +34,141 @@ pub enum LifecycleCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryPolicy {
+    pub restart_on_exit: bool,
+    pub restart_on_stale_heartbeat: bool,
+    pub max_restart_attempts: u32,
+    pub heartbeat_timeout_ms: Option<i64>,
+    pub snapshot_timeout_ms: Option<i64>,
+    pub restart_backoff_ms: u64,
+}
+
+impl Default for RecoveryPolicy {
+    fn default() -> Self {
+        Self {
+            restart_on_exit: false,
+            restart_on_stale_heartbeat: false,
+            max_restart_attempts: 0,
+            heartbeat_timeout_ms: None,
+            snapshot_timeout_ms: None,
+            restart_backoff_ms: 250,
+        }
+    }
+}
+
+impl RecoveryPolicy {
+    pub fn validate(&self) -> Result<(), SupervisorError> {
+        if self.heartbeat_timeout_ms.is_some_and(|value| value <= 0) {
+            return Err(SupervisorError::InvalidRecoveryPolicy {
+                message: "heartbeat_timeout_ms must be positive when configured".to_string(),
+            });
+        }
+        if self.snapshot_timeout_ms.is_some_and(|value| value <= 0) {
+            return Err(SupervisorError::InvalidRecoveryPolicy {
+                message: "snapshot_timeout_ms must be positive when configured".to_string(),
+            });
+        }
+        if (self.restart_on_exit || self.restart_on_stale_heartbeat)
+            && self.max_restart_attempts == 0
+        {
+            return Err(SupervisorError::InvalidRecoveryPolicy {
+                message: "restart policies require max_restart_attempts > 0".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeSnapshotMetadata {
+    pub schema_version: u16,
+    pub snapshot_id: String,
+    pub captured_at: DateTime<Utc>,
+    pub source: Option<String>,
+    pub payload_kind: Option<String>,
+    pub payload_bytes: Option<u64>,
+    pub checksum: Option<String>,
+}
+
+impl RuntimeSnapshotMetadata {
+    pub fn new(snapshot_id: impl Into<String>, captured_at: DateTime<Utc>) -> Self {
+        Self {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            snapshot_id: snapshot_id.into(),
+            captured_at,
+            source: None,
+            payload_kind: None,
+            payload_bytes: None,
+            checksum: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), SupervisorError> {
+        if self.schema_version != SUPERVISOR_SCHEMA_VERSION {
+            return Err(SupervisorError::InvalidRuntimeUpdate {
+                strategy_id: "<snapshot>".to_string(),
+                message: format!(
+                    "snapshot schema_version {} does not match expected {}",
+                    self.schema_version, SUPERVISOR_SCHEMA_VERSION
+                ),
+            });
+        }
+        if self.snapshot_id.trim().is_empty() {
+            return Err(SupervisorError::MissingLifecycleField {
+                field: "snapshot_id",
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeHeartbeat {
+    pub schema_version: u16,
+    pub strategy_id: String,
+    pub run_id: Option<String>,
+    pub process_id: Option<u32>,
+    pub status: Option<ProcessStatus>,
+    pub heartbeat_at: DateTime<Utc>,
+    pub snapshot: Option<RuntimeSnapshotMetadata>,
+}
+
+impl RuntimeHeartbeat {
+    pub fn new(strategy_id: impl Into<String>, heartbeat_at: DateTime<Utc>) -> Self {
+        Self {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            strategy_id: strategy_id.into(),
+            run_id: None,
+            process_id: None,
+            status: None,
+            heartbeat_at,
+            snapshot: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), SupervisorError> {
+        if self.schema_version != SUPERVISOR_SCHEMA_VERSION {
+            return Err(SupervisorError::InvalidRuntimeUpdate {
+                strategy_id: self.strategy_id.clone(),
+                message: format!(
+                    "heartbeat schema_version {} does not match expected {}",
+                    self.schema_version, SUPERVISOR_SCHEMA_VERSION
+                ),
+            });
+        }
+        if self.strategy_id.trim().is_empty() {
+            return Err(SupervisorError::MissingLifecycleField {
+                field: "strategy_id",
+            });
+        }
+        if let Some(snapshot) = &self.snapshot {
+            snapshot.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StrategyProcess {
     pub schema_version: u16,
     pub strategy_id: String,
@@ -46,10 +181,14 @@ pub struct StrategyProcess {
     pub started_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
     pub last_snapshot_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub runtime_snapshot: Option<RuntimeSnapshotMetadata>,
     pub restart_count: u32,
     pub last_exit_code: Option<i32>,
     pub last_error: Option<String>,
     pub log_path: Option<String>,
+    #[serde(default)]
+    pub recovery_policy: RecoveryPolicy,
 }
 
 impl StrategyProcess {
@@ -72,10 +211,12 @@ impl StrategyProcess {
             started_at: None,
             last_heartbeat_at: None,
             last_snapshot_at: None,
+            runtime_snapshot: None,
             restart_count: 0,
             last_exit_code: None,
             last_error: None,
             log_path: None,
+            recovery_policy: RecoveryPolicy::default(),
         }
     }
 
@@ -102,6 +243,11 @@ impl StrategyProcess {
         self.last_error = Some(error.into());
         self
     }
+
+    pub fn with_recovery_policy(mut self, recovery_policy: RecoveryPolicy) -> Self {
+        self.recovery_policy = recovery_policy;
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +263,8 @@ pub struct StrategyProcessSpec {
     pub working_dir: Option<String>,
     pub log_path: Option<String>,
     pub restart_backoff_ms: u64,
+    #[serde(default)]
+    pub recovery_policy: RecoveryPolicy,
 }
 
 impl StrategyProcessSpec {
@@ -140,6 +288,7 @@ impl StrategyProcessSpec {
             working_dir: None,
             log_path: None,
             restart_backoff_ms: 250,
+            recovery_policy: RecoveryPolicy::default(),
         }
     }
 
@@ -160,6 +309,13 @@ impl StrategyProcessSpec {
 
     pub fn with_restart_backoff_ms(mut self, restart_backoff_ms: u64) -> Self {
         self.restart_backoff_ms = restart_backoff_ms;
+        self.recovery_policy.restart_backoff_ms = restart_backoff_ms;
+        self
+    }
+
+    pub fn with_recovery_policy(mut self, recovery_policy: RecoveryPolicy) -> Self {
+        self.restart_backoff_ms = recovery_policy.restart_backoff_ms;
+        self.recovery_policy = recovery_policy;
         self
     }
 
@@ -175,6 +331,7 @@ impl StrategyProcessSpec {
                 return Err(SupervisorError::MissingLifecycleField { field });
             }
         }
+        self.recovery_policy.validate()?;
         Ok(())
     }
 
@@ -187,6 +344,7 @@ impl StrategyProcessSpec {
             self.config_path.clone(),
         );
         process.log_path = self.log_path.clone();
+        process.recovery_policy = self.recovery_policy.clone();
         process
     }
 }
@@ -397,6 +555,58 @@ pub struct SupervisorSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeHeartbeatStatus {
+    pub schema_version: u16,
+    pub strategy_id: String,
+    pub run_id: String,
+    pub status: ProcessStatus,
+    pub process_id: Option<u32>,
+    pub last_heartbeat_at: Option<DateTime<Utc>>,
+    pub heartbeat_age_ms: Option<i64>,
+    pub last_snapshot_at: Option<DateTime<Utc>>,
+    pub snapshot_age_ms: Option<i64>,
+    pub runtime_snapshot: Option<RuntimeSnapshotMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeSnapshotStatus {
+    pub schema_version: u16,
+    pub strategy_id: String,
+    pub run_id: String,
+    pub last_snapshot_at: Option<DateTime<Utc>>,
+    pub snapshot_age_ms: Option<i64>,
+    pub runtime_snapshot: Option<RuntimeSnapshotMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoveryAction {
+    None,
+    MarkFailed,
+    Restart,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessRecoveryStatus {
+    pub schema_version: u16,
+    pub strategy_id: String,
+    pub run_id: String,
+    pub status: ProcessStatus,
+    pub restart_count: u32,
+    pub policy: RecoveryPolicy,
+    pub heartbeat_age_ms: Option<i64>,
+    pub snapshot_age_ms: Option<i64>,
+    pub action: RecoveryAction,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisorRecoveryStatus {
+    pub schema_version: u16,
+    pub captured_at: DateTime<Utc>,
+    pub processes: Vec<ProcessRecoveryStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InvalidStrategyProcess {
     pub strategy_id: String,
     pub errors: Vec<String>,
@@ -437,6 +647,13 @@ pub enum SupervisorError {
     AlreadyRunning { strategy_id: String },
     #[error("registry storage error: {message}")]
     RegistryStorage { message: String },
+    #[error("invalid runtime update for {strategy_id}: {message}")]
+    InvalidRuntimeUpdate {
+        strategy_id: String,
+        message: String,
+    },
+    #[error("invalid recovery policy: {message}")]
+    InvalidRecoveryPolicy { message: String },
 }
 
 #[derive(Debug, Default)]
@@ -524,11 +741,73 @@ impl ProcessRegistry {
         Ok(())
     }
 
+    pub fn ingest_runtime_heartbeat(
+        &mut self,
+        heartbeat: RuntimeHeartbeat,
+    ) -> Result<StrategyProcess, SupervisorError> {
+        heartbeat.validate()?;
+        let process = self
+            .processes
+            .get_mut(&heartbeat.strategy_id)
+            .ok_or_else(|| SupervisorError::NotFound {
+                strategy_id: heartbeat.strategy_id.clone(),
+            })?;
+        if let Some(run_id) = &heartbeat.run_id {
+            if run_id != &process.run_id {
+                return Err(SupervisorError::InvalidRuntimeUpdate {
+                    strategy_id: heartbeat.strategy_id,
+                    message: format!(
+                        "heartbeat run_id {run_id} does not match registry run_id {}",
+                        process.run_id
+                    ),
+                });
+            }
+        }
+        if let Some(process_id) = heartbeat.process_id {
+            process.process_id = Some(process_id);
+        }
+        if let Some(status) = heartbeat.status {
+            process.status = status;
+        }
+        process.last_heartbeat_at = Some(heartbeat.heartbeat_at);
+        if let Some(snapshot) = heartbeat.snapshot {
+            process.last_snapshot_at = Some(snapshot.captured_at);
+            process.runtime_snapshot = Some(snapshot);
+        }
+        Ok(process.clone())
+    }
+
     pub fn snapshot(&self) -> SupervisorSnapshot {
         SupervisorSnapshot {
             schema_version: SUPERVISOR_SCHEMA_VERSION,
             captured_at: Utc::now(),
             processes: self.list(),
+        }
+    }
+
+    pub fn heartbeat_statuses(&self, now: DateTime<Utc>) -> Vec<RuntimeHeartbeatStatus> {
+        self.processes
+            .values()
+            .map(|process| process.heartbeat_status(now))
+            .collect()
+    }
+
+    pub fn snapshot_statuses(&self, now: DateTime<Utc>) -> Vec<RuntimeSnapshotStatus> {
+        self.processes
+            .values()
+            .map(|process| process.snapshot_status(now))
+            .collect()
+    }
+
+    pub fn recovery_status(&self, now: DateTime<Utc>) -> SupervisorRecoveryStatus {
+        SupervisorRecoveryStatus {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            captured_at: now,
+            processes: self
+                .processes
+                .values()
+                .map(|process| process.recovery_status(now))
+                .collect(),
         }
     }
 
@@ -546,6 +825,96 @@ impl ProcessRegistry {
             registry.upsert(process);
         }
         registry
+    }
+
+    pub fn from_processes(processes: &[StrategyProcess]) -> Self {
+        let mut registry = Self::default();
+        for process in processes {
+            registry.upsert(process.clone());
+        }
+        registry
+    }
+}
+
+impl StrategyProcess {
+    pub fn heartbeat_status(&self, now: DateTime<Utc>) -> RuntimeHeartbeatStatus {
+        RuntimeHeartbeatStatus {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            strategy_id: self.strategy_id.clone(),
+            run_id: self.run_id.clone(),
+            status: self.status.clone(),
+            process_id: self.process_id,
+            last_heartbeat_at: self.last_heartbeat_at,
+            heartbeat_age_ms: age_ms(self.last_heartbeat_at, now),
+            last_snapshot_at: self.last_snapshot_at,
+            snapshot_age_ms: age_ms(self.last_snapshot_at, now),
+            runtime_snapshot: self.runtime_snapshot.clone(),
+        }
+    }
+
+    pub fn snapshot_status(&self, now: DateTime<Utc>) -> RuntimeSnapshotStatus {
+        RuntimeSnapshotStatus {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            strategy_id: self.strategy_id.clone(),
+            run_id: self.run_id.clone(),
+            last_snapshot_at: self.last_snapshot_at,
+            snapshot_age_ms: age_ms(self.last_snapshot_at, now),
+            runtime_snapshot: self.runtime_snapshot.clone(),
+        }
+    }
+
+    pub fn recovery_status(&self, now: DateTime<Utc>) -> ProcessRecoveryStatus {
+        let heartbeat_age_ms = age_ms(self.last_heartbeat_at, now);
+        let snapshot_age_ms = age_ms(self.last_snapshot_at, now);
+        let stale_heartbeat =
+            is_age_over(heartbeat_age_ms, self.recovery_policy.heartbeat_timeout_ms);
+        let stale_snapshot = is_age_over(snapshot_age_ms, self.recovery_policy.snapshot_timeout_ms);
+        let restart_budget_available =
+            self.restart_count < self.recovery_policy.max_restart_attempts;
+
+        let (action, reason) = if stale_heartbeat && self.status == ProcessStatus::Running {
+            if self.recovery_policy.restart_on_stale_heartbeat && restart_budget_available {
+                (RecoveryAction::Restart, Some("heartbeat stale".to_string()))
+            } else {
+                (
+                    RecoveryAction::MarkFailed,
+                    Some("heartbeat stale".to_string()),
+                )
+            }
+        } else if self.status == ProcessStatus::Failed
+            && self.recovery_policy.restart_on_exit
+            && restart_budget_available
+        {
+            (RecoveryAction::Restart, Some("process failed".to_string()))
+        } else if stale_snapshot {
+            (RecoveryAction::None, Some("snapshot stale".to_string()))
+        } else {
+            (RecoveryAction::None, None)
+        };
+
+        ProcessRecoveryStatus {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            strategy_id: self.strategy_id.clone(),
+            run_id: self.run_id.clone(),
+            status: self.status.clone(),
+            restart_count: self.restart_count,
+            policy: self.recovery_policy.clone(),
+            heartbeat_age_ms,
+            snapshot_age_ms,
+            action,
+            reason,
+        }
+    }
+}
+
+fn age_ms(timestamp: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Option<i64> {
+    timestamp.map(|timestamp| (now - timestamp).num_milliseconds().max(0))
+}
+
+fn is_age_over(age_ms: Option<i64>, timeout_ms: Option<i64>) -> bool {
+    match (age_ms, timeout_ms) {
+        (Some(age_ms), Some(timeout_ms)) => age_ms > timeout_ms,
+        _ => false,
     }
 }
 
@@ -712,6 +1081,18 @@ impl LocalProcessSupervisor {
         &self.registry
     }
 
+    pub fn register(&mut self, process: StrategyProcess) -> Result<(), SupervisorError> {
+        self.registry.insert(process)
+    }
+
+    pub fn remember_spec(&mut self, spec: StrategyProcessSpec) {
+        self.specs.insert(spec.strategy_id.clone(), spec);
+    }
+
+    pub fn spec(&self, strategy_id: &str) -> Option<&StrategyProcessSpec> {
+        self.specs.get(strategy_id)
+    }
+
     pub fn snapshot(&self) -> SupervisorSnapshot {
         self.registry.snapshot()
     }
@@ -853,6 +1234,13 @@ impl LocalProcessSupervisor {
         self.registry.heartbeat(strategy_id, heartbeat_at)
     }
 
+    pub fn ingest_runtime_heartbeat(
+        &mut self,
+        heartbeat: RuntimeHeartbeat,
+    ) -> Result<StrategyProcess, SupervisorError> {
+        self.registry.ingest_runtime_heartbeat(heartbeat)
+    }
+
     pub fn mark_stale_heartbeats(
         &mut self,
         max_age_ms: i64,
@@ -873,6 +1261,10 @@ impl LocalProcessSupervisor {
             }
         }
         stale
+    }
+
+    pub fn recovery_status(&self, now: DateTime<Utc>) -> SupervisorRecoveryStatus {
+        self.registry.recovery_status(now)
     }
 
     pub async fn reap_exited(&mut self) -> Result<Vec<StrategyProcess>, SupervisorError> {
@@ -970,6 +1362,111 @@ mod tests {
             .unwrap();
 
         assert_eq!(registry.list()[0].last_heartbeat_at, Some(now));
+    }
+
+    #[test]
+    fn runtime_heartbeat_should_update_process_and_snapshot_metadata() {
+        let mut registry = ProcessRegistry::default();
+        registry
+            .insert(
+                StrategyProcess::new("s1", "mock", "run-1", "tenant", "config.yml")
+                    .mark_started(7, Utc::now()),
+            )
+            .unwrap();
+        let heartbeat_at = Utc::now();
+        let mut snapshot = RuntimeSnapshotMetadata::new("snap-1", heartbeat_at);
+        snapshot.payload_kind = Some("strategy_state".to_string());
+        snapshot.payload_bytes = Some(128);
+
+        let updated = registry
+            .ingest_runtime_heartbeat(RuntimeHeartbeat {
+                schema_version: SUPERVISOR_SCHEMA_VERSION,
+                strategy_id: "s1".to_string(),
+                run_id: Some("run-1".to_string()),
+                process_id: Some(9),
+                status: Some(ProcessStatus::Running),
+                heartbeat_at,
+                snapshot: Some(snapshot.clone()),
+            })
+            .expect("heartbeat should update registry process");
+
+        assert_eq!(updated.process_id, Some(9));
+        assert_eq!(updated.last_heartbeat_at, Some(heartbeat_at));
+        assert_eq!(updated.last_snapshot_at, Some(heartbeat_at));
+        assert_eq!(updated.runtime_snapshot, Some(snapshot));
+    }
+
+    #[test]
+    fn runtime_heartbeat_should_reject_mismatched_run_id() {
+        let mut registry = ProcessRegistry::default();
+        registry
+            .insert(StrategyProcess::new(
+                "s1",
+                "mock",
+                "registry-run",
+                "tenant",
+                "config.yml",
+            ))
+            .unwrap();
+
+        let error = registry
+            .ingest_runtime_heartbeat(RuntimeHeartbeat {
+                schema_version: SUPERVISOR_SCHEMA_VERSION,
+                strategy_id: "s1".to_string(),
+                run_id: Some("other-run".to_string()),
+                process_id: None,
+                status: None,
+                heartbeat_at: Utc::now(),
+                snapshot: None,
+            })
+            .expect_err("mismatched run id should fail");
+
+        assert!(matches!(
+            error,
+            SupervisorError::InvalidRuntimeUpdate { .. }
+        ));
+    }
+
+    #[test]
+    fn recovery_status_should_plan_restart_for_stale_heartbeat_with_budget() {
+        let now = Utc::now();
+        let policy = RecoveryPolicy {
+            restart_on_exit: false,
+            restart_on_stale_heartbeat: true,
+            max_restart_attempts: 2,
+            heartbeat_timeout_ms: Some(1_000),
+            snapshot_timeout_ms: None,
+            restart_backoff_ms: 10,
+        };
+        let process = StrategyProcess::new("s1", "mock", "run", "tenant", "config.yml")
+            .mark_started(42, now - Duration::milliseconds(5_000))
+            .with_recovery_policy(policy);
+
+        let status = process.recovery_status(now);
+
+        assert_eq!(status.action, RecoveryAction::Restart);
+        assert_eq!(status.reason.as_deref(), Some("heartbeat stale"));
+        assert_eq!(status.heartbeat_age_ms, Some(5_000));
+    }
+
+    #[test]
+    fn recovery_policy_should_reject_restart_without_budget() {
+        let policy = RecoveryPolicy {
+            restart_on_exit: true,
+            restart_on_stale_heartbeat: false,
+            max_restart_attempts: 0,
+            heartbeat_timeout_ms: None,
+            snapshot_timeout_ms: None,
+            restart_backoff_ms: 10,
+        };
+
+        let error = policy
+            .validate()
+            .expect_err("restart policy without attempts should fail");
+        assert!(matches!(
+            error,
+            SupervisorError::InvalidRecoveryPolicy { .. }
+        ));
     }
 
     #[tokio::test]
@@ -1234,10 +1731,12 @@ mod tests {
             started_at: None,
             last_heartbeat_at: None,
             last_snapshot_at: None,
+            runtime_snapshot: None,
             restart_count: 0,
             last_exit_code: None,
             last_error: Some("bad config".to_string()),
             log_path: None,
+            recovery_policy: RecoveryPolicy::default(),
         });
 
         let report = registry.validation_report();

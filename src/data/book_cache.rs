@@ -74,28 +74,40 @@ pub struct BookCache {
 
 impl BookCache {
     pub async fn update_from_event(&self, event: BookEvent) {
+        self.update_from_event_ref(&event).await;
+    }
+
+    pub async fn update_from_event_ref(&self, event: &BookEvent) {
         let key = event.key();
         if matches!(
             event.event_kind,
-            BookEventKind::Stale | BookEventKind::Reconnect | BookEventKind::Error
+            BookEventKind::Stale
+                | BookEventKind::Gap
+                | BookEventKind::ChecksumMismatch
+                | BookEventKind::Reconnect
+                | BookEventKind::Error
         ) {
+            let reason = event
+                .stale_reason
+                .clone()
+                .unwrap_or_else(|| format!("{:?}", event.event_kind));
             self.mark_stale(
                 &event.exchange,
                 event.market_type,
                 &event.internal_symbol,
-                format!("{:?}", event.event_kind),
+                reason,
             )
             .await;
             return;
         }
 
         let book = CachedBook {
-            exchange: event.exchange,
+            exchange: event.exchange.clone(),
             market_type: event.market_type,
             internal_symbol: normalize_symbol(&event.internal_symbol),
-            exchange_symbol: event.exchange_symbol,
-            bids: event.bids,
-            asks: event.asks,
+            exchange_symbol: event.exchange_symbol.clone(),
+            bids: event.bids.clone(),
+            asks: event.asks.clone(),
             best_bid: event.best_bid,
             best_ask: event.best_ask,
             exchange_timestamp: event.exchange_timestamp,
@@ -104,8 +116,8 @@ impl BookCache {
             latency_ms: event.latency_ms,
             sequence: event.sequence,
             source: event.source,
-            is_stale: false,
-            stale_reason: None,
+            is_stale: !event.is_tradeable,
+            stale_reason: event.stale_reason.clone(),
         };
         self.inner.write().await.insert(key, book);
     }

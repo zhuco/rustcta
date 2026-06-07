@@ -1,21 +1,204 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, ExchangeApiError, ExchangeApiResult, FeesRequest,
-    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, QueryOrderRequest, QueryOrderResponse,
-    RecentFillsRequest, RecentFillsResponse, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
+    ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
+    OpenOrdersResponse, OrderListConditionalLeg, OrderListLegType, OrderListOrderLeg,
+    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::MarketType;
+use rustcta_types::{MarketType, OrderSide, OrderType};
 
 use super::parser::normalize_binance_symbol;
 use super::private_parser::{
-    parse_account_balances, parse_fee_snapshots, parse_open_orders, parse_order_state,
-    parse_recent_fills,
+    parse_account_balances, parse_binance_cancel_all_orders, parse_fee_snapshots,
+    parse_open_orders, parse_order_state, parse_recent_fills,
 };
 use super::BinanceGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
 impl BinanceGatewayAdapter {
+    pub(super) async fn place_order_impl(
+        &self,
+        request: PlaceOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let mut params = binance_place_order_params(&request)?;
+        params.insert(
+            "symbol".to_string(),
+            normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        let value = self
+            .send_signed_post("binance.place_order", "/api/v3/order", &params)
+            .await?;
+        let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(PlaceOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
+    pub(super) async fn place_quote_market_order_impl(
+        &self,
+        request: QuoteMarketOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        params.insert("side".to_string(), binance_side(request.side).to_string());
+        params.insert("type".to_string(), "MARKET".to_string());
+        insert_non_empty(&mut params, "quoteOrderQty", &request.quote_quantity)?;
+        if let Some(client_order_id) = request.client_order_id.as_deref() {
+            insert_non_empty(&mut params, "newClientOrderId", client_order_id)?;
+        }
+        let value = self
+            .send_signed_post("binance.place_quote_market_order", "/api/v3/order", &params)
+            .await?;
+        let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(PlaceOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
+    pub(super) async fn cancel_order_impl(
+        &self,
+        request: CancelOrderRequest,
+    ) -> ExchangeApiResult<CancelOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        insert_order_identifier(
+            &mut params,
+            request.exchange_order_id.as_deref(),
+            request.client_order_id.as_deref(),
+            "cancel_order",
+        )?;
+        let value = self
+            .send_signed_delete("binance.cancel_order", "/api/v3/order", &params)
+            .await?;
+        let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(CancelOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+            cancelled: true,
+        })
+    }
+
+    pub(super) async fn cancel_all_orders_impl(
+        &self,
+        request: CancelAllOrdersRequest,
+    ) -> ExchangeApiResult<CancelAllOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if let Some(market_type) = request.market_type {
+            self.ensure_spot(market_type)?;
+        }
+        let symbol = request
+            .symbol
+            .as_ref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "binance cancel_all_orders requires symbol".to_string(),
+            })?;
+        self.ensure_exchange(&symbol.exchange)?;
+        self.ensure_spot(symbol.market_type)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_binance_symbol(&symbol.exchange_symbol.symbol)?,
+        );
+        let value = self
+            .send_signed_delete("binance.cancel_all_orders", "/api/v3/openOrders", &params)
+            .await?;
+        let orders = parse_binance_cancel_all_orders(&self.exchange_id, symbol, &value)?;
+        let cancelled_count = orders.len() as u32;
+        Ok(CancelAllOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            cancelled_count,
+        })
+    }
+
+    pub(super) async fn amend_order_impl(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "symbol".to_string(),
+            normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        insert_order_identifier(
+            &mut params,
+            request.exchange_order_id.as_deref(),
+            request.client_order_id.as_deref(),
+            "amend_order",
+        )?;
+        insert_non_empty(&mut params, "quantity", &request.new_quantity)?;
+        if let Some(client_order_id) = request.new_client_order_id.as_deref() {
+            insert_non_empty(&mut params, "newClientOrderId", client_order_id)?;
+        }
+        let value = self
+            .send_signed_put(
+                "binance.amend_order",
+                "/api/v3/order/amend/keepPriority",
+                &params,
+            )
+            .await?;
+        let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(AmendOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
+    pub(super) async fn place_order_list_impl(
+        &self,
+        request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        let symbol = request.symbol().clone();
+        self.ensure_exchange(&symbol.exchange)?;
+        self.ensure_spot(symbol.market_type)?;
+        let (schema_version, context_request_id, endpoint, params, kind) =
+            binance_order_list_params(&request)?;
+        ensure_exchange_api_schema(schema_version)?;
+        let value = self
+            .send_signed_post("binance.place_order_list", endpoint, &params)
+            .await?;
+        let response = super::private_parser::parse_order_list_response(
+            &self.exchange_id,
+            &symbol,
+            kind,
+            &value,
+        )?;
+        Ok(OrderListResponse {
+            metadata: response_metadata(symbol.exchange, context_request_id),
+            ..response
+        })
+    }
+
     pub(super) async fn get_balances_impl(
         &self,
         request: BalancesRequest,
@@ -198,5 +381,260 @@ impl BinanceGatewayAdapter {
             metadata: response_metadata(request.exchange, request.context.request_id),
             fills,
         })
+    }
+}
+
+fn binance_place_order_params(
+    request: &PlaceOrderRequest,
+) -> ExchangeApiResult<HashMap<String, String>> {
+    let mut params = HashMap::new();
+    params.insert("side".to_string(), binance_side(request.side).to_string());
+    params.insert(
+        "type".to_string(),
+        binance_order_type(request.order_type, request.post_only).to_string(),
+    );
+    if request.order_type == OrderType::Market {
+        if let Some(quote_quantity) = request.quote_quantity.as_deref() {
+            insert_non_empty(&mut params, "quoteOrderQty", quote_quantity)?;
+        } else {
+            insert_non_empty(&mut params, "quantity", &request.quantity)?;
+        }
+    } else {
+        insert_non_empty(&mut params, "quantity", &request.quantity)?;
+        let price = request
+            .price
+            .as_deref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "binance limit-style order requires price".to_string(),
+            })?;
+        insert_non_empty(&mut params, "price", price)?;
+        params.insert(
+            "timeInForce".to_string(),
+            binance_time_in_force(request.order_type, request.time_in_force).to_string(),
+        );
+    }
+    if let Some(client_order_id) = request.client_order_id.as_deref() {
+        insert_non_empty(&mut params, "newClientOrderId", client_order_id)?;
+    }
+    if request.reduce_only {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "binance spot order does not support reduce_only".to_string(),
+        });
+    }
+    Ok(params)
+}
+
+fn binance_order_list_params(
+    request: &OrderListRequest,
+) -> ExchangeApiResult<(
+    u16,
+    Option<String>,
+    &'static str,
+    HashMap<String, String>,
+    rustcta_exchange_api::OrderListKind,
+)> {
+    match request {
+        OrderListRequest::Oco {
+            schema_version,
+            context,
+            symbol,
+            list_client_order_id,
+            side,
+            quantity,
+            above,
+            below,
+        } => {
+            let mut params = HashMap::new();
+            params.insert(
+                "symbol".to_string(),
+                normalize_binance_symbol(&symbol.exchange_symbol.symbol)?,
+            );
+            params.insert("side".to_string(), binance_side(*side).to_string());
+            insert_non_empty(&mut params, "quantity", quantity)?;
+            if let Some(client_id) = list_client_order_id.as_deref() {
+                insert_non_empty(&mut params, "listClientOrderId", client_id)?;
+            }
+            insert_conditional_leg(&mut params, "above", above)?;
+            insert_conditional_leg(&mut params, "below", below)?;
+            Ok((
+                *schema_version,
+                context.request_id.clone(),
+                "/api/v3/orderList/oco",
+                params,
+                rustcta_exchange_api::OrderListKind::Oco,
+            ))
+        }
+        OrderListRequest::Oto {
+            schema_version,
+            context,
+            symbol,
+            list_client_order_id,
+            working,
+            pending,
+        } => {
+            let mut params = HashMap::new();
+            params.insert(
+                "symbol".to_string(),
+                normalize_binance_symbol(&symbol.exchange_symbol.symbol)?,
+            );
+            if let Some(client_id) = list_client_order_id.as_deref() {
+                insert_non_empty(&mut params, "listClientOrderId", client_id)?;
+            }
+            insert_order_leg(&mut params, "working", working)?;
+            insert_order_leg(&mut params, "pending", pending)?;
+            Ok((
+                *schema_version,
+                context.request_id.clone(),
+                "/api/v3/orderList/oto",
+                params,
+                rustcta_exchange_api::OrderListKind::Oto,
+            ))
+        }
+    }
+}
+
+fn insert_conditional_leg(
+    params: &mut HashMap<String, String>,
+    prefix: &str,
+    leg: &OrderListConditionalLeg,
+) -> ExchangeApiResult<()> {
+    params.insert(
+        format!("{prefix}Type"),
+        binance_order_list_type(leg.order_type).to_string(),
+    );
+    if let Some(price) = leg.price.as_deref() {
+        insert_non_empty(params, &format!("{prefix}Price"), price)?;
+    }
+    if let Some(stop_price) = leg.stop_price.as_deref() {
+        insert_non_empty(params, &format!("{prefix}StopPrice"), stop_price)?;
+    }
+    if let Some(time_in_force) = leg.time_in_force {
+        params.insert(
+            format!("{prefix}TimeInForce"),
+            binance_time_in_force_from_tif(time_in_force).to_string(),
+        );
+    }
+    if let Some(client_order_id) = leg.client_order_id.as_deref() {
+        insert_non_empty(params, &format!("{prefix}ClientOrderId"), client_order_id)?;
+    }
+    Ok(())
+}
+
+fn insert_order_leg(
+    params: &mut HashMap<String, String>,
+    prefix: &str,
+    leg: &OrderListOrderLeg,
+) -> ExchangeApiResult<()> {
+    params.insert(format!("{prefix}Side"), binance_side(leg.side).to_string());
+    params.insert(
+        format!("{prefix}Type"),
+        binance_order_list_type(leg.order_type).to_string(),
+    );
+    insert_non_empty(params, &format!("{prefix}Quantity"), &leg.quantity)?;
+    if let Some(price) = leg.price.as_deref() {
+        insert_non_empty(params, &format!("{prefix}Price"), price)?;
+    }
+    if let Some(stop_price) = leg.stop_price.as_deref() {
+        insert_non_empty(params, &format!("{prefix}StopPrice"), stop_price)?;
+    }
+    if let Some(time_in_force) = leg.time_in_force {
+        params.insert(
+            format!("{prefix}TimeInForce"),
+            binance_time_in_force_from_tif(time_in_force).to_string(),
+        );
+    }
+    if let Some(client_order_id) = leg.client_order_id.as_deref() {
+        insert_non_empty(params, &format!("{prefix}ClientOrderId"), client_order_id)?;
+    }
+    Ok(())
+}
+
+fn insert_order_identifier(
+    params: &mut HashMap<String, String>,
+    exchange_order_id: Option<&str>,
+    client_order_id: Option<&str>,
+    operation: &str,
+) -> ExchangeApiResult<()> {
+    if let Some(order_id) = exchange_order_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        params.insert("orderId".to_string(), order_id.to_string());
+    }
+    if let Some(client_id) = client_order_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        params.insert("origClientOrderId".to_string(), client_id.to_string());
+    }
+    if !params.contains_key("orderId") && !params.contains_key("origClientOrderId") {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("binance {operation} requires exchange_order_id or client_order_id"),
+        });
+    }
+    Ok(())
+}
+
+fn insert_non_empty(
+    params: &mut HashMap<String, String>,
+    key: &str,
+    value: &str,
+) -> ExchangeApiResult<()> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("binance parameter {key} must not be empty"),
+        });
+    }
+    params.insert(key.to_string(), value.to_string());
+    Ok(())
+}
+
+fn binance_side(side: OrderSide) -> &'static str {
+    match side {
+        OrderSide::Buy => "BUY",
+        OrderSide::Sell => "SELL",
+    }
+}
+
+fn binance_order_type(order_type: OrderType, post_only: bool) -> &'static str {
+    match order_type {
+        OrderType::Market => "MARKET",
+        OrderType::Limit if post_only => "LIMIT_MAKER",
+        OrderType::Limit => "LIMIT",
+        OrderType::PostOnly => "LIMIT_MAKER",
+        OrderType::IOC | OrderType::FOK => "LIMIT",
+        _ => "LIMIT",
+    }
+}
+
+fn binance_time_in_force(order_type: OrderType, tif: Option<TimeInForce>) -> &'static str {
+    if order_type == OrderType::IOC {
+        return "IOC";
+    }
+    if order_type == OrderType::FOK {
+        return "FOK";
+    }
+    tif.map(binance_time_in_force_from_tif).unwrap_or("GTC")
+}
+
+fn binance_time_in_force_from_tif(tif: TimeInForce) -> &'static str {
+    match tif {
+        TimeInForce::GTC => "GTC",
+        TimeInForce::IOC => "IOC",
+        TimeInForce::FOK => "FOK",
+        TimeInForce::GTX => "GTX",
+    }
+}
+
+fn binance_order_list_type(order_type: OrderListLegType) -> &'static str {
+    match order_type {
+        OrderListLegType::Market => "MARKET",
+        OrderListLegType::Limit => "LIMIT",
+        OrderListLegType::LimitMaker => "LIMIT_MAKER",
+        OrderListLegType::StopLoss => "STOP_LOSS",
+        OrderListLegType::StopLossLimit => "STOP_LOSS_LIMIT",
+        OrderListLegType::TakeProfit => "TAKE_PROFIT",
+        OrderListLegType::TakeProfitLimit => "TAKE_PROFIT_LIMIT",
     }
 }

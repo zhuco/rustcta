@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, OrderListRequest, OrderListResponse, PlaceOrderRequest,
     PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
-    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -112,6 +113,42 @@ impl BinanceGatewayAdapter {
             .await
     }
 
+    async fn send_signed_post(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
+        self.rest
+            .send_signed_post(endpoint, params, api_key, api_secret, recv_window_ms)
+            .await
+    }
+
+    async fn send_signed_delete(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
+        self.rest
+            .send_signed_delete(endpoint, params, api_key, api_secret, recv_window_ms)
+            .await
+    }
+
+    async fn send_signed_put(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
+        self.rest
+            .send_signed_put(endpoint, params, api_key, api_secret, recv_window_ms)
+            .await
+    }
+
     fn context_account(
         &self,
         context: &rustcta_exchange_api::RequestContext,
@@ -168,9 +205,15 @@ impl ExchangeClient for BinanceGatewayAdapter {
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_enabled();
         capabilities.supports_fees = self.config.private_rest_enabled();
+        capabilities.supports_place_order = self.config.private_rest_enabled();
+        capabilities.supports_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_query_order = self.config.private_rest_enabled();
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
+        capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
+        capabilities.supports_quote_market_order = self.config.private_rest_enabled();
+        capabilities.supports_amend_order = self.config.private_rest_enabled();
+        capabilities.supports_order_list = self.config.private_rest_enabled();
         capabilities.supports_client_order_id = true;
         capabilities.supports_time_in_force =
             vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK];
@@ -182,6 +225,8 @@ impl ExchangeClient for BinanceGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(20);
+        capabilities.order_book =
+            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(20));
         capabilities
     }
 
@@ -216,16 +261,44 @@ impl ExchangeClient for BinanceGatewayAdapter {
 
     async fn place_order(
         &self,
-        _request: PlaceOrderRequest,
+        request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.unsupported_private("binance.place_order")
+        self.place_order_impl(request).await
+    }
+
+    async fn place_quote_market_order(
+        &self,
+        request: QuoteMarketOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        self.place_quote_market_order_impl(request).await
     }
 
     async fn cancel_order(
         &self,
-        _request: CancelOrderRequest,
+        request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.unsupported_private("binance.cancel_order")
+        self.cancel_order_impl(request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        self.amend_order_impl(request).await
+    }
+
+    async fn place_order_list(
+        &self,
+        request: OrderListRequest,
+    ) -> ExchangeApiResult<OrderListResponse> {
+        self.place_order_list_impl(request).await
+    }
+
+    async fn cancel_all_orders(
+        &self,
+        request: rustcta_exchange_api::CancelAllOrdersRequest,
+    ) -> ExchangeApiResult<rustcta_exchange_api::CancelAllOrdersResponse> {
+        self.cancel_all_orders_impl(request).await
     }
 
     async fn query_order(

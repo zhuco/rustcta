@@ -9,8 +9,10 @@ use tokio::net::TcpListener;
 
 #[derive(Debug, Clone)]
 pub(super) struct SeenRequest {
+    pub(super) method: String,
     pub(super) path: String,
     pub(super) query: HashMap<String, String>,
+    pub(super) body: Option<Value>,
     headers: HashMap<String, String>,
 }
 
@@ -63,7 +65,9 @@ pub(super) async fn spawn_rest_server(
 
 fn parse_seen_request(request_text: &str) -> SeenRequest {
     let request_line = request_text.lines().next().unwrap_or_default();
-    let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or_default().to_string();
+    let target = request_parts.next().unwrap_or_default();
     let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
     let query = query_text
         .split('&')
@@ -82,9 +86,16 @@ fn parse_seen_request(request_text: &str) -> SeenRequest {
             Some((key.to_ascii_lowercase(), value.trim().to_string()))
         })
         .collect();
+    let body = request_text
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.trim())
+        .filter(|body| !body.is_empty())
+        .and_then(|body| serde_json::from_str(body).ok());
     SeenRequest {
+        method,
         path: path.to_string(),
         query,
+        body,
         headers,
     }
 }
@@ -115,6 +126,16 @@ pub(super) fn symbol_scope() -> SymbolScope {
 }
 
 pub(super) fn assert_signed_request(request: &SeenRequest, api_key: &str, api_secret: &str) {
+    assert_signed_request_method(request, "GET", api_key, api_secret);
+}
+
+pub(super) fn assert_signed_request_method(
+    request: &SeenRequest,
+    method: &str,
+    api_key: &str,
+    api_secret: &str,
+) {
+    assert_eq!(request.method, method);
     assert_eq!(request.header("x-coinex-key"), Some(api_key));
     assert!(request.header("x-coinex-sign").is_some());
     assert!(request.header("x-coinex-timestamp").is_some());

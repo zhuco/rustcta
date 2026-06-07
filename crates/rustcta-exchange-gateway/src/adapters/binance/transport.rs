@@ -84,6 +84,94 @@ impl BinancePublicRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_signed_post(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::POST,
+            endpoint,
+            params,
+            api_key,
+            api_secret,
+            recv_window_ms,
+        )
+        .await
+    }
+
+    pub async fn send_signed_delete(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::DELETE,
+            endpoint,
+            params,
+            api_key,
+            api_secret,
+            recv_window_ms,
+        )
+        .await
+    }
+
+    pub async fn send_signed_put(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::PUT,
+            endpoint,
+            params,
+            api_key,
+            api_secret,
+            recv_window_ms,
+        )
+        .await
+    }
+
+    async fn send_signed_request(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        recv_window_ms: u64,
+    ) -> ExchangeApiResult<Value> {
+        let mut signed_params = params.clone();
+        signed_params.insert(
+            "timestamp".to_string(),
+            Utc::now().timestamp_millis().to_string(),
+        );
+        signed_params.insert("recvWindow".to_string(), recv_window_ms.to_string());
+        let query = build_query_string(&signed_params);
+        let signature = sign_raw_query(api_secret, &query)?;
+        let url = build_signed_url(&self.rest_base_url, endpoint, &signed_params, &signature);
+        let response = self
+            .http
+            .request(method, url)
+            .header("X-MBX-APIKEY", api_key)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 async fn parse_response(

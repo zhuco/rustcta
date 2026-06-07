@@ -74,6 +74,41 @@ impl ControlPanelView {
             Self::ApiKeys => "nav_api_keys",
         }
     }
+
+    pub(crate) fn route_id(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::Overview => "overview",
+            Self::SpotArb => "spot-arb",
+            Self::CrossArb => "cross-arb",
+            Self::Exchanges => "exchanges",
+            Self::Symbols => "symbols",
+            Self::Plans => "plans",
+            Self::Risk => "risk",
+            Self::Runtime => "runtime",
+            Self::Config => "config",
+            Self::Logs => "logs",
+            Self::ApiKeys => "api-keys",
+        }
+    }
+
+    pub(crate) fn from_route_id(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "workspace" => Some(Self::Workspace),
+            "overview" => Some(Self::Overview),
+            "spot-arb" | "spot_arb" => Some(Self::SpotArb),
+            "cross-arb" | "cross_arb" => Some(Self::CrossArb),
+            "exchanges" => Some(Self::Exchanges),
+            "symbols" => Some(Self::Symbols),
+            "plans" => Some(Self::Plans),
+            "risk" => Some(Self::Risk),
+            "runtime" => Some(Self::Runtime),
+            "config" => Some(Self::Config),
+            "logs" => Some(Self::Logs),
+            "api-keys" | "api_keys" => Some(Self::ApiKeys),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -236,34 +271,6 @@ impl ExchangeCredentialSchema {
             .collect()
     }
 
-    pub(crate) fn active_exchange(rows: &[Self], selected_exchange: &str) -> String {
-        if rows.iter().any(|row| row.exchange == selected_exchange) {
-            selected_exchange.to_string()
-        } else {
-            rows.first()
-                .map(|row| row.exchange.clone())
-                .unwrap_or_else(|| selected_exchange.to_string())
-        }
-    }
-
-    pub(crate) fn selected(rows: &[Self], exchange: &str) -> Option<Self> {
-        rows.iter()
-            .find(|row| row.exchange.eq_ignore_ascii_case(exchange))
-            .cloned()
-    }
-
-    pub(crate) fn field_exists(&self, field_name: &str) -> bool {
-        self.fields.iter().any(|field| field.name == field_name)
-    }
-
-    pub(crate) fn field_label(&self, field_name: &str, lang: Language) -> String {
-        self.fields
-            .iter()
-            .find(|field| field.name == field_name)
-            .map(|field| field.label.clone())
-            .unwrap_or_else(|| s(lang, "exchange_account_id"))
-    }
-
     fn from_value(value: &Value, lang: Language) -> Self {
         Self {
             exchange: text_at(value, "exchange", Language::En),
@@ -295,19 +302,6 @@ pub(crate) struct ExchangeCredentialAccountRow {
 pub(crate) struct CredentialAccountOption {
     pub(crate) value: String,
     pub(crate) label: String,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ExchangeCredentialSaveDraft {
-    pub(crate) exchange: String,
-    pub(crate) account_id: String,
-    pub(crate) account_label: String,
-    pub(crate) exchange_account_id: String,
-    pub(crate) wallet_address: String,
-    pub(crate) is_vault_address: String,
-    pub(crate) api_key: String,
-    pub(crate) api_secret: String,
-    pub(crate) passphrase: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -589,17 +583,49 @@ impl GatewayExchangeRowData {
 
 impl CredentialStatusRowData {
     pub(crate) fn from_response(value: &Value, lang: Language) -> Vec<Self> {
-        as_array(value.get("slots").unwrap_or(&Value::Null))
-            .into_iter()
-            .map(|row| Self {
-                slot_id: text_at(&row, "slot_id", lang),
-                exchange_id: text_at(&row, "exchange_id", lang),
-                tenant_id: text_at(&row, "tenant_id", lang),
-                configured: bool_at(&row, "configured"),
-                last_verified_at: text_at(&row, "last_verified_at", lang),
-                health: text_at(&row, "health", lang),
-            })
-            .collect()
+        let slots = as_array(value.get("slots").unwrap_or(&Value::Null));
+        if !slots.is_empty() {
+            return slots
+                .into_iter()
+                .map(|row| Self {
+                    slot_id: text_at(&row, "slot_id", lang),
+                    exchange_id: text_at(&row, "exchange_id", lang),
+                    tenant_id: text_at(&row, "tenant_id", lang),
+                    configured: bool_at(&row, "configured"),
+                    last_verified_at: text_at(&row, "last_verified_at", lang),
+                    health: text_at(&row, "health", lang),
+                })
+                .collect();
+        }
+        ExchangeCredentialAccountRow::from_rows(
+            value.get("exchanges").unwrap_or(&Value::Null),
+            lang,
+        )
+        .into_iter()
+        .map(|row| {
+            let required_fields = row.fields.iter().filter(|field| field.required).count();
+            let configured = if required_fields == 0 {
+                row.fields.iter().all(|field| field.configured)
+            } else {
+                row.fields
+                    .iter()
+                    .filter(|field| field.required)
+                    .all(|field| field.configured)
+            };
+            Self {
+                slot_id: row.row_key,
+                exchange_id: row.exchange,
+                tenant_id: "-".to_string(),
+                configured,
+                last_verified_at: "-".to_string(),
+                health: if configured {
+                    "healthy".to_string()
+                } else {
+                    "missing".to_string()
+                },
+            }
+        })
+        .collect()
     }
 }
 

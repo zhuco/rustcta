@@ -1,13 +1,16 @@
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest,
-    QueryOrderRequest, RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
+    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, OrderListConditionalLeg,
+    OrderListLegType, OrderListRequest, PlaceOrderRequest, QueryOrderRequest,
+    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::signing::sign_raw_query;
 use super::test_support::{
-    assert_signed_request, context, exchange_id, private_config, spawn_rest_server, symbol_scope,
+    assert_signed_request, assert_signed_request_method, context, exchange_id, private_config,
+    spawn_rest_server, symbol_scope,
 };
 use super::BinanceGatewayAdapter;
 
@@ -125,6 +128,276 @@ async fn binance_adapter_should_query_order_from_signed_rest() {
         Some("cli-1")
     );
     assert_signed_request(&request);
+}
+
+#[tokio::test]
+async fn binance_adapter_should_route_private_order_mutations() {
+    let order_ack = json!({
+        "symbol": "BTCUSDT",
+        "orderId": 30,
+        "clientOrderId": "cli-place",
+        "price": "25000.00000000",
+        "origQty": "0.01000000",
+        "executedQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "BUY",
+        "transactTime": 1499827319559_i64
+    });
+    let quote_ack = json!({
+        "symbol": "BTCUSDT",
+        "orderId": 31,
+        "clientOrderId": "cli-quote",
+        "price": "0.00000000",
+        "origQty": "0.00000000",
+        "executedQty": "0.00100000",
+        "cummulativeQuoteQty": "25.50000000",
+        "status": "FILLED",
+        "type": "MARKET",
+        "side": "BUY",
+        "transactTime": 1499827319560_i64
+    });
+    let cancel_ack = json!({
+        "symbol": "BTCUSDT",
+        "orderId": 30,
+        "clientOrderId": "cli-place",
+        "price": "25000.00000000",
+        "origQty": "0.01000000",
+        "executedQty": "0.00000000",
+        "status": "CANCELED",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "BUY",
+        "updateTime": 1499827319561_i64
+    });
+    let cancel_all_ack = json!([{
+        "symbol": "BTCUSDT",
+        "orderId": 32,
+        "clientOrderId": "cli-open",
+        "price": "26000.00000000",
+        "origQty": "0.01000000",
+        "executedQty": "0.00000000",
+        "status": "CANCELED",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "SELL",
+        "updateTime": 1499827319562_i64
+    }]);
+    let amend_ack = json!({
+        "symbol": "BTCUSDT",
+        "orderId": 33,
+        "clientOrderId": "cli-amend",
+        "price": "27000.00000000",
+        "origQty": "0.00500000",
+        "executedQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "SELL",
+        "updateTime": 1499827319563_i64
+    });
+    let oco_ack = json!({
+        "orderListId": 7,
+        "listClientOrderId": "cli-list",
+        "listStatusType": "EXEC_STARTED",
+        "listOrderStatus": "EXECUTING",
+        "symbol": "BTCUSDT",
+        "orderReports": [{
+            "symbol": "BTCUSDT",
+            "orderId": 34,
+            "clientOrderId": "cli-above",
+            "price": "28000.00000000",
+            "origQty": "0.01000000",
+            "executedQty": "0.00000000",
+            "status": "NEW",
+            "timeInForce": "GTC",
+            "type": "LIMIT_MAKER",
+            "side": "SELL",
+            "transactTime": 1499827319564_i64
+        }, {
+            "symbol": "BTCUSDT",
+            "orderId": 35,
+            "clientOrderId": "cli-below",
+            "price": "24000.00000000",
+            "origQty": "0.01000000",
+            "executedQty": "0.00000000",
+            "status": "NEW",
+            "timeInForce": "GTC",
+            "type": "STOP_LOSS_LIMIT",
+            "side": "SELL",
+            "transactTime": 1499827319564_i64
+        }]
+    });
+    let (base_url, seen) = spawn_rest_server(vec![
+        order_ack,
+        quote_ack,
+        cancel_ack,
+        cancel_all_ack,
+        amend_ack,
+        oco_ack,
+    ])
+    .await;
+    let adapter = BinanceGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_place_order);
+    assert!(capabilities.supports_cancel_order);
+    assert!(capabilities.supports_cancel_all_orders);
+    assert!(capabilities.supports_quote_market_order);
+    assert!(capabilities.supports_amend_order);
+    assert!(capabilities.supports_order_list);
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("place-order"),
+            symbol: symbol_scope("BTCUSDT"),
+            client_order_id: Some("cli-place".to_string()),
+            side: OrderSide::Buy,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "0.01000000".to_string(),
+            price: Some("25000.00000000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect("place order");
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("30"));
+
+    let quoted = adapter
+        .place_quote_market_order(QuoteMarketOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("quote-order"),
+            symbol: symbol_scope("BTCUSDT"),
+            client_order_id: Some("cli-quote".to_string()),
+            side: OrderSide::Buy,
+            quote_quantity: "25.50".to_string(),
+        })
+        .await
+        .expect("quote order");
+    assert_eq!(quoted.order.status, OrderStatus::Filled);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-order"),
+            symbol: symbol_scope("BTCUSDT"),
+            client_order_id: Some("cli-place".to_string()),
+            exchange_order_id: Some("30".to_string()),
+        })
+        .await
+        .expect("cancel order");
+    assert!(cancelled.cancelled);
+
+    let cancelled_all = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope("BTCUSDT")),
+        })
+        .await
+        .expect("cancel all");
+    assert_eq!(cancelled_all.cancelled_count, 1);
+
+    let amended = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend-order"),
+            symbol: symbol_scope("BTCUSDT"),
+            client_order_id: None,
+            exchange_order_id: Some("33".to_string()),
+            new_client_order_id: Some("cli-amend".to_string()),
+            new_quantity: "0.00500000".to_string(),
+        })
+        .await
+        .expect("amend order");
+    assert_eq!(amended.order.quantity, "0.00500000");
+
+    let order_list = adapter
+        .place_order_list(OrderListRequest::Oco {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("order-list"),
+            symbol: symbol_scope("BTCUSDT"),
+            list_client_order_id: Some("cli-list".to_string()),
+            side: OrderSide::Sell,
+            quantity: "0.01000000".to_string(),
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some("28000.00000000".to_string()),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: Some("cli-above".to_string()),
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some("24000.00000000".to_string()),
+                stop_price: Some("24500.00000000".to_string()),
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: Some("cli-below".to_string()),
+            },
+        })
+        .await
+        .expect("order list");
+    assert_eq!(order_list.order_list_id.as_deref(), Some("7"));
+    assert_eq!(order_list.orders.len(), 2);
+
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen[0].path, "/api/v3/order");
+    assert_signed_request_method(&seen[0], "POST");
+    assert_eq!(seen[0].query.get("type").map(String::as_str), Some("LIMIT"));
+    assert_eq!(
+        seen[0].query.get("timeInForce").map(String::as_str),
+        Some("GTC")
+    );
+    assert_eq!(
+        seen[0].query.get("newClientOrderId").map(String::as_str),
+        Some("cli-place")
+    );
+
+    assert_eq!(seen[1].path, "/api/v3/order");
+    assert_signed_request_method(&seen[1], "POST");
+    assert_eq!(
+        seen[1].query.get("quoteOrderQty").map(String::as_str),
+        Some("25.50")
+    );
+
+    assert_eq!(seen[2].path, "/api/v3/order");
+    assert_signed_request_method(&seen[2], "DELETE");
+    assert_eq!(seen[2].query.get("orderId").map(String::as_str), Some("30"));
+    assert_eq!(
+        seen[2].query.get("origClientOrderId").map(String::as_str),
+        Some("cli-place")
+    );
+
+    assert_eq!(seen[3].path, "/api/v3/openOrders");
+    assert_signed_request_method(&seen[3], "DELETE");
+
+    assert_eq!(seen[4].path, "/api/v3/order/amend/keepPriority");
+    assert_signed_request_method(&seen[4], "PUT");
+    assert_eq!(
+        seen[4].query.get("quantity").map(String::as_str),
+        Some("0.00500000")
+    );
+    assert_eq!(
+        seen[4].query.get("newClientOrderId").map(String::as_str),
+        Some("cli-amend")
+    );
+
+    assert_eq!(seen[5].path, "/api/v3/orderList/oco");
+    assert_signed_request_method(&seen[5], "POST");
+    assert_eq!(
+        seen[5].query.get("aboveType").map(String::as_str),
+        Some("LIMIT_MAKER")
+    );
+    assert_eq!(
+        seen[5].query.get("belowStopPrice").map(String::as_str),
+        Some("24500.00000000")
+    );
 }
 
 #[tokio::test]

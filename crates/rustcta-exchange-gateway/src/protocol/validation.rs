@@ -55,9 +55,46 @@ impl GatewayProtocolRequest {
                 validate_exchange_schema(request.schema_version)?;
                 self.validate_context(&request.context)?;
             }
+            GatewayRequestPayload::PlaceQuoteMarketOrder(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+            }
             GatewayRequestPayload::CancelOrder(request) => {
                 validate_exchange_schema(request.schema_version)?;
                 self.validate_context(&request.context)?;
+            }
+            GatewayRequestPayload::AmendOrder(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+                if request.client_order_id.is_none() && request.exchange_order_id.is_none() {
+                    return Err(GatewayError::Rejected(
+                        "amend_order requires client_order_id or exchange_order_id".to_string(),
+                    ));
+                }
+            }
+            GatewayRequestPayload::PlaceOrderList(request) => {
+                let symbol = request.symbol();
+                let context = match request {
+                    rustcta_exchange_api::OrderListRequest::Oco {
+                        schema_version,
+                        context,
+                        ..
+                    }
+                    | rustcta_exchange_api::OrderListRequest::Oto {
+                        schema_version,
+                        context,
+                        ..
+                    } => {
+                        validate_exchange_schema(*schema_version)?;
+                        context
+                    }
+                };
+                self.validate_context(context)?;
+                if symbol.exchange.as_str().trim().is_empty() {
+                    return Err(GatewayError::Rejected(
+                        "place_order_list requires a symbol exchange".to_string(),
+                    ));
+                }
             }
             GatewayRequestPayload::BatchPlaceOrders(request) => {
                 validate_exchange_schema(request.schema_version)?;

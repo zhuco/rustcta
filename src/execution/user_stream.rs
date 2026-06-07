@@ -204,6 +204,75 @@ pub enum PrivateEventKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PrivateOrderEventKind {
+    Ack,
+    New,
+    PartialFill,
+    Fill,
+    Cancel,
+    Reject,
+    Expired,
+    BalanceUpdate,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PrivateStreamHealthAction {
+    AllowLiveOrders,
+    CooldownLiveOrders,
+    BlockLiveOrders,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ReconcileTrigger {
+    PrivateStreamLag {
+        exchange: ExchangeId,
+        lag_ms: i64,
+        threshold_ms: i64,
+    },
+    StreamDisconnected {
+        exchange: ExchangeId,
+        disconnected_at: DateTime<Utc>,
+    },
+    UnknownOrderEvent {
+        exchange: ExchangeId,
+        canonical_symbol: CanonicalSymbol,
+        client_order_id: Option<String>,
+        exchange_order_id: Option<String>,
+        received_at: DateTime<Utc>,
+    },
+    StartupRecovery {
+        exchange: ExchangeId,
+        requested_at: DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReconcileQueueItem {
+    pub trigger: ReconcileTrigger,
+    pub queued_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrivateStreamAuditEvent {
+    pub exchange: ExchangeId,
+    pub action: String,
+    pub reason: String,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrivateStreamGateDecision {
+    pub exchange: ExchangeId,
+    pub action: PrivateStreamHealthAction,
+    pub requires_reconcile: bool,
+    pub reason: Option<String>,
+    pub decided_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrivateErrorEvent {
     pub class: ExchangeErrorClass,
@@ -239,6 +308,8 @@ pub struct AccountSyncConfig {
     pub quantity_tolerance: f64,
     pub orphan_tolerance: f64,
     pub stale_after_ms: i64,
+    pub private_stream_lag_cooldown_ms: i64,
+    pub private_stream_lag_block_ms: i64,
 }
 
 impl Default for AccountSyncConfig {
@@ -247,6 +318,8 @@ impl Default for AccountSyncConfig {
             quantity_tolerance: 1e-8,
             orphan_tolerance: 1e-6,
             stale_after_ms: 10_000,
+            private_stream_lag_cooldown_ms: 2_000,
+            private_stream_lag_block_ms: 10_000,
         }
     }
 }
@@ -256,10 +329,15 @@ pub struct AccountSyncState {
     config: AccountSyncConfig,
     positions: HashMap<PositionKey, PositionSnapshot>,
     open_orders: HashMap<OrderKey, OrderSnapshot>,
+    open_orders_by_client_id: HashMap<OrderLookupKey, OrderKey>,
+    open_orders_by_exchange_id: HashMap<OrderLookupKey, OrderKey>,
     balances: HashMap<BalanceKey, ExchangeBalance>,
     last_event_at: HashMap<ExchangeId, DateTime<Utc>>,
     last_disconnect_at: HashMap<ExchangeId, DateTime<Utc>>,
     funding_events: Vec<PrivateStreamEvent>,
+    unmatched_private_events: Vec<PrivateEvent>,
+    reconcile_queue: Vec<ReconcileQueueItem>,
+    audit_events: Vec<PrivateStreamAuditEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -277,6 +355,12 @@ struct OrderKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+struct OrderLookupKey {
+    exchange: ExchangeId,
+    id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct BalanceKey {
     exchange: ExchangeId,
     asset: String,
@@ -288,10 +372,15 @@ impl AccountSyncState {
             config,
             positions: HashMap::new(),
             open_orders: HashMap::new(),
+            open_orders_by_client_id: HashMap::new(),
+            open_orders_by_exchange_id: HashMap::new(),
             balances: HashMap::new(),
             last_event_at: HashMap::new(),
             last_disconnect_at: HashMap::new(),
             funding_events: Vec::new(),
+            unmatched_private_events: Vec::new(),
+            reconcile_queue: Vec::new(),
+            audit_events: Vec::new(),
         }
     }
 
@@ -300,11 +389,17 @@ impl AccountSyncState {
             PrivateStreamEvent::OrderUpdate(order) => {
                 self.last_event_at
                     .insert(order.exchange.clone(), order.updated_at);
-                let key = OrderKey::from_snapshot(&order);
+                let key = self
+                    .lookup_order_key(
+                        &order.exchange,
+                        order.client_order_id.as_deref(),
+                        order.exchange_order_id.as_deref(),
+                    )
+                    .unwrap_or_else(|| OrderKey::from_snapshot(&order));
                 if order.is_open() {
-                    self.open_orders.insert(key, order);
+                    self.upsert_open_order(key, order);
                 } else {
-                    self.open_orders.remove(&key);
+                    self.remove_order_by_key(&key);
                 }
             }
             PrivateStreamEvent::PositionUpdate(position) => {
@@ -337,14 +432,31 @@ impl AccountSyncState {
             PrivateEventKind::Order(order) => {
                 self.last_event_at.insert(exchange.clone(), received_at);
                 self.last_disconnect_at.remove(&exchange);
-                let mut snapshot = OrderSnapshot::from_order_state(order);
+                let mut snapshot = OrderSnapshot::from_order_state(order.clone());
                 snapshot.updated_at = received_at;
+                let is_terminal_unknown = !snapshot.is_open()
+                    && self
+                        .lookup_order_key(
+                            &snapshot.exchange,
+                            snapshot.client_order_id.as_deref(),
+                            snapshot.exchange_order_id.as_deref(),
+                        )
+                        .is_none();
+                if is_terminal_unknown {
+                    self.enqueue_unmatched_order_event(PrivateEvent::order(order, received_at));
+                }
                 self.apply_event(PrivateStreamEvent::OrderUpdate(snapshot));
             }
             PrivateEventKind::Fill(fill) => {
                 self.last_event_at.insert(exchange.clone(), received_at);
                 self.last_disconnect_at.remove(&exchange);
-                let key = OrderKey::from_fill(&fill);
+                let key = self
+                    .lookup_order_key(
+                        &fill.exchange,
+                        fill.client_order_id.as_deref(),
+                        fill.exchange_order_id.as_deref(),
+                    )
+                    .unwrap_or_else(|| OrderKey::from_fill(&fill));
                 let mut should_remove = false;
                 if let Some(existing) = self.open_orders.get_mut(&key) {
                     existing.client_order_id = existing
@@ -366,7 +478,9 @@ impl AccountSyncState {
                     should_remove = existing.status == OrderCommandStatus::Filled;
                 }
                 if should_remove {
-                    self.open_orders.remove(&key);
+                    self.remove_order_by_key(&key);
+                } else if !self.open_orders.contains_key(&key) {
+                    self.enqueue_unmatched_order_event(PrivateEvent::fill(fill, received_at));
                 }
             }
             PrivateEventKind::Position(position) => {
@@ -427,6 +541,139 @@ impl AccountSyncState {
 
     pub fn account_snapshot(&self) -> Vec<ExchangeBalance> {
         self.balances.values().cloned().collect()
+    }
+
+    pub fn private_stream_lag_ms(&self, exchange: &ExchangeId, now: DateTime<Utc>) -> Option<i64> {
+        self.last_event_at
+            .get(exchange)
+            .map(|last| now.signed_duration_since(*last).num_milliseconds())
+    }
+
+    pub fn live_order_gate(
+        &mut self,
+        exchange: &ExchangeId,
+        now: DateTime<Utc>,
+    ) -> PrivateStreamGateDecision {
+        if let Some(disconnected_at) = self.last_disconnect_at.get(exchange).copied() {
+            let reason =
+                "private stream disconnected; REST reconcile required before new live orders"
+                    .to_string();
+            self.enqueue_reconcile(ReconcileTrigger::StreamDisconnected {
+                exchange: exchange.clone(),
+                disconnected_at,
+            });
+            self.audit_events.push(PrivateStreamAuditEvent {
+                exchange: exchange.clone(),
+                action: "block_live_orders".to_string(),
+                reason: reason.clone(),
+                client_order_id: None,
+                exchange_order_id: None,
+                occurred_at: now,
+            });
+            return PrivateStreamGateDecision {
+                exchange: exchange.clone(),
+                action: PrivateStreamHealthAction::BlockLiveOrders,
+                requires_reconcile: true,
+                reason: Some(reason),
+                decided_at: now,
+            };
+        }
+
+        let Some(lag_ms) = self.private_stream_lag_ms(exchange, now) else {
+            let reason =
+                "private stream has no events; startup REST reconcile required".to_string();
+            self.enqueue_reconcile(ReconcileTrigger::StartupRecovery {
+                exchange: exchange.clone(),
+                requested_at: now,
+            });
+            self.audit_events.push(PrivateStreamAuditEvent {
+                exchange: exchange.clone(),
+                action: "block_live_orders".to_string(),
+                reason: reason.clone(),
+                client_order_id: None,
+                exchange_order_id: None,
+                occurred_at: now,
+            });
+            return PrivateStreamGateDecision {
+                exchange: exchange.clone(),
+                action: PrivateStreamHealthAction::BlockLiveOrders,
+                requires_reconcile: true,
+                reason: Some(reason),
+                decided_at: now,
+            };
+        };
+
+        if lag_ms > self.config.private_stream_lag_block_ms {
+            let reason = format!(
+                "private stream lag {lag_ms}ms exceeds block threshold {}ms",
+                self.config.private_stream_lag_block_ms
+            );
+            self.enqueue_reconcile(ReconcileTrigger::PrivateStreamLag {
+                exchange: exchange.clone(),
+                lag_ms,
+                threshold_ms: self.config.private_stream_lag_block_ms,
+            });
+            self.audit_events.push(PrivateStreamAuditEvent {
+                exchange: exchange.clone(),
+                action: "block_live_orders".to_string(),
+                reason: reason.clone(),
+                client_order_id: None,
+                exchange_order_id: None,
+                occurred_at: now,
+            });
+            PrivateStreamGateDecision {
+                exchange: exchange.clone(),
+                action: PrivateStreamHealthAction::BlockLiveOrders,
+                requires_reconcile: true,
+                reason: Some(reason),
+                decided_at: now,
+            }
+        } else if lag_ms > self.config.private_stream_lag_cooldown_ms {
+            let reason = format!(
+                "private stream lag {lag_ms}ms exceeds cooldown threshold {}ms",
+                self.config.private_stream_lag_cooldown_ms
+            );
+            self.enqueue_reconcile(ReconcileTrigger::PrivateStreamLag {
+                exchange: exchange.clone(),
+                lag_ms,
+                threshold_ms: self.config.private_stream_lag_cooldown_ms,
+            });
+            self.audit_events.push(PrivateStreamAuditEvent {
+                exchange: exchange.clone(),
+                action: "cooldown_live_orders".to_string(),
+                reason: reason.clone(),
+                client_order_id: None,
+                exchange_order_id: None,
+                occurred_at: now,
+            });
+            PrivateStreamGateDecision {
+                exchange: exchange.clone(),
+                action: PrivateStreamHealthAction::CooldownLiveOrders,
+                requires_reconcile: true,
+                reason: Some(reason),
+                decided_at: now,
+            }
+        } else {
+            PrivateStreamGateDecision {
+                exchange: exchange.clone(),
+                action: PrivateStreamHealthAction::AllowLiveOrders,
+                requires_reconcile: false,
+                reason: None,
+                decided_at: now,
+            }
+        }
+    }
+
+    pub fn unmatched_private_events(&self) -> &[PrivateEvent] {
+        &self.unmatched_private_events
+    }
+
+    pub fn reconcile_queue(&self) -> &[ReconcileQueueItem] {
+        &self.reconcile_queue
+    }
+
+    pub fn audit_events(&self) -> &[PrivateStreamAuditEvent] {
+        &self.audit_events
     }
 
     pub fn balance(&self, exchange: &ExchangeId, asset: &str) -> Option<&ExchangeBalance> {
@@ -500,8 +747,153 @@ impl AccountSyncState {
         self.last_disconnect_at.remove(&exchange);
     }
 
+    pub fn replace_exchange_open_orders(
+        &mut self,
+        exchange: ExchangeId,
+        orders: impl IntoIterator<Item = OrderSnapshot>,
+        updated_at: DateTime<Utc>,
+    ) {
+        let existing = self
+            .open_orders
+            .keys()
+            .filter(|key| key.exchange == exchange)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in existing {
+            self.remove_order_by_key(&key);
+        }
+        for mut order in orders {
+            if !order.is_open() {
+                continue;
+            }
+            order.updated_at = updated_at;
+            let key = OrderKey::from_snapshot(&order);
+            self.upsert_open_order(key, order);
+        }
+        self.last_event_at.insert(exchange.clone(), updated_at);
+        self.last_disconnect_at.remove(&exchange);
+        self.audit_events.push(PrivateStreamAuditEvent {
+            exchange,
+            action: "rest_fallback_reconcile_applied".to_string(),
+            reason: "open orders replaced from REST fallback reconcile".to_string(),
+            client_order_id: None,
+            exchange_order_id: None,
+            occurred_at: updated_at,
+        });
+    }
+
     pub fn order_snapshots(&self) -> Vec<OrderSnapshot> {
         self.open_orders.values().cloned().collect()
+    }
+
+    fn lookup_order_key(
+        &self,
+        exchange: &ExchangeId,
+        client_order_id: Option<&str>,
+        exchange_order_id: Option<&str>,
+    ) -> Option<OrderKey> {
+        client_order_id
+            .and_then(|id| {
+                self.open_orders_by_client_id
+                    .get(&OrderLookupKey::new(exchange.clone(), id))
+            })
+            .or_else(|| {
+                exchange_order_id.and_then(|id| {
+                    self.open_orders_by_exchange_id
+                        .get(&OrderLookupKey::new(exchange.clone(), id))
+                })
+            })
+            .cloned()
+    }
+
+    fn upsert_open_order(&mut self, key: OrderKey, order: OrderSnapshot) {
+        if let Some(old) = self.open_orders.insert(key.clone(), order.clone()) {
+            self.remove_order_indexes(&key, &old);
+        }
+        self.insert_order_indexes(&key, &order);
+    }
+
+    fn remove_order_by_key(&mut self, key: &OrderKey) -> Option<OrderSnapshot> {
+        let removed = self.open_orders.remove(key);
+        if let Some(order) = &removed {
+            self.remove_order_indexes(key, order);
+        }
+        removed
+    }
+
+    fn insert_order_indexes(&mut self, key: &OrderKey, order: &OrderSnapshot) {
+        if let Some(client_order_id) = &order.client_order_id {
+            self.open_orders_by_client_id.insert(
+                OrderLookupKey::new(order.exchange.clone(), client_order_id),
+                key.clone(),
+            );
+        }
+        if let Some(exchange_order_id) = &order.exchange_order_id {
+            self.open_orders_by_exchange_id.insert(
+                OrderLookupKey::new(order.exchange.clone(), exchange_order_id),
+                key.clone(),
+            );
+        }
+    }
+
+    fn remove_order_indexes(&mut self, key: &OrderKey, order: &OrderSnapshot) {
+        if let Some(client_order_id) = &order.client_order_id {
+            let lookup = OrderLookupKey::new(order.exchange.clone(), client_order_id);
+            if self.open_orders_by_client_id.get(&lookup) == Some(key) {
+                self.open_orders_by_client_id.remove(&lookup);
+            }
+        }
+        if let Some(exchange_order_id) = &order.exchange_order_id {
+            let lookup = OrderLookupKey::new(order.exchange.clone(), exchange_order_id);
+            if self.open_orders_by_exchange_id.get(&lookup) == Some(key) {
+                self.open_orders_by_exchange_id.remove(&lookup);
+            }
+        }
+    }
+
+    fn enqueue_unmatched_order_event(&mut self, event: PrivateEvent) {
+        let (canonical_symbol, client_order_id, exchange_order_id) = match &event.kind {
+            PrivateEventKind::Order(order) => (
+                order.canonical_symbol.clone(),
+                order.client_order_id.clone(),
+                order.exchange_order_id.clone(),
+            ),
+            PrivateEventKind::Fill(fill) => (
+                fill.canonical_symbol.clone(),
+                fill.client_order_id.clone(),
+                fill.exchange_order_id.clone(),
+            ),
+            _ => return,
+        };
+        self.enqueue_reconcile(ReconcileTrigger::UnknownOrderEvent {
+            exchange: event.exchange.clone(),
+            canonical_symbol,
+            client_order_id: client_order_id.clone(),
+            exchange_order_id: exchange_order_id.clone(),
+            received_at: event.received_at,
+        });
+        self.audit_events.push(PrivateStreamAuditEvent {
+            exchange: event.exchange.clone(),
+            action: "queue_rest_fallback_reconcile".to_string(),
+            reason: "unmatched private stream order event".to_string(),
+            client_order_id,
+            exchange_order_id,
+            occurred_at: event.received_at,
+        });
+        self.unmatched_private_events.push(event);
+    }
+
+    fn enqueue_reconcile(&mut self, trigger: ReconcileTrigger) {
+        let queued_at = match &trigger {
+            ReconcileTrigger::PrivateStreamLag { .. } => Utc::now(),
+            ReconcileTrigger::StreamDisconnected {
+                disconnected_at, ..
+            } => *disconnected_at,
+            ReconcileTrigger::UnknownOrderEvent { received_at, .. } => *received_at,
+            ReconcileTrigger::StartupRecovery { requested_at, .. } => *requested_at,
+        };
+        self.reconcile_queue
+            .push(ReconcileQueueItem { trigger, queued_at });
     }
 
     pub fn is_stale(&self, exchange: &ExchangeId, now: DateTime<Utc>) -> bool {
@@ -588,6 +980,15 @@ impl OrderKey {
     }
 }
 
+impl OrderLookupKey {
+    fn new(exchange: ExchangeId, id: impl AsRef<str>) -> Self {
+        Self {
+            exchange,
+            id: id.as_ref().to_string(),
+        }
+    }
+}
+
 impl OrderSnapshot {
     fn from_order_state(state: OrderState) -> Self {
         Self {
@@ -601,6 +1002,20 @@ impl OrderSnapshot {
             filled_quantity: state.filled_quantity,
             updated_at: state.updated_at,
         }
+    }
+}
+
+pub fn private_order_event_kind(status: OrderCommandStatus) -> PrivateOrderEventKind {
+    match status {
+        OrderCommandStatus::Planned => PrivateOrderEventKind::Ack,
+        OrderCommandStatus::Submitted => PrivateOrderEventKind::New,
+        OrderCommandStatus::Accepted => PrivateOrderEventKind::New,
+        OrderCommandStatus::PartiallyFilled => PrivateOrderEventKind::PartialFill,
+        OrderCommandStatus::Filled => PrivateOrderEventKind::Fill,
+        OrderCommandStatus::CancelRequested => PrivateOrderEventKind::Cancel,
+        OrderCommandStatus::Cancelled => PrivateOrderEventKind::Cancel,
+        OrderCommandStatus::Rejected => PrivateOrderEventKind::Reject,
+        OrderCommandStatus::Failed => PrivateOrderEventKind::Reject,
     }
 }
 
@@ -1215,7 +1630,33 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fill_should_not_create_open_order_snapshot() {
+    fn partial_fill_should_keep_order_open_and_update_progress_by_exchange_order_id() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::default();
+
+        let mut order = ws_order(now, OrderStatus::Open);
+        order.filled = 0.0;
+        let order_event =
+            PrivateEvent::from_ws_message(ExchangeId::Binance, WsMessage::Order(order), now)
+                .expect("order should map to private event");
+        state.apply_private_event(order_event);
+
+        let fill = FillEvent {
+            quantity: 0.04,
+            client_order_id: None,
+            exchange_order_id: Some("exchange-1".to_string()),
+            ..FillEvent::from_ws_trade(ExchangeId::Binance, ws_trade(now))
+        };
+        state.apply_private_event(PrivateEvent::fill(fill, now));
+
+        let order = state.open_orders().first().copied().expect("open order");
+        assert_eq!(order.status, OrderCommandStatus::PartiallyFilled);
+        assert_eq!(order.filled_quantity, 0.04);
+        assert_eq!(state.unmatched_private_events().len(), 0);
+    }
+
+    #[test]
+    fn unknown_fill_should_not_create_open_order_snapshot_and_should_queue_reconcile() {
         let now = Utc::now();
         let mut state = AccountSyncState::default();
 
@@ -1228,6 +1669,126 @@ mod tests {
         state.apply_private_event(fill_event);
 
         assert!(state.open_orders().is_empty());
+        assert_eq!(state.unmatched_private_events().len(), 1);
+        assert_eq!(state.reconcile_queue().len(), 1);
+        assert!(matches!(
+            state.reconcile_queue()[0].trigger,
+            ReconcileTrigger::UnknownOrderEvent { .. }
+        ));
+        assert_eq!(state.audit_events().len(), 1);
+    }
+
+    #[test]
+    fn terminal_unknown_order_event_should_enter_unmatched_reconcile_queue() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::default();
+
+        state.apply_private_event(PrivateEvent::order(
+            OrderState {
+                exchange: ExchangeId::Binance,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+                client_order_id: Some("unknown-client".to_string()),
+                exchange_order_id: Some("unknown-exchange".to_string()),
+                side: OrderSide::Buy,
+                position_side: PositionSide::Net,
+                order_type: OrderType::Limit,
+                quantity: 0.01,
+                price: Some(50_000.0),
+                filled_quantity: 0.01,
+                average_fill_price: Some(50_000.0),
+                time_in_force: TimeInForce::Ioc,
+                reduce_only: false,
+                status: OrderCommandStatus::Filled,
+                updated_at: now,
+            },
+            now,
+        ));
+
+        assert!(state.open_orders().is_empty());
+        assert_eq!(state.unmatched_private_events().len(), 1);
+        assert_eq!(state.reconcile_queue().len(), 1);
+        assert!(matches!(
+            state.reconcile_queue()[0].trigger,
+            ReconcileTrigger::UnknownOrderEvent { .. }
+        ));
+    }
+
+    #[test]
+    fn private_stream_lag_should_cooldown_or_block_live_orders() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::new(AccountSyncConfig {
+            private_stream_lag_cooldown_ms: 1_000,
+            private_stream_lag_block_ms: 5_000,
+            ..AccountSyncConfig::default()
+        });
+
+        state.apply_event(PrivateStreamEvent::Heartbeat {
+            exchange: ExchangeId::Binance,
+            received_at: now - chrono::Duration::milliseconds(2_000),
+        });
+        let cooldown = state.live_order_gate(&ExchangeId::Binance, now);
+        assert_eq!(
+            cooldown.action,
+            PrivateStreamHealthAction::CooldownLiveOrders
+        );
+        assert!(cooldown.requires_reconcile);
+
+        state.apply_event(PrivateStreamEvent::Heartbeat {
+            exchange: ExchangeId::Binance,
+            received_at: now - chrono::Duration::milliseconds(6_000),
+        });
+        let block = state.live_order_gate(&ExchangeId::Binance, now);
+        assert_eq!(block.action, PrivateStreamHealthAction::BlockLiveOrders);
+        assert!(block.requires_reconcile);
+        assert!(state.reconcile_queue().len() >= 2);
+    }
+
+    #[test]
+    fn disconnected_private_stream_should_block_live_orders() {
+        let now = Utc::now();
+        let mut state = AccountSyncState::default();
+        state.apply_private_event(PrivateEvent::new(
+            ExchangeId::Binance,
+            PrivateEventKind::StreamDisconnected {
+                reason: Some("socket closed".to_string()),
+                disconnected_at: now,
+            },
+            now,
+        ));
+
+        let decision = state.live_order_gate(&ExchangeId::Binance, now);
+
+        assert_eq!(decision.action, PrivateStreamHealthAction::BlockLiveOrders);
+        assert!(decision.requires_reconcile);
+        assert!(matches!(
+            state.reconcile_queue()[0].trigger,
+            ReconcileTrigger::StreamDisconnected { .. }
+        ));
+    }
+
+    #[test]
+    fn private_order_event_kind_should_cover_required_lifecycle_states() {
+        assert_eq!(
+            private_order_event_kind(OrderCommandStatus::Accepted),
+            PrivateOrderEventKind::New
+        );
+        assert_eq!(
+            private_order_event_kind(OrderCommandStatus::PartiallyFilled),
+            PrivateOrderEventKind::PartialFill
+        );
+        assert_eq!(
+            private_order_event_kind(OrderCommandStatus::Filled),
+            PrivateOrderEventKind::Fill
+        );
+        assert_eq!(
+            private_order_event_kind(OrderCommandStatus::Cancelled),
+            PrivateOrderEventKind::Cancel
+        );
+        assert_eq!(
+            private_order_event_kind(OrderCommandStatus::Rejected),
+            PrivateOrderEventKind::Reject
+        );
     }
 
     #[test]
@@ -1262,6 +1823,7 @@ mod tests {
             quantity_tolerance: 0.001,
             orphan_tolerance: 0.01,
             stale_after_ms: 10_000,
+            ..AccountSyncConfig::default()
         });
 
         state.apply_event(PrivateStreamEvent::PositionUpdate(position(0.05, now)));
@@ -1289,6 +1851,7 @@ mod tests {
             quantity_tolerance: 0.001,
             orphan_tolerance: 0.01,
             stale_after_ms: 10_000,
+            ..AccountSyncConfig::default()
         });
 
         state.apply_event(PrivateStreamEvent::PositionUpdate(position(0.05, now)));
@@ -1432,6 +1995,7 @@ mod tests {
             quantity_tolerance: 0.001,
             orphan_tolerance: 0.01,
             stale_after_ms: 5_000,
+            ..AccountSyncConfig::default()
         });
 
         state.apply_event(PrivateStreamEvent::Heartbeat {
@@ -1449,6 +2013,7 @@ mod tests {
             quantity_tolerance: 0.001,
             orphan_tolerance: 0.01,
             stale_after_ms: 5_000,
+            ..AccountSyncConfig::default()
         });
 
         state.apply_private_event(PrivateEvent::new(
@@ -1479,6 +2044,7 @@ mod tests {
             quantity_tolerance: 0.001,
             orphan_tolerance: 0.01,
             stale_after_ms: 5_000,
+            ..AccountSyncConfig::default()
         });
 
         state.apply_private_event(PrivateEvent::order(
@@ -1533,6 +2099,7 @@ mod tests {
             quantity_tolerance: 0.001,
             orphan_tolerance: 0.01,
             stale_after_ms: 10_000,
+            ..AccountSyncConfig::default()
         });
 
         let report = state.reconcile_position(

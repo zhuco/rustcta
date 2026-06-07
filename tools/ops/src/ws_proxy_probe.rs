@@ -22,6 +22,8 @@ use url::Url;
 pub struct WsProxyProbeArgs {
     #[arg(long, default_value = "all")]
     pub exchange: String,
+    #[arg(long, default_value = "unknown")]
+    pub region: String,
     #[arg(long, default_value_t = 12000)]
     pub timeout_ms: u64,
     #[arg(long, default_value_t = 1)]
@@ -35,10 +37,19 @@ pub async fn run_ws_proxy_probe(args: WsProxyProbeArgs) -> Result<Vec<String>> {
     let mut lines = Vec::new();
 
     for case in cases {
+        let region = args.region.trim();
+        let exchange = case.exchange_name();
+        let endpoint = case.endpoint_kind();
         match probe_case(&case, timeout_duration, args.frames.max(1)).await {
-            Ok(summary) => lines.push(format!("OK   {:<18} {}", case.name, summary)),
+            Ok(summary) => lines.push(format!(
+                "OK   {:<18} region={} exchange={} endpoint={} {}",
+                case.name, region, exchange, endpoint, summary
+            )),
             Err(error) => {
-                lines.push(format!("FAIL {:<18} {}", case.name, error));
+                lines.push(format!(
+                    "FAIL {:<18} region={} exchange={} endpoint={} {}",
+                    case.name, region, exchange, endpoint, error
+                ));
                 failures.push(case.name);
             }
         }
@@ -255,6 +266,19 @@ struct ProbeCase {
     name: &'static str,
     url: String,
     subscribe_messages: Vec<String>,
+}
+
+impl ProbeCase {
+    fn exchange_name(&self) -> &str {
+        self.name
+            .split_once('-')
+            .map(|(exchange, _)| exchange)
+            .unwrap_or(self.name)
+    }
+
+    fn endpoint_kind(&self) -> &'static str {
+        "public_ws"
+    }
 }
 
 async fn selected_cases(filter: &str) -> Result<Vec<ProbeCase>> {
@@ -503,5 +527,22 @@ fn summarize_binary(bytes: Vec<u8>) -> String {
                 .join(" ");
             format!("binary {} bytes [{}]", bytes.len(), hex)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_case_should_expose_region_matrix_dimensions() {
+        let case = ProbeCase {
+            name: "binance-spot",
+            url: "wss://example.test".to_string(),
+            subscribe_messages: Vec::new(),
+        };
+
+        assert_eq!(case.exchange_name(), "binance");
+        assert_eq!(case.endpoint_kind(), "public_ws");
     }
 }

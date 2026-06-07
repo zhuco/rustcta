@@ -8,6 +8,7 @@ description = "Append-only event, order, fill, account, and audit ledger contrac
 [dependencies]
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+rustcta-execution-api = { path = "../rustcta-execution-api" }
 rustcta-types = { path = "../rustcta-types" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -177,8 +177,23 @@ impl LocalGateway for MockExchangeGateway {
             GatewayRequestPayload::PlaceOrder(request) => {
                 GatewayResponsePayload::PlaceOrder(self.handle_place_order(request)?)
             }
+            GatewayRequestPayload::PlaceQuoteMarketOrder(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.place_quote_market_order".to_string(),
+                });
+            }
             GatewayRequestPayload::CancelOrder(request) => {
                 GatewayResponsePayload::CancelOrder(self.handle_cancel_order(request)?)
+            }
+            GatewayRequestPayload::AmendOrder(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.amend_order".to_string(),
+                });
+            }
+            GatewayRequestPayload::PlaceOrderList(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.place_order_list".to_string(),
+                });
             }
             GatewayRequestPayload::BatchPlaceOrders(request) => {
                 GatewayResponsePayload::BatchPlaceOrders(self.handle_batch_place_orders(request)?)

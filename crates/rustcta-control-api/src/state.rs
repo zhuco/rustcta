@@ -129,6 +129,7 @@ impl ControlApiState {
             recent_opportunities: Default::default(),
             opportunities: Default::default(),
             symbols: Default::default(),
+            strategy_snapshots: Vec::new(),
         })
     }
 
@@ -156,6 +157,7 @@ impl ControlApiState {
             recent_opportunities: Default::default(),
             opportunities: Default::default(),
             symbols: Default::default(),
+            strategy_snapshots: Vec::new(),
         }
     }
 
@@ -681,6 +683,7 @@ impl From<SupervisorSnapshot> for ControlApiStateSnapshot {
             recent_opportunities: Default::default(),
             opportunities: Default::default(),
             symbols: Default::default(),
+            strategy_snapshots: Vec::new(),
         }
     }
 }

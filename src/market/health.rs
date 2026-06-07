@@ -26,6 +26,10 @@ pub struct RouteHealth {
     pub rate_limit_hits: u64,
     pub latency_ms_p50: Option<f64>,
     pub latency_ms_p95: Option<f64>,
+    pub latency_ms_p99: Option<f64>,
+    pub latency_ms_p999: Option<f64>,
+    pub latency_ms_max: Option<f64>,
+    pub latency_sample_count: usize,
     pub degraded_reason: Option<String>,
 }
 
@@ -45,6 +49,10 @@ impl RouteHealth {
             rate_limit_hits: 0,
             latency_ms_p50: None,
             latency_ms_p95: None,
+            latency_ms_p99: None,
+            latency_ms_p999: None,
+            latency_ms_max: None,
+            latency_sample_count: 0,
             degraded_reason: None,
         }
     }
@@ -80,6 +88,23 @@ impl RouteHealth {
     pub fn allows_closes(&self) -> bool {
         self.status.allows_closes()
     }
+
+    pub fn set_latency_summary(
+        &mut self,
+        sample_count: usize,
+        p50_ms: Option<f64>,
+        p95_ms: Option<f64>,
+        p99_ms: Option<f64>,
+        p999_ms: Option<f64>,
+        max_ms: Option<f64>,
+    ) {
+        self.latency_sample_count = sample_count;
+        self.latency_ms_p50 = p50_ms;
+        self.latency_ms_p95 = p95_ms;
+        self.latency_ms_p99 = p99_ms;
+        self.latency_ms_p999 = p999_ms;
+        self.latency_ms_max = max_ms;
+    }
 }
 
 #[cfg(test)]
@@ -94,5 +119,25 @@ mod tests {
         assert_eq!(health.status, RouteStatus::Degraded);
         assert!(!health.allows_new_entries());
         assert!(health.allows_closes());
+    }
+
+    #[test]
+    fn route_health_should_expose_tail_latency_percentiles() {
+        let mut health = RouteHealth::new(ExchangeId::Binance, RouteType::MarketWs, "wss://x");
+
+        health.set_latency_summary(
+            1_000,
+            Some(40.0),
+            Some(55.0),
+            Some(75.0),
+            Some(120.0),
+            Some(140.0),
+        );
+
+        assert_eq!(health.latency_sample_count, 1_000);
+        assert_eq!(health.latency_ms_p95, Some(55.0));
+        assert_eq!(health.latency_ms_p99, Some(75.0));
+        assert_eq!(health.latency_ms_p999, Some(120.0));
+        assert_eq!(health.latency_ms_max, Some(140.0));
     }
 }

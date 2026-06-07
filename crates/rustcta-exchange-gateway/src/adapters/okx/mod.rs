@@ -1,12 +1,13 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
-    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -134,9 +135,14 @@ impl ExchangeClient for OkxGatewayAdapter {
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_available();
         capabilities.supports_fees = self.config.private_rest_available();
+        capabilities.supports_place_order = self.config.private_rest_available();
+        capabilities.supports_cancel_order = self.config.private_rest_available();
         capabilities.supports_query_order = self.config.private_rest_available();
         capabilities.supports_open_orders = self.config.private_rest_available();
         capabilities.supports_recent_fills = self.config.private_rest_available();
+        capabilities.supports_cancel_all_orders = self.config.private_rest_available();
+        capabilities.supports_quote_market_order = self.config.private_rest_available();
+        capabilities.supports_amend_order = self.config.private_rest_available();
         capabilities.supports_client_order_id = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
@@ -152,6 +158,8 @@ impl ExchangeClient for OkxGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(400);
+        capabilities.order_book =
+            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(400));
         capabilities.max_recent_fill_limit = Some(100);
         capabilities
     }
@@ -187,16 +195,37 @@ impl ExchangeClient for OkxGatewayAdapter {
 
     async fn place_order(
         &self,
-        _request: PlaceOrderRequest,
+        request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.unsupported_private("okx.place_order")
+        self.place_order_private_rest(request).await
+    }
+
+    async fn place_quote_market_order(
+        &self,
+        request: QuoteMarketOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        self.place_quote_market_order_private_rest(request).await
     }
 
     async fn cancel_order(
         &self,
-        _request: CancelOrderRequest,
+        request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.unsupported_private("okx.cancel_order")
+        self.cancel_order_private_rest(request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        self.amend_order_private_rest(request).await
+    }
+
+    async fn cancel_all_orders(
+        &self,
+        request: rustcta_exchange_api::CancelAllOrdersRequest,
+    ) -> ExchangeApiResult<rustcta_exchange_api::CancelAllOrdersResponse> {
+        self.cancel_all_orders_private_rest(request).await
     }
 
     async fn query_order(

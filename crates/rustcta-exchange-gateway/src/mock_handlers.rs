@@ -5,9 +5,9 @@ use rustcta_exchange_api::{
     CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeClientCapabilities,
     FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
     OrderBookResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
-    RecentFillsResponse, ResponseMetadata, SymbolRulesRequest, SymbolRulesResponse,
-    EXCHANGE_API_SCHEMA_VERSION,
+    PositionsResponse, PrivateOrderStreamEventKind, PrivateStreamCapabilities, PrivateStreamKind,
+    QueryOrderRequest, QueryOrderResponse, RecentFillsRequest, RecentFillsResponse,
+    ResponseMetadata, SymbolRulesRequest, SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{ExchangeId, OrderBookSnapshot, OrderStatus};
 
@@ -515,7 +515,7 @@ impl MockExchangeGateway {
                 market_type: subscription.symbol.market_type,
                 canonical_symbol: subscription.symbol.canonical_symbol,
                 exchange_symbol: subscription.symbol.exchange_symbol,
-                kind: subscription.kind,
+                kind: subscription.kind.clone(),
                 subscribed_at: now,
             };
             state.subscriptions.push(ack.clone());
@@ -542,7 +542,8 @@ impl MockExchangeGateway {
                 exchange: subscription.exchange,
                 market_type: subscription.market_type,
                 account_id: subscription.account_id,
-                kind: subscription.kind,
+                kind: subscription.kind.clone(),
+                capabilities: Some(private_capabilities_for_kind(&subscription.kind)),
                 subscribed_at: now,
             };
             state.private_subscriptions.push(ack.clone());
@@ -554,4 +555,53 @@ impl MockExchangeGateway {
             subscriptions: acks,
         })
     }
+}
+
+fn private_capabilities_for_kind(kind: &PrivateStreamKind) -> PrivateStreamCapabilities {
+    let mut capabilities = PrivateStreamCapabilities::unsupported(EXCHANGE_API_SCHEMA_VERSION);
+    capabilities.supports_client_order_id = true;
+    capabilities.supports_exchange_order_id = true;
+    match kind {
+        PrivateStreamKind::Orders => {
+            capabilities.supports_orders = true;
+            capabilities.order_event_kinds = vec![
+                PrivateOrderStreamEventKind::Ack,
+                PrivateOrderStreamEventKind::New,
+                PrivateOrderStreamEventKind::PartialFill,
+                PrivateOrderStreamEventKind::Fill,
+                PrivateOrderStreamEventKind::Cancel,
+                PrivateOrderStreamEventKind::Reject,
+                PrivateOrderStreamEventKind::Expired,
+            ];
+        }
+        PrivateStreamKind::Fills => {
+            capabilities.supports_fills = true;
+            capabilities.order_event_kinds = vec![PrivateOrderStreamEventKind::Fill];
+        }
+        PrivateStreamKind::Balances => {
+            capabilities.supports_balances = true;
+            capabilities.order_event_kinds = vec![PrivateOrderStreamEventKind::BalanceUpdate];
+        }
+        PrivateStreamKind::Positions => {
+            capabilities.supports_positions = true;
+        }
+        PrivateStreamKind::Account => {
+            capabilities.supports_orders = true;
+            capabilities.supports_fills = true;
+            capabilities.supports_balances = true;
+            capabilities.supports_positions = true;
+            capabilities.supports_account = true;
+            capabilities.order_event_kinds = vec![
+                PrivateOrderStreamEventKind::Ack,
+                PrivateOrderStreamEventKind::New,
+                PrivateOrderStreamEventKind::PartialFill,
+                PrivateOrderStreamEventKind::Fill,
+                PrivateOrderStreamEventKind::Cancel,
+                PrivateOrderStreamEventKind::Reject,
+                PrivateOrderStreamEventKind::Expired,
+                PrivateOrderStreamEventKind::BalanceUpdate,
+            ];
+        }
+    }
+    capabilities
 }

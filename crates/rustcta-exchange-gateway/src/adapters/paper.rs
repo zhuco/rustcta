@@ -205,6 +205,27 @@ impl ExchangeClient for PaperGatewayAdapter {
         capabilities.supports_private_rest = true;
         capabilities.supports_public_streams = true;
         capabilities.supports_private_streams = true;
+        capabilities.private_stream_capabilities =
+            Some(rustcta_exchange_api::PrivateStreamCapabilities {
+                schema_version: rustcta_exchange_api::EXCHANGE_API_SCHEMA_VERSION,
+                supports_orders: true,
+                supports_fills: true,
+                supports_balances: true,
+                supports_positions: false,
+                supports_account: true,
+                order_event_kinds: vec![
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::Ack,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::New,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::PartialFill,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::Fill,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::Cancel,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::Reject,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::Expired,
+                    rustcta_exchange_api::PrivateOrderStreamEventKind::BalanceUpdate,
+                ],
+                supports_client_order_id: true,
+                supports_exchange_order_id: true,
+            });
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = true;
         capabilities.supports_place_order = true;
@@ -225,6 +246,8 @@ impl ExchangeClient for PaperGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(200);
+        capabilities.order_book =
+            rustcta_exchange_api::OrderBookCapability::strict_delta(Some(200));
         capabilities
     }
 

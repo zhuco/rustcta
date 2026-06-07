@@ -293,6 +293,11 @@ if [[ ! -f "$workflow_file" ]]; then
   fail "missing focused non-gateway workflow: $workflow_file"
 fi
 
+full_migration_workflow_file=".github/workflows/industrial-migration-gates.yml"
+if [[ ! -f "$full_migration_workflow_file" ]]; then
+  fail "missing full industrial migration gate workflow: $full_migration_workflow_file"
+fi
+
 required_workflow_entries=(
   "apps/cli/tests/cli_contract_smoke.rs"
   "apps/supervisor/tests/cli_contract.rs"
@@ -315,6 +320,23 @@ required_workflow_entries=(
 for entry in "${required_workflow_entries[@]}"; do
   if ! grep -Fq -- "$entry" "$workflow_file"; then
     fail "focused non-gateway workflow is missing required entry: $entry"
+  fi
+done
+
+required_full_migration_workflow_entries=(
+  "cargo fmt --check"
+  "cargo test --all-features"
+  "cargo clippy --all-targets --all-features"
+  "scripts/check_industrial_boundaries.sh"
+  "cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin"
+  "cargo run -q -p rustcta-tools-ops -- legacy-bin-plan"
+  "cd web-ui/dioxus"
+  "cargo build --release"
+)
+
+for entry in "${required_full_migration_workflow_entries[@]}"; do
+  if ! grep -Fq -- "$entry" "$full_migration_workflow_file"; then
+    fail "full industrial migration workflow is missing required entry: $entry"
   fi
 done
 
@@ -344,6 +366,62 @@ require_file_contains \
   apps/supervisor/tests/cli_contract.rs \
   "spot_spot_live_dry_run_config_should_remain_manual_until_spec_safety_is_tighter" \
   "supervisor app contract test must pin spot_spot live dry-run safety"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  "command_tree_help_should_cover_operator_surfaces" \
+  "industrial CLI smoke must cover command tree help"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  '"migration"' \
+  "industrial CLI smoke must include migration help"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  '"ledger"' \
+  "industrial CLI smoke must include ledger help"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  '"supervisor"' \
+  "industrial CLI smoke must include supervisor help"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  '"ops"' \
+  "industrial CLI smoke must include ops help"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  "cross_arb_preflight_bridge_should_emit_offline_plan_without_network_paths" \
+  "industrial CLI smoke must prove cross-arb preflight bridge stays offline"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  '"network_access"' \
+  "industrial CLI preflight smoke must assert network boundary"
+require_file_contains \
+  apps/cli/tests/cli_contract_smoke.rs \
+  '"live_order_access"' \
+  "industrial CLI preflight smoke must assert live order boundary"
+require_file_contains \
+  apps/cli/src/main.rs \
+  "network_access: \"disabled\"" \
+  "industrial CLI preflight bridge must not run live network paths"
+require_file_contains \
+  apps/cli/src/main.rs \
+  "live_order_access: \"disabled\"" \
+  "industrial CLI preflight bridge must not run live order paths"
+require_file_contains \
+  apps/cli/src/main.rs \
+  "legacy_cross_arb_preflight_args" \
+  "industrial CLI preflight bridge must preserve legacy argument mapping"
+require_file_contains \
+  docs/industrial_cli_command_tree.md \
+  "rustcta-industrial cross-arb preflight" \
+  "industrial CLI command tree doc must describe the preflight bridge"
+require_file_contains \
+  docs/industrial_cli_command_tree.md \
+  "network_access=disabled" \
+  "industrial CLI command tree doc must document offline preflight boundary"
+require_file_contains \
+  docs/industrial_cli_command_tree.md \
+  "migration verify-legacy-bins" \
+  "industrial CLI command tree doc must document legacy bin classification checks"
 require_file_contains \
   apps/cli/tests/cli_contract_smoke.rs \
   "supervisor_readiness_should_report_checked_in_specs_in_run_order" \
@@ -536,8 +614,8 @@ if rg -n "$control_api_secret_patterns" crates/rustcta-control-api --glob '!**/s
   fail "control API crate must not expose or persist raw exchange secrets"
 fi
 
-if rg -n "$control_api_secret_patterns" crates/rustcta-control-api/src/lib.rs \
-  | rg -v -F 'assert!(!text.contains'; then
+if sed -n '1,/^mod tests /p' crates/rustcta-control-api/src/lib.rs \
+  | rg -n "$control_api_secret_patterns"; then
   fail "control API crate must not expose or persist raw exchange secrets"
 fi
 
@@ -575,6 +653,22 @@ fi
 
 if [[ -e tools ]]; then
   cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+  cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- \
+    migration verify-legacy-bins --src-bin-dir src/bin
+
+  legacy_bin_plan_json="$(mktemp)"
+  cargo run -q -p rustcta-tools-ops -- legacy-bin-plan > "$legacy_bin_plan_json"
+  if ! grep -Fq '"compatibility"' "$legacy_bin_plan_json" \
+    || ! grep -Fq '"new_command"' "$legacy_bin_plan_json" \
+    || ! grep -Fq '"retirement_milestone"' "$legacy_bin_plan_json" \
+    || ! grep -Fq '"keep_wrapper"' "$legacy_bin_plan_json" \
+    || ! grep -Fq '"warn"' "$legacy_bin_plan_json" \
+    || ! grep -Fq '"alias"' "$legacy_bin_plan_json" \
+    || ! grep -Fq '"remove_later"' "$legacy_bin_plan_json"; then
+    rm -f "$legacy_bin_plan_json"
+    fail "legacy bin migration plan must expose the compatibility retirement matrix"
+  fi
+  rm -f "$legacy_bin_plan_json"
 
   if rg -n 'src/exchanges/|crate::exchanges::|rustcta_exchange_gateway::[[:space:]]*adapters\b|rustcta_exchange_gateway::[[:space:]]*\{[^}]*\badapters\b' \
     tools \

@@ -322,3 +322,112 @@ fn gateway_request_should_serialize_batch_and_cancel_all_payloads() {
         "BTCUSDT"
     );
 }
+
+#[test]
+fn gateway_request_should_serialize_advanced_spot_order_payloads() {
+    let now = DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let quote = GatewayRequest::PlaceQuoteMarketOrder(QuoteMarketOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context(now),
+        symbol: symbol(now),
+        client_order_id: Some("cli-quote".to_string()),
+        side: OrderSide::Buy,
+        quote_quantity: "25.50".to_string(),
+    });
+    let amend = GatewayRequest::AmendOrder(AmendOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context(now),
+        symbol: symbol(now),
+        client_order_id: None,
+        exchange_order_id: Some("ex-1".to_string()),
+        new_client_order_id: Some("cli-amend".to_string()),
+        new_quantity: "0.00500000".to_string(),
+    });
+    let order_list = GatewayRequest::PlaceOrderList(OrderListRequest::Oco {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context(now),
+        symbol: symbol(now),
+        list_client_order_id: Some("cli-list".to_string()),
+        side: OrderSide::Sell,
+        quantity: "0.01000000".to_string(),
+        above: OrderListConditionalLeg {
+            order_type: OrderListLegType::LimitMaker,
+            price: Some("55000.00".to_string()),
+            stop_price: None,
+            time_in_force: None,
+            client_order_id: Some("cli-above".to_string()),
+        },
+        below: OrderListConditionalLeg {
+            order_type: OrderListLegType::StopLossLimit,
+            price: Some("45000.00".to_string()),
+            stop_price: Some("45500.00".to_string()),
+            time_in_force: Some(TimeInForce::GTC),
+            client_order_id: Some("cli-below".to_string()),
+        },
+    });
+
+    let quote = serde_json::to_value(quote).unwrap();
+    let amend = serde_json::to_value(amend).unwrap();
+    let order_list = serde_json::to_value(order_list).unwrap();
+
+    assert_eq!(quote["PlaceQuoteMarketOrder"]["quote_quantity"], "25.50");
+    assert_eq!(amend["AmendOrder"]["new_quantity"], "0.00500000");
+    assert_eq!(amend["AmendOrder"]["exchange_order_id"], "ex-1");
+    assert_eq!(order_list["PlaceOrderList"]["Oco"]["schema_version"], 1);
+    assert_eq!(
+        order_list["PlaceOrderList"]["Oco"]["above"]["order_type"],
+        "LimitMaker"
+    );
+
+    let capabilities = ExchangeClientCapabilities::new(exchange_id());
+    assert!(!capabilities.supports_quote_market_order);
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(capabilities.private_stream_capabilities.is_some());
+    assert_eq!(
+        capabilities.order_book,
+        OrderBookCapability::snapshot_only(None)
+    );
+}
+
+#[test]
+fn capabilities_should_default_advanced_spot_flags_for_legacy_payloads() {
+    let value = serde_json::json!({
+        "schema_version": EXCHANGE_API_SCHEMA_VERSION,
+        "exchange": "binance",
+        "market_types": ["spot"],
+        "supports_public_rest": true,
+        "supports_private_rest": true,
+        "supports_public_streams": false,
+        "supports_private_streams": false,
+        "supports_symbol_rules": true,
+        "supports_order_book_snapshot": true,
+        "supports_balances": true,
+        "supports_positions": false,
+        "supports_fees": true,
+        "supports_place_order": false,
+        "supports_cancel_order": false,
+        "supports_query_order": true,
+        "supports_open_orders": true,
+        "supports_recent_fills": true,
+        "supports_batch_place_order": false,
+        "supports_batch_cancel_order": false,
+        "supports_cancel_all_orders": false,
+        "supports_client_order_id": true,
+        "supports_reduce_only": false,
+        "supports_post_only": true,
+        "supports_time_in_force": ["gtc"],
+        "supports_order_types": ["limit"],
+        "max_order_book_depth": 20,
+        "max_recent_fill_limit": 1000
+    });
+
+    let capabilities: ExchangeClientCapabilities = serde_json::from_value(value).unwrap();
+
+    assert!(!capabilities.supports_quote_market_order);
+    assert!(!capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+    assert!(capabilities.private_stream_capabilities.is_none());
+}

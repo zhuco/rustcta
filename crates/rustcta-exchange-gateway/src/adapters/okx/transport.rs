@@ -98,6 +98,43 @@ impl OkxRest {
             })?;
         parse_response(self.exchange_id.clone(), response).await
     }
+
+    pub async fn send_signed_post(&self, endpoint: &str, body: &Value) -> ExchangeApiResult<Value> {
+        let credentials = self
+            .credentials
+            .as_ref()
+            .ok_or(ExchangeApiError::Unsupported {
+                operation: "okx.private_rest",
+            })?;
+        let url = format!("{}{}", self.rest_base_url.trim_end_matches('/'), endpoint);
+        let body_text =
+            serde_json::to_string(body).map_err(|error| ExchangeApiError::Serialization {
+                message: error.to_string(),
+            })?;
+        let timestamp = okx_timestamp();
+        let signature = okx_signature(
+            &credentials.api_secret,
+            &timestamp,
+            "POST",
+            endpoint,
+            &body_text,
+        );
+        let response = self
+            .http
+            .post(url)
+            .header("OK-ACCESS-KEY", &credentials.api_key)
+            .header("OK-ACCESS-SIGN", signature)
+            .header("OK-ACCESS-TIMESTAMP", timestamp)
+            .header("OK-ACCESS-PASSPHRASE", &credentials.passphrase)
+            .header("Content-Type", "application/json")
+            .body(body_text)
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
 }
 
 async fn parse_response(

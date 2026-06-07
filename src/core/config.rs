@@ -172,11 +172,14 @@ impl ApiKeys {
 }
 
 fn load_dotenv_lenient() {
-    if dotenv::dotenv().is_ok() {
-        return;
+    dotenv::dotenv().ok();
+    for path in [".env", "data/control_api/exchange_api_keys.env"] {
+        load_dotenv_file_lenient(path);
     }
+}
 
-    let Ok(raw) = std::fs::read_to_string(".env") else {
+fn load_dotenv_file_lenient(path: &str) {
+    let Ok(raw) = std::fs::read_to_string(path) else {
         return;
     };
 

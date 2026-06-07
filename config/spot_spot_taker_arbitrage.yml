@@ -96,6 +96,21 @@ taker_fee_bps_override: 10.0
 slippage_bps: 3.0
 safety_buffer_bps: 2.0
 
+venue_selection:
+  enabled: true
+  capital_cost_bps: 0.0
+  inventory_rebalance_cost_bps: 0.0
+  transfer_cost_bps: 0.0
+  transfer_delay_penalty_bps: 0.0
+  slow_venue_observe_only: false
+  slow_venue_min_net_spread_extra_bps: 20.0
+  venue_overrides:
+    gateio:
+      latency_penalty_bps: 20.0
+      min_net_spread_extra_bps: 20.0
+      transfer_delay_seconds: 1800
+      observe_only: false
+
 stale_book_ms: 10000
 max_book_latency_ms: 10000
 min_depth_notional: 5.0

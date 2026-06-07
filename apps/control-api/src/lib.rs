@@ -1,10 +1,12 @@
 use anyhow::Result;
+use axum::body::Body;
+use axum::http::{header, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
 use axum::Router;
 use rustcta_control_api::{router, ControlApiState};
 use rustcta_event_ledger::JsonlLedger;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use tower_http::services::{ServeDir, ServeFile};
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18080";
 const DEFAULT_TENANT_ID: &str = "local";
@@ -80,14 +82,21 @@ impl ControlApiAppConfig {
     }
 
     pub fn build_state(&self) -> Result<ControlApiState> {
-        let mut state = if let Some(path) = &self.legacy_snapshot_path {
-            let raw = std::fs::read_to_string(path)?;
-            let snapshot = serde_json::from_str::<serde_json::Value>(&raw)?;
-            ControlApiState::from_legacy_dashboard_snapshot(&snapshot)
-                .with_legacy_dashboard_snapshot_path(path.clone())
-        } else {
-            ControlApiState::empty_local()
-        };
+        let mut state = self
+            .legacy_snapshot_path
+            .as_ref()
+            .and_then(|path| {
+                let raw = std::fs::read_to_string(path).ok()?;
+                let snapshot = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+                Some(
+                    ControlApiState::from_legacy_dashboard_snapshot(&snapshot)
+                        .with_legacy_dashboard_snapshot_path(path.clone()),
+                )
+            })
+            .unwrap_or_else(ControlApiState::empty_local);
+        if let Some(path) = &self.legacy_snapshot_path {
+            state = state.with_legacy_dashboard_snapshot_path(path.clone());
+        }
 
         if let Some(agent) = &self.local_agent {
             state = state.with_local_agent(
@@ -121,9 +130,11 @@ impl ControlApiAppConfig {
         let state = self.build_state()?;
         let app = match &self.static_dir {
             Some(static_dir) => {
-                let index = static_dir.join("index.html");
-                router(state)
-                    .fallback_service(ServeDir::new(static_dir).fallback(ServeFile::new(index)))
+                let static_dir = static_dir.clone();
+                router(state).fallback(move |uri: Uri| {
+                    let static_dir = static_dir.clone();
+                    async move { serve_static_spa(uri, static_dir).await }
+                })
             }
             None => router(state),
         };
@@ -170,10 +181,72 @@ fn default_agent_capabilities() -> Vec<String> {
     vec!["control-api".to_string(), "supervisor-reader".to_string()]
 }
 
+async fn serve_static_spa(uri: Uri, static_dir: PathBuf) -> Response {
+    let request_path = uri.path();
+    if request_path == "/api" || request_path.starts_with("/api/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let relative = match safe_relative_path(request_path) {
+        Some(relative) => relative,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let candidate = static_dir.join(&relative);
+    let path = if candidate.is_file() {
+        candidate
+    } else if relative.extension().is_none() {
+        static_dir.join("index.html")
+    } else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, content_type_for_path(&path))],
+            Body::from(bytes),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+fn safe_relative_path(request_path: &str) -> Option<PathBuf> {
+    let trimmed = request_path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return Some(PathBuf::from("index.html"));
+    }
+
+    let path = Path::new(trimmed);
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => relative.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(relative)
+}
+
+fn content_type_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("css") => "text/css; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("ico") => "image/x-icon",
+        Some("wasm") => "application/wasm",
+        _ => "application/octet-stream",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
@@ -445,6 +518,248 @@ mod tests {
             value["scanner"]["symbol_coverage"][0]["symbols"][0],
             "BTC/USDT"
         );
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn app_router_should_start_with_missing_followed_files() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-app-missing-files-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let snapshot_path = temp_dir.join("missing-dashboard.json");
+        let registry_path = temp_dir.join("missing-registry.json");
+        let log_path = temp_dir.join("missing-strategy.log");
+
+        let snapshot_path_text = snapshot_path.to_string_lossy().to_string();
+        let registry_path_text = registry_path.to_string_lossy().to_string();
+        let log_path_text = log_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            (
+                "RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH",
+                snapshot_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
+                registry_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_STRATEGY_LOG_PATH",
+                log_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let workspace = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspace")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(workspace.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(workspace.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["agent_count"], 0);
+        assert_eq!(value["strategy_count"], 0);
+
+        let logs = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategy-logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(logs.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["configured"], true);
+        assert_eq!(value["readable"], false);
+        assert!(value["read_error"].is_string());
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn static_hosting_should_serve_spa_without_capturing_api_404s() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-app-static-{}",
+            std::process::id()
+        ));
+        let static_dir = temp_dir.join("dist");
+        std::fs::create_dir_all(&static_dir).unwrap();
+        std::fs::write(static_dir.join("index.html"), "<html>control panel</html>").unwrap();
+        std::fs::write(static_dir.join("main.css"), "body { color: black; }").unwrap();
+
+        let static_dir_text = static_dir.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([(
+            "RUSTCTA_CONTROL_API_STATIC_DIR",
+            static_dir_text.as_str(),
+        )]);
+        let app = config.build_router().unwrap();
+
+        for uri in ["/", "/workspace/cross_arb_live"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let content_type = response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(content_type, "text/html; charset=utf-8");
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(std::str::from_utf8(&body)
+                .unwrap()
+                .contains("control panel"));
+        }
+
+        let css = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/main.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(css.status(), StatusCode::OK);
+        assert_eq!(
+            css.headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "text/css; charset=utf-8"
+        );
+
+        let unknown_api = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/not-a-route")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unknown_api.status(), StatusCode::NOT_FOUND);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn app_router_should_tail_process_logs_from_supervisor_registry_metadata() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-app-process-log-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let registry_path = temp_dir.join("registry.json");
+        let log_path = temp_dir.join("cross-arb.log");
+        std::fs::write(
+            &log_path,
+            [
+                "2026-06-07T12:00:00Z INFO process booted",
+                "2026-06-07T12:00:01Z WARN lag detected",
+                "2026-06-07T12:00:02Z ERROR credential marker should redact",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            &registry_path,
+            serde_json::json!({
+                "schema_version": 1,
+                "captured_at": "2026-06-07T12:00:02Z",
+                "processes": [
+                    {
+                        "schema_version": 1,
+                        "strategy_id": "cross_arb_live",
+                        "strategy_kind": "cross_exchange_arbitrage",
+                        "run_id": "local",
+                        "tenant_id": "local",
+                        "config_path": "config/cross_exchange_arbitrage_usdt.yml",
+                        "status": "Running",
+                        "process_id": 123,
+                        "started_at": "2026-06-07T12:00:00Z",
+                        "last_heartbeat_at": "2026-06-07T12:00:01Z",
+                        "last_snapshot_at": null,
+                        "restart_count": 0,
+                        "last_exit_code": null,
+                        "last_error": null,
+                        "log_path": log_path
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let registry_path_text = registry_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            (
+                "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
+                registry_path_text.as_str(),
+            ),
+            ("RUSTCTA_CONTROL_API_STRATEGY_LOG_TAIL_LINES", "2"),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let process = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/processes/cross_arb_live")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(process.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(process.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["log_configured"], true);
+        assert!(value.get("log_path").is_none());
+
+        let logs = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/processes/cross_arb_live/logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(logs.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["target"], "cross_arb_live");
+        assert_eq!(value["configured"], true);
+        assert_eq!(value["readable"], true);
+        assert_eq!(value["event_count"], 2);
+        assert_eq!(value["events"][1]["message"], "[redacted log line]");
 
         std::fs::remove_dir_all(temp_dir).ok();
     }

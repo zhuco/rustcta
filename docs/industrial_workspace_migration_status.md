@@ -655,10 +655,13 @@ as owned interfaces and edited with explicit coordination.
   depending on the legacy root crate.
 - `apps/cli` now exposes the first legacy one-shot operator command bridge:
   `rustcta-industrial cross-arb preflight`. It preserves the legacy
-  `cross_arb_preflight` flags (`--config`, `--private`/`--private-readonly`,
-  timeout and sample controls) by delegating to the existing compatibility
-  binary through a subprocess, so the CLI app does not gain a dependency on the
-  legacy root crate.
+  `cross_arb_preflight` argument mapping (`--config`,
+  `--private`/`--private-readonly`, timeout and sample controls) as an offline
+  JSON bridge plan with `network_access=disabled` and
+  `live_order_access=disabled`, so the CLI app does not gain a dependency on
+  the legacy root crate or start public/private network checks. Operators still
+  run the legacy `cross_arb_preflight` binary directly when they intentionally
+  need networked read-only preflight checks.
 - `apps/cli` now exposes offline supervisor spec helpers through
   `rustcta-industrial supervisor print-legacy-spec --template <template>` and
   `rustcta-industrial supervisor validate-spec --path <spec.json>`, plus
@@ -704,6 +707,19 @@ as owned interfaces and edited with explicit coordination.
   dashboard snapshot, then performs HTTP assertions for `/api/workspace`,
   `/api/strategies`, `/api/processes`, `/api/processes/:id`, `/api/symbols`,
   `/api/risk`, and `/api/strategy-logs`.
+- `.github/workflows/industrial-migration-gates.yml` adds the Task 10 full
+  migration gate: workspace `cargo fmt --check`, `cargo test --all-features`,
+  `cargo clippy --all-targets --all-features`, legacy bin inventory
+  verification, boundary checks, and a release build for `web-ui/dioxus`.
+- `docs/industrial_migration_final_gates.md` is the final migration gate
+  runbook. It documents the old-command/new-command list, compatibility
+  retirement matrix, local paper end-to-end checklist, and intentionally
+  paused areas.
+- The `rustcta-tools-ops` legacy bin matrix now emits a compatibility
+  retirement decision for every direct `src/bin/*.rs` file: `keep_wrapper`,
+  `warn`, `alias`, or `remove_later`, plus the replacement command and
+  retirement milestone. `scripts/check_industrial_boundaries.sh` fails if this
+  matrix schema or the required decision set disappears.
 - `scripts/check_industrial_boundaries.sh` enforces the first dependency
   boundaries:
   - the focused non-gateway workflow must keep the migrated control-api,
@@ -729,7 +745,8 @@ as owned interfaces and edited with explicit coordination.
   - tools cannot import concrete exchange adapter internals or become
     long-running service/runtime owners
   - legacy `src/bin/*.rs` entrypoints must remain classified in the
-    `rustcta-tools-ops` migration matrix
+    `rustcta-tools-ops` migration matrix, including their compatibility
+    retirement decision, replacement command, and milestone
   - the only allowed temporary legacy-root dependency under the industrial
     workspace is `crates/rustcta-backtest -> rustcta::backtest::runtime`, to be
     retired as backtest implementation modules move into the dedicated crate

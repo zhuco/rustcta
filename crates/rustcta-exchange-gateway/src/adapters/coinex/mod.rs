@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, CancelOrderRequest, CancelOrderResponse, ExchangeApiError,
-    ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse,
-    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
-    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
-    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, RecentFillsRequest,
-    RecentFillsResponse, SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
+    ExchangeApiError, ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest,
+    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
+    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -128,6 +130,44 @@ impl CoinExGatewayAdapter {
             )
             .await
     }
+
+    async fn send_signed_post(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &serde_json::Value,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_signed_post(
+                &self.config.api_key,
+                &self.config.api_secret,
+                endpoint,
+                params,
+                body,
+            )
+            .await
+    }
+
+    async fn send_signed_delete(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &serde_json::Value,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        self.ensure_private_rest(operation)?;
+        self.rest
+            .send_signed_delete(
+                &self.config.api_key,
+                &self.config.api_secret,
+                endpoint,
+                params,
+                body,
+            )
+            .await
+    }
 }
 
 #[async_trait]
@@ -160,6 +200,11 @@ impl ExchangeClient for CoinExGatewayAdapter {
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_enabled();
         capabilities.supports_fees = self.config.private_rest_enabled();
+        capabilities.supports_place_order = self.config.private_rest_enabled();
+        capabilities.supports_cancel_order = self.config.private_rest_enabled();
+        capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
+        capabilities.supports_quote_market_order = self.config.private_rest_enabled();
+        capabilities.supports_amend_order = self.config.private_rest_enabled();
         capabilities.supports_query_order = self.config.private_rest_enabled();
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
@@ -178,6 +223,8 @@ impl ExchangeClient for CoinExGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(50);
+        capabilities.order_book =
+            rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
         capabilities
     }
 
@@ -212,16 +259,37 @@ impl ExchangeClient for CoinExGatewayAdapter {
 
     async fn place_order(
         &self,
-        _request: PlaceOrderRequest,
+        request: PlaceOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.unsupported_private("coinex.place_order")
+        self.place_order_impl(request).await
+    }
+
+    async fn place_quote_market_order(
+        &self,
+        request: QuoteMarketOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        self.place_quote_market_order_impl(request).await
     }
 
     async fn cancel_order(
         &self,
-        _request: CancelOrderRequest,
+        request: CancelOrderRequest,
     ) -> ExchangeApiResult<CancelOrderResponse> {
-        self.unsupported_private("coinex.cancel_order")
+        self.cancel_order_impl(request).await
+    }
+
+    async fn amend_order(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        self.amend_order_impl(request).await
+    }
+
+    async fn cancel_all_orders(
+        &self,
+        request: CancelAllOrdersRequest,
+    ) -> ExchangeApiResult<CancelAllOrdersResponse> {
+        self.cancel_all_orders_impl(request).await
     }
 
     async fn query_order(

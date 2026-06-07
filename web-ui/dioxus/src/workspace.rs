@@ -1,7 +1,10 @@
 use dioxus::prelude::*;
 use serde_json::json;
 
-use crate::api::{create_strategy, send_strategy_command};
+use crate::api::{
+    create_strategy, fetch_strategy_config_for_strategy, save_strategy_config_for_strategy,
+    send_strategy_command,
+};
 use crate::i18n::{s, t};
 use crate::types::{
     AgentWorkspaceRowData, CredentialStatusRowData, DashboardData, GatewayWorkspaceData, Language,
@@ -24,7 +27,16 @@ pub(crate) fn StrategyWorkspacePanel(
     let mut log_path = use_signal(|| default_preset.log_path.to_string());
     let mut command = use_signal(|| default_preset.command.to_string());
     let mut args = use_signal(|| default_preset.args.to_string());
+    let mut selected_strategy_id = use_signal(String::new);
+    let mut selected_config_path = use_signal(String::new);
+    let mut selected_config_content = use_signal(String::new);
     let strategies = StrategyWorkspaceRowData::from_rows(&data().strategies, lang);
+    if selected_strategy_id().is_empty() {
+        if let Some(row) = strategies.first() {
+            selected_strategy_id.set(row.strategy_id.clone());
+            selected_config_path.set(row.config_path.clone());
+        }
+    }
     let processes = ProcessWorkspaceRowData::from_rows(&data().processes, lang);
     let workspace = WorkspaceSummaryData::from_value(&data().workspace, lang);
     let agents = AgentWorkspaceRowData::from_rows(&data().agents, lang);
@@ -57,7 +69,28 @@ pub(crate) fn StrategyWorkspacePanel(
             });
         }
     };
-
+    let load_selected_config = {
+        let token = token.clone();
+        let mut message = message;
+        move |_| {
+            let token_value = token.clone();
+            let strategy_id = selected_strategy_id();
+            if strategy_id.trim().is_empty() {
+                message.set(s(lang, "workspace_select_strategy").to_string());
+                return;
+            }
+            wasm_bindgen_futures::spawn_local(async move {
+                match fetch_strategy_config_for_strategy(&token_value, &strategy_id, lang).await {
+                    Ok(draft) => {
+                        selected_config_path.set(draft.path);
+                        selected_config_content.set(draft.content);
+                        message.set(t(lang, "config_loaded").to_string());
+                    }
+                    Err(error) => message.set(error),
+                }
+            });
+        }
+    };
     rsx! {
         section { id: "workspace", class: "strategy-workspace",
             div { class: "section-title",
@@ -99,7 +132,10 @@ pub(crate) fn StrategyWorkspacePanel(
                                         row: row.clone(),
                                         token: token.clone(),
                                         message,
-                                        lang
+                                        lang,
+                                        selected_strategy_id,
+                                        selected_config_path,
+                                        selected_config_content
                                     }
                                 }
                             }
@@ -205,6 +241,51 @@ pub(crate) fn StrategyWorkspacePanel(
                             }
                         }
                         button { class: "button primary", onclick: create_strategy, {s(lang, "workspace_create_strategy")} }
+                    }
+                    div { class: "config-editor-panel",
+                        div { class: "panel-title-row subpanel-title",
+                            h3 { {s(lang, "workspace_strategy_config")} }
+                            span { class: "muted", "{selected_strategy_id()}" }
+                        }
+                        label { class: "form-field",
+                            span { {s(lang, "workspace_selected_strategy")} }
+                            select {
+                                value: "{selected_strategy_id()}",
+                                onchange: move |event| {
+                                    let selected = event.value();
+                                    selected_strategy_id.set(selected.clone());
+                                    if let Some(row) = strategies.iter().find(|row| row.strategy_id == selected) {
+                                        selected_config_path.set(row.config_path.clone());
+                                    }
+                                    selected_config_content.set(String::new());
+                                },
+                                for row in strategies.iter() {
+                                    option { value: "{row.strategy_id}", "{row.strategy_id}" }
+                                }
+                            }
+                        }
+                        div { class: "config-grid",
+                            div { span { {s(lang, "workspace_config_path")} } strong { "{selected_config_path()}" } }
+                        }
+                        textarea {
+                            class: "config-editor",
+                            value: "{selected_config_content()}",
+                            placeholder: s(lang, "workspace_load_strategy_config_hint"),
+                            oninput: move |event| selected_config_content.set(event.value())
+                        }
+                        div { class: "actions",
+                            button { class: "button", onclick: load_selected_config, {s(lang, "load_config")} }
+                            button {
+                                class: "button",
+                                onclick: save_strategy_config_click(token.clone(), selected_strategy_id, selected_config_content, message, lang, false),
+                                {s(lang, "save_config")}
+                            }
+                            button {
+                                class: "button primary",
+                                onclick: save_strategy_config_click(token.clone(), selected_strategy_id, selected_config_content, message, lang, true),
+                                {s(lang, "save_and_restart")}
+                            }
+                        }
                     }
                     div { class: "workspace-side-summary",
                         h3 { {s(lang, "workspace_agents_gateway")} }
@@ -319,30 +400,30 @@ impl StrategyCreatePreset {
     const DEFAULT: Self = Self::SPOT_ARB;
 
     const SPOT_ARB: Self = Self {
-        kind: "spot_spot_arbitrage",
+        kind: "spot_spot_taker_arbitrage",
         strategy_id: "spot-arb-local",
         config_path: "config/spot_spot_taker_arbitrage.yml",
-        log_path: "logs/spot-arb-local.log",
+        log_path: "logs/control_panel/spot-arb-local.log",
         command: "cargo",
         args: "run --bin rustcta -- --strategy spot_spot_taker_arbitrage --config config/spot_spot_taker_arbitrage.yml",
     };
 
     const CROSS_ARB: Self = Self {
         kind: "cross_exchange_arbitrage",
-        strategy_id: "cross-arb-local",
+        strategy_id: "contract-arb-local",
         config_path: "config/cross_exchange_arbitrage_usdt.yml",
-        log_path: "logs/cross-arb-local.log",
+        log_path: "logs/control_panel/contract-arb-local.log",
         command: "cargo",
-        args: "run --bin cross_arb_live -- --config config/cross_exchange_arbitrage_usdt.yml --run",
+        args: "run --bin cross_arb_live -- --config config/cross_exchange_arbitrage_usdt.yml --skip-private-audit --run",
     };
 
     const FUNDING_ARB: Self = Self {
         kind: "funding_arbitrage",
         strategy_id: "funding-arb-local",
-        config_path: "",
-        log_path: "logs/funding-arb-local.log",
+        config_path: "config/funding_rate_arbitrage_usdt.yml",
+        log_path: "logs/control_panel/funding-arb-local.log",
         command: "cargo",
-        args: "",
+        args: "run --bin funding_arb_observe -- --config config/funding_rate_arbitrage_usdt.yml",
     };
 
     const CUSTOM: Self = Self {
@@ -372,9 +453,14 @@ fn StrategyWorkspaceRow(
     token: String,
     message: Signal<String>,
     lang: Language,
+    mut selected_strategy_id: Signal<String>,
+    mut selected_config_path: Signal<String>,
+    mut selected_config_content: Signal<String>,
 ) -> Element {
     let strategy_id = row.strategy_id.clone();
     let status = row.status.clone();
+    let row_config_path = row.config_path.clone();
+    let row_strategy_id = strategy_id.clone();
     let start = strategy_lifecycle_click(
         strategy_id.clone(),
         StrategyLifecycleCommand::Start,
@@ -398,6 +484,12 @@ fn StrategyWorkspaceRow(
     );
     rsx! {
         tr {
+            class: if selected_strategy_id() == row_strategy_id { "clickable-row active" } else { "clickable-row" },
+            onclick: move |_| {
+                selected_strategy_id.set(row_strategy_id.clone());
+                selected_config_path.set(row_config_path.clone());
+                selected_config_content.set(String::new());
+            },
             td { "{strategy_id}" }
             td { "{row.strategy_kind}" }
             td { span { class: strategy_status_class(&status), "{status}" } }
@@ -471,6 +563,35 @@ fn strategy_lifecycle_click(
                     t(lang, "workspace_strategy_command_accepted"),
                     compact(&value)
                 )),
+                Err(error) => message.set(error),
+            }
+        });
+    }
+}
+
+fn save_strategy_config_click(
+    token: String,
+    selected_strategy_id: Signal<String>,
+    selected_config_content: Signal<String>,
+    mut message: Signal<String>,
+    lang: Language,
+    restart: bool,
+) -> impl FnMut(Event<MouseData>) + 'static {
+    move |_| {
+        let token_value = token.clone();
+        let strategy_id = selected_strategy_id();
+        let content = selected_config_content();
+        if strategy_id.trim().is_empty() {
+            message.set(s(lang, "workspace_select_strategy").to_string());
+            return;
+        }
+        wasm_bindgen_futures::spawn_local(async move {
+            match save_strategy_config_for_strategy(&token_value, &strategy_id, content, restart)
+                .await
+            {
+                Ok(value) => {
+                    message.set(format!("{}: {}", t(lang, "config_saved"), compact(&value)))
+                }
                 Err(error) => message.set(error),
             }
         });

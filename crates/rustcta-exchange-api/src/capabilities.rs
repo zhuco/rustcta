@@ -1,6 +1,75 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ExchangeId, MarketType, OrderType, TimeInForce, EXCHANGE_API_SCHEMA_VERSION};
+use crate::{
+    ExchangeId, MarketType, OrderType, PrivateStreamCapabilities, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderBookStrictness {
+    SnapshotOnly,
+    BestEffortDelta,
+    StrictDelta,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderBookChecksumMode {
+    Disabled,
+    TopLevelSum,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrderBookCapability {
+    pub strictness: OrderBookStrictness,
+    pub supports_sequence: bool,
+    pub supports_checksum: bool,
+    pub checksum_mode: OrderBookChecksumMode,
+    pub supports_resync_endpoint: bool,
+    pub max_depth: Option<u32>,
+}
+
+impl Default for OrderBookCapability {
+    fn default() -> Self {
+        Self::snapshot_only(None)
+    }
+}
+
+impl OrderBookCapability {
+    pub fn snapshot_only(max_depth: Option<u32>) -> Self {
+        Self {
+            strictness: OrderBookStrictness::SnapshotOnly,
+            supports_sequence: false,
+            supports_checksum: false,
+            checksum_mode: OrderBookChecksumMode::Disabled,
+            supports_resync_endpoint: true,
+            max_depth,
+        }
+    }
+
+    pub fn best_effort_delta(max_depth: Option<u32>) -> Self {
+        Self {
+            strictness: OrderBookStrictness::BestEffortDelta,
+            supports_sequence: false,
+            supports_checksum: false,
+            checksum_mode: OrderBookChecksumMode::Disabled,
+            supports_resync_endpoint: true,
+            max_depth,
+        }
+    }
+
+    pub fn strict_delta(max_depth: Option<u32>) -> Self {
+        Self {
+            strictness: OrderBookStrictness::StrictDelta,
+            supports_sequence: true,
+            supports_checksum: false,
+            checksum_mode: OrderBookChecksumMode::Disabled,
+            supports_resync_endpoint: true,
+            max_depth,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExchangeClientCapabilities {
@@ -11,6 +80,8 @@ pub struct ExchangeClientCapabilities {
     pub supports_private_rest: bool,
     pub supports_public_streams: bool,
     pub supports_private_streams: bool,
+    #[serde(default)]
+    pub private_stream_capabilities: Option<PrivateStreamCapabilities>,
     pub supports_symbol_rules: bool,
     pub supports_order_book_snapshot: bool,
     pub supports_balances: bool,
@@ -24,12 +95,20 @@ pub struct ExchangeClientCapabilities {
     pub supports_batch_place_order: bool,
     pub supports_batch_cancel_order: bool,
     pub supports_cancel_all_orders: bool,
+    #[serde(default)]
+    pub supports_quote_market_order: bool,
+    #[serde(default)]
+    pub supports_amend_order: bool,
+    #[serde(default)]
+    pub supports_order_list: bool,
     pub supports_client_order_id: bool,
     pub supports_reduce_only: bool,
     pub supports_post_only: bool,
     pub supports_time_in_force: Vec<TimeInForce>,
     pub supports_order_types: Vec<OrderType>,
     pub max_order_book_depth: Option<u32>,
+    #[serde(default)]
+    pub order_book: OrderBookCapability,
     pub max_recent_fill_limit: Option<u32>,
 }
 
@@ -43,6 +122,9 @@ impl ExchangeClientCapabilities {
             supports_private_rest: false,
             supports_public_streams: false,
             supports_private_streams: false,
+            private_stream_capabilities: Some(PrivateStreamCapabilities::unsupported(
+                EXCHANGE_API_SCHEMA_VERSION,
+            )),
             supports_symbol_rules: false,
             supports_order_book_snapshot: false,
             supports_balances: false,
@@ -56,12 +138,16 @@ impl ExchangeClientCapabilities {
             supports_batch_place_order: false,
             supports_batch_cancel_order: false,
             supports_cancel_all_orders: false,
+            supports_quote_market_order: false,
+            supports_amend_order: false,
+            supports_order_list: false,
             supports_client_order_id: false,
             supports_reduce_only: false,
             supports_post_only: false,
             supports_time_in_force: Vec::new(),
             supports_order_types: Vec::new(),
             max_order_book_depth: None,
+            order_book: OrderBookCapability::default(),
             max_recent_fill_limit: None,
         }
     }

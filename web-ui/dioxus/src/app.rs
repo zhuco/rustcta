@@ -14,7 +14,9 @@ use crate::dashboard_panels::{
 use crate::i18n::{command_label, s, t};
 use crate::overview::Overview;
 use crate::spot_arb::SpotArbPanel;
-use crate::storage::{load_language, load_token, save_language, save_token};
+use crate::storage::{
+    load_active_view, load_language, load_token, save_active_view, save_language, save_token,
+};
 use crate::types::{ControlPanelView, DashboardData, Language};
 use crate::ui::ControlActionPanel;
 use crate::workspace::StrategyWorkspacePanel;
@@ -47,7 +49,7 @@ pub(crate) fn App() -> Element {
     let refresh_error_count = use_signal(|| 0usize);
     let mut auto_refresh = use_signal(|| true);
     let last_refresh = use_signal(|| "-".to_string());
-    let mut active_view = use_signal(ControlPanelView::default);
+    let mut active_view = use_signal(load_active_view);
     let api_key_exchange = use_signal(|| "gate".to_string());
     let api_key_account = use_signal(|| "default".to_string());
     let view_context = ActiveViewContext {
@@ -153,7 +155,10 @@ pub(crate) fn App() -> Element {
                     for view in ControlPanelView::ALL {
                         button {
                             class: nav_class(active_view(), view),
-                            onclick: move |_| active_view.set(view),
+                            onclick: move |_| {
+                                save_active_view(view);
+                                active_view.set(view);
+                            },
                             {s(lang, view.nav_label_key())}
                         }
                     }

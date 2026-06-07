@@ -1,8 +1,10 @@
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest,
-    QueryOrderRequest, RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
+    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
+    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus};
+use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{context, exchange_id, spawn_rest_server, symbol_scope, SeenRequest};
@@ -27,7 +29,11 @@ async fn kucoin_adapter_should_keep_private_operations_unsupported_without_crede
 }
 
 fn assert_signed_request(request: &SeenRequest, path: &str) {
-    assert_eq!(request.method, "GET");
+    assert_signed_request_method(request, "GET", path);
+}
+
+fn assert_signed_request_method(request: &SeenRequest, method: &str, path: &str) {
+    assert_eq!(request.method, method);
     assert_eq!(request.path, path);
     assert_eq!(
         request.headers.get("kc-api-key").map(String::as_str),
@@ -59,6 +65,167 @@ fn kucoin_signing_should_base64_encode_hmac_sha256() {
     let signature = super::signing::sign_base64("secret", "1700000000000GET/api/v1/accounts")
         .expect("signature");
     assert_eq!(signature, "ka2jGwVPj+HJ5t7L4fEM4HttekAXENIQpmo8ulfZmV8=");
+}
+
+#[tokio::test]
+async fn kucoin_adapter_should_route_private_order_mutations() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "200000",
+            "data": {"orderId": "2001", "clientOid": "LIMIT1"}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"orderId": "2002", "clientOid": "QUOTE1"}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"orderId": "2001"}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"cancelledOrderIds": ["2003", "2004"]}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"newOrderId": "2005", "clientOid": "AMEND1"}
+        }),
+    ])
+    .await;
+    let adapter = KuCoinGatewayAdapter::new(KuCoinGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        api_passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..KuCoinGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_place_order);
+    assert!(capabilities.supports_cancel_order);
+    assert!(capabilities.supports_cancel_all_orders);
+    assert!(capabilities.supports_quote_market_order);
+    assert!(capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("place-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            side: OrderSide::Buy,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "0.01".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect("place order");
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("2001"));
+    assert_eq!(placed.order.client_order_id.as_deref(), Some("LIMIT1"));
+
+    let quote = adapter
+        .place_quote_market_order(QuoteMarketOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("quote-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("QUOTE1".to_string()),
+            side: OrderSide::Buy,
+            quote_quantity: "125.5".to_string(),
+        })
+        .await
+        .expect("quote order");
+    assert_eq!(quote.order.exchange_order_id.as_deref(), Some("2002"));
+    assert_eq!(quote.order.order_type, OrderType::Market);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            exchange_order_id: Some("2001".to_string()),
+        })
+        .await
+        .expect("cancel order");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+
+    let cancel_all = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect("cancel all");
+    assert_eq!(cancel_all.cancelled_count, 2);
+
+    let amended = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("AMEND1".to_string()),
+            exchange_order_id: Some("2005".to_string()),
+            new_client_order_id: None,
+            new_quantity: "0.005".to_string(),
+        })
+        .await
+        .expect("amend order");
+    assert_eq!(amended.order.exchange_order_id.as_deref(), Some("2005"));
+    assert_eq!(amended.order.client_order_id.as_deref(), Some("AMEND1"));
+    assert_eq!(amended.order.quantity, "0.005");
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 5);
+
+    assert_signed_request_method(&requests[0], "POST", "/api/v1/hf/orders");
+    let body = requests[0].body.as_ref().expect("place body");
+    assert_eq!(body["symbol"], "BTC-USDT");
+    assert_eq!(body["side"], "buy");
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["size"], "0.01");
+    assert_eq!(body["price"], "65000");
+    assert_eq!(body["clientOid"], "LIMIT1");
+    assert_eq!(body["tradeType"], "TRADE");
+
+    assert_signed_request_method(&requests[1], "POST", "/api/v1/hf/orders");
+    let body = requests[1].body.as_ref().expect("quote body");
+    assert_eq!(body["symbol"], "BTC-USDT");
+    assert_eq!(body["side"], "buy");
+    assert_eq!(body["type"], "market");
+    assert_eq!(body["funds"], "125.5");
+    assert_eq!(body["clientOid"], "QUOTE1");
+    assert_eq!(body["tradeType"], "TRADE");
+
+    assert_signed_request_method(&requests[2], "DELETE", "/api/v1/hf/orders/2001");
+    assert_eq!(
+        requests[2].query.get("symbol").map(String::as_str),
+        Some("BTC-USDT")
+    );
+
+    assert_signed_request_method(&requests[3], "DELETE", "/api/v1/hf/orders");
+    assert_eq!(
+        requests[3].query.get("symbol").map(String::as_str),
+        Some("BTC-USDT")
+    );
+
+    assert_signed_request_method(&requests[4], "POST", "/api/v1/hf/orders/alter");
+    let body = requests[4].body.as_ref().expect("amend body");
+    assert_eq!(body["symbol"], "BTC-USDT");
+    assert_eq!(body["orderId"], "2005");
+    assert_eq!(body["clientOid"], "AMEND1");
+    assert_eq!(body["newSize"], "0.005");
 }
 
 #[tokio::test]

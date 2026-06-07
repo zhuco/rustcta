@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BalancesRequest, BalancesResponse, BatchCancelOrdersRequest, BatchCancelOrdersResponse,
-    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
-    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeError, ExchangeId,
-    ExchangeStreamEvent, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
-    QueryOrderResponse, RecentFillsRequest, RecentFillsResponse, ResponseMetadata,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeError, ExchangeId, ExchangeStreamEvent, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, OrderListRequest,
+    OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, ResponseMetadata,
     SymbolRulesRequest, SymbolRulesResponse,
 };
 
@@ -19,7 +20,10 @@ pub enum GatewayRequest {
     GetOrderBook(OrderBookRequest),
     GetFees(FeesRequest),
     PlaceOrder(PlaceOrderRequest),
+    PlaceQuoteMarketOrder(QuoteMarketOrderRequest),
     CancelOrder(CancelOrderRequest),
+    AmendOrder(AmendOrderRequest),
+    PlaceOrderList(OrderListRequest),
     BatchPlaceOrders(BatchPlaceOrdersRequest),
     BatchCancelOrders(BatchCancelOrdersRequest),
     CancelAllOrders(CancelAllOrdersRequest),
@@ -38,6 +42,8 @@ pub enum GatewayResponse {
     OrderBook(OrderBookResponse),
     Fees(FeesResponse),
     PlaceOrder(PlaceOrderResponse),
+    AmendOrder(AmendOrderResponse),
+    OrderList(OrderListResponse),
     CancelOrder(CancelOrderResponse),
     BatchPlaceOrders(BatchPlaceOrdersResponse),
     BatchCancelOrders(BatchCancelOrdersResponse),

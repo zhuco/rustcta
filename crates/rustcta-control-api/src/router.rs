@@ -18,6 +18,7 @@ pub fn router(state: ControlApiState) -> Router {
             get(routes::strategies).post(routes::create_strategy),
         )
         .route("/api/strategies/:id", get(routes::strategy_detail))
+        .route("/api/strategy-snapshots", get(routes::strategy_snapshots))
         .route(
             "/api/strategies/:id/snapshot",
             get(routes::strategy_snapshot),

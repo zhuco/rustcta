@@ -14,6 +14,7 @@ use crate::live_preflight::LivePreflightConfig;
 use crate::live_preflight::SmallLiveGateConfig;
 use crate::risk::KillSwitchConfig;
 use crate::strategies::arbitrage_core::ArbitrageScannerConfig;
+use crate::strategies::spot_spot_taker_arbitrage::SpotVenue;
 use crate::web::MonitoringConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +126,8 @@ pub struct SpotSpotTakerArbitrageConfig {
     #[serde(default)]
     pub inventory_rebalance: InventoryRebalanceConfig,
     #[serde(default)]
+    pub venue_selection: VenueSelectionConfig,
+    #[serde(default)]
     pub initial_balances: HashMap<String, HashMap<String, f64>>,
     #[serde(default)]
     pub mexc: VenueRuntimeConfig,
@@ -188,6 +191,153 @@ impl Default for InventoryRebalanceConfig {
             emergency_adverse_bps: 30.0,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct VenueSelectionConfig {
+    pub enabled: bool,
+    pub capital_cost_bps: f64,
+    pub inventory_rebalance_cost_bps: f64,
+    pub transfer_cost_bps: f64,
+    pub transfer_delay_penalty_bps: f64,
+    pub slow_venue_observe_only: bool,
+    pub slow_venue_min_net_spread_extra_bps: f64,
+    pub venue_overrides: HashMap<String, VenueCostConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct VenueCostConfig {
+    pub capital_cost_bps: Option<f64>,
+    pub inventory_rebalance_cost_bps: Option<f64>,
+    pub transfer_cost_bps: Option<f64>,
+    pub transfer_delay_penalty_bps: Option<f64>,
+    pub latency_penalty_bps: Option<f64>,
+    pub min_net_spread_extra_bps: Option<f64>,
+    pub observe_only: bool,
+    pub transfer_delay_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct VenueSelectionEstimate {
+    pub capital_cost_bps: f64,
+    pub transfer_cost_bps: f64,
+    pub transfer_delay_penalty_bps: f64,
+    pub inventory_rebalance_cost_bps: f64,
+    pub latency_penalty_bps: f64,
+    pub effective_min_net_spread_bps: f64,
+    pub observe_only: bool,
+}
+
+impl Default for VenueSelectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            capital_cost_bps: 0.0,
+            inventory_rebalance_cost_bps: 0.0,
+            transfer_cost_bps: 0.0,
+            transfer_delay_penalty_bps: 0.0,
+            slow_venue_observe_only: false,
+            slow_venue_min_net_spread_extra_bps: 20.0,
+            venue_overrides: default_venue_cost_overrides(),
+        }
+    }
+}
+
+impl Default for VenueCostConfig {
+    fn default() -> Self {
+        Self {
+            capital_cost_bps: None,
+            inventory_rebalance_cost_bps: None,
+            transfer_cost_bps: None,
+            transfer_delay_penalty_bps: None,
+            latency_penalty_bps: None,
+            min_net_spread_extra_bps: None,
+            observe_only: false,
+            transfer_delay_seconds: None,
+        }
+    }
+}
+
+impl VenueSelectionConfig {
+    pub fn estimate_for_pair(
+        &self,
+        buy_exchange: SpotVenue,
+        sell_exchange: SpotVenue,
+        base_min_net_spread_bps: f64,
+    ) -> VenueSelectionEstimate {
+        if !self.enabled {
+            return VenueSelectionEstimate {
+                effective_min_net_spread_bps: base_min_net_spread_bps,
+                ..VenueSelectionEstimate::default()
+            };
+        }
+        let buy = self.venue_cost(buy_exchange);
+        let sell = self.venue_cost(sell_exchange);
+        let capital_cost_bps = self.capital_cost_bps.max(0.0)
+            + buy.capital_cost_bps.unwrap_or(0.0).max(0.0)
+            + sell.capital_cost_bps.unwrap_or(0.0).max(0.0);
+        let transfer_cost_bps = self.transfer_cost_bps.max(0.0)
+            + buy.transfer_cost_bps.unwrap_or(0.0).max(0.0)
+            + sell.transfer_cost_bps.unwrap_or(0.0).max(0.0);
+        let transfer_delay_penalty_bps = self.transfer_delay_penalty_bps.max(0.0)
+            + buy.transfer_delay_penalty_bps.unwrap_or(0.0).max(0.0)
+            + sell.transfer_delay_penalty_bps.unwrap_or(0.0).max(0.0);
+        let inventory_rebalance_cost_bps = self.inventory_rebalance_cost_bps.max(0.0)
+            + buy.inventory_rebalance_cost_bps.unwrap_or(0.0).max(0.0)
+            + sell.inventory_rebalance_cost_bps.unwrap_or(0.0).max(0.0);
+        let latency_penalty_bps = buy.latency_penalty_bps.unwrap_or(0.0).max(0.0)
+            + sell.latency_penalty_bps.unwrap_or(0.0).max(0.0);
+        let min_net_spread_extra_bps = buy
+            .min_net_spread_extra_bps
+            .unwrap_or(if buy.observe_only {
+                self.slow_venue_min_net_spread_extra_bps
+            } else {
+                0.0
+            })
+            .max(0.0)
+            + sell
+                .min_net_spread_extra_bps
+                .unwrap_or(if sell.observe_only {
+                    self.slow_venue_min_net_spread_extra_bps
+                } else {
+                    0.0
+                })
+                .max(0.0);
+        let observe_only = self.slow_venue_observe_only && (buy.observe_only || sell.observe_only);
+        VenueSelectionEstimate {
+            capital_cost_bps,
+            transfer_cost_bps,
+            transfer_delay_penalty_bps,
+            inventory_rebalance_cost_bps,
+            latency_penalty_bps,
+            effective_min_net_spread_bps: base_min_net_spread_bps
+                + min_net_spread_extra_bps
+                + latency_penalty_bps,
+            observe_only,
+        }
+    }
+
+    fn venue_cost(&self, exchange: SpotVenue) -> VenueCostConfig {
+        self.venue_overrides
+            .get(exchange.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+fn default_venue_cost_overrides() -> HashMap<String, VenueCostConfig> {
+    HashMap::from([(
+        "gateio".to_string(),
+        VenueCostConfig {
+            latency_penalty_bps: Some(20.0),
+            min_net_spread_extra_bps: Some(20.0),
+            observe_only: false,
+            transfer_delay_seconds: Some(1_800),
+            ..VenueCostConfig::default()
+        },
+    )])
 }
 
 impl InventoryRebalanceConfig {
@@ -398,6 +548,40 @@ impl SpotSpotTakerArbitrageConfig {
             if self.dry_run {
                 return Err(anyhow!("trading_mode=live requires dry_run=false"));
             }
+            if !self.live_dry_run.enabled || !self.live_dry_run.build_order_requests {
+                return Err(anyhow!(
+                    "trading_mode=live requires live_dry_run.enabled=true and build_order_requests=true because live orders are submitted from validated order plans"
+                ));
+            }
+            if !self.kill_switch.enabled || !self.kill_switch.allow_live_orders {
+                return Err(anyhow!(
+                    "trading_mode=live requires kill_switch.enabled=true and allow_live_orders=true"
+                ));
+            }
+            if self
+                .kill_switch
+                .initial_state
+                .eq_ignore_ascii_case("triggered")
+            {
+                return Err(anyhow!(
+                    "trading_mode=live requires kill_switch.initial_state to be untriggered"
+                ));
+            }
+            if !self.live_preflight.enabled {
+                return Err(anyhow!(
+                    "trading_mode=live requires live_preflight.enabled=true"
+                ));
+            }
+            if !self.live_preflight.target_mode.eq_ignore_ascii_case("live")
+                && !self
+                    .live_preflight
+                    .target_mode
+                    .eq_ignore_ascii_case("small_live_taker_taker")
+            {
+                return Err(anyhow!(
+                    "trading_mode=live requires live_preflight.target_mode=live or small_live_taker_taker"
+                ));
+            }
         } else if self.live_trading_enabled {
             return Err(anyhow!(
                 "live_trading_enabled=true requires trading_mode=live"
@@ -416,6 +600,29 @@ impl SpotSpotTakerArbitrageConfig {
             {
                 return Err(anyhow!("invalid inventory_rebalance settings"));
             }
+        }
+        if self.venue_selection.enabled
+            && (self.venue_selection.capital_cost_bps < 0.0
+                || self.venue_selection.inventory_rebalance_cost_bps < 0.0
+                || self.venue_selection.transfer_cost_bps < 0.0
+                || self.venue_selection.transfer_delay_penalty_bps < 0.0
+                || self.venue_selection.slow_venue_min_net_spread_extra_bps < 0.0
+                || self.venue_selection.venue_overrides.values().any(|venue| {
+                    venue.capital_cost_bps.is_some_and(|value| value < 0.0)
+                        || venue
+                            .inventory_rebalance_cost_bps
+                            .is_some_and(|value| value < 0.0)
+                        || venue.transfer_cost_bps.is_some_and(|value| value < 0.0)
+                        || venue
+                            .transfer_delay_penalty_bps
+                            .is_some_and(|value| value < 0.0)
+                        || venue.latency_penalty_bps.is_some_and(|value| value < 0.0)
+                        || venue
+                            .min_net_spread_extra_bps
+                            .is_some_and(|value| value < 0.0)
+                }))
+        {
+            return Err(anyhow!("invalid venue_selection cost settings"));
         }
         if mode == "live_dry_run" && !self.live_dry_run.enabled {
             return Err(anyhow!(
@@ -494,6 +701,18 @@ impl SpotSpotTakerArbitrageConfig {
                     "trading_mode=live requires small_live_gate.enabled_symbols to be explicit"
                 ));
             }
+            let configured_exchanges = normalized_exchange_set(&self.exchanges);
+            let live_exchanges = normalized_exchange_set(&self.small_live_gate.enabled_exchanges);
+            if live_exchanges.is_empty() {
+                return Err(anyhow!(
+                    "trading_mode=live requires small_live_gate.enabled_exchanges to be explicit"
+                ));
+            }
+            if !live_exchanges.is_subset(&configured_exchanges) {
+                return Err(anyhow!(
+                    "small_live_gate.enabled_exchanges must be a subset of configured exchanges"
+                ));
+            }
             if !live_symbols.is_subset(&monitored_symbols) {
                 return Err(anyhow!(
                     "small_live_gate.enabled_symbols must be a subset of monitored symbols"
@@ -505,6 +724,33 @@ impl SpotSpotTakerArbitrageConfig {
             {
                 return Err(anyhow!(
                     "live_preflight.symbols must match small_live_gate.enabled_symbols in live mode"
+                ));
+            }
+            if normalized_exchange_set(&self.live_preflight.exchanges) != live_exchanges {
+                return Err(anyhow!(
+                    "live_preflight.exchanges must match small_live_gate.enabled_exchanges in live mode"
+                ));
+            }
+            if self
+                .live_preflight
+                .max_live_notional_per_trade
+                .map_or(true, |value| {
+                    value <= 0.0 || value > self.small_live_gate.max_notional_per_order + 1e-12
+                })
+            {
+                return Err(anyhow!(
+                    "live_preflight.max_live_notional_per_trade must be positive and no greater than small_live_gate.max_notional_per_order in live mode"
+                ));
+            }
+            if self
+                .live_preflight
+                .max_total_live_notional
+                .map_or(true, |value| {
+                    value <= 0.0 || value > self.small_live_gate.max_total_notional + 1e-12
+                })
+            {
+                return Err(anyhow!(
+                    "live_preflight.max_total_live_notional must be positive and no greater than small_live_gate.max_total_notional in live mode"
                 ));
             }
         }
@@ -563,6 +809,18 @@ fn normalized_symbol_set(symbols: &[String]) -> BTreeSet<String> {
                 .replace(['-', '_', '/'], "")
                 .to_ascii_uppercase()
         })
+        .collect()
+}
+
+fn normalized_exchange_set(exchanges: &[String]) -> BTreeSet<String> {
+    exchanges
+        .iter()
+        .map(
+            |exchange| match exchange.trim().to_ascii_lowercase().as_str() {
+                "gate" | "gate.io" => "gateio".to_string(),
+                other => other.to_string(),
+            },
+        )
         .collect()
 }
 

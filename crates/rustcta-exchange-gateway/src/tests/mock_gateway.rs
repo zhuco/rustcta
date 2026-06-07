@@ -471,6 +471,12 @@ async fn mock_gateway_should_return_capabilities_and_accept_private_subscription
         GatewayResponsePayload::PrivateSubscribed(response)
             if response.subscriptions.len() == 1
                 && response.subscriptions[0].subscription_id == "private-sub-1"
+                && response.subscriptions[0]
+                    .capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| capabilities.supports_orders
+                        && capabilities.supports_client_order_id
+                        && capabilities.supports_exchange_order_id)
     ));
     assert_eq!(
         gateway

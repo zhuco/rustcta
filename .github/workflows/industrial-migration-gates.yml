@@ -1,0 +1,63 @@
+name: industrial-migration-gates
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  workspace:
+    name: full workspace migration gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Test all features
+        run: cargo test --all-features
+
+      - name: Clippy all targets and features
+        run: cargo clippy --all-targets --all-features
+
+      - name: Classified legacy bin inventory
+        run: |
+          cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+          cargo run -q -p rustcta-tools-ops -- legacy-bin-plan
+
+      - name: Industrial boundary checks
+        run: scripts/check_industrial_boundaries.sh
+
+  web-ui:
+    name: web UI release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Dioxus control panel
+        run: |
+          cd web-ui/dioxus
+          cargo build --release

@@ -1,16 +1,19 @@
 use anyhow::Result;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
-use axum::routing::get;
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rustcta_supervisor::{
     build_legacy_process_spec, JsonFileProcessRegistryStore, LegacyProcessSpecOptions,
-    LegacyProcessTemplate, LocalProcessSupervisor, ProcessRegistry, StrategyProcessSpec,
-    SupervisorSnapshot,
+    LegacyProcessTemplate, LocalProcessSupervisor, ProcessRegistry, RuntimeHeartbeat,
+    RuntimeHeartbeatStatus, RuntimeSnapshotStatus, StrategyProcess, StrategyProcessSpec,
+    SupervisorRecoveryStatus, SupervisorSnapshot,
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+
+const LOCAL_LIFECYCLE_TOKEN_HEADER: &str = "x-rustcta-supervisor-token";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -87,9 +90,18 @@ async fn main() -> Result<()> {
         let bind_addr = arg_value(&args, "--bind").unwrap_or("127.0.0.1:18181");
         let store = registry_store
             .unwrap_or_else(|| JsonFileProcessRegistryStore::new("run/supervisor/registry.json"));
+        let local_lifecycle_token = arg_value(&args, "--local-lifecycle-token")
+            .map(ToString::to_string)
+            .or_else(|| std::env::var("RUSTCTA_SUPERVISOR_LOCAL_LIFECYCLE_TOKEN").ok())
+            .filter(|value| !value.trim().is_empty());
+        if local_lifecycle_token.is_some() && !is_loopback_bind(bind_addr) {
+            anyhow::bail!(
+                "local lifecycle routes require a loopback --bind address such as 127.0.0.1:18181"
+            );
+        }
         let listener = TcpListener::bind(bind_addr).await?;
         println!("rustcta-supervisor listening on http://{bind_addr}");
-        axum::serve(listener, supervisor_router(store)).await?;
+        axum::serve(listener, supervisor_router(store, local_lifecycle_token)).await?;
         return Ok(());
     }
 
@@ -130,17 +142,35 @@ fn load_spec(path: &str) -> Result<StrategyProcessSpec> {
 #[derive(Clone)]
 struct SupervisorApiState {
     registry_store: Arc<JsonFileProcessRegistryStore>,
+    local_lifecycle_token: Option<Arc<String>>,
 }
 
-fn supervisor_router(registry_store: JsonFileProcessRegistryStore) -> Router {
-    Router::new()
+fn supervisor_router(
+    registry_store: JsonFileProcessRegistryStore,
+    local_lifecycle_token: Option<String>,
+) -> Router {
+    let local_lifecycle_enabled = local_lifecycle_token.is_some();
+    let state = SupervisorApiState {
+        registry_store: Arc::new(registry_store),
+        local_lifecycle_token: local_lifecycle_token.map(Arc::new),
+    };
+    let router = Router::new()
         .route("/api/health", get(supervisor_health))
         .route("/api/snapshot", get(supervisor_snapshot))
+        .route("/api/heartbeats", get(supervisor_heartbeats))
+        .route("/api/runtime-snapshots", get(supervisor_runtime_snapshots))
+        .route("/api/recovery", get(supervisor_recovery))
         .route("/api/processes", get(supervisor_processes))
-        .route("/api/processes/:id", get(supervisor_process_detail))
-        .with_state(SupervisorApiState {
-            registry_store: Arc::new(registry_store),
-        })
+        .route("/api/processes/:id", get(supervisor_process_detail));
+    let router = if local_lifecycle_enabled {
+        router.route(
+            "/api/local/lifecycle/heartbeat",
+            post(supervisor_ingest_heartbeat),
+        )
+    } else {
+        router
+    };
+    router.with_state(state)
 }
 
 async fn supervisor_health(State(state): State<SupervisorApiState>) -> Json<serde_json::Value> {
@@ -148,6 +178,8 @@ async fn supervisor_health(State(state): State<SupervisorApiState>) -> Json<serd
         "status": "ok",
         "component": "rustcta-supervisor",
         "registry_configured": !state.registry_store.path().as_os_str().is_empty(),
+        "read_only": state.local_lifecycle_token.is_none(),
+        "local_lifecycle_enabled": state.local_lifecycle_token.is_some(),
     }))
 }
 
@@ -161,7 +193,7 @@ async fn supervisor_snapshot(
 
 async fn supervisor_processes(
     State(state): State<SupervisorApiState>,
-) -> Result<Json<Vec<rustcta_supervisor::StrategyProcess>>, StatusCode> {
+) -> Result<Json<Vec<StrategyProcess>>, StatusCode> {
     let registry = load_registry(Some(state.registry_store.as_ref()))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(registry.list()))
@@ -170,7 +202,7 @@ async fn supervisor_processes(
 async fn supervisor_process_detail(
     State(state): State<SupervisorApiState>,
     Path(id): Path<String>,
-) -> Result<Json<rustcta_supervisor::StrategyProcess>, StatusCode> {
+) -> Result<Json<StrategyProcess>, StatusCode> {
     let registry = load_registry(Some(state.registry_store.as_ref()))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     registry
@@ -178,6 +210,64 @@ async fn supervisor_process_detail(
         .cloned()
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn supervisor_heartbeats(
+    State(state): State<SupervisorApiState>,
+) -> Result<Json<Vec<RuntimeHeartbeatStatus>>, StatusCode> {
+    let registry = load_registry(Some(state.registry_store.as_ref()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(registry.heartbeat_statuses(chrono::Utc::now())))
+}
+
+async fn supervisor_runtime_snapshots(
+    State(state): State<SupervisorApiState>,
+) -> Result<Json<Vec<RuntimeSnapshotStatus>>, StatusCode> {
+    let registry = load_registry(Some(state.registry_store.as_ref()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(registry.snapshot_statuses(chrono::Utc::now())))
+}
+
+async fn supervisor_recovery(
+    State(state): State<SupervisorApiState>,
+) -> Result<Json<SupervisorRecoveryStatus>, StatusCode> {
+    let registry = load_registry(Some(state.registry_store.as_ref()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(registry.recovery_status(chrono::Utc::now())))
+}
+
+async fn supervisor_ingest_heartbeat(
+    State(state): State<SupervisorApiState>,
+    headers: HeaderMap,
+    Json(heartbeat): Json<RuntimeHeartbeat>,
+) -> Result<Json<StrategyProcess>, StatusCode> {
+    require_local_lifecycle_token(&state, &headers)?;
+    let registry = load_registry(Some(state.registry_store.as_ref()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut supervisor = LocalProcessSupervisor::from_registry(registry);
+    let process = supervisor
+        .ingest_runtime_heartbeat(heartbeat)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    save_registry(Some(state.registry_store.as_ref()), supervisor.registry())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(process))
+}
+
+fn require_local_lifecycle_token(
+    state: &SupervisorApiState,
+    headers: &HeaderMap,
+) -> Result<(), StatusCode> {
+    let Some(expected) = state.local_lifecycle_token.as_deref() else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let actual = headers
+        .get(LOCAL_LIFECYCLE_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok());
+    if actual == Some(expected.as_str()) {
+        Ok(())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 fn load_registry(store: Option<&JsonFileProcessRegistryStore>) -> Result<ProcessRegistry> {
@@ -207,6 +297,13 @@ fn has_flag(args: &[String], name: &str) -> bool {
     args.iter().any(|arg| arg == name)
 }
 
+fn is_loopback_bind(bind_addr: &str) -> bool {
+    bind_addr.starts_with("127.")
+        || bind_addr.starts_with("localhost:")
+        || bind_addr.starts_with("[::1]:")
+        || bind_addr.starts_with("::1:")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,7 +314,7 @@ mod tests {
     #[tokio::test]
     async fn supervisor_router_should_expose_read_only_health() {
         let store = JsonFileProcessRegistryStore::new("/tmp/rustcta-supervisor-test-missing.json");
-        let response = supervisor_router(store)
+        let response = supervisor_router(store, None)
             .oneshot(
                 Request::builder()
                     .uri("/api/health")
@@ -233,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn supervisor_router_should_return_404_for_missing_process() {
         let store = JsonFileProcessRegistryStore::new("/tmp/rustcta-supervisor-test-missing.json");
-        let response = supervisor_router(store)
+        let response = supervisor_router(store, None)
             .oneshot(
                 Request::builder()
                     .uri("/api/processes/missing")
@@ -244,5 +341,110 @@ mod tests {
             .expect("process detail request should complete");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn supervisor_router_should_expose_read_only_recovery_status() {
+        let store = JsonFileProcessRegistryStore::new("/tmp/rustcta-supervisor-test-missing.json");
+        let response = supervisor_router(store, None)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/recovery")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("recovery request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn supervisor_router_should_not_register_lifecycle_mutation_without_token() {
+        let store = JsonFileProcessRegistryStore::new("/tmp/rustcta-supervisor-test-missing.json");
+        let response = supervisor_router(store, None)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local/lifecycle/heartbeat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"schema_version":1}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("heartbeat request should complete");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn supervisor_router_should_authenticate_local_lifecycle_heartbeat() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-supervisor-app-heartbeat-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let registry_path = temp_dir.join("registry.json");
+        let store = JsonFileProcessRegistryStore::new(&registry_path);
+        let mut registry = ProcessRegistry::default();
+        registry.upsert(StrategyProcess::new(
+            "strategy-heartbeat",
+            "mock",
+            "run",
+            "tenant",
+            "config.yml",
+        ));
+        store.save(&registry).expect("save registry");
+
+        let response = supervisor_router(store, Some("token-1".to_string()))
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local/lifecycle/heartbeat")
+                    .header("content-type", "application/json")
+                    .header(LOCAL_LIFECYCLE_TOKEN_HEADER, "token-1")
+                    .body(Body::from(
+                        r#"{
+                            "schema_version":1,
+                            "strategy_id":"strategy-heartbeat",
+                            "run_id":"run",
+                            "process_id":99,
+                            "status":"Running",
+                            "heartbeat_at":"2026-06-07T00:00:00Z",
+                            "snapshot":{
+                                "schema_version":1,
+                                "snapshot_id":"snap-1",
+                                "captured_at":"2026-06-07T00:00:00Z",
+                                "source":"local",
+                                "payload_kind":"strategy_state",
+                                "payload_bytes":12,
+                                "checksum":null
+                            }
+                        }"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("heartbeat request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let loaded = JsonFileProcessRegistryStore::new(&registry_path)
+            .load()
+            .expect("load updated registry");
+        let process = loaded
+            .get("strategy-heartbeat")
+            .expect("heartbeat process should exist");
+        assert_eq!(process.process_id, Some(99));
+        assert_eq!(process.last_snapshot_at, process.last_heartbeat_at);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[test]
+    fn local_lifecycle_token_should_require_loopback_bind() {
+        assert!(is_loopback_bind("127.0.0.1:18181"));
+        assert!(is_loopback_bind("localhost:18181"));
+        assert!(is_loopback_bind("[::1]:18181"));
+        assert!(!is_loopback_bind("0.0.0.0:18181"));
+        assert!(!is_loopback_bind("192.168.1.10:18181"));
     }
 }

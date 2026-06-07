@@ -14,9 +14,11 @@ pub mod core;
 
 pub use core::{
     calculate_spread, configured_spot_pair, depth_notional,
-    spot_rejection_counts_toward_consecutive, BookSource, CachedBook, OpportunityRecord,
-    RejectionReason, SimulatedTradeRecord, SpotFeeSource, SpotOrderBookLevel, SpotRiskLimits,
-    SpotRiskState, SpotVenue, SpreadEstimate, SummaryReport,
+    spot_rejection_counts_toward_consecutive, BookSource, CachedBook, DirectedVenuePair,
+    EventDrivenSpreadEngine, EventDrivenSpreadEngineConfig, EventDrivenSpreadResult,
+    OpportunityRecord, OpportunitySummaryRecord, RejectionReason, SimulatedTradeRecord,
+    SpotBookEvent, SpotBookEventKind, SpotFeeSource, SpotOrderBookLevel, SpotRiskLimits,
+    SpotRiskState, SpotVenue, SpreadEstimate, SummaryReport, TradePnlCategory, TradeSummaryRecord,
 };
 
 pub const STRATEGY_KIND: &str = "spot_spot_arbitrage";
@@ -438,6 +440,12 @@ mod tests {
             sell_fee: 0.1,
             gross_pnl: 1.0,
             net_pnl: 0.8,
+            pnl_category: TradePnlCategory::Arbitrage,
+            slippage_cost: 0.0,
+            capital_cost: 0.0,
+            transfer_cost: 0.0,
+            inventory_rebalance_cost: 0.0,
+            latency_penalty_cost: 0.0,
             latency_ms: 10,
             order_book_age_ms: 20,
             execution_mode: "paper".to_string(),
@@ -497,6 +505,113 @@ mod tests {
         let fallback = configured_spot_pair(&["mexc".to_string(), "coinex".to_string()]);
         assert_eq!(fallback, (SpotVenue::Mexc, SpotVenue::CoinEx));
         assert_eq!(SpotVenue::GateIo.other(), SpotVenue::Bitget);
+    }
+
+    #[test]
+    fn event_driven_spread_engine_should_recompute_only_updated_symbol_pairs() {
+        let mut engine = EventDrivenSpreadEngine::new(EventDrivenSpreadEngineConfig {
+            exchanges: vec![
+                "mexc".to_string(),
+                "coinex".to_string(),
+                "bitget".to_string(),
+            ],
+            symbols: vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()],
+        });
+        let now = Utc::now();
+
+        let first = engine.on_book_event(SpotBookEvent::snapshot(
+            "mexc", "BTCUSDT", 99.0, 100.0, 1.0, now,
+        ));
+        assert!(first.recomputed_pairs.is_empty());
+
+        let second = engine.on_book_event(SpotBookEvent::snapshot(
+            "coinex", "BTCUSDT", 101.0, 102.0, 1.0, now,
+        ));
+        assert_eq!(
+            second.recomputed_pairs,
+            vec![
+                DirectedVenuePair {
+                    buy_exchange: "coinex".to_string(),
+                    sell_exchange: "mexc".to_string(),
+                },
+                DirectedVenuePair {
+                    buy_exchange: "mexc".to_string(),
+                    sell_exchange: "coinex".to_string(),
+                },
+            ]
+        );
+
+        engine.on_book_event(SpotBookEvent::snapshot(
+            "bitget", "ETHUSDT", 199.0, 200.0, 1.0, now,
+        ));
+        let eth_update = engine.on_book_event(SpotBookEvent::snapshot(
+            "mexc", "ETHUSDT", 198.0, 199.0, 1.0, now,
+        ));
+        assert_eq!(
+            eth_update
+                .recomputed_pairs
+                .iter()
+                .map(|pair| (&pair.buy_exchange, &pair.sell_exchange))
+                .collect::<Vec<_>>(),
+            vec![
+                (&"bitget".to_string(), &"mexc".to_string()),
+                (&"mexc".to_string(), &"bitget".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn event_driven_spread_engine_should_not_recompute_from_stale_books() {
+        let mut engine = EventDrivenSpreadEngine::new(EventDrivenSpreadEngineConfig {
+            exchanges: vec!["mexc".to_string(), "coinex".to_string()],
+            symbols: vec!["BTCUSDT".to_string()],
+        });
+        let now = Utc::now();
+
+        engine.on_book_event(SpotBookEvent::snapshot(
+            "mexc", "BTCUSDT", 99.0, 100.0, 1.0, now,
+        ));
+        let ready = engine.on_book_event(SpotBookEvent::snapshot(
+            "coinex", "BTCUSDT", 101.0, 102.0, 1.0, now,
+        ));
+        assert_eq!(ready.recomputed_pairs.len(), 2);
+
+        let stale = engine.on_book_event(SpotBookEvent::stale(
+            "coinex",
+            "BTCUSDT",
+            "heartbeat timeout",
+            now,
+        ));
+        assert!(stale.recomputed_pairs.is_empty());
+        assert!(engine.book("coinex", "BTCUSDT").unwrap().is_stale);
+
+        let update = engine.on_book_event(SpotBookEvent::snapshot(
+            "mexc", "BTCUSDT", 100.0, 101.0, 1.0, now,
+        ));
+        assert!(update.recomputed_pairs.is_empty());
+    }
+
+    #[test]
+    fn event_driven_spread_engine_should_ignore_unconfigured_symbol_and_exchange() {
+        let mut engine = EventDrivenSpreadEngine::new(EventDrivenSpreadEngineConfig {
+            exchanges: vec!["mexc".to_string(), "coinex".to_string()],
+            symbols: vec!["BTCUSDT".to_string()],
+        });
+        let now = Utc::now();
+
+        engine.on_book_event(SpotBookEvent::snapshot(
+            "mexc", "BTCUSDT", 99.0, 100.0, 1.0, now,
+        ));
+        let wrong_symbol = engine.on_book_event(SpotBookEvent::snapshot(
+            "coinex", "ETHUSDT", 101.0, 102.0, 1.0, now,
+        ));
+        assert!(wrong_symbol.recomputed_pairs.is_empty());
+
+        let wrong_exchange = engine.on_book_event(SpotBookEvent::snapshot(
+            "gateio", "BTCUSDT", 101.0, 102.0, 1.0, now,
+        ));
+        assert!(wrong_exchange.recomputed_pairs.is_empty());
+        assert!(engine.book("gateio", "BTCUSDT").is_none());
     }
 
     #[test]
@@ -600,6 +715,12 @@ mod tests {
             sell_fee: 0.1,
             gross_pnl: net_pnl + 0.2,
             net_pnl,
+            pnl_category: TradePnlCategory::Arbitrage,
+            slippage_cost: 0.0,
+            capital_cost: 0.0,
+            transfer_cost: 0.0,
+            inventory_rebalance_cost: 0.0,
+            latency_penalty_cost: 0.0,
             latency_ms: 10,
             order_book_age_ms: 20,
             execution_mode: "paper".to_string(),
@@ -630,6 +751,18 @@ mod tests {
             estimated_total_fee: 0.2,
             estimated_gross_pnl: 1.0,
             estimated_net_pnl: 0.8,
+            capital_cost_bps: 0.0,
+            transfer_cost_bps: 0.0,
+            transfer_delay_penalty_bps: 0.0,
+            inventory_rebalance_cost_bps: 0.0,
+            latency_penalty_bps: 0.0,
+            effective_min_net_spread_bps: 0.0,
+            estimated_slippage_cost: 0.0,
+            estimated_capital_cost: 0.0,
+            estimated_transfer_cost: 0.0,
+            estimated_inventory_rebalance_cost: 0.0,
+            estimated_latency_penalty_cost: 0.0,
+            estimated_total_cost: 0.2,
             executable_notional: 100.0,
             quantity: 1.0,
             accepted,

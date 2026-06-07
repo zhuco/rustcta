@@ -6,14 +6,20 @@ Modes:
 
 - `paper`: simulates fills and mutates paper inventory.
 - `live_dry_run`: reads live/public books and local/private balance snapshots when available, validates order requests, records plans, and does not call `place_order`.
-- Future `live`: intentionally not implemented for `spot_spot_taker_arbitrage`.
+- `live`: available only for explicitly gated small Spot execution. The strategy
+  still builds and records the same validated order plans, then calls
+  `place_order` only when `trading_mode=live`, `dry_run=false`,
+  `live_trading_enabled=true`, live preflight is enabled, the kill switch allows
+  live orders, and the small-live gate matches the symbol, exchange, and
+  notional.
 
 Safety rules:
 
 - `live_dry_run.submit_orders: true` hard-fails config validation.
-- `would_submit` is always `false`.
-- `live_trading_enabled: true` still fails.
-- `trading_mode: live` still fails.
+- `would_submit` remains `false` in `paper` and `live_dry_run`.
+- `live_trading_enabled: true` is valid only with `trading_mode: live`.
+- `trading_mode: live` requires explicit live preflight and kill-switch
+  alignment before the strategy starts.
 
 Default config:
 

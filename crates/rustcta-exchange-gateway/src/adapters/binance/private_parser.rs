@@ -1,7 +1,8 @@
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AccountId, ExchangeApiError, ExchangeApiResult, FeeRateSnapshot, OrderState, SymbolScope,
-    TenantId, EXCHANGE_API_SCHEMA_VERSION,
+    AccountId, ExchangeApiError, ExchangeApiResult, FeeRateSnapshot, OrderListKind,
+    OrderListResponse, OrderState, ResponseMetadata, SymbolScope, TenantId,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AssetBalance, ExchangeBalance, ExchangeId, ExchangeSymbol, Fill, FillStatus, LiquidityRole,
@@ -157,6 +158,60 @@ pub fn parse_open_orders(
         .iter()
         .map(|order| parse_order_state(exchange_id, symbol_hint, order))
         .collect()
+}
+
+pub fn parse_binance_cancel_all_orders(
+    exchange_id: &ExchangeId,
+    symbol_hint: &SymbolScope,
+    value: &Value,
+) -> ExchangeApiResult<Vec<OrderState>> {
+    let rows = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "cancel-all response is not an array",
+            value,
+        )
+    })?;
+    let mut orders = Vec::new();
+    for row in rows {
+        if let Some(reports) = row.get("orderReports").and_then(Value::as_array) {
+            for report in reports {
+                orders.push(parse_order_state(exchange_id, Some(symbol_hint), report)?);
+            }
+        } else {
+            orders.push(parse_order_state(exchange_id, Some(symbol_hint), row)?);
+        }
+    }
+    Ok(orders)
+}
+
+pub fn parse_order_list_response(
+    exchange_id: &ExchangeId,
+    symbol_hint: &SymbolScope,
+    kind: OrderListKind,
+    value: &Value,
+) -> ExchangeApiResult<OrderListResponse> {
+    let reports = value
+        .get("orderReports")
+        .or_else(|| value.get("orders"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let orders = reports
+        .iter()
+        .map(|order| parse_order_state(exchange_id, Some(symbol_hint), order))
+        .collect::<ExchangeApiResult<Vec<_>>>()?;
+    Ok(OrderListResponse {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        metadata: ResponseMetadata::new(exchange_id.clone(), Utc::now()),
+        symbol: symbol_hint.clone(),
+        kind,
+        order_list_id: value_as_string(value.get("orderListId")),
+        list_client_order_id: value_as_string(value.get("listClientOrderId")),
+        list_status_type: value_as_string(value.get("listStatusType")),
+        list_order_status: value_as_string(value.get("listOrderStatus")),
+        orders,
+    })
 }
 
 pub fn parse_fee_snapshots(

@@ -1,54 +1,13 @@
 use chrono::{DateTime, Utc};
+pub use rustcta_strategy_spot_spot_arbitrage::{
+    BookSource, RejectionReason, SpotVenue, TradePnlCategory,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::exchanges::unified::{OrderBookLevel, SymbolRule};
-use crate::execution::FeeSource;
+use crate::execution::{FeeSource, OpportunityLatencyTrace};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SpotVenue {
-    Mexc,
-    CoinEx,
-    GateIo,
-    Bitget,
-}
-
-impl SpotVenue {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Mexc => "mexc",
-            Self::CoinEx => "coinex",
-            Self::GateIo => "gateio",
-            Self::Bitget => "bitget",
-        }
-    }
-
-    pub fn other(self) -> Self {
-        match self {
-            Self::Mexc => Self::CoinEx,
-            Self::CoinEx => Self::Mexc,
-            Self::GateIo => Self::Bitget,
-            Self::Bitget => Self::GateIo,
-        }
-    }
-}
-
-pub fn configured_spot_pair(exchanges: &[String]) -> (SpotVenue, SpotVenue) {
-    let has_gateio = exchanges.iter().any(|exchange| {
-        matches!(
-            exchange.trim().to_ascii_lowercase().as_str(),
-            "gate" | "gateio" | "gate.io"
-        )
-    });
-    let has_bitget = exchanges
-        .iter()
-        .any(|exchange| exchange.trim().eq_ignore_ascii_case("bitget"));
-    if has_gateio && has_bitget {
-        (SpotVenue::GateIo, SpotVenue::Bitget)
-    } else {
-        (SpotVenue::Mexc, SpotVenue::CoinEx)
-    }
-}
+pub use rustcta_strategy_spot_spot_arbitrage::configured_spot_pair;
 
 #[derive(Debug, Clone)]
 pub struct CommonSymbolRules {
@@ -66,49 +25,6 @@ impl CommonSymbolRules {
             SpotVenue::CoinEx => &self.coinex,
             SpotVenue::GateIo => self.gateio.as_ref().unwrap_or(&self.mexc),
             SpotVenue::Bitget => self.bitget.as_ref().unwrap_or(&self.coinex),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RejectionReason {
-    StaleBook,
-    InsufficientDepth,
-    MinNotional,
-    SymbolRule,
-    InsufficientQuoteBalance,
-    InsufficientBaseBalance,
-    NetSpreadBelowThreshold,
-    AbnormalSpread,
-    NotionalLimit,
-    Cooldown,
-    ExchangeHealth,
-    DailyLossLimit,
-    TradeLossLimit,
-    ConsecutiveRejections,
-    SymbolBlacklisted,
-    DisabledSymbol,
-    DisabledExchange,
-    DisabledExchangeSymbol,
-    ControlPlaneBlocked,
-    PaperExecutionRejected,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BookSource {
-    Websocket,
-    Rest,
-    Replay,
-}
-
-impl BookSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Websocket => "websocket",
-            Self::Rest => "rest",
-            Self::Replay => "replay",
         }
     }
 }
@@ -150,6 +66,30 @@ pub struct OpportunityRecord {
     pub estimated_total_fee: f64,
     pub estimated_gross_pnl: f64,
     pub estimated_net_pnl: f64,
+    #[serde(default)]
+    pub capital_cost_bps: f64,
+    #[serde(default)]
+    pub transfer_cost_bps: f64,
+    #[serde(default)]
+    pub transfer_delay_penalty_bps: f64,
+    #[serde(default)]
+    pub inventory_rebalance_cost_bps: f64,
+    #[serde(default)]
+    pub latency_penalty_bps: f64,
+    #[serde(default)]
+    pub effective_min_net_spread_bps: f64,
+    #[serde(default)]
+    pub estimated_slippage_cost: f64,
+    #[serde(default)]
+    pub estimated_capital_cost: f64,
+    #[serde(default)]
+    pub estimated_transfer_cost: f64,
+    #[serde(default)]
+    pub estimated_inventory_rebalance_cost: f64,
+    #[serde(default)]
+    pub estimated_latency_penalty_cost: f64,
+    #[serde(default)]
+    pub estimated_total_cost: f64,
     pub executable_notional: f64,
     pub quantity: f64,
     pub accepted: bool,
@@ -161,6 +101,7 @@ pub struct OpportunityRecord {
     pub sell_book_source: BookSource,
     pub buy_latency_ms: Option<i64>,
     pub sell_latency_ms: Option<i64>,
+    pub lifecycle_latency: Option<OpportunityLatencyTrace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +118,18 @@ pub struct SimulatedTradeRecord {
     pub sell_fee: f64,
     pub gross_pnl: f64,
     pub net_pnl: f64,
+    #[serde(default)]
+    pub pnl_category: TradePnlCategory,
+    #[serde(default)]
+    pub slippage_cost: f64,
+    #[serde(default)]
+    pub capital_cost: f64,
+    #[serde(default)]
+    pub transfer_cost: f64,
+    #[serde(default)]
+    pub inventory_rebalance_cost: f64,
+    #[serde(default)]
+    pub latency_penalty_cost: f64,
     pub latency_ms: i64,
     pub order_book_age_ms: i64,
     pub execution_mode: String,

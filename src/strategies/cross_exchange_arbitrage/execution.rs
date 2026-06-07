@@ -238,6 +238,7 @@ impl CrossArbExecutionCoordinator {
             .cloned()
             .ok_or_else(|| anyhow!("opportunity {opportunity_id} not found for open signal"))?;
         if runtime.state.config.execution.open_execution_style == OpenExecutionStyle::MakerTaker
+            && !runtime.state.config.execution.dry_run
             && !runtime
                 .state
                 .is_private_stream_ready(&opportunity.maker_exchange)
@@ -3775,6 +3776,43 @@ mod tests {
             .order_index()
             .resolve_fill(&maker_fill_from_command(&decision.plan.commands[0]))
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn cross_arb_execution_dry_run_should_not_require_private_stream_for_maker_open() {
+        let now = Utc::now();
+        let (mut runtime, signal) = runtime_with_signal(now);
+        runtime.state.config.execution.dry_run = true;
+        runtime.state.risk_state.private_stream_health.clear();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Okx,
+            place_calls: calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
+            last_cancel_exchange_order_id: None,
+            cancel_error: None,
+        }));
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Binance,
+            place_calls: calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
+            last_cancel_exchange_order_id: None,
+            cancel_error: None,
+        }));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let decision = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("dry-run decision");
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(decision.plan.commands.len(), 1);
+        assert!(decision.blocked_reason.is_none());
+        assert_eq!(decision.submitted_orders.len(), 1);
     }
 
     #[tokio::test]

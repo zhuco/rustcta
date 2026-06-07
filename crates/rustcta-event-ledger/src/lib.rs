@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use rustcta_execution_api::{
+    FeeModelDecision, IdempotencyDecision, LiveDryRunDecision, ReconciliationEvent,
+    RejectionDecision, ReservationDecision,
+};
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, LiquidityRole, MarketType, OrderSide, OrderStatus,
     PositionSide, RunId, SchemaVersion, StrategyId, TenantId,
@@ -48,7 +52,12 @@ pub enum EventKind {
     BalanceSnapshotEvent,
     PositionSnapshotEvent,
     RiskDecisionEvent,
+    FeeModelDecisionEvent,
+    ReservationDecisionEvent,
+    IdempotencyDecisionEvent,
+    LiveDryRunDecisionEvent,
     ReconciliationEvent,
+    RejectionEvent,
     OperatorCommandEvent,
     AuditEvent,
 }
@@ -171,6 +180,54 @@ impl LedgerEvent {
             LedgerPayload::Audit(record),
         )
     }
+
+    pub fn fee_model_decision(identity: EventIdentity, decision: FeeModelDecision) -> Self {
+        Self::new(
+            EventKind::FeeModelDecisionEvent,
+            identity,
+            LedgerPayload::FeeModelDecision(decision),
+        )
+    }
+
+    pub fn reservation_decision(identity: EventIdentity, decision: ReservationDecision) -> Self {
+        Self::new(
+            EventKind::ReservationDecisionEvent,
+            identity,
+            LedgerPayload::ReservationDecision(decision),
+        )
+    }
+
+    pub fn idempotency_decision(identity: EventIdentity, decision: IdempotencyDecision) -> Self {
+        Self::new(
+            EventKind::IdempotencyDecisionEvent,
+            identity,
+            LedgerPayload::IdempotencyDecision(decision),
+        )
+    }
+
+    pub fn live_dry_run_decision(identity: EventIdentity, decision: LiveDryRunDecision) -> Self {
+        Self::new(
+            EventKind::LiveDryRunDecisionEvent,
+            identity,
+            LedgerPayload::LiveDryRunDecision(decision),
+        )
+    }
+
+    pub fn reconciliation(identity: EventIdentity, event: ReconciliationEvent) -> Self {
+        Self::new(
+            EventKind::ReconciliationEvent,
+            identity,
+            LedgerPayload::Reconciliation(event),
+        )
+    }
+
+    pub fn rejection(identity: EventIdentity, decision: RejectionDecision) -> Self {
+        Self::new(
+            EventKind::RejectionEvent,
+            identity,
+            LedgerPayload::Rejection(decision),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -179,6 +236,12 @@ pub enum LedgerPayload {
     OrderLifecycle(OrderLifecycleRecord),
     Fill(FillLedgerRecord),
     BalanceSnapshot(BalanceSnapshotRecord),
+    FeeModelDecision(FeeModelDecision),
+    ReservationDecision(ReservationDecision),
+    IdempotencyDecision(IdempotencyDecision),
+    LiveDryRunDecision(LiveDryRunDecision),
+    Reconciliation(ReconciliationEvent),
+    Rejection(RejectionDecision),
     Audit(AuditRecord),
     Raw(Value),
 }
@@ -728,6 +791,9 @@ fn find_secret_field(value: &Value, path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustcta_execution_api::{
+        ExecutionMutationKind, RejectionDecision, EXECUTION_API_SCHEMA_VERSION,
+    };
 
     fn identity() -> EventIdentity {
         EventIdentity::new(
@@ -888,6 +954,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn jsonl_replay_should_preserve_command_ack_fill_account_audit_ordering() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-jsonl-ledger-ordering-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let path = temp_dir.join("events.jsonl");
+        let ledger = JsonlLedger::new(&path);
+
+        let command = ledger
+            .append(order_event("client-1"))
+            .await
+            .expect("append command");
+
+        let mut ack = order_event("client-1");
+        if let LedgerPayload::OrderLifecycle(record) = &mut ack.payload {
+            record.event_kind = EventKind::OrderAckEvent;
+            record.status = OrderStatus::Open;
+        }
+        ack.kind = EventKind::OrderAckEvent;
+        let ack = ledger.append(ack).await.expect("append ack");
+
+        let fill = ledger
+            .append(LedgerEvent::fill(FillLedgerRecord::new(
+                identity().with_command("cmd-fill"),
+                exchange_id(),
+                MarketType::Spot,
+                symbol(),
+                OrderSide::Buy,
+                PositionSide::None,
+                LiquidityRole::Taker,
+                100.0,
+                0.5,
+                Utc::now(),
+            )))
+            .await
+            .expect("append fill");
+
+        let account = ledger
+            .append(LedgerEvent::balance_snapshot(BalanceSnapshotRecord::new(
+                identity(),
+                exchange_id(),
+                MarketType::Spot,
+                vec![AssetBalanceRecord::new("USDT", 100.0, 90.0, 10.0, 0.0)],
+                Utc::now(),
+            )))
+            .await
+            .expect("append account snapshot");
+
+        let audit = ledger
+            .append(LedgerEvent::audit(AuditRecord::new(
+                identity(),
+                AuditActor::new(AuditActorType::ExecutionRouter, "router"),
+                "mutation_replayed",
+                AuditOutcome::Succeeded,
+            )))
+            .await
+            .expect("append audit");
+
+        assert_eq!(
+            [
+                command.sequence,
+                ack.sequence,
+                fill.sequence,
+                account.sequence,
+                audit.sequence
+            ],
+            [1, 2, 3, 4, 5]
+        );
+
+        let reopened = JsonlLedger::new(&path);
+        let events = reopened.replay(None).await.expect("replay all");
+        assert_eq!(
+            events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            vec![
+                EventKind::OrderCommandEvent,
+                EventKind::OrderAckEvent,
+                EventKind::FillEvent,
+                EventKind::BalanceSnapshotEvent,
+                EventKind::AuditEvent,
+            ]
+        );
+
+        let from_fill = reopened.replay(Some(3)).await.expect("replay from fill");
+        assert_eq!(
+            from_fill
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
     async fn jsonl_ledger_should_reject_secret_like_fields_before_write() {
         let temp_dir = std::env::temp_dir().join(format!(
             "rustcta-jsonl-ledger-secret-test-{}",
@@ -903,6 +1064,49 @@ mod tests {
         }
 
         let error = ledger.append(event).await.expect_err("secret must reject");
+
+        assert!(matches!(error, LedgerError::SecretField { .. }));
+        assert!(!path.exists());
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn typed_rejection_decision_should_reject_secret_metadata_before_jsonl_write() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-jsonl-ledger-typed-secret-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let path = temp_dir.join("events.jsonl");
+        let ledger = JsonlLedger::new(&path);
+        let identity = identity()
+            .with_command("cmd-secret")
+            .with_idempotency_key("idem-secret");
+        let decision = RejectionDecision {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            identity: rustcta_execution_api::MutationIdentity {
+                tenant_id: identity.tenant_id.clone(),
+                account_id: identity.account_id.clone().expect("account id"),
+                strategy_id: identity.strategy_id.clone().expect("strategy id"),
+                run_id: identity.run_id.clone().expect("run id"),
+                idempotency_key: "idem-secret".to_string(),
+                risk_profile_id: "risk".to_string(),
+                requested_at: identity.occurred_at,
+            },
+            command_id: "cmd-secret".to_string(),
+            mutation_kind: ExecutionMutationKind::Rejection,
+            reason: "secret field in mutation payload".to_string(),
+            rejected_at: Utc::now(),
+            metadata: serde_json::json!({
+                "nested": {
+                    "authorization": "Bearer do-not-write"
+                }
+            }),
+        };
+
+        let error = ledger
+            .append(LedgerEvent::rejection(identity, decision))
+            .await
+            .expect_err("secret must reject");
 
         assert!(matches!(error, LedgerError::SecretField { .. }));
         assert!(!path.exists());

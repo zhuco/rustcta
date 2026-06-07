@@ -30,12 +30,19 @@ use rustcta::web::{
     status_from_model, ConfigSummaryView, DashboardReadModel, DisabledExchangeSymbolView,
     DisabledExchangeView, DisabledSymbolView, DisabledView, InventoryView, TradeView,
 };
+use rustcta_supervisor::{
+    JsonFileProcessRegistryStore, LifecycleCommand, LifecycleCommandRecord, LocalProcessSupervisor,
+    ProcessRegistry, ProcessStatus, StrategyProcess, StrategyProcessSpec,
+    SUPERVISOR_SCHEMA_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::process::Command;
+use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
@@ -94,6 +101,18 @@ struct Args {
     strategy_config: PathBuf,
     #[arg(
         long,
+        default_value = "data/control_api/strategy_registry.json",
+        help = "Local registry used by the web console to manage multiple strategy processes"
+    )]
+    strategy_registry: PathBuf,
+    #[arg(
+        long,
+        default_value = "data/control_api/strategy_specs.json",
+        help = "Local strategy launch specs used by the web console to restart managed strategies"
+    )]
+    strategy_specs: PathBuf,
+    #[arg(
+        long,
         default_value = "scripts/separated_control_panel.sh",
         help = "Local helper script used to restart the strategy after config edits"
     )]
@@ -116,10 +135,13 @@ struct AppState {
     balance_history_path: PathBuf,
     strategy_profit_history_path: PathBuf,
     strategy_config: PathBuf,
+    strategy_registry: PathBuf,
+    strategy_specs: PathBuf,
     restart_script: PathBuf,
     token_env: String,
     event_interval_ms: u64,
     balance_history_interval_ms: u64,
+    supervisor: Arc<RwLock<LocalProcessSupervisor>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +185,73 @@ struct ExchangeApiKeyStatusResponse {
     enabled_exchanges: Vec<String>,
     supported_exchanges: Vec<ExchangeApiKeyExchangeStatus>,
     exchanges: Vec<ExchangeApiKeyExchangeStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkspaceSummaryResponse {
+    schema_version: u16,
+    generated_at: DateTime<Utc>,
+    strategy_count: usize,
+    process_count: usize,
+    agent_count: usize,
+    risk_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct StrategyProcessView {
+    schema_version: u16,
+    strategy_id: String,
+    strategy_kind: String,
+    run_id: String,
+    tenant_id: String,
+    config_path: String,
+    status: ProcessStatus,
+    process_id: Option<u32>,
+    started_at: Option<DateTime<Utc>>,
+    last_heartbeat_at: Option<DateTime<Utc>>,
+    last_snapshot_at: Option<DateTime<Utc>>,
+    restart_count: u32,
+    last_exit_code: Option<i32>,
+    last_error: Option<String>,
+    log_configured: bool,
+    log_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CreateStrategyRequest {
+    strategy_id: String,
+    strategy_kind: String,
+    #[serde(default)]
+    run_id: Option<String>,
+    #[serde(default)]
+    tenant_id: Option<String>,
+    #[serde(default)]
+    config_path: String,
+    #[serde(default)]
+    log_path: Option<String>,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    working_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StrategySpecsStore {
+    schema_version: u16,
+    updated_at: DateTime<Utc>,
+    specs: Vec<StrategyProcessSpec>,
+}
+
+#[derive(Debug, Clone)]
+struct ManagedStrategyPreset {
+    strategy_id: &'static str,
+    strategy_kind: &'static str,
+    config_path: String,
+    log_path: &'static str,
+    command: &'static str,
+    args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -321,6 +410,11 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     rustcta::utils::init_tracing_logger("info");
     let args = Args::parse();
+    let supervisor = Arc::new(RwLock::new(load_legacy_supervisor(
+        &args.strategy_registry,
+        &args.strategy_specs,
+        &args.strategy_config,
+    )?));
     let state = AppState {
         snapshot_path: args.snapshot_path,
         command_path: args.command_path,
@@ -328,10 +422,13 @@ async fn main() -> Result<()> {
         balance_history_path: args.balance_history_path,
         strategy_profit_history_path: args.strategy_profit_history_path,
         strategy_config: args.strategy_config,
+        strategy_registry: args.strategy_registry,
+        strategy_specs: args.strategy_specs,
         restart_script: args.restart_script,
         token_env: args.token_env,
         event_interval_ms: args.event_interval_ms.max(50),
         balance_history_interval_ms: args.balance_history_interval_ms.max(60_000),
+        supervisor,
     };
     let addr: SocketAddr = args
         .bind_addr
@@ -355,6 +452,15 @@ fn router(state: AppState, static_dir: PathBuf) -> Router {
         .route("/api/status", get(status))
         .route("/api/config", get(config))
         .route("/api/config/summary", get(config))
+        .route("/api/workspace", get(workspace_summary))
+        .route("/api/strategies", get(strategies).post(create_strategy))
+        .route("/api/strategies/:id", get(strategy_detail))
+        .route(
+            "/api/strategies/:id/config",
+            get(strategy_config_by_id).post(update_strategy_config_by_id),
+        )
+        .route("/api/strategies/:id/command", post(strategy_command))
+        .route("/api/processes", get(processes))
         .route(
             "/api/strategy-config",
             get(strategy_config).post(update_strategy_config),
@@ -597,6 +703,164 @@ async fn config(State(state): State<AppState>, headers: HeaderMap) -> Response {
     .await
 }
 
+async fn workspace_summary(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(error) = reap_supervisor_exits(&state).await {
+        log::warn!("failed to refresh strategy process status: {error}");
+    }
+    let strategies = strategy_processes(&state).await;
+    Json(WorkspaceSummaryResponse {
+        schema_version: SUPERVISOR_SCHEMA_VERSION,
+        generated_at: Utc::now(),
+        strategy_count: strategies.len(),
+        process_count: strategies.len(),
+        agent_count: 1,
+        risk_status: "unknown".to_string(),
+    })
+    .into_response()
+}
+
+async fn strategies(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(error) = reap_supervisor_exits(&state).await {
+        log::warn!("failed to refresh strategy process status: {error}");
+    }
+    Json(strategy_process_views(strategy_processes(&state).await)).into_response()
+}
+
+async fn processes(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    strategies(State(state), headers).await
+}
+
+async fn strategy_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Err(error) = reap_supervisor_exits(&state).await {
+        log::warn!("failed to refresh strategy process status: {error}");
+    }
+    match strategy_processes(&state)
+        .await
+        .into_iter()
+        .find(|process| process.strategy_id == id)
+    {
+        Some(process) => Json(strategy_process_view(process)).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("strategy not found: {id}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn strategy_config_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match read_strategy_config_by_id(&state, &id).await {
+        Ok((path, content)) => Json(json!({
+            "strategy_id": id,
+            "path": path.display().to_string(),
+            "content": content,
+        }))
+        .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn update_strategy_config_by_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(request): Json<StrategyConfigUpdateRequest>,
+) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match apply_strategy_config_update_by_id(&state, &id, request).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn create_strategy(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateStrategyRequest>,
+) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match create_strategy_inner(&state, request).await {
+        Ok(process) => Json(strategy_process_view(process)).into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn strategy_command(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(mut command): Json<LifecycleCommandRecord>,
+) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if command.strategy_id != id {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "strategy_id does not match route id" })),
+        )
+            .into_response();
+    }
+    command.schema_version = SUPERVISOR_SCHEMA_VERSION;
+    if let Err(error) = command.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response();
+    }
+    match apply_strategy_command_inner(&state, command.clone()).await {
+        Ok(process) => Json(json!({
+            "accepted": true,
+            "applied_to_runtime": true,
+            "command": command,
+            "process": strategy_process_view(process),
+        }))
+        .into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 async fn apply_current_strategy_config_summary(state: &AppState, model: &mut DashboardReadModel) {
     if let Ok(config) = strategy_config_summary(state).await {
         model.trading_mode = config.trading_mode.clone();
@@ -604,6 +868,627 @@ async fn apply_current_strategy_config_summary(state: &AppState, model: &mut Das
         model.dry_run = config.dry_run;
         model.config_summary = config;
     }
+}
+
+fn load_legacy_supervisor(
+    registry_path: &FsPath,
+    specs_path: &FsPath,
+    strategy_config: &FsPath,
+) -> Result<LocalProcessSupervisor> {
+    let store = JsonFileProcessRegistryStore::new(registry_path);
+    let mut registry = store
+        .load()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let mut specs = read_strategy_specs(specs_path)?;
+    let mut registry_changed = false;
+    let mut specs_changed = normalize_strategy_specs(&mut specs);
+
+    if migrate_legacy_contract_arb_strategy_id(&mut registry, &mut specs) {
+        registry_changed = true;
+        specs_changed = true;
+    }
+
+    for preset in default_managed_strategy_presets(strategy_config) {
+        if registry_contains_preset(&registry, &preset) {
+            continue;
+        }
+        let (process, spec) = managed_strategy_process_and_spec(&preset);
+        registry.upsert(process);
+        specs.push(spec);
+        registry_changed = true;
+        specs_changed = true;
+    }
+    if registry_changed {
+        store
+            .save(&registry)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    }
+
+    let mut spec_ids = specs
+        .iter()
+        .map(|spec| spec.strategy_id.clone())
+        .collect::<HashSet<_>>();
+    for process in registry.list() {
+        if spec_ids.insert(process.strategy_id.clone()) {
+            specs.push(strategy_process_spec_from_process(&process));
+            specs_changed = true;
+        }
+    }
+    if specs_changed {
+        write_strategy_specs(specs_path, &specs)?;
+    }
+    let mut supervisor = LocalProcessSupervisor::from_registry(registry);
+    for spec in specs {
+        supervisor.remember_spec(spec);
+    }
+    Ok(supervisor)
+}
+
+fn normalize_strategy_specs(specs: &mut [StrategyProcessSpec]) -> bool {
+    let mut changed = false;
+    for spec in specs {
+        if spec.strategy_kind == "cross_exchange_arbitrage"
+            && spec.args.iter().any(|arg| arg == "cross_arb_live")
+            && spec.args.iter().any(|arg| arg == "--run")
+            && !spec.args.iter().any(|arg| arg == "--skip-private-audit")
+        {
+            let insert_at = spec
+                .args
+                .iter()
+                .position(|arg| arg == "--run")
+                .unwrap_or(spec.args.len());
+            spec.args
+                .insert(insert_at, "--skip-private-audit".to_string());
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn migrate_legacy_contract_arb_strategy_id(
+    registry: &mut ProcessRegistry,
+    specs: &mut [StrategyProcessSpec],
+) -> bool {
+    const LEGACY_ID: &str = "default-strategy";
+    const STRATEGY_ID: &str = "contract-arb-local";
+    const LOG_PATH: &str = "logs/control_panel/contract-arb-local.log";
+
+    let Some(legacy) = registry.get(LEGACY_ID).cloned() else {
+        return false;
+    };
+    if registry.get(STRATEGY_ID).is_some()
+        || legacy.strategy_kind != "cross_exchange_arbitrage"
+        || !legacy.status.is_terminal()
+    {
+        return false;
+    }
+
+    let mut migrated = legacy;
+    migrated.strategy_id = STRATEGY_ID.to_string();
+    migrated.log_path = Some(LOG_PATH.to_string());
+    registry.remove(LEGACY_ID);
+    registry.upsert(migrated);
+
+    for spec in specs {
+        if spec.strategy_id == LEGACY_ID && spec.strategy_kind == "cross_exchange_arbitrage" {
+            spec.strategy_id = STRATEGY_ID.to_string();
+            spec.log_path = Some(LOG_PATH.to_string());
+        }
+    }
+
+    true
+}
+
+fn default_managed_strategy_presets(strategy_config: &FsPath) -> Vec<ManagedStrategyPreset> {
+    let requested_config = strategy_config.display().to_string();
+    let contract_config =
+        if strategy_kind_from_config_path(&requested_config) == "cross_exchange_arbitrage" {
+            requested_config
+        } else {
+            "config/cross_exchange_arbitrage_usdt.yml".to_string()
+        };
+
+    vec![
+        ManagedStrategyPreset {
+            strategy_id: "spot-arb-local",
+            strategy_kind: "spot_spot_taker_arbitrage",
+            config_path: "config/spot_spot_taker_arbitrage.yml".to_string(),
+            log_path: "logs/control_panel/spot-arb-local.log",
+            command: "cargo",
+            args: default_strategy_args(
+                "spot_spot_taker_arbitrage",
+                "config/spot_spot_taker_arbitrage.yml",
+                Vec::new(),
+            ),
+        },
+        ManagedStrategyPreset {
+            strategy_id: "contract-arb-local",
+            strategy_kind: "cross_exchange_arbitrage",
+            config_path: contract_config.clone(),
+            log_path: "logs/control_panel/contract-arb-local.log",
+            command: "cargo",
+            args: default_strategy_args("cross_exchange_arbitrage", &contract_config, Vec::new()),
+        },
+        ManagedStrategyPreset {
+            strategy_id: "funding-arb-local",
+            strategy_kind: "funding_arbitrage",
+            config_path: "config/funding_rate_arbitrage_usdt.yml".to_string(),
+            log_path: "logs/control_panel/funding-arb-local.log",
+            command: "cargo",
+            args: default_strategy_args(
+                "funding_arbitrage",
+                "config/funding_rate_arbitrage_usdt.yml",
+                Vec::new(),
+            ),
+        },
+    ]
+}
+
+fn registry_contains_preset(registry: &ProcessRegistry, preset: &ManagedStrategyPreset) -> bool {
+    registry.list().into_iter().any(|process| {
+        process.strategy_id == preset.strategy_id
+            || (process.strategy_kind == preset.strategy_kind
+                && normalize_strategy_path(&process.config_path)
+                    == normalize_strategy_path(&preset.config_path))
+    })
+}
+
+fn normalize_strategy_path(path: &str) -> String {
+    path.trim_start_matches("./").to_string()
+}
+
+fn managed_strategy_process_and_spec(
+    preset: &ManagedStrategyPreset,
+) -> (StrategyProcess, StrategyProcessSpec) {
+    let mut process = StrategyProcess::new(
+        preset.strategy_id,
+        preset.strategy_kind,
+        "local",
+        "local",
+        preset.config_path.clone(),
+    );
+    process.status = ProcessStatus::Stopped;
+    process.log_path = Some(preset.log_path.to_string());
+    let spec = StrategyProcessSpec::new(
+        process.strategy_id.clone(),
+        process.strategy_kind.clone(),
+        process.run_id.clone(),
+        process.tenant_id.clone(),
+        process.config_path.clone(),
+        preset.command,
+    )
+    .with_args(preset.args.clone())
+    .with_working_dir(".")
+    .with_log_path(preset.log_path);
+    (process, spec)
+}
+
+fn strategy_process_spec_from_process(process: &StrategyProcess) -> StrategyProcessSpec {
+    let mut spec = StrategyProcessSpec::new(
+        process.strategy_id.clone(),
+        process.strategy_kind.clone(),
+        process.run_id.clone(),
+        process.tenant_id.clone(),
+        process.config_path.clone(),
+        "cargo",
+    )
+    .with_args(default_strategy_args(
+        &process.strategy_kind,
+        &process.config_path,
+        Vec::new(),
+    ))
+    .with_working_dir(".");
+    if let Some(log_path) = process.log_path.clone() {
+        spec = spec.with_log_path(log_path);
+    }
+    spec
+}
+
+async fn strategy_processes(state: &AppState) -> Vec<StrategyProcess> {
+    state.supervisor.read().await.registry().list()
+}
+
+fn strategy_process_views(processes: Vec<StrategyProcess>) -> Vec<StrategyProcessView> {
+    processes.into_iter().map(strategy_process_view).collect()
+}
+
+fn strategy_process_view(process: StrategyProcess) -> StrategyProcessView {
+    let log_configured = process
+        .log_path
+        .as_ref()
+        .map(|path| !path.trim().is_empty())
+        .unwrap_or(false);
+    StrategyProcessView {
+        schema_version: process.schema_version,
+        strategy_id: process.strategy_id,
+        strategy_kind: process.strategy_kind,
+        run_id: process.run_id,
+        tenant_id: process.tenant_id,
+        config_path: process.config_path,
+        status: process.status,
+        process_id: process.process_id,
+        started_at: process.started_at,
+        last_heartbeat_at: process.last_heartbeat_at,
+        last_snapshot_at: process.last_snapshot_at,
+        restart_count: process.restart_count,
+        last_exit_code: process.last_exit_code,
+        last_error: process.last_error,
+        log_configured,
+        log_path: process.log_path,
+    }
+}
+
+async fn create_strategy_inner(
+    state: &AppState,
+    request: CreateStrategyRequest,
+) -> Result<StrategyProcess> {
+    let (mut process, spec) = request.into_process_and_spec(Utc::now())?;
+    process.status = ProcessStatus::Stopped;
+    let mut supervisor = state.supervisor.write().await;
+    supervisor
+        .register(process.clone())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    supervisor.remember_spec(spec);
+    save_registry(
+        state,
+        &ProcessRegistry::from_processes(&supervisor.registry().list()),
+    )?;
+    write_strategy_specs(&state.strategy_specs, &supervisor_specs(&supervisor))?;
+    Ok(process)
+}
+
+async fn apply_strategy_command_inner(
+    state: &AppState,
+    command: LifecycleCommandRecord,
+) -> Result<StrategyProcess> {
+    let mut supervisor = state.supervisor.write().await;
+    let process = match command.command {
+        LifecycleCommand::Start => {
+            let spec = strategy_spec_for_command(&supervisor, &command)?;
+            supervisor
+                .start(spec)
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?
+        }
+        LifecycleCommand::Stop => supervisor
+            .stop(&command.strategy_id)
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+        LifecycleCommand::Restart => {
+            if supervisor.registry().get(&command.strategy_id).is_none() {
+                anyhow::bail!("strategy not found: {}", command.strategy_id);
+            }
+            let spec = strategy_spec_for_command(&supervisor, &command)?;
+            if supervisor.restart(&command.strategy_id).await.is_err() {
+                supervisor
+                    .start(spec)
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
+            } else {
+                supervisor
+                    .registry()
+                    .get(&command.strategy_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("strategy not found: {}", command.strategy_id))?
+            }
+        }
+        LifecycleCommand::Heartbeat => {
+            supervisor
+                .heartbeat(&command.strategy_id, command.requested_at)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            supervisor
+                .registry()
+                .get(&command.strategy_id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("strategy not found: {}", command.strategy_id))?
+        }
+    };
+    save_registry(
+        state,
+        &ProcessRegistry::from_processes(&supervisor.registry().list()),
+    )?;
+    Ok(process)
+}
+
+async fn reap_supervisor_exits(state: &AppState) -> Result<()> {
+    let mut supervisor = state.supervisor.write().await;
+    let exited = supervisor
+        .reap_exited()
+        .await
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    if !exited.is_empty() {
+        save_registry(
+            state,
+            &ProcessRegistry::from_processes(&supervisor.registry().list()),
+        )?;
+    }
+    Ok(())
+}
+
+fn save_registry(state: &AppState, registry: &ProcessRegistry) -> Result<()> {
+    JsonFileProcessRegistryStore::new(&state.strategy_registry)
+        .save(registry)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
+
+fn read_strategy_specs(path: &FsPath) -> Result<Vec<StrategyProcessSpec>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("read strategy specs {}", path.display()))?;
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let store: StrategySpecsStore = serde_json::from_str(&raw)
+        .with_context(|| format!("parse strategy specs {}", path.display()))?;
+    Ok(store.specs)
+}
+
+fn write_strategy_specs(path: &FsPath, specs: &[StrategyProcessSpec]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let store = StrategySpecsStore {
+        schema_version: SUPERVISOR_SCHEMA_VERSION,
+        updated_at: Utc::now(),
+        specs: specs.to_vec(),
+    };
+    let raw = serde_json::to_vec_pretty(&store).context("serialize strategy specs")?;
+    let temp_path = path.with_extension("tmp");
+    std::fs::write(&temp_path, raw).with_context(|| format!("write {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, path).with_context(|| format!("replace {}", path.display()))?;
+    Ok(())
+}
+
+fn supervisor_specs(supervisor: &LocalProcessSupervisor) -> Vec<StrategyProcessSpec> {
+    supervisor
+        .registry()
+        .list()
+        .into_iter()
+        .filter_map(|process| {
+            supervisor.spec(&process.strategy_id).cloned().or_else(|| {
+                let command = LifecycleCommandRecord {
+                    schema_version: SUPERVISOR_SCHEMA_VERSION,
+                    command_id: "snapshot".to_string(),
+                    strategy_id: process.strategy_id.clone(),
+                    run_id: Some(process.run_id.clone()),
+                    command: LifecycleCommand::Start,
+                    requested_by: Some("control_api".to_string()),
+                    idempotency_key: "snapshot".to_string(),
+                    requested_at: Utc::now(),
+                };
+                strategy_spec_for_command(supervisor, &command).ok()
+            })
+        })
+        .collect()
+}
+
+fn strategy_spec_for_command(
+    supervisor: &LocalProcessSupervisor,
+    command: &LifecycleCommandRecord,
+) -> Result<StrategyProcessSpec> {
+    if let Some(spec) = supervisor.spec(&command.strategy_id) {
+        let mut spec = spec.clone();
+        if let Some(run_id) = &command.run_id {
+            spec.run_id = run_id.clone();
+        }
+        return Ok(spec);
+    }
+    let process = supervisor
+        .registry()
+        .get(&command.strategy_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("strategy not found: {}", command.strategy_id))?;
+    let mut spec = StrategyProcessSpec::new(
+        process.strategy_id.clone(),
+        process.strategy_kind.clone(),
+        command.run_id.clone().unwrap_or(process.run_id.clone()),
+        process.tenant_id.clone(),
+        process.config_path.clone(),
+        "cargo",
+    )
+    .with_args(default_strategy_args(
+        &process.strategy_kind,
+        &process.config_path,
+        Vec::new(),
+    ))
+    .with_working_dir(".");
+    if let Some(log_path) = process.log_path.clone() {
+        spec = spec.with_log_path(log_path);
+    }
+    Ok(spec)
+}
+
+impl CreateStrategyRequest {
+    fn into_process_and_spec(
+        self,
+        now: DateTime<Utc>,
+    ) -> Result<(StrategyProcess, StrategyProcessSpec)> {
+        let strategy_id = self.strategy_id.trim();
+        let strategy_kind = self.strategy_kind.trim();
+        if strategy_id.is_empty() {
+            anyhow::bail!("strategy_id cannot be empty");
+        }
+        if strategy_kind.is_empty() {
+            anyhow::bail!("strategy_kind cannot be empty");
+        }
+        let config_path = self.config_path.trim().to_string();
+        let run_id = self
+            .run_id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("manual-{}", now.timestamp_millis()));
+        let tenant_id = self
+            .tenant_id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "local".to_string());
+        let mut process = StrategyProcess::new(
+            strategy_id,
+            strategy_kind,
+            run_id.clone(),
+            tenant_id.clone(),
+            config_path.clone(),
+        );
+        process.schema_version = SUPERVISOR_SCHEMA_VERSION;
+        process.log_path = self.log_path.filter(|value| !value.trim().is_empty());
+        let mut spec = StrategyProcessSpec::new(
+            process.strategy_id.clone(),
+            process.strategy_kind.clone(),
+            run_id,
+            tenant_id,
+            config_path,
+            self.command
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "cargo".to_string()),
+        )
+        .with_args(default_strategy_args(
+            &process.strategy_kind,
+            &process.config_path,
+            self.args,
+        ));
+        if let Some(working_dir) = self.working_dir.filter(|value| !value.trim().is_empty()) {
+            spec = spec.with_working_dir(working_dir);
+        } else {
+            spec = spec.with_working_dir(".");
+        }
+        if let Some(log_path) = process.log_path.clone() {
+            spec = spec.with_log_path(log_path);
+        }
+        Ok((process, spec))
+    }
+}
+
+fn default_strategy_args(
+    strategy_kind: &str,
+    config_path: &str,
+    explicit_args: Vec<String>,
+) -> Vec<String> {
+    if !explicit_args.is_empty() {
+        return explicit_args;
+    }
+    match strategy_kind {
+        "cross_exchange_arbitrage" => vec![
+            "run".to_string(),
+            "--bin".to_string(),
+            "cross_arb_live".to_string(),
+            "--".to_string(),
+            "--config".to_string(),
+            config_path.to_string(),
+            "--skip-private-audit".to_string(),
+            "--run".to_string(),
+        ],
+        "spot_spot_arbitrage" | "spot_spot_taker_arbitrage" => vec![
+            "run".to_string(),
+            "--bin".to_string(),
+            "rustcta".to_string(),
+            "--".to_string(),
+            "--strategy".to_string(),
+            "spot_spot_taker_arbitrage".to_string(),
+            "--config".to_string(),
+            config_path.to_string(),
+        ],
+        "funding_arbitrage" | "funding_rate_arbitrage" => vec![
+            "run".to_string(),
+            "--bin".to_string(),
+            if config_path.contains("live") {
+                "funding_arb_live".to_string()
+            } else {
+                "funding_arb_observe".to_string()
+            },
+            "--".to_string(),
+            "--config".to_string(),
+            config_path.to_string(),
+        ],
+        value => vec![
+            "run".to_string(),
+            "--bin".to_string(),
+            "rustcta".to_string(),
+            "--".to_string(),
+            "--strategy".to_string(),
+            value.to_string(),
+            "--config".to_string(),
+            config_path.to_string(),
+        ],
+    }
+}
+
+fn strategy_kind_from_config_path(config_path: &str) -> &'static str {
+    if config_path.contains("cross_exchange") || config_path.contains("cross_arb") {
+        "cross_exchange_arbitrage"
+    } else if config_path.contains("funding") {
+        "funding_arbitrage"
+    } else {
+        "spot_spot_taker_arbitrage"
+    }
+}
+
+async fn read_strategy_config_by_id(state: &AppState, id: &str) -> Result<(PathBuf, String)> {
+    let process = strategy_processes(state)
+        .await
+        .into_iter()
+        .find(|process| process.strategy_id == id)
+        .ok_or_else(|| anyhow::anyhow!("strategy not found: {id}"))?;
+    let path = PathBuf::from(process.config_path);
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .with_context(|| format!("read strategy config {}", path.display()))?;
+    Ok((path, content))
+}
+
+async fn apply_strategy_config_update_by_id(
+    state: &AppState,
+    id: &str,
+    request: StrategyConfigUpdateRequest,
+) -> Result<Value> {
+    if request.content.trim().is_empty() {
+        anyhow::bail!("strategy config content cannot be empty");
+    }
+    serde_yaml::from_str::<serde_yaml::Value>(&request.content)
+        .context("strategy config must be valid YAML")?;
+    let (path, _) = read_strategy_config_by_id(state, id).await?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let tmp_path = path.with_extension("yml.tmp");
+    tokio::fs::write(&tmp_path, request.content.as_bytes())
+        .await
+        .with_context(|| format!("write {}", tmp_path.display()))?;
+    tokio::fs::rename(&tmp_path, &path)
+        .await
+        .with_context(|| format!("replace {}", path.display()))?;
+
+    let restart = if request.restart {
+        let command_id = format!("web-config-restart-{}", Utc::now().timestamp_millis());
+        let process = apply_strategy_command_inner(
+            state,
+            LifecycleCommandRecord {
+                schema_version: SUPERVISOR_SCHEMA_VERSION,
+                command_id: command_id.clone(),
+                strategy_id: id.to_string(),
+                run_id: Some(format!("run-{}", Utc::now().timestamp_millis())),
+                command: LifecycleCommand::Restart,
+                requested_by: Some("web".to_string()),
+                idempotency_key: command_id,
+                requested_at: Utc::now(),
+            },
+        )
+        .await?;
+        json!({
+            "requested": true,
+            "strategy_status": process.status,
+            "process": strategy_process_view(process),
+        })
+    } else {
+        json!({ "requested": false })
+    };
+    Ok(json!({
+        "saved": true,
+        "strategy_id": id,
+        "path": path.display().to_string(),
+        "restart": restart,
+    }))
 }
 
 async fn strategy_config_summary(state: &AppState) -> Result<ConfigSummaryView> {
@@ -7179,10 +8064,13 @@ mod tests {
             balance_history_path: dir.join("balance_history.json"),
             strategy_profit_history_path: dir.join("strategy_profit_history.json"),
             strategy_config: config_path,
+            strategy_registry: dir.join("strategy_registry.json"),
+            strategy_specs: dir.join("strategy_specs.json"),
             restart_script: noop_restart_script(dir),
             token_env: "RUSTCTA_TEST_TOKEN".to_string(),
             event_interval_ms: 1000,
             balance_history_interval_ms: 60_000,
+            supervisor: Arc::new(RwLock::new(LocalProcessSupervisor::new())),
         }
     }
 
@@ -8648,10 +9536,13 @@ mod tests {
             balance_history_path: dir.path().join("balance_history.json"),
             strategy_profit_history_path: dir.path().join("strategy_profit_history.json"),
             strategy_config: config_path.clone(),
+            strategy_registry: dir.path().join("strategy_registry.json"),
+            strategy_specs: dir.path().join("strategy_specs.json"),
             restart_script: script,
             token_env: "RUSTCTA_TEST_TOKEN".to_string(),
             event_interval_ms: 1000,
             balance_history_interval_ms: 60_000,
+            supervisor: Arc::new(RwLock::new(LocalProcessSupervisor::new())),
         };
 
         let response = restart_strategy(&state).await.unwrap();

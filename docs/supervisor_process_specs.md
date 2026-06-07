@@ -71,6 +71,59 @@ cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- \
   --validate-registry
 ```
 
+## Heartbeat, Snapshot, And Recovery Views
+
+The supervisor registry records runtime heartbeat timestamps, optional runtime
+snapshot metadata, and a local recovery policy per process. The checked-in
+specs keep recovery disabled by default:
+
+```json
+{
+  "restart_on_exit": false,
+  "restart_on_stale_heartbeat": false,
+  "max_restart_attempts": 0,
+  "heartbeat_timeout_ms": null,
+  "snapshot_timeout_ms": null,
+  "restart_backoff_ms": 5000
+}
+```
+
+Read-only HTTP mode exposes these local registry views without lifecycle
+mutation routes:
+
+```bash
+cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- \
+  --serve \
+  --bind 127.0.0.1:18181 \
+  --registry-path run/supervisor/registry.json
+```
+
+Routes:
+
+- `GET /api/health`
+- `GET /api/snapshot`
+- `GET /api/processes`
+- `GET /api/processes/:id`
+- `GET /api/heartbeats`
+- `GET /api/runtime-snapshots`
+- `GET /api/recovery`
+
+Runtime heartbeat ingestion is intentionally separated under a local lifecycle
+route and is registered only when an explicit local token is configured:
+
+```bash
+RUSTCTA_SUPERVISOR_LOCAL_LIFECYCLE_TOKEN=<local-token> \
+cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- \
+  --serve \
+  --bind 127.0.0.1:18181 \
+  --registry-path run/supervisor/registry.json
+```
+
+The route is `POST /api/local/lifecycle/heartbeat` and requires the
+`x-rustcta-supervisor-token` header. Without that token configuration the route
+does not exist. This is local lifecycle mutation groundwork only; remote
+unauthenticated start, stop, or restart APIs are still out of scope.
+
 The industrial CLI exposes the same offline helpers:
 
 ```bash

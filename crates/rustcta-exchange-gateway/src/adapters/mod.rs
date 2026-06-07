@@ -403,11 +403,38 @@ impl LocalGateway for AdapterBackedGateway {
                         .map_err(exchange_api_error_to_gateway)?,
                 )
             }
+            GatewayRequestPayload::PlaceQuoteMarketOrder(request) => {
+                let adapter = self.adapter_for(&request.symbol.exchange)?;
+                GatewayResponsePayload::PlaceOrder(
+                    adapter
+                        .place_quote_market_order(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
             GatewayRequestPayload::CancelOrder(request) => {
                 let adapter = self.adapter_for(&request.symbol.exchange)?;
                 GatewayResponsePayload::CancelOrder(
                     adapter
                         .cancel_order(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
+            GatewayRequestPayload::AmendOrder(request) => {
+                let adapter = self.adapter_for(&request.symbol.exchange)?;
+                GatewayResponsePayload::AmendOrder(
+                    adapter
+                        .amend_order(request)
+                        .await
+                        .map_err(exchange_api_error_to_gateway)?,
+                )
+            }
+            GatewayRequestPayload::PlaceOrderList(request) => {
+                let adapter = self.adapter_for(&request.symbol().exchange)?;
+                GatewayResponsePayload::OrderList(
+                    adapter
+                        .place_order_list(request)
                         .await
                         .map_err(exchange_api_error_to_gateway)?,
                 )
@@ -501,6 +528,7 @@ impl LocalGateway for AdapterBackedGateway {
                 let mut subscriptions = Vec::with_capacity(request.subscriptions.len());
                 for subscription in request.subscriptions {
                     let adapter = self.adapter_for(&subscription.exchange)?;
+                    let capabilities = adapter.capabilities().private_stream_capabilities;
                     let subscription_id = adapter
                         .subscribe_private_stream(subscription.clone())
                         .await
@@ -512,6 +540,7 @@ impl LocalGateway for AdapterBackedGateway {
                         market_type: subscription.market_type,
                         account_id: subscription.account_id,
                         kind: subscription.kind,
+                        capabilities,
                         subscribed_at: Utc::now(),
                     });
                 }

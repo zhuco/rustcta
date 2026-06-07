@@ -1,6 +1,6 @@
 [package]
 name = "rustcta"
-version = "0.3.9"
+version = "0.3.10"
 edition = "2021"
 default-run = "rustcta"
 
@@ -39,7 +39,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.9"
+version = "0.3.10"
 edition = "2021"
 license = "UNLICENSED"
 publish = false
@@ -124,6 +124,7 @@ rmp-serde = "1.1"
 prost = "0.12"
 rustcta-reporting.workspace = true
 rustcta-strategy-sdk.workspace = true
+rustcta-supervisor.workspace = true
 rustcta-strategy-funding-arbitrage = { path = "strategies/funding-arbitrage" }
 rustcta-strategy-range-grid = { path = "strategies/range-grid" }
 rustcta-strategy-spot-spot-arbitrage = { path = "strategies/spot-spot-arbitrage" }

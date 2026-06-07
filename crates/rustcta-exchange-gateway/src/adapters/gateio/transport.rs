@@ -62,18 +62,112 @@ impl GateIoPublicRest {
         api_key: &str,
         api_secret: &str,
     ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::GET,
+            endpoint,
+            params,
+            None,
+            api_key,
+            api_secret,
+        )
+        .await
+    }
+
+    pub async fn send_signed_post(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &Value,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::POST,
+            endpoint,
+            params,
+            Some(body),
+            api_key,
+            api_secret,
+        )
+        .await
+    }
+
+    pub async fn send_signed_patch(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &Value,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::PATCH,
+            endpoint,
+            params,
+            Some(body),
+            api_key,
+            api_secret,
+        )
+        .await
+    }
+
+    pub async fn send_signed_delete(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::DELETE,
+            endpoint,
+            params,
+            None,
+            api_key,
+            api_secret,
+        )
+        .await
+    }
+
+    async fn send_signed_request(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: Option<&Value>,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
         let query = build_query(params);
         let url = build_url_from_query(&self.rest_base_url, endpoint, &query);
         let timestamp = Utc::now().timestamp().to_string();
         let path = signed_request_path(&self.rest_base_url, endpoint);
-        let signature = sign_gateio_request(api_secret, "GET", &path, &query, "", &timestamp);
-        let response = self
+        let body_text = body
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| ExchangeApiError::Serialization {
+                message: error.to_string(),
+            })?
+            .unwrap_or_default();
+        let signature = sign_gateio_request(
+            api_secret,
+            method.as_str(),
+            &path,
+            &query,
+            &body_text,
+            &timestamp,
+        );
+        let mut request = self
             .http
-            .get(url)
+            .request(method, url)
             .header("KEY", api_key)
             .header("Timestamp", timestamp)
             .header("SIGN", signature)
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json");
+        if !body_text.is_empty() {
+            request = request.body(body_text);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

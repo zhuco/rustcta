@@ -59,6 +59,7 @@ pub fn validate_transition(
             to,
             BundleStatus::MakerPending
                 | BundleStatus::DepthInsufficient
+                | BundleStatus::OneSidedExposure
                 | BundleStatus::Expired
                 | BundleStatus::RiskStopped
                 | BundleStatus::ReconcileRequired
@@ -78,6 +79,7 @@ pub fn validate_transition(
             to,
             BundleStatus::Hedging
                 | BundleStatus::OrphanLeg
+                | BundleStatus::OneSidedExposure
                 | BundleStatus::RiskStopped
                 | BundleStatus::ReconcileRequired
         ),
@@ -85,6 +87,7 @@ pub fn validate_transition(
             to,
             BundleStatus::OpenSimulated
                 | BundleStatus::OrphanLeg
+                | BundleStatus::OneSidedExposure
                 | BundleStatus::RiskStopped
                 | BundleStatus::ReconcileRequired
         ),
@@ -109,11 +112,20 @@ pub fn validate_transition(
                 | BundleStatus::RiskStopped
                 | BundleStatus::ReconcileRequired
         ),
+        BundleStatus::OneSidedExposure => matches!(
+            to,
+            BundleStatus::ClosingSimulated
+                | BundleStatus::OrphanLeg
+                | BundleStatus::Closed
+                | BundleStatus::RiskStopped
+                | BundleStatus::ReconcileRequired
+        ),
         BundleStatus::ReconcileRequired => matches!(
             to,
             BundleStatus::OpenSimulated
                 | BundleStatus::ClosingSimulated
                 | BundleStatus::OrphanLeg
+                | BundleStatus::OneSidedExposure
                 | BundleStatus::Closed
                 | BundleStatus::RiskStopped
         ),
@@ -188,5 +200,18 @@ mod tests {
         transition_bundle(&mut bundle, BundleStatus::OrphanLeg, now).unwrap();
 
         assert_eq!(bundle.status, BundleStatus::OrphanLeg);
+    }
+
+    #[test]
+    fn state_machine_should_recover_one_sided_exposure_through_close_path() {
+        let now = Utc::now();
+        let mut bundle = test_bundle();
+
+        transition_bundle(&mut bundle, BundleStatus::OneSidedExposure, now).unwrap();
+        transition_bundle(&mut bundle, BundleStatus::ClosingSimulated, now).unwrap();
+        transition_bundle(&mut bundle, BundleStatus::Closed, now).unwrap();
+
+        assert_eq!(bundle.status, BundleStatus::Closed);
+        assert_eq!(bundle.close_time, Some(now));
     }
 }

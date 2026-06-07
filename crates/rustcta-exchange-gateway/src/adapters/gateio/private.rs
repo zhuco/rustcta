@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
 use rustcta_exchange_api::{
-    BalancesRequest, BalancesResponse, ExchangeApiError, ExchangeApiResult, FeesRequest,
-    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, QueryOrderRequest, QueryOrderResponse,
-    RecentFillsRequest, RecentFillsResponse, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
+    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
+    ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
+    OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::MarketType;
+use rustcta_types::{MarketType, OrderSide, OrderType};
+use serde_json::{json, Value};
 
 use super::parser::normalize_gateio_symbol;
 use super::private_parser::{
@@ -15,6 +19,142 @@ use super::GateIoGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
 
 impl GateIoGatewayAdapter {
+    pub(super) async fn place_order_impl(
+        &self,
+        request: PlaceOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let body = gateio_order_body(&request)?;
+        let value = self
+            .send_signed_post("gateio.place_order", "/spot/orders", &HashMap::new(), &body)
+            .await?;
+        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(PlaceOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
+    pub(super) async fn place_quote_market_order_impl(
+        &self,
+        request: QuoteMarketOrderRequest,
+    ) -> ExchangeApiResult<PlaceOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let body = gateio_quote_market_order_body(&request)?;
+        let value = self
+            .send_signed_post(
+                "gateio.place_quote_market_order",
+                "/spot/orders",
+                &HashMap::new(),
+                &body,
+            )
+            .await?;
+        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(PlaceOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
+    pub(super) async fn cancel_order_impl(
+        &self,
+        request: CancelOrderRequest,
+    ) -> ExchangeApiResult<CancelOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let order_id = request
+            .exchange_order_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(ExchangeApiError::Unsupported {
+                operation: "gateio.cancel_by_client_order_id",
+            })?;
+        let mut params = HashMap::new();
+        params.insert(
+            "currency_pair".to_string(),
+            normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+        );
+        let endpoint = format!("/spot/orders/{order_id}");
+        let value = self
+            .send_signed_delete("gateio.cancel_order", &endpoint, &params)
+            .await?;
+        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(CancelOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+            cancelled: true,
+        })
+    }
+
+    pub(super) async fn cancel_all_orders_impl(
+        &self,
+        request: CancelAllOrdersRequest,
+    ) -> ExchangeApiResult<CancelAllOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        self.ensure_optional_spot(request.market_type)?;
+        let symbol = request
+            .symbol
+            .as_ref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "gateio.cancel_all_orders requires symbol".to_string(),
+            })?;
+        self.ensure_exchange(&symbol.exchange)?;
+        self.ensure_spot(symbol.market_type)?;
+        let mut params = HashMap::new();
+        params.insert(
+            "currency_pair".to_string(),
+            normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+        );
+        let value = self
+            .send_signed_delete("gateio.cancel_all_orders", "/spot/orders", &params)
+            .await?;
+        let orders = parse_open_orders(&self.exchange_id, Some(symbol), &value)?;
+        Ok(CancelAllOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            cancelled_count: orders.len() as u32,
+            orders,
+        })
+    }
+
+    pub(super) async fn amend_order_impl(
+        &self,
+        request: AmendOrderRequest,
+    ) -> ExchangeApiResult<AmendOrderResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_spot(request.symbol.market_type)?;
+        let order_id = request
+            .exchange_order_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(ExchangeApiError::Unsupported {
+                operation: "gateio.amend_by_client_order_id",
+            })?;
+        let body = gateio_amend_order_body(&request)?;
+        let endpoint = format!("/spot/orders/{order_id}");
+        let value = self
+            .send_signed_patch("gateio.amend_order", &endpoint, &HashMap::new(), &body)
+            .await?;
+        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        Ok(AmendOrderResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.symbol.exchange, request.context.request_id),
+            order,
+        })
+    }
+
     pub(super) async fn get_balances_impl(
         &self,
         request: BalancesRequest,
@@ -184,4 +324,114 @@ impl GateIoGatewayAdapter {
             fills,
         })
     }
+}
+
+fn gateio_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
+    if request.reduce_only {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "gateio spot order does not support reduce_only".to_string(),
+        });
+    }
+    let order_type = match request.order_type {
+        OrderType::Market => "market",
+        OrderType::StopMarket | OrderType::StopLimit => {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "gateio.stop_order",
+            });
+        }
+        _ => "limit",
+    };
+    let mut body = json!({
+        "currency_pair": normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+        "side": gateio_side(request.side),
+        "type": order_type,
+        "amount": non_empty("quantity", &request.quantity)?,
+    });
+    if request.order_type != OrderType::Market {
+        let price = request
+            .price
+            .as_deref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "gateio limit-style order requires price".to_string(),
+            })?;
+        body["price"] = Value::String(non_empty("price", price)?);
+    }
+    if let Some(client_order_id) = request.client_order_id.as_deref() {
+        body["text"] = Value::String(gateio_client_text(client_order_id)?);
+    }
+    if let Some(time_in_force) = request.time_in_force {
+        body["time_in_force"] = Value::String(gateio_time_in_force(time_in_force).to_string());
+    }
+    Ok(body)
+}
+
+fn gateio_quote_market_order_body(request: &QuoteMarketOrderRequest) -> ExchangeApiResult<Value> {
+    if request.side != OrderSide::Buy {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "gateio.quote_market_sell",
+        });
+    }
+    let mut body = json!({
+        "currency_pair": normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+        "side": "buy",
+        "type": "market",
+        "amount": non_empty("quote_quantity", &request.quote_quantity)?,
+        "time_in_force": "ioc",
+    });
+    if let Some(client_order_id) = request.client_order_id.as_deref() {
+        body["text"] = Value::String(gateio_client_text(client_order_id)?);
+    }
+    Ok(body)
+}
+
+fn gateio_amend_order_body(request: &AmendOrderRequest) -> ExchangeApiResult<Value> {
+    if request
+        .new_client_order_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "gateio.amend_new_client_order_id",
+        });
+    }
+    Ok(json!({
+        "currency_pair": normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+        "account": "spot",
+        "amount": non_empty("new_quantity", &request.new_quantity)?,
+    }))
+}
+
+fn gateio_client_text(client_order_id: &str) -> ExchangeApiResult<String> {
+    let client_order_id = non_empty("client_order_id", client_order_id)?;
+    Ok(if client_order_id.starts_with("t-") {
+        client_order_id
+    } else {
+        format!("t-{client_order_id}")
+    })
+}
+
+fn gateio_side(side: OrderSide) -> &'static str {
+    match side {
+        OrderSide::Buy => "buy",
+        OrderSide::Sell => "sell",
+    }
+}
+
+fn gateio_time_in_force(time_in_force: TimeInForce) -> &'static str {
+    match time_in_force {
+        TimeInForce::GTC => "gtc",
+        TimeInForce::IOC => "ioc",
+        TimeInForce::FOK => "fok",
+        TimeInForce::GTX => "poc",
+    }
+}
+
+fn non_empty(field: &str, value: &str) -> ExchangeApiResult<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("gateio {field} must not be empty"),
+        });
+    }
+    Ok(value.to_string())
 }

@@ -60,11 +60,11 @@ fn append_jsonl(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
 }
 
 fn append_csv(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
-    const HEADER: &[u8] = b"event_type,timestamp,symbol,buy_exchange,sell_exchange,buy_price,sell_price,raw_spread_bps,net_spread_bps,notional,quantity,accepted,rejection_reason,rejection_detail,buy_fee_bps,sell_fee_bps,fee_source_buy,fee_source_sell,platform_discount_applied,estimated_total_fee,estimated_net_pnl,buy_book_age_ms,sell_book_age_ms,buy_book_source,sell_book_source,buy_latency_ms,sell_latency_ms,gross_pnl,net_pnl,fees\n";
+    const HEADER: &[u8] = b"event_type,timestamp,symbol,buy_exchange,sell_exchange,buy_price,sell_price,raw_spread_bps,net_spread_bps,notional,quantity,accepted,rejection_reason,rejection_detail,buy_fee_bps,sell_fee_bps,fee_source_buy,fee_source_sell,platform_discount_applied,estimated_total_fee,estimated_net_pnl,buy_book_age_ms,sell_book_age_ms,buy_book_source,sell_book_source,buy_latency_ms,sell_latency_ms,gross_pnl,net_pnl,fees,capital_cost,transfer_cost,inventory_rebalance_cost,latency_penalty_cost,slippage_cost,pnl_category\n";
 
     let row = match event {
         RecorderEvent::Opportunity(record) => format!(
-            "opportunity,{},{},{},{},{},{},{},{},{},{},{},{:?},{:?},{},{},{:?},{:?},{},{},{},{},{},{:?},{:?},{:?},{:?},,,",
+            "opportunity,{},{},{},{},{},{},{},{},{},{},{},{:?},{:?},{},{},{:?},{:?},{},{},{},{},{},{:?},{:?},{:?},{:?},,,,{},{},{},{},{},",
             record.timestamp.to_rfc3339(),
             record.symbol,
             record.buy_exchange,
@@ -90,10 +90,15 @@ fn append_csv(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
             record.buy_book_source,
             record.sell_book_source,
             record.buy_latency_ms,
-            record.sell_latency_ms
+            record.sell_latency_ms,
+            record.estimated_capital_cost,
+            record.estimated_transfer_cost,
+            record.estimated_inventory_rebalance_cost,
+            record.estimated_latency_penalty_cost,
+            record.estimated_slippage_cost
         ),
         RecorderEvent::SimulatedTrade(record) => format!(
-            "simulated_trade,{},{},{},{},{},{},,,{},{},,,,,,,,,,,,,,,,,{},{},{}",
+            "simulated_trade,{},{},{},{},{},{},,,{},{},,,,,,,,,,,,,,,,,{},{},{},{},{},{},{},{},{:?}",
             record.timestamp.to_rfc3339(),
             record.symbol,
             record.buy_exchange,
@@ -104,7 +109,13 @@ fn append_csv(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
             record.quantity,
             record.gross_pnl,
             record.net_pnl,
-            record.buy_fee + record.sell_fee
+            record.buy_fee + record.sell_fee,
+            record.capital_cost,
+            record.transfer_cost,
+            record.inventory_rebalance_cost,
+            record.latency_penalty_cost,
+            record.slippage_cost,
+            record.pnl_category
         ),
     };
     let mut row = row.into_bytes();

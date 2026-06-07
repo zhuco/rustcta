@@ -2,7 +2,7 @@ use gloo_net::http::Request;
 use serde_json::json;
 use serde_json::Value;
 
-use crate::types::{DashboardData, ExchangeCredentialSaveDraft, WorkspaceFetchData};
+use crate::types::{DashboardData, WorkspaceFetchData};
 use crate::utils::{as_array, bool_at, path_segment, record_balance_history, text_at};
 
 const API_CONTROL_PREFIX: &str = "/api/control";
@@ -85,10 +85,6 @@ pub(crate) struct StrategyConfigDraft {
     pub(crate) content: String,
 }
 
-pub(crate) struct ExchangeCredentialStatusUpdate {
-    pub(crate) status: Value,
-}
-
 fn control_command_endpoint(command: &str) -> String {
     format!("{API_CONTROL_PREFIX}/{}", path_segment(command))
 }
@@ -113,6 +109,10 @@ fn strategy_command_endpoint(strategy_id: &str) -> String {
     format!("{API_STRATEGIES}/{}/command", path_segment(strategy_id))
 }
 
+fn strategy_config_endpoint(strategy_id: &str) -> String {
+    format!("{API_STRATEGIES}/{}/config", path_segment(strategy_id))
+}
+
 pub(crate) async fn create_strategy(token: &str, body: &Value) -> Result<Value, String> {
     api_post_json(API_STRATEGIES, token, body).await
 }
@@ -127,6 +127,28 @@ pub(crate) async fn send_strategy_command(
     body: &Value,
 ) -> Result<Value, String> {
     api_post_json(&strategy_command_endpoint(strategy_id), token, body).await
+}
+
+pub(crate) async fn fetch_strategy_config_for_strategy(
+    token: &str,
+    strategy_id: &str,
+    lang: crate::types::Language,
+) -> Result<StrategyConfigDraft, String> {
+    let value = api_get(&strategy_config_endpoint(strategy_id), token).await?;
+    Ok(StrategyConfigDraft {
+        path: text_at(&value, "path", lang),
+        content: text_at(&value, "content", lang),
+    })
+}
+
+pub(crate) async fn save_strategy_config_for_strategy(
+    token: &str,
+    strategy_id: &str,
+    content: String,
+    restart: bool,
+) -> Result<Value, String> {
+    let body = json!({ "content": content, "restart": restart });
+    api_post_json(&strategy_config_endpoint(strategy_id), token, &body).await
 }
 
 pub(crate) async fn post_exchange_control(
@@ -260,6 +282,15 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
             local_balance_history
         }
     };
+    let credentials_status = workspace_data.credentials_status.clone();
+    let api_keys = fetch_credential_schema_fallback(
+        token,
+        previous.api_keys,
+        credentials_status.clone(),
+        &mut updated,
+        &mut errors,
+    )
+    .await;
     DashboardFetch {
         data: DashboardData {
             workspace: workspace_data.workspace,
@@ -267,7 +298,7 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
             processes: workspace_data.processes,
             agents: workspace_data.agents,
             gateway_status: workspace_data.gateway_status,
-            credentials_status: workspace_data.credentials_status,
+            credentials_status,
             status: fetch_or_previous(
                 API_STATUS,
                 token,
@@ -397,14 +428,7 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
                 &mut errors,
             )
             .await,
-            api_keys: fetch_or_previous(
-                API_EXCHANGE_API_KEYS,
-                token,
-                previous.api_keys,
-                &mut updated,
-                &mut errors,
-            )
-            .await,
+            api_keys,
             strategy_logs: fetch_or_previous(
                 API_STRATEGY_LOGS,
                 token,
@@ -420,44 +444,14 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
     }
 }
 
-pub(crate) async fn fetch_exchange_api_keys(token: &str) -> Result<Value, String> {
-    api_get(API_EXCHANGE_API_KEYS, token).await
-}
-
-pub(crate) async fn save_exchange_credential_draft(
-    token: &str,
-    draft: ExchangeCredentialSaveDraft,
-) -> Result<ExchangeCredentialStatusUpdate, String> {
-    let body = json!({
-        "exchange": draft.exchange,
-        "account_id": draft.account_id,
-        "account_label": draft.account_label,
-        "exchange_account_id": draft.exchange_account_id,
-        "wallet_address": draft.wallet_address,
-        "is_vault_address": draft.is_vault_address,
-        "api_key": draft.api_key,
-        "api_secret": draft.api_secret,
-        "passphrase": draft.passphrase,
-    });
-    let value = api_post_json(API_EXCHANGE_API_KEYS, token, &body).await?;
-    Ok(ExchangeCredentialStatusUpdate {
-        status: value.get("status").cloned().unwrap_or(Value::Null),
-    })
-}
-
-pub(crate) async fn delete_exchange_credential_slot(
-    token: &str,
-    exchange: &str,
-    account_id: &str,
-) -> Result<ExchangeCredentialStatusUpdate, String> {
-    let value = api_delete(
-        &format!("{API_EXCHANGE_API_KEYS}/{exchange}:{account_id}"),
-        token,
-    )
-    .await?;
-    Ok(ExchangeCredentialStatusUpdate {
-        status: value.get("status").cloned().unwrap_or(Value::Null),
-    })
+pub(crate) async fn fetch_credential_status(token: &str) -> Result<Value, String> {
+    match api_get(API_CREDENTIALS_STATUS, token).await {
+        Ok(value) => Ok(value),
+        Err(status_error) => match api_get(API_EXCHANGE_API_KEYS, token).await {
+            Ok(value) => Ok(value),
+            Err(legacy_error) => Err(format!("{status_error}; legacy fallback: {legacy_error}")),
+        },
+    }
 }
 
 pub(crate) async fn fetch_strategy_config_draft(
@@ -584,6 +578,29 @@ async fn fetch_or_previous(
     }
 }
 
+async fn fetch_credential_schema_fallback(
+    token: &str,
+    previous: Value,
+    status_value: Value,
+    updated: &mut usize,
+    errors: &mut Vec<String>,
+) -> Value {
+    match api_get(API_EXCHANGE_API_KEYS, token).await {
+        Ok(value) => {
+            *updated += 1;
+            value
+        }
+        Err(error) => {
+            if status_value.is_null() {
+                errors.push(error);
+                previous
+            } else {
+                status_value
+            }
+        }
+    }
+}
+
 async fn fetch_runtime_publisher_status(
     path: &str,
     token: &str,
@@ -638,14 +655,14 @@ async fn api_get(path: &str, token: &str) -> Result<Value, String> {
         .header("Authorization", &bearer)
         .send()
         .await
-        .map_err(|error| format!("GET {path} failed: {error}"))?;
+        .map_err(|error| format!("请求 {path} 失败：{error}"))?;
     if !response.ok() {
-        return Err(format!("GET {path} returned HTTP {}", response.status()));
+        return Err(api_error_message(path, response).await);
     }
     response
         .json::<Value>()
         .await
-        .map_err(|error| format!("GET {path} JSON parse failed: {error}"))
+        .map_err(|error| format!("解析 {path} 响应失败：{error}"))
 }
 
 async fn api_post(path: &str, token: &str) -> Result<Value, String> {
@@ -654,14 +671,14 @@ async fn api_post(path: &str, token: &str) -> Result<Value, String> {
         .header("Authorization", &bearer)
         .send()
         .await
-        .map_err(|error| format!("POST {path} failed: {error}"))?;
+        .map_err(|error| format!("提交 {path} 失败：{error}"))?;
     if !response.ok() {
-        return Err(format!("POST {path} returned HTTP {}", response.status()));
+        return Err(api_error_message(path, response).await);
     }
     response
         .json::<Value>()
         .await
-        .map_err(|error| format!("POST {path} JSON parse failed: {error}"))
+        .map_err(|error| format!("解析 {path} 提交响应失败：{error}"))
 }
 
 async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, String> {
@@ -669,31 +686,32 @@ async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, S
     let response = Request::post(path)
         .header("Authorization", &bearer)
         .json(body)
-        .map_err(|error| format!("POST {path} JSON encode failed: {error}"))?
+        .map_err(|error| format!("编码 {path} 提交内容失败：{error}"))?
         .send()
         .await
-        .map_err(|error| format!("POST {path} failed: {error}"))?;
+        .map_err(|error| format!("提交 {path} 失败：{error}"))?;
     if !response.ok() {
-        return Err(format!("POST {path} returned HTTP {}", response.status()));
+        return Err(api_error_message(path, response).await);
     }
     response
         .json::<Value>()
         .await
-        .map_err(|error| format!("POST {path} JSON parse failed: {error}"))
+        .map_err(|error| format!("解析 {path} 提交响应失败：{error}"))
 }
 
-async fn api_delete(path: &str, token: &str) -> Result<Value, String> {
-    let bearer = format!("Bearer {token}");
-    let response = Request::delete(path)
-        .header("Authorization", &bearer)
-        .send()
-        .await
-        .map_err(|error| format!("DELETE {path} failed: {error}"))?;
-    if !response.ok() {
-        return Err(format!("DELETE {path} returned HTTP {}", response.status()));
+async fn api_error_message(path: &str, response: gloo_net::http::Response) -> String {
+    let status = response.status();
+    if status == 401 {
+        return format!("{path} 返回 HTTP 401：认证 token 缺失、错误或已过期；请把 run/local_control_api_token.txt 里的当前 token 重新粘贴到页面左侧 Auth token 输入框");
     }
-    response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("DELETE {path} JSON parse failed: {error}"))
+    match response.json::<Value>().await {
+        Ok(value) => {
+            if let Some(error) = value.get("error").and_then(Value::as_str) {
+                format!("{path} 返回 HTTP {status}：{error}")
+            } else {
+                format!("{path} 返回 HTTP {status}：{value}")
+            }
+        }
+        Err(error) => format!("{path} 返回 HTTP {status}，且响应内容无法解析：{error}"),
+    }
 }

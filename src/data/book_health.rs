@@ -19,6 +19,10 @@ pub struct ExchangeMarketHealth {
     pub reconnect_count: u64,
     pub parse_error_count: u64,
     pub sequence_gap_count: u64,
+    pub sequence_rollback_count: u64,
+    pub duplicate_update_count: u64,
+    pub out_of_order_count: u64,
+    pub checksum_mismatch_count: u64,
     pub heartbeat_timeout_count: u64,
     pub avg_latency_ms: Option<f64>,
     pub max_latency_ms: Option<i64>,
@@ -113,6 +117,38 @@ impl BookHealth {
             .entry(normalize_exchange(exchange))
             .or_insert_with(|| new_health(exchange, market_type));
         health.sequence_gap_count += 1;
+    }
+
+    pub async fn mark_sequence_rollback(&self, exchange: &str, market_type: MarketType) {
+        let mut guard = self.inner.write().await;
+        let health = guard
+            .entry(normalize_exchange(exchange))
+            .or_insert_with(|| new_health(exchange, market_type));
+        health.sequence_rollback_count += 1;
+    }
+
+    pub async fn mark_duplicate_update(&self, exchange: &str, market_type: MarketType) {
+        let mut guard = self.inner.write().await;
+        let health = guard
+            .entry(normalize_exchange(exchange))
+            .or_insert_with(|| new_health(exchange, market_type));
+        health.duplicate_update_count += 1;
+    }
+
+    pub async fn mark_out_of_order(&self, exchange: &str, market_type: MarketType) {
+        let mut guard = self.inner.write().await;
+        let health = guard
+            .entry(normalize_exchange(exchange))
+            .or_insert_with(|| new_health(exchange, market_type));
+        health.out_of_order_count += 1;
+    }
+
+    pub async fn mark_checksum_mismatch(&self, exchange: &str, market_type: MarketType) {
+        let mut guard = self.inner.write().await;
+        let health = guard
+            .entry(normalize_exchange(exchange))
+            .or_insert_with(|| new_health(exchange, market_type));
+        health.checksum_mismatch_count += 1;
     }
 
     pub async fn mark_heartbeat_timeout(&self, exchange: &str, market_type: MarketType) {

@@ -63,24 +63,97 @@ impl KuCoinPublicRest {
         api_secret: &str,
         api_passphrase: &str,
     ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::GET,
+            endpoint,
+            params,
+            None,
+            api_key,
+            api_secret,
+            api_passphrase,
+        )
+        .await
+    }
+
+    pub async fn send_signed_post(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: &Value,
+        api_key: &str,
+        api_secret: &str,
+        api_passphrase: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::POST,
+            endpoint,
+            params,
+            Some(body),
+            api_key,
+            api_secret,
+            api_passphrase,
+        )
+        .await
+    }
+
+    pub async fn send_signed_delete(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+        api_passphrase: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_signed_request(
+            reqwest::Method::DELETE,
+            endpoint,
+            params,
+            None,
+            api_key,
+            api_secret,
+            api_passphrase,
+        )
+        .await
+    }
+
+    async fn send_signed_request(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: Option<&Value>,
+        api_key: &str,
+        api_secret: &str,
+        api_passphrase: &str,
+    ) -> ExchangeApiResult<Value> {
         let path = build_path(endpoint, params);
         let timestamp = Utc::now().timestamp_millis().to_string();
-        let prehash = format!("{timestamp}GET{path}");
+        let body_text = body
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| ExchangeApiError::Serialization {
+                message: error.to_string(),
+            })?
+            .unwrap_or_default();
+        let prehash = format!("{timestamp}{}{path}{body_text}", method.as_str());
         let signature = sign_base64(api_secret, &prehash)?;
         let passphrase = sign_base64(api_secret, api_passphrase)?;
-        let response = self
+        let mut request = self
             .http
-            .get(format!(
-                "{}{}",
-                self.rest_base_url.trim_end_matches('/'),
-                path
-            ))
+            .request(
+                method,
+                format!("{}{}", self.rest_base_url.trim_end_matches('/'), path),
+            )
             .header("KC-API-KEY", api_key)
             .header("KC-API-SIGN", signature)
             .header("KC-API-TIMESTAMP", timestamp)
             .header("KC-API-PASSPHRASE", passphrase)
             .header("KC-API-KEY-VERSION", "2")
-            .header("Content-Type", "application/json")
+            .header("Content-Type", "application/json");
+        if !body_text.is_empty() {
+            request = request.body(body_text);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

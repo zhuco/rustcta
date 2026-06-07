@@ -1,13 +1,15 @@
 use rustcta_exchange_api::{
-    BalancesRequest, ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest,
-    QueryOrderRequest, RecentFillsRequest, EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
+    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
+    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus};
+use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{
-    assert_signed_okx_request, context, exchange_id, private_config, spawn_rest_server,
-    symbol_scope,
+    assert_signed_okx_request, assert_signed_okx_request_method, context, exchange_id,
+    private_config, spawn_rest_server, symbol_scope,
 };
 use super::{OkxGatewayAdapter, OkxGatewayConfig};
 
@@ -249,6 +251,183 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
         requests[4].query.get("limit").map(String::as_str),
         Some("50")
     );
+}
+
+#[tokio::test]
+async fn okx_adapter_should_route_private_order_mutations() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "2001", "clOrdId": "LIMIT1", "sCode": "0", "sMsg": ""}]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "2002", "clOrdId": "QUOTE1", "sCode": "0", "sMsg": ""}]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "2001", "clOrdId": "LIMIT1", "sCode": "0", "sMsg": ""}]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{
+                "instId": "BTC-USDT",
+                "ordId": "2003",
+                "clOrdId": "CANCELALL1",
+                "side": "sell",
+                "ordType": "limit",
+                "state": "live",
+                "px": "70000",
+                "sz": "0.02",
+                "accFillSz": "0"
+            }]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "2003", "clOrdId": "CANCELALL1", "sCode": "0", "sMsg": ""}]
+        }),
+        json!({
+            "code": "0",
+            "msg": "",
+            "data": [{"ordId": "2004", "clOrdId": "AMENDNEW", "sCode": "0", "sMsg": ""}]
+        }),
+    ])
+    .await;
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(capabilities.supports_place_order);
+    assert!(capabilities.supports_cancel_order);
+    assert!(capabilities.supports_cancel_all_orders);
+    assert!(capabilities.supports_quote_market_order);
+    assert!(capabilities.supports_amend_order);
+    assert!(!capabilities.supports_order_list);
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("place-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            side: OrderSide::Buy,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "0.02".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: false,
+        })
+        .await
+        .expect("place order");
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("2001"));
+    assert_eq!(placed.order.client_order_id.as_deref(), Some("LIMIT1"));
+
+    let quote = adapter
+        .place_quote_market_order(QuoteMarketOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("quote-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("QUOTE1".to_string()),
+            side: OrderSide::Buy,
+            quote_quantity: "125.5".to_string(),
+        })
+        .await
+        .expect("quote order");
+    assert_eq!(quote.order.exchange_order_id.as_deref(), Some("2002"));
+    assert_eq!(quote.order.order_type, OrderType::Market);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("LIMIT1".to_string()),
+            exchange_order_id: Some("2001".to_string()),
+        })
+        .await
+        .expect("cancel order");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+
+    let cancel_all = adapter
+        .cancel_all_orders(CancelAllOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("cancel-all"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            symbol: Some(symbol_scope()),
+        })
+        .await
+        .expect("cancel all");
+    assert_eq!(cancel_all.cancelled_count, 1);
+
+    let amended = adapter
+        .amend_order(AmendOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("amend-order"),
+            symbol: symbol_scope(),
+            client_order_id: Some("AMENDOLD".to_string()),
+            exchange_order_id: Some("2004".to_string()),
+            new_client_order_id: Some("AMENDNEW".to_string()),
+            new_quantity: "0.015".to_string(),
+        })
+        .await
+        .expect("amend order");
+    assert_eq!(amended.order.exchange_order_id.as_deref(), Some("2004"));
+    assert_eq!(amended.order.client_order_id.as_deref(), Some("AMENDNEW"));
+    assert_eq!(amended.order.quantity, "0.015");
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 6);
+
+    assert_signed_okx_request_method(&requests[0], "POST", "/api/v5/trade/order");
+    let body = requests[0].body.as_ref().expect("place body");
+    assert_eq!(body["instId"], "BTC-USDT");
+    assert_eq!(body["tdMode"], "cash");
+    assert_eq!(body["side"], "buy");
+    assert_eq!(body["ordType"], "limit");
+    assert_eq!(body["sz"], "0.02");
+    assert_eq!(body["px"], "65000");
+    assert_eq!(body["clOrdId"], "LIMIT1");
+
+    assert_signed_okx_request_method(&requests[1], "POST", "/api/v5/trade/order");
+    let body = requests[1].body.as_ref().expect("quote body");
+    assert_eq!(body["ordType"], "market");
+    assert_eq!(body["sz"], "125.5");
+    assert_eq!(body["tgtCcy"], "quote_ccy");
+    assert_eq!(body["clOrdId"], "QUOTE1");
+
+    assert_signed_okx_request_method(&requests[2], "POST", "/api/v5/trade/cancel-order");
+    let body = requests[2].body.as_ref().expect("cancel body");
+    assert_eq!(body["instId"], "BTC-USDT");
+    assert_eq!(body["ordId"], "2001");
+    assert_eq!(body["clOrdId"], "LIMIT1");
+
+    assert_signed_okx_request(&requests[3], "/api/v5/trade/orders-pending");
+    assert_eq!(
+        requests[3].query.get("instId").map(String::as_str),
+        Some("BTC-USDT")
+    );
+
+    assert_signed_okx_request_method(&requests[4], "POST", "/api/v5/trade/cancel-batch-orders");
+    let body = requests[4].body.as_ref().unwrap().as_array().unwrap();
+    assert_eq!(body.len(), 1);
+    assert_eq!(body[0]["instId"], "BTC-USDT");
+    assert_eq!(body[0]["ordId"], "2003");
+
+    assert_signed_okx_request_method(&requests[5], "POST", "/api/v5/trade/amend-order");
+    let body = requests[5].body.as_ref().expect("amend body");
+    assert_eq!(body["instId"], "BTC-USDT");
+    assert_eq!(body["ordId"], "2004");
+    assert_eq!(body["clOrdId"], "AMENDOLD");
+    assert_eq!(body["newClOrdId"], "AMENDNEW");
+    assert_eq!(body["newSz"], "0.015");
 }
 
 #[tokio::test]

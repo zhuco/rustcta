@@ -186,9 +186,6 @@ impl CrossExchangeArbitrageConfig {
             if self.enabled_exchanges.is_empty() {
                 return Err(ConfigValidationError::MissingLiveEnabledExchanges);
             }
-            if self.execution.open_execution_style != OpenExecutionStyle::DualTaker {
-                return Err(ConfigValidationError::LiveTradingRequiresDualTaker);
-            }
             if self.execution.taker_ioc_slippage_limit_pct <= 0.0
                 || !self.execution.taker_ioc_slippage_limit_pct.is_finite()
             {
@@ -314,8 +311,6 @@ pub enum ConfigValidationError {
     MissingLiveEnabledSymbols,
     #[error("live trading requires explicit enabled_exchanges")]
     MissingLiveEnabledExchanges,
-    #[error("live trading starts with taker-taker only")]
-    LiveTradingRequiresDualTaker,
     #[error("live trading requires positive taker IOC slippage limit")]
     LiveTradingRequiresSlippageLimit,
     #[error("live mode requires an explicit symbol whitelist")]
@@ -1115,6 +1110,8 @@ pub struct PersistenceConfig {
     pub jsonl_dir: String,
     pub clickhouse_enabled: bool,
     #[serde(default = "default_true")]
+    pub persist_market_snapshots: bool,
+    #[serde(default = "default_true")]
     pub stop_live_on_unavailable: bool,
 }
 
@@ -1124,6 +1121,7 @@ impl Default for PersistenceConfig {
             enabled: true,
             jsonl_dir: "logs/cross_exchange_arbitrage".to_string(),
             clickhouse_enabled: false,
+            persist_market_snapshots: true,
             stop_live_on_unavailable: true,
         }
     }
@@ -1331,7 +1329,7 @@ mod tests {
     }
 
     #[test]
-    fn config_default_usdt_file_should_match_three_venue_200_symbol_plan() {
+    fn config_default_usdt_file_should_match_three_venue_400_symbol_plan() {
         let raw = std::fs::read_to_string("config/cross_exchange_arbitrage_usdt.yml").unwrap();
         let config = serde_yaml::from_str::<CrossExchangeArbitrageConfig>(&raw).unwrap();
 
@@ -1340,8 +1338,8 @@ mod tests {
             config.universe.enabled_exchanges,
             vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
         );
-        assert_eq!(config.universe.symbols.len(), 200);
-        assert_eq!(config.market.min_common_exchanges, 3);
+        assert_eq!(config.universe.symbols.len(), 400);
+        assert_eq!(config.market.min_common_exchanges, 2);
         assert_eq!(config.sizing.target_notional_usdt, 5.0);
         assert_eq!(config.sizing.max_positions_per_exchange, 10);
         assert_eq!(config.execution.max_concurrent_maker_orders, 10);

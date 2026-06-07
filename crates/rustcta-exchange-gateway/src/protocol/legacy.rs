@@ -84,8 +84,15 @@ fn typed_payload_from_legacy_operation(
         }
         GatewayOperation::GetFees => GatewayRequestPayload::GetFees(decode_payload(payload)?),
         GatewayOperation::PlaceOrder => GatewayRequestPayload::PlaceOrder(decode_payload(payload)?),
+        GatewayOperation::PlaceQuoteMarketOrder => {
+            GatewayRequestPayload::PlaceQuoteMarketOrder(decode_payload(payload)?)
+        }
         GatewayOperation::CancelOrder => {
             GatewayRequestPayload::CancelOrder(decode_payload(payload)?)
+        }
+        GatewayOperation::AmendOrder => GatewayRequestPayload::AmendOrder(decode_payload(payload)?),
+        GatewayOperation::PlaceOrderList => {
+            GatewayRequestPayload::PlaceOrderList(decode_payload(payload)?)
         }
         GatewayOperation::BatchPlaceOrders => {
             GatewayRequestPayload::BatchPlaceOrders(decode_payload(payload)?)

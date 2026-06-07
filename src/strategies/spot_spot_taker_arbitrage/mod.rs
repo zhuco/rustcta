@@ -1,8 +1,8 @@
-//! Paper-only MEXC <-> CoinEx Spot taker arbitrage strategy.
+//! Spot taker arbitrage strategy for the supported cross-exchange Spot pairs.
 //!
-//! This module never submits live orders. It reads public Spot order books,
-//! evaluates executable taker/taker spreads, simulates fills against paper
-//! inventory, and records both accepted and rejected opportunities.
+//! Paper and live-dry-run modes never submit live orders. `trading_mode=live`
+//! may submit Spot orders only after explicit live flags, preflight, kill-switch,
+//! small-live-gate, symbol-rule, balance, and order-plan validation pass.
 
 pub mod book_cache;
 pub mod book_recorder;
@@ -45,7 +45,8 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::json;
-use tokio::time::{interval, sleep, MissedTickBehavior};
+use tokio::sync::broadcast;
+use tokio::time::{interval, sleep, timeout, MissedTickBehavior};
 
 use crate::control::spot_control::{
     normalize_symbol, snapshot_store_from_config, DisableMode, DisableSymbolRequest,
@@ -242,9 +243,32 @@ impl SpotSpotTakerArbitrageStrategy {
         let mut enabled_arbitrage_symbols = BTreeSet::<String>::new();
         let mut spread_duration_tracker = SpreadDurationTracker::default();
         let mut arbitrage_pair_states = BTreeMap::<String, ArbitragePairRuntime>::new();
+        let mut event_spread_engine = EventDrivenSpreadEngine::new(EventDrivenSpreadEngineConfig {
+            exchanges: self.config.exchanges.clone(),
+            symbols: self.config.symbols.clone(),
+        });
+        let mut book_event_rx = websocket_runtime
+            .as_ref()
+            .map(WebsocketMarketDataRuntime::subscribe_book_events);
 
         loop {
-            ticker.tick().await;
+            let updated_symbol = match self.config.market_data_mode {
+                MarketDataMode::WebsocketCache => {
+                    next_event_driven_symbol(
+                        &mut book_event_rx,
+                        &mut event_spread_engine,
+                        self.config.scan_interval_ms,
+                    )
+                    .await
+                }
+                MarketDataMode::RestPolling => {
+                    ticker.tick().await;
+                    None
+                }
+                MarketDataMode::Replay => {
+                    unreachable!("replay mode returns before live loop")
+                }
+            };
             let control_liquidation_blocked_symbols = BTreeSet::new();
             if let Some(state) = &monitoring {
                 state.publish_strategy_status("running");
@@ -272,12 +296,14 @@ impl SpotSpotTakerArbitrageStrategy {
                 &mut enabled_arbitrage_symbols,
                 &mut arbitrage_pair_states,
             );
+            let symbols_to_process = symbols_for_market_data_tick(&self.config, &updated_symbol);
             if should_scan_arbitrage_opportunities(
                 &arbitrage_pair_states,
                 self.config.max_enabled_arbitrage_symbols,
-            ) {
+            ) && !symbols_to_process.is_empty()
+            {
                 let mut stop_current_scan = false;
-                for symbol in &self.config.symbols {
+                for symbol in &symbols_to_process {
                     if stop_current_scan || kill_switch.state().active {
                         break;
                     }
@@ -339,39 +365,44 @@ impl SpotSpotTakerArbitrageStrategy {
                         MarketDataMode::WebsocketCache => {
                             let (left_venue, right_venue) =
                                 configured_spot_pair(&self.config.exchanges);
-                            let Some(mexc_book) =
-                                book_cache.get_book(left_venue.as_str(), symbol).await
+                            let Some((left_book, right_book)) =
+                                event_spread_engine.book_pair(left_venue, right_venue, symbol)
                             else {
                                 report.record_rejection(RejectionReason::StaleBook);
                                 risk.record_rejection(symbol, RejectionReason::StaleBook);
                                 publish_risk_event(
                                     &monitoring,
                                     symbol,
-                                    Some(left_venue.as_str()),
+                                    None,
                                     RejectionReason::StaleBook,
-                                    Some(format!("missing {} cached book", left_venue.as_str())),
+                                    Some(format!(
+                                        "missing event-driven books for {} and {}",
+                                        left_venue.as_str(),
+                                        right_venue.as_str()
+                                    )),
                                 );
                                 continue;
                             };
-                            let Some(coinex_book) =
-                                book_cache.get_book(right_venue.as_str(), symbol).await
-                            else {
+                            if left_book.is_stale || right_book.is_stale {
                                 report.record_rejection(RejectionReason::StaleBook);
                                 risk.record_rejection(symbol, RejectionReason::StaleBook);
                                 publish_risk_event(
                                     &monitoring,
                                     symbol,
-                                    Some(right_venue.as_str()),
+                                    None,
                                     RejectionReason::StaleBook,
-                                    Some(format!("missing {} cached book", right_venue.as_str())),
+                                    Some(format!(
+                                        "stale event-driven book left_stale={} right_stale={}",
+                                        left_book.is_stale, right_book.is_stale
+                                    )),
                                 );
                                 continue;
-                            };
-                            let mexc_source = mexc_book.source;
-                            let coinex_source = coinex_book.source;
+                            }
+                            let mexc_source = left_book.source;
+                            let coinex_source = right_book.source;
                             (
-                                mexc_book.into_snapshot(),
-                                coinex_book.into_snapshot(),
+                                event_engine_snapshot(left_book),
+                                event_engine_snapshot(right_book),
                                 mexc_source,
                                 coinex_source,
                             )
@@ -1595,6 +1626,54 @@ fn spot_order_plan_mode(config: &SpotSpotTakerArbitrageConfig) -> bool {
     config.trading_mode.eq_ignore_ascii_case("live_dry_run") || spot_live_mode(config)
 }
 
+async fn next_event_driven_symbol(
+    rx: &mut Option<broadcast::Receiver<crate::data::BookEvent>>,
+    engine: &mut EventDrivenSpreadEngine,
+    idle_refresh_ms: u64,
+) -> Option<String> {
+    let Some(rx) = rx.as_mut() else {
+        sleep(Duration::from_millis(idle_refresh_ms.max(1))).await;
+        return None;
+    };
+    let wait = Duration::from_millis(idle_refresh_ms.max(1));
+    match timeout(wait, rx.recv()).await {
+        Ok(Ok(event)) => {
+            let Some(spot_event) = spot_book_event_from_shared(&event) else {
+                return None;
+            };
+            let stale_signal = spot_event.event_kind.is_stale_signal() || !spot_event.is_tradeable;
+            let result = engine.on_book_event(spot_event);
+            if stale_signal || !result.recomputed_pairs.is_empty() {
+                Some(result.symbol)
+            } else {
+                None
+            }
+        }
+        Ok(Err(broadcast::error::RecvError::Lagged(skipped))) => {
+            log::warn!(
+                "spot_spot_taker_arbitrage websocket book event receiver lagged skipped={skipped}; waiting for next event"
+            );
+            None
+        }
+        Ok(Err(broadcast::error::RecvError::Closed)) => {
+            log::warn!("spot_spot_taker_arbitrage websocket book event stream closed");
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+fn symbols_for_market_data_tick(
+    config: &SpotSpotTakerArbitrageConfig,
+    updated_symbol: &Option<String>,
+) -> Vec<String> {
+    match config.market_data_mode {
+        MarketDataMode::RestPolling => config.symbols.clone(),
+        MarketDataMode::WebsocketCache => updated_symbol.iter().cloned().collect(),
+        MarketDataMode::Replay => Vec::new(),
+    }
+}
+
 fn log_warn_once(key: impl Into<String>, message: impl FnOnce() -> String) {
     let key = key.into();
     let keys = SPOT_SPOT_WARN_ONCE_KEYS.get_or_init(|| Mutex::new(BTreeSet::new()));
@@ -2145,7 +2224,24 @@ fn live_dual_taker_trade_record(
     let buy_fee = buy_plan.fee_estimate.fee_amount * (quantity / buy_plan.quantity);
     let sell_fee = sell_plan.fee_estimate.fee_amount * (quantity / sell_plan.quantity);
     let gross_pnl = sell_notional - buy_notional;
-    let net_pnl = gross_pnl - buy_fee - sell_fee;
+    let fill_ratio = if opportunity.quantity > 0.0 {
+        (quantity / opportunity.quantity).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let slippage_cost = opportunity.estimated_slippage_cost * fill_ratio;
+    let capital_cost = opportunity.estimated_capital_cost * fill_ratio;
+    let transfer_cost = opportunity.estimated_transfer_cost * fill_ratio;
+    let inventory_rebalance_cost = opportunity.estimated_inventory_rebalance_cost * fill_ratio;
+    let latency_penalty_cost = opportunity.estimated_latency_penalty_cost * fill_ratio;
+    let net_pnl = gross_pnl
+        - buy_fee
+        - sell_fee
+        - slippage_cost
+        - capital_cost
+        - transfer_cost
+        - inventory_rebalance_cost
+        - latency_penalty_cost;
 
     Some(SimulatedTradeRecord {
         timestamp: chrono::Utc::now(),
@@ -2160,6 +2256,12 @@ fn live_dual_taker_trade_record(
         sell_fee,
         gross_pnl,
         net_pnl,
+        pnl_category: TradePnlCategory::Arbitrage,
+        slippage_cost,
+        capital_cost,
+        transfer_cost,
+        inventory_rebalance_cost,
+        latency_penalty_cost,
         latency_ms: opportunity
             .buy_latency_ms
             .unwrap_or_default()

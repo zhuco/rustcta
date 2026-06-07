@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 
 use crate::{
     ControlApiConfigSummary, ControlApiState, CreateStrategyRequest, CredentialStatusResponse,
-    StrategyProcessView, WorkspaceSummary, CONTROL_API_SCHEMA_VERSION,
+    StrategyProcessView, StrategySnapshotEnvelope, StrategySnapshotSource, WorkspaceSummary,
+    CONTROL_API_SCHEMA_VERSION,
 };
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -132,21 +133,40 @@ pub async fn strategy_detail(
 pub async fn strategy_snapshot(
     State(state): State<ControlApiState>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
-    let strategy = state
-        .snapshot()
-        .await
+) -> Result<Json<StrategySnapshotEnvelope>, StatusCode> {
+    let snapshot = state.snapshot().await;
+    if let Some(strategy_snapshot) = snapshot
+        .strategy_snapshots
+        .iter()
+        .find(|snapshot| snapshot.strategy_id == id)
+        .cloned()
+    {
+        return Ok(Json(strategy_snapshot));
+    }
+
+    let strategy = snapshot
         .strategies
         .into_iter()
         .find(|strategy| strategy.strategy_id == id)
         .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(json!({
-        "schema_version": CONTROL_API_SCHEMA_VERSION,
-        "strategy_id": strategy.strategy_id,
-        "run_id": strategy.run_id,
-        "status": strategy.status,
-        "last_snapshot_at": strategy.last_snapshot_at,
-    })))
+    Ok(Json(strategy_snapshot_from_process(strategy)))
+}
+
+pub async fn strategy_snapshots(
+    State(state): State<ControlApiState>,
+) -> Json<Vec<StrategySnapshotEnvelope>> {
+    let snapshot = state.snapshot().await;
+    let mut snapshots = snapshot.strategy_snapshots;
+    for strategy in snapshot.strategies {
+        if snapshots
+            .iter()
+            .any(|snapshot| snapshot.strategy_id == strategy.strategy_id)
+        {
+            continue;
+        }
+        snapshots.push(strategy_snapshot_from_process(strategy));
+    }
+    Json(snapshots)
 }
 
 pub async fn strategy_command(
@@ -346,4 +366,29 @@ fn command_accepted_payload(command: &LifecycleCommandRecord, applied_to_runtime
         "would_submit_order": false,
         "applied_to_runtime": applied_to_runtime,
     })
+}
+
+fn strategy_snapshot_from_process(
+    strategy: rustcta_supervisor::StrategyProcess,
+) -> StrategySnapshotEnvelope {
+    StrategySnapshotEnvelope {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        strategy_id: strategy.strategy_id,
+        strategy_kind: strategy.strategy_kind,
+        run_id: Some(strategy.run_id),
+        status: Some(strategy.status),
+        generated_at: Utc::now(),
+        source: StrategySnapshotSource::Supervisor,
+        detail: json!({
+            "config_path": strategy.config_path,
+            "process_id": strategy.process_id,
+            "started_at": strategy.started_at,
+            "last_heartbeat_at": strategy.last_heartbeat_at,
+            "last_snapshot_at": strategy.last_snapshot_at,
+            "restart_count": strategy.restart_count,
+            "last_exit_code": strategy.last_exit_code,
+            "last_error": strategy.last_error,
+            "log_configured": strategy.log_path.is_some(),
+        }),
+    }
 }
