@@ -206,19 +206,106 @@ message_rate_note
 - 每个交易所的订阅发送间隔和每连接 symbol 数量不能超过官方限制。
 - 记录实际 `book_recv_interval_ms`、gap 次数、重连次数，用真实数据判断“最快”是否稳定。
 
-当前优先审计对象：
+### 3. 官方默认 Public Book Profile
 
-```text
-Binance USD-M: depth5@100ms 或交易所支持的更快 top-of-book channel
-OKX SWAP: books5 / books-l2-tbt 等可用快照或增量 channel
-Bitget USDT-FUTURES: books5 / books1 / books 等可用 channel
-Bybit Linear: orderbook.1 / orderbook.50 等可用 channel
-Gate / MEXC / HTX: 只在延迟和稳定性达标后纳入高速主交易腿
+以下默认值按 2026-06-07 查询到的官方文档整理。后续实现策略时优先采用本表，不需要重新查 channel 名称；但上线前仍要用 canary 记录真实 `book_recv_interval_ms`、丢包、重连、sequence gap 和本机处理延迟。
+
+| 交易所 | 默认 profile | Channel / stream | 深度 | 官方推送频率 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| Binance USD-M | `fastest_depth` | `<symbol>@depth5@100ms` | 5 档 | 100ms | 官方 partial book depth 支持 5/10/20 档，速度为 250/500/100ms；未查到 USD-M 5 档 50ms。 |
+| Binance USD-M | `conservative_depth` | `<symbol>@depth10@100ms` 或 `<symbol>@depth20@100ms` | 10/20 档 | 100ms | 小仓 5 档通常够用；如果 5 档无法覆盖 VWAP，再升到 10/20。 |
+| OKX SWAP | `fastest_public_depth` | `books5` | 5 档 | 100ms | 普通 public 可用，适合作为默认安全档。 |
+| OKX SWAP | `fastest_l1` | `bbo-tbt` | 1 档 | 10ms | 只适合 L1 小额验证；不适合需要多档 VWAP 的默认双 taker。 |
+| OKX SWAP | `fastest_vip_depth` | `books50-l2-tbt` | 50 档 | 10ms | 需要登录且官方限制 VIP4+；可作为高级 profile，不作为普通默认。 |
+| OKX SWAP | `deep_vip_depth` | `books-l2-tbt` | 400 档 | 10ms | 需要登录且官方限制 VIP4+；消息量更大。 |
+| Bitget USDT-FUTURES | `fastest_depth` | `books5` | 5 档 | 10ms | 官方 UTA futures depth：books1 1ms、books5 10ms、books50 20ms、books 50ms。双 taker 默认用 books5。 |
+| Bitget USDT-FUTURES | `fastest_l1` | `books1` | 1 档 | 1ms | 只适合极小 notional 或 L1 canary。 |
+| Bitget USDT-FUTURES | `deep_depth` | `books50` | 50 档 | 20ms | 5 档深度不足时使用。 |
+| Bybit Linear | `fastest_depth` | `orderbook.50.<symbol>` | 50 档 | 20ms | 官方 linear/inverse 没有 5 档 channel；默认用 50 档。 |
+| Bybit Linear | `fastest_l1` | `orderbook.1.<symbol>` | 1 档 | 10ms | 当前代码使用 L1；双 taker VWAP 默认应升到 50 档，除非强制 tiny notional。 |
+| Bybit Linear | `deep_depth` | `orderbook.200.<symbol>` | 200 档 | 100ms | 大 notional 或 50 档不足时使用。 |
+| Gate USDT Futures | `fastest_depth` | `futures.order_book_update` payload `[contract, "20ms", "20"]` | 20 档更新 | 20ms | 官方 futures update 支持 20ms/100ms；20ms 只允许 20 档。需要 REST snapshot + incremental merge。 |
+| Gate USDT Futures | `conservative_depth` | `futures.order_book_update` payload `[contract, "100ms", "50"]` | 50 档更新 | 100ms | 消息压力更低，适合降级。 |
+| MEXC USDT Contract | `conservative_full_depth` | `sub.depth.full` param `{symbol, limit: 5}` | 5 档 | 官方页面未标明固定频率 | 官方 contract 文档确认 full depth limit 可为 5/10/20，且 incremental `sub.depth` 默认 compress=true；未找到可靠官方固定推送间隔，暂不作为高速主交易腿。 |
+| MEXC USDT Contract | `incremental_depth_candidate` | `sub.depth` param `{symbol, compress: true}` | 增量 | 官方页面未标明固定频率 | 需要本地 orderbook merge 和 canary 实测后再启用。 |
+| HTX USDT Swap | `fastest_depth` | `market.<contract>.depth.size_20.high_freq` | 20 档增量 | orderbook event 每 30ms 检查一次，有变化才推送 | 官方建议使用 high_freq 增量并维护本地 orderbook。 |
+| HTX USDT Swap | `conservative_depth` | `market.<contract>.depth.step6` | 20 档快照 | 官方提示大深度 100ms 数据量可能导致断连 | 当前代码使用 step0；高速 profile 应改为 high_freq 或 step6。 |
+
+默认实现建议：
+
+```yaml
+market:
+  public_book_speed: fastest
+  public_book_depth: 5
+  allow_top_of_book_only: false
+  exchange_book_profiles:
+    binance:
+      profile: fastest_depth
+      channel: depth5@100ms
+      depth: 5
+      expected_push_interval_ms: 100
+      requires_local_merge: false
+      supports_sequence: true
+    okx:
+      profile: fastest_public_depth
+      channel: books5
+      depth: 5
+      expected_push_interval_ms: 100
+      requires_local_merge: false
+      supports_sequence: true
+      vip_upgrade_channel: books50-l2-tbt
+    bitget:
+      profile: fastest_depth
+      channel: books5
+      depth: 5
+      expected_push_interval_ms: 10
+      requires_local_merge: false
+      supports_sequence: true
+    bybit:
+      profile: fastest_depth
+      channel: orderbook.50
+      depth: 50
+      expected_push_interval_ms: 20
+      requires_local_merge: true
+      supports_sequence: true
+    gate:
+      profile: fastest_depth
+      channel: futures.order_book_update
+      depth: 20
+      expected_push_interval_ms: 20
+      requires_local_merge: true
+      supports_sequence: true
+    mexc:
+      profile: conservative_full_depth
+      channel: sub.depth.full
+      depth: 5
+      expected_push_interval_ms: null
+      requires_local_merge: false
+      supports_sequence: true
+      use_as_primary_fast_leg: false
+    htx:
+      profile: fastest_depth
+      channel: depth.size_20.high_freq
+      depth: 20
+      expected_push_interval_ms: 30
+      requires_local_merge: true
+      supports_sequence: true
 ```
+
+官方文档来源：
+
+- Binance USD-M partial book depth：`https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Partial-Book-Depth-Streams`
+- Binance USD-M diff book depth：`https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Diff-Book-Depth-Streams`
+- OKX order book channel：`https://tr.okx.com/docs-v5/en/#order-book-trading-market-data-ws-order-book-channel`
+- Bitget UTA depth channel：`https://www.bitget.com/api-doc/uta/websocket/public/Order-Book-Channel`
+- Bybit V5 orderbook：`https://bybit-exchange.github.io/docs/v5/websocket/public/orderbook`
+- Gate futures WebSocket：`https://www.gate.com/en/docs/developers/futures/`
+- MEXC contract API：`https://mexcdevelop.github.io/apidocs/contract_v1_en/`
+- HTX USDT Swap API：`https://huobiapi.github.io/docs/usdt_swap/v1/en/`
 
 注意：更快的 channel 不一定更适合双 taker。若最快 channel 只有 1 档盘口，而目标 notional 需要吃多档，必须使用足够深度的 channel 或把下单 notional 降到 1 档可覆盖范围内。
 
-### 3. 双向价差评估
+### 4. 双向价差评估
 
 每个 symbol 对每组交易所都评估：
 
@@ -243,7 +330,7 @@ net_edge_after_fee_funding_slippage
 - exchange_health_penalty
 ```
 
-### 4. 双 Taker 执行请求
+### 5. 双 Taker 执行请求
 
 配置上应强制：
 
@@ -257,7 +344,7 @@ execution:
 
 如果当前配置结构没有 `allow_maker_taker_live`，可以先通过 validate 逻辑或 live runner admission 限制：前期 live run 只接受 `open_execution_style=dual_taker`。
 
-### 5. 成交状态机
+### 6. 成交状态机
 
 建议把双 taker bundle 的结果状态收敛为：
 
