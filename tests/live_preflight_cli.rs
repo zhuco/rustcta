@@ -8,7 +8,7 @@ fn base_config(live_preflight_extra: &str) -> String {
         r#"
 enabled: true
 trading_mode: paper
-exchanges: [mexc]
+exchanges: [mexc, coinex]
 symbols: [BTCUSDT]
 quote_asset: USDT
 max_notional_per_trade: 25.0
@@ -30,6 +30,8 @@ monitoring:
 initial_balances:
   mexc:
     USDT: 20.0
+  coinex:
+    USDT: 20.0
 mexc:
   api_key: ""
   api_secret: ""
@@ -39,7 +41,7 @@ coinex:
 live_preflight:
   enabled: true
   target_mode: small_live_taker_taker
-  exchanges: [mexc]
+  exchanges: [mexc, coinex]
   market_type: Spot
   symbols: [BTCUSDT]
   max_live_notional_per_trade: 5
@@ -76,6 +78,7 @@ fn cli_preflight_should_exit_zero_when_required_checks_pass() {
   require_websocket_fresh: false
   require_fee_model: false
   require_disabled_registry: false
+  require_kill_switch: false
   require_balances: false
   require_symbol_rules: false
   require_order_validation: false

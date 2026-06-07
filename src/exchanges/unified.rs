@@ -491,6 +491,384 @@ impl TimeInForce {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuoteMarketOrderRequest {
+    pub market_type: MarketType,
+    pub symbol: String,
+    pub side: OrderSide,
+    pub quote_quantity: f64,
+    pub client_order_id: Option<String>,
+}
+
+impl QuoteMarketOrderRequest {
+    pub fn spot_buy(symbol: impl Into<String>, quote_quantity: f64) -> Self {
+        Self {
+            market_type: MarketType::Spot,
+            symbol: symbol.into(),
+            side: OrderSide::Buy,
+            quote_quantity,
+            client_order_id: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ExchangeClientError> {
+        if self.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "quote-sized market orders are currently a spot-only request model"
+                    .to_string(),
+            });
+        }
+        if self.symbol.trim().is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "symbol",
+                reason: "symbol must not be empty".to_string(),
+            });
+        }
+        validate_positive("quote_quantity", self.quote_quantity)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AmendOrderRequest {
+    pub market_type: MarketType,
+    pub symbol: String,
+    pub order_id: Option<String>,
+    pub client_order_id: Option<String>,
+    pub new_client_order_id: Option<String>,
+    pub new_quantity: f64,
+}
+
+impl AmendOrderRequest {
+    pub fn reduce_quantity_by_order_id(
+        market_type: MarketType,
+        symbol: impl Into<String>,
+        order_id: impl Into<String>,
+        new_quantity: f64,
+    ) -> Self {
+        Self {
+            market_type,
+            symbol: symbol.into(),
+            order_id: Some(order_id.into()),
+            client_order_id: None,
+            new_client_order_id: None,
+            new_quantity,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ExchangeClientError> {
+        if self.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "spot amend requests are currently spot-only".to_string(),
+            });
+        }
+        if self.symbol.trim().is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "symbol",
+                reason: "symbol must not be empty".to_string(),
+            });
+        }
+        if self
+            .order_id
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+            && self
+                .client_order_id
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+        {
+            return Err(ExchangeClientError::Validation {
+                field: "order_id",
+                reason: "order_id or client_order_id is required".to_string(),
+            });
+        }
+        validate_positive("new_quantity", self.new_quantity)
+    }
+
+    pub fn order_id(&self) -> Option<&str> {
+        self.order_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    pub fn client_order_id(&self) -> Option<&str> {
+        self.client_order_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    pub fn new_client_order_id(&self) -> Option<&str> {
+        self.new_client_order_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OrderListKind {
+    Oco,
+    Oto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OrderListLegType {
+    Market,
+    Limit,
+    LimitMaker,
+    StopLoss,
+    StopLossLimit,
+    TakeProfit,
+    TakeProfitLimit,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderListConditionalLeg {
+    pub order_type: OrderListLegType,
+    pub price: Option<f64>,
+    pub stop_price: Option<f64>,
+    pub time_in_force: Option<TimeInForce>,
+    pub client_order_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderListOrderLeg {
+    pub side: OrderSide,
+    pub order_type: OrderListLegType,
+    pub quantity: f64,
+    pub price: Option<f64>,
+    pub stop_price: Option<f64>,
+    pub time_in_force: Option<TimeInForce>,
+    pub client_order_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OrderListRequest {
+    Oco {
+        market_type: MarketType,
+        symbol: String,
+        list_client_order_id: Option<String>,
+        side: OrderSide,
+        quantity: f64,
+        above: OrderListConditionalLeg,
+        below: OrderListConditionalLeg,
+    },
+    Oto {
+        market_type: MarketType,
+        symbol: String,
+        list_client_order_id: Option<String>,
+        working: OrderListOrderLeg,
+        pending: OrderListOrderLeg,
+    },
+}
+
+impl OrderListRequest {
+    pub fn validate(&self) -> Result<(), ExchangeClientError> {
+        let (market_type, symbol) = match self {
+            Self::Oco {
+                market_type,
+                symbol,
+                quantity,
+                above,
+                below,
+                ..
+            } => {
+                validate_positive("quantity", *quantity)?;
+                validate_order_list_conditional_leg("above", above)?;
+                validate_order_list_conditional_leg("below", below)?;
+                (*market_type, symbol)
+            }
+            Self::Oto {
+                market_type,
+                symbol,
+                working,
+                pending,
+                ..
+            } => {
+                validate_positive("working.quantity", working.quantity)?;
+                validate_positive("pending.quantity", pending.quantity)?;
+                validate_order_list_order_leg("working", working)?;
+                validate_order_list_order_leg("pending", pending)?;
+                (*market_type, symbol)
+            }
+        };
+        if market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "order lists are currently a spot-only request model".to_string(),
+            });
+        }
+        if symbol.trim().is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "symbol",
+                reason: "symbol must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn symbol(&self) -> &str {
+        match self {
+            Self::Oco { symbol, .. } | Self::Oto { symbol, .. } => symbol,
+        }
+    }
+
+    pub fn kind(&self) -> OrderListKind {
+        match self {
+            Self::Oco { .. } => OrderListKind::Oco,
+            Self::Oto { .. } => OrderListKind::Oto,
+        }
+    }
+}
+
+fn validate_order_list_conditional_leg(
+    label: &'static str,
+    leg: &OrderListConditionalLeg,
+) -> Result<(), ExchangeClientError> {
+    validate_order_list_leg_prices(label, leg.order_type, leg.price, leg.stop_price)
+}
+
+fn validate_order_list_order_leg(
+    label: &'static str,
+    leg: &OrderListOrderLeg,
+) -> Result<(), ExchangeClientError> {
+    validate_order_list_leg_prices(label, leg.order_type, leg.price, leg.stop_price)
+}
+
+fn validate_order_list_leg_prices(
+    label: &'static str,
+    order_type: OrderListLegType,
+    price: Option<f64>,
+    stop_price: Option<f64>,
+) -> Result<(), ExchangeClientError> {
+    if let Some(price) = price {
+        validate_positive("price", price)?;
+    }
+    if let Some(stop_price) = stop_price {
+        validate_positive("stop_price", stop_price)?;
+    }
+
+    if matches!(
+        order_type,
+        OrderListLegType::Limit
+            | OrderListLegType::LimitMaker
+            | OrderListLegType::StopLossLimit
+            | OrderListLegType::TakeProfitLimit
+    ) && price.is_none()
+    {
+        return Err(ExchangeClientError::Validation {
+            field: "price",
+            reason: format!("{label} order-list leg requires price for {order_type:?}"),
+        });
+    }
+
+    if matches!(
+        order_type,
+        OrderListLegType::StopLoss
+            | OrderListLegType::StopLossLimit
+            | OrderListLegType::TakeProfit
+            | OrderListLegType::TakeProfitLimit
+    ) && stop_price.is_none()
+    {
+        return Err(ExchangeClientError::Validation {
+            field: "stop_price",
+            reason: format!("{label} order-list leg requires stop_price for {order_type:?}"),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_optional_request_client_order_id(
+    exchange: &str,
+    market_type: MarketType,
+    client_order_id: Option<&str>,
+) -> ExchangeClientResult<()> {
+    if let Some(client_order_id) = client_order_id {
+        validate_client_order_id(exchange, market_type, client_order_id).map_err(|error| {
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_order_list_request_client_ids(
+    exchange: &str,
+    request: &OrderListRequest,
+) -> ExchangeClientResult<()> {
+    match request {
+        OrderListRequest::Oco {
+            list_client_order_id,
+            above,
+            below,
+            ..
+        } => {
+            validate_optional_request_client_order_id(
+                exchange,
+                MarketType::Spot,
+                list_client_order_id.as_deref(),
+            )?;
+            validate_optional_request_client_order_id(
+                exchange,
+                MarketType::Spot,
+                above.client_order_id.as_deref(),
+            )?;
+            validate_optional_request_client_order_id(
+                exchange,
+                MarketType::Spot,
+                below.client_order_id.as_deref(),
+            )?;
+        }
+        OrderListRequest::Oto {
+            list_client_order_id,
+            working,
+            pending,
+            ..
+        } => {
+            validate_optional_request_client_order_id(
+                exchange,
+                MarketType::Spot,
+                list_client_order_id.as_deref(),
+            )?;
+            validate_optional_request_client_order_id(
+                exchange,
+                MarketType::Spot,
+                working.client_order_id.as_deref(),
+            )?;
+            validate_optional_request_client_order_id(
+                exchange,
+                MarketType::Spot,
+                pending.client_order_id.as_deref(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderListResponse {
+    pub exchange: String,
+    pub market_type: MarketType,
+    pub symbol: String,
+    pub order_list_id: Option<String>,
+    pub list_client_order_id: Option<String>,
+    pub kind: OrderListKind,
+    pub list_status_type: Option<String>,
+    pub list_order_status: Option<String>,
+    pub orders: Vec<OrderResponse>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrderResponse {
     pub exchange: String,
     pub market_type: MarketType,
@@ -573,10 +951,23 @@ impl CancelOrderRequest {
         Ok(())
     }
 
-    fn order_lookup_id(&self) -> &str {
+    pub fn order_id(&self) -> Option<&str> {
         self.order_id
             .as_deref()
-            .or(self.client_order_id.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    pub fn client_order_id(&self) -> Option<&str> {
+        self.client_order_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn order_lookup_id(&self) -> &str {
+        self.order_id()
+            .or_else(|| self.client_order_id())
             .unwrap_or_default()
     }
 }
@@ -604,6 +995,67 @@ impl CancelOrderResponse {
             cancelled_at: Utc::now(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CancelAllOrdersRequest {
+    pub market_type: MarketType,
+    pub symbol: Option<String>,
+}
+
+impl CancelAllOrdersRequest {
+    pub fn for_symbol(market_type: MarketType, symbol: impl Into<String>) -> Self {
+        Self {
+            market_type,
+            symbol: Some(symbol.into()),
+        }
+    }
+
+    pub fn validate_for_market_type(
+        &self,
+        expected_market_type: MarketType,
+    ) -> Result<(), ExchangeClientError> {
+        if self.market_type != expected_market_type {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: format!(
+                    "cancel-all request market type {:?} does not match client market type {:?}",
+                    self.market_type, expected_market_type
+                ),
+            });
+        }
+        if self
+            .symbol
+            .as_deref()
+            .is_some_and(|symbol| symbol.trim().is_empty())
+        {
+            return Err(ExchangeClientError::Validation {
+                field: "symbol",
+                reason: "symbol must not be empty when provided".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn validate_symbol_required(&self) -> Result<&str, ExchangeClientError> {
+        self.symbol
+            .as_deref()
+            .map(str::trim)
+            .filter(|symbol| !symbol.is_empty())
+            .ok_or_else(|| ExchangeClientError::Validation {
+                field: "symbol",
+                reason: "symbol is required for this exchange cancel-all endpoint".to_string(),
+            })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CancelAllOrdersResponse {
+    pub exchange: String,
+    pub market_type: MarketType,
+    pub symbol: Option<String>,
+    pub cancelled_orders: usize,
+    pub cancelled_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -679,6 +1131,13 @@ pub struct ExchangeClientCapabilities {
     pub supports_ioc: bool,
     pub supports_fok: bool,
     pub supports_cancel_order: bool,
+    pub supports_cancel_all_orders: bool,
+    #[serde(default)]
+    pub supports_quote_market_order: bool,
+    #[serde(default)]
+    pub supports_amend_order: bool,
+    #[serde(default)]
+    pub supports_order_list: bool,
     pub supports_query_order: bool,
     pub supports_open_orders: bool,
     pub supports_balances: bool,
@@ -703,6 +1162,10 @@ impl ExchangeClientCapabilities {
             supports_ioc: true,
             supports_fok: true,
             supports_cancel_order: true,
+            supports_cancel_all_orders: false,
+            supports_quote_market_order: false,
+            supports_amend_order: false,
+            supports_order_list: false,
             supports_query_order: true,
             supports_open_orders: true,
             supports_balances: true,
@@ -727,6 +1190,10 @@ impl ExchangeClientCapabilities {
             supports_ioc: false,
             supports_fok: false,
             supports_cancel_order: true,
+            supports_cancel_all_orders: false,
+            supports_quote_market_order: false,
+            supports_amend_order: false,
+            supports_order_list: false,
             supports_query_order: true,
             supports_open_orders: true,
             supports_balances: true,
@@ -749,6 +1216,10 @@ impl ExchangeClientCapabilities {
             ExchangeCapability::Ioc => self.supports_ioc,
             ExchangeCapability::Fok => self.supports_fok,
             ExchangeCapability::CancelOrder => self.supports_cancel_order,
+            ExchangeCapability::CancelAllOrders => self.supports_cancel_all_orders,
+            ExchangeCapability::QuoteMarketOrder => self.supports_quote_market_order,
+            ExchangeCapability::AmendOrder => self.supports_amend_order,
+            ExchangeCapability::OrderList => self.supports_order_list,
             ExchangeCapability::QueryOrder => self.supports_query_order,
             ExchangeCapability::OpenOrders => self.supports_open_orders,
             ExchangeCapability::Balances => self.supports_balances,
@@ -778,6 +1249,10 @@ pub enum ExchangeCapability {
     Ioc,
     Fok,
     CancelOrder,
+    CancelAllOrders,
+    QuoteMarketOrder,
+    AmendOrder,
+    OrderList,
     QueryOrder,
     OpenOrders,
     Balances,
@@ -846,10 +1321,63 @@ pub trait ExchangeClient: Send + Sync {
 
     async fn place_order(&self, request: OrderRequest) -> ExchangeClientResult<OrderResponse>;
 
+    async fn place_quote_market_order(
+        &self,
+        request: QuoteMarketOrderRequest,
+    ) -> ExchangeClientResult<OrderResponse> {
+        request.validate()?;
+        validate_optional_request_client_order_id(
+            self.exchange_name(),
+            request.market_type,
+            request.client_order_id.as_deref(),
+        )?;
+        Err(ExchangeClientError::Unsupported(
+            "quote-sized market orders are not implemented for this client".to_string(),
+        ))
+    }
+
+    async fn amend_order(&self, request: AmendOrderRequest) -> ExchangeClientResult<OrderResponse> {
+        request.validate()?;
+        validate_optional_request_client_order_id(
+            self.exchange_name(),
+            request.market_type,
+            request.client_order_id(),
+        )?;
+        validate_optional_request_client_order_id(
+            self.exchange_name(),
+            request.market_type,
+            request.new_client_order_id(),
+        )?;
+        Err(ExchangeClientError::Unsupported(
+            "amend order is not implemented for this client".to_string(),
+        ))
+    }
+
+    async fn place_order_list(
+        &self,
+        request: OrderListRequest,
+    ) -> ExchangeClientResult<OrderListResponse> {
+        request.validate()?;
+        validate_order_list_request_client_ids(self.exchange_name(), &request)?;
+        Err(ExchangeClientError::Unsupported(
+            "order lists are not implemented for this client".to_string(),
+        ))
+    }
+
     async fn cancel_order(
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeClientResult<CancelOrderResponse>;
+
+    async fn cancel_all_orders(
+        &self,
+        request: CancelAllOrdersRequest,
+    ) -> ExchangeClientResult<CancelAllOrdersResponse> {
+        request.validate_for_market_type(self.market_type())?;
+        Err(ExchangeClientError::Unsupported(
+            "cancel-all orders is not implemented for this client".to_string(),
+        ))
+    }
 
     async fn get_order(&self, symbol: &str, order_id: &str) -> ExchangeClientResult<OrderResponse>;
 
@@ -879,7 +1407,8 @@ pub trait ExchangeClient: Send + Sync {
         self.normalize_symbol(symbol)
     }
 
-    async fn get_recent_fills(&self, _symbol: &str) -> ExchangeClientResult<Vec<TradeFill>> {
+    async fn get_recent_fills(&self, symbol: &str) -> ExchangeClientResult<Vec<TradeFill>> {
+        self.normalize_symbol(symbol)?;
         Err(ExchangeClientError::Unsupported(
             "recent fills are not implemented for this client".to_string(),
         ))
@@ -901,8 +1430,9 @@ pub trait ExchangeClient: Send + Sync {
 
     async fn subscribe_orderbook(
         &self,
-        _symbols: Vec<String>,
+        symbols: Vec<String>,
     ) -> ExchangeClientResult<mpsc::Receiver<OrderBookSnapshot>> {
+        validate_orderbook_subscription_symbols(&symbols)?;
         Err(ExchangeClientError::Unsupported(
             "orderbook subscription is not implemented for this client".to_string(),
         ))
@@ -979,6 +1509,7 @@ impl ExchangeClient for LegacyExchangeClient {
         depth: u16,
     ) -> ExchangeClientResult<OrderBookSnapshot> {
         let symbol = self.normalize_symbol(symbol)?;
+        validate_orderbook_depth(depth)?;
         let book = self
             .exchange
             .get_orderbook(&symbol, self.market_type.to_legacy(), Some(depth as u32))
@@ -1050,6 +1581,17 @@ impl ExchangeClient for LegacyExchangeClient {
                 ),
             });
         }
+        if let Some(client_order_id) = &request.client_order_id {
+            validate_client_order_id(&self.exchange_name, self.market_type, client_order_id)
+                .map_err(|error| {
+                    ExchangeClientError::Classified(ExchangeError {
+                        exchange: self.exchange_name.clone(),
+                        class: ExchangeErrorClass::InvalidClientOrderId,
+                        code: None,
+                        message: error.to_string(),
+                    })
+                })?;
+        }
         let order = self
             .exchange
             .cancel_order(
@@ -1066,6 +1608,7 @@ impl ExchangeClient for LegacyExchangeClient {
 
     async fn get_order(&self, symbol: &str, order_id: &str) -> ExchangeClientResult<OrderResponse> {
         let symbol = self.normalize_symbol(symbol)?;
+        let order_id = validate_order_lookup_id(order_id)?;
         let order = self
             .exchange
             .get_order(order_id, &symbol, self.market_type.to_legacy())
@@ -1131,6 +1674,43 @@ fn round_to_step(value: f64, step: f64, round_up: bool) -> f64 {
 
 pub fn validate_price_tick(price: f64, tick_size: f64) -> ExchangeClientResult<()> {
     validate_step("price", price, tick_size)
+}
+
+pub fn validate_orderbook_subscription_symbols(symbols: &[String]) -> ExchangeClientResult<()> {
+    if symbols.is_empty() {
+        return Err(ExchangeClientError::Validation {
+            field: "symbols",
+            reason: "at least one symbol is required".to_string(),
+        });
+    }
+    if symbols.iter().any(|symbol| symbol.trim().is_empty()) {
+        return Err(ExchangeClientError::Validation {
+            field: "symbols",
+            reason: "symbols must not contain empty values".to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub fn validate_orderbook_depth(depth: u16) -> ExchangeClientResult<()> {
+    if depth == 0 {
+        return Err(ExchangeClientError::Validation {
+            field: "depth",
+            reason: "depth must be greater than zero".to_string(),
+        });
+    }
+    Ok(())
+}
+
+pub fn validate_order_lookup_id(order_id: &str) -> ExchangeClientResult<&str> {
+    let order_id = order_id.trim();
+    if order_id.is_empty() {
+        return Err(ExchangeClientError::Validation {
+            field: "order_id",
+            reason: "order_id must not be empty".to_string(),
+        });
+    }
+    Ok(order_id)
 }
 
 pub fn validate_quantity_step(quantity: f64, step_size: f64) -> ExchangeClientResult<()> {
@@ -1224,7 +1804,9 @@ fn validate_step(field: &'static str, value: f64, step: f64) -> ExchangeClientRe
         return Ok(());
     }
     let units = value / step;
-    if (units - units.round()).abs() <= 1e-8 {
+    let nearest = units.round() * step;
+    let tolerance = (step.abs() * 1e-6).max(value.abs() * 1e-12).max(1e-12);
+    if (value - nearest).abs() <= tolerance {
         Ok(())
     } else {
         Err(ExchangeClientError::Validation {
@@ -1317,6 +1899,59 @@ mod tests {
             request.validate(),
             Err(ExchangeClientError::Validation { field: "price", .. })
         ));
+    }
+
+    #[test]
+    fn step_validation_should_accept_large_prices_with_small_ticks() {
+        assert!(validate_price_tick(1_000.0, 0.00001).is_ok());
+        assert!(validate_price_tick(10_000.0, 0.00001).is_ok());
+        assert!(validate_price_tick(10_000.000003, 0.00001).is_err());
+    }
+
+    #[test]
+    fn order_lookup_id_should_reject_blank_values() {
+        assert_eq!(validate_order_lookup_id(" 1001 ").unwrap(), "1001");
+
+        let err = validate_order_lookup_id("   ").unwrap_err();
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn cancel_order_request_should_ignore_blank_identifiers_for_lookup() {
+        let request = CancelOrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            order_id: Some("   ".to_string()),
+            client_order_id: Some("CANCELCLIENT1".to_string()),
+        };
+
+        request.validate().unwrap();
+        assert_eq!(request.order_id(), None);
+        assert_eq!(request.client_order_id(), Some("CANCELCLIENT1"));
+        assert_eq!(request.order_lookup_id(), "CANCELCLIENT1");
+    }
+
+    #[test]
+    fn amend_order_request_should_ignore_blank_identifiers() {
+        let request = AmendOrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            order_id: Some("   ".to_string()),
+            client_order_id: Some("AMENDCLIENT1".to_string()),
+            new_client_order_id: Some("   ".to_string()),
+            new_quantity: 0.5,
+        };
+
+        request.validate().unwrap();
+        assert_eq!(request.order_id(), None);
+        assert_eq!(request.client_order_id(), Some("AMENDCLIENT1"));
+        assert_eq!(request.new_client_order_id(), None);
     }
 
     #[test]
@@ -1418,6 +2053,335 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn legacy_exchange_client_should_validate_get_order_id_before_lookup() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("binance"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        let error = client.get_order("BTCUSDT", "   ").await.unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn legacy_exchange_client_should_validate_orderbook_depth_before_lookup() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("binance"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        let error = client.get_orderbook("BTCUSDT", 0).await.unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation { field: "depth", .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn legacy_exchange_client_should_validate_cancel_client_order_id_before_lookup() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("mexc"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        let error = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "BTCUSDT".to_string(),
+                order_id: None,
+                client_order_id: Some("bad/id".to_string()),
+            })
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExchangeClientError::Classified(ExchangeError {
+                class: ExchangeErrorClass::InvalidClientOrderId,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn default_order_list_path_should_validate_before_unsupported() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("coinex"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        fn oco_request(market_type: MarketType) -> OrderListRequest {
+            OrderListRequest::Oco {
+                market_type,
+                symbol: "BTCUSDT".to_string(),
+                list_client_order_id: None,
+                side: OrderSide::Sell,
+                quantity: 0.01,
+                above: OrderListConditionalLeg {
+                    order_type: OrderListLegType::LimitMaker,
+                    price: Some(70_000.0),
+                    stop_price: None,
+                    time_in_force: None,
+                    client_order_id: None,
+                },
+                below: OrderListConditionalLeg {
+                    order_type: OrderListLegType::StopLossLimit,
+                    price: Some(59_500.0),
+                    stop_price: Some(60_000.0),
+                    time_in_force: Some(TimeInForce::GTC),
+                    client_order_id: None,
+                },
+            }
+        }
+
+        let valid = oco_request(MarketType::Spot);
+        assert!(matches!(
+            client.place_order_list(valid).await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("order lists are not implemented")
+        ));
+
+        let invalid_market_type = oco_request(MarketType::Perpetual);
+        assert!(matches!(
+            client.place_order_list(invalid_market_type).await,
+            Err(ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            })
+        ));
+
+        let mut missing_limit_price = oco_request(MarketType::Spot);
+        if let OrderListRequest::Oco { above, .. } = &mut missing_limit_price {
+            above.price = None;
+        }
+        assert!(matches!(
+            client.place_order_list(missing_limit_price).await,
+            Err(ExchangeClientError::Validation { field: "price", .. })
+        ));
+
+        let mut missing_stop_price = oco_request(MarketType::Spot);
+        if let OrderListRequest::Oco { below, .. } = &mut missing_stop_price {
+            below.stop_price = None;
+        }
+        assert!(matches!(
+            client.place_order_list(missing_stop_price).await,
+            Err(ExchangeClientError::Validation {
+                field: "stop_price",
+                ..
+            })
+        ));
+
+        let mut invalid_client_id = oco_request(MarketType::Spot);
+        if let OrderListRequest::Oco {
+            list_client_order_id,
+            ..
+        } = &mut invalid_client_id
+        {
+            *list_client_order_id = Some("bad/id".to_string());
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_client_id).await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn default_advanced_order_paths_should_validate_before_unsupported() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("paper"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        assert!(matches!(
+            client
+                .place_quote_market_order(QuoteMarketOrderRequest::spot_buy("BTCUSDT", 25.0))
+                .await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("quote-sized market orders are not implemented")
+        ));
+
+        let invalid_quote = QuoteMarketOrderRequest {
+            market_type: MarketType::Perpetual,
+            symbol: "BTCUSDT".to_string(),
+            side: OrderSide::Buy,
+            quote_quantity: 25.0,
+            client_order_id: None,
+        };
+        assert!(matches!(
+            client.place_quote_market_order(invalid_quote).await,
+            Err(ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            })
+        ));
+
+        let invalid_quote_client_id = QuoteMarketOrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            side: OrderSide::Buy,
+            quote_quantity: 25.0,
+            client_order_id: Some("bad/id".to_string()),
+        };
+        assert!(matches!(
+            client
+                .place_quote_market_order(invalid_quote_client_id)
+                .await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+
+        assert!(matches!(
+            client
+                .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                    MarketType::Spot,
+                    "BTCUSDT",
+                    "order-1",
+                    0.01,
+                ))
+                .await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("amend order is not implemented")
+        ));
+
+        let blank_optional_amend_ids = AmendOrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            order_id: Some("order-1".to_string()),
+            client_order_id: Some("   ".to_string()),
+            new_client_order_id: Some("   ".to_string()),
+            new_quantity: 0.01,
+        };
+        assert!(matches!(
+            client.amend_order(blank_optional_amend_ids).await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("amend order is not implemented")
+        ));
+
+        let invalid_amend = AmendOrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            order_id: None,
+            client_order_id: None,
+            new_client_order_id: None,
+            new_quantity: 0.01,
+        };
+        assert!(matches!(
+            client.amend_order(invalid_amend).await,
+            Err(ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            })
+        ));
+
+        let invalid_amend_client_id = AmendOrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            order_id: Some("order-1".to_string()),
+            client_order_id: Some("bad/id".to_string()),
+            new_client_order_id: None,
+            new_quantity: 0.01,
+        };
+        assert!(matches!(
+            client.amend_order(invalid_amend_client_id).await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn default_cancel_all_path_should_validate_before_unsupported() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("paper"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        assert!(matches!(
+            client
+                .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                    MarketType::Spot,
+                    "BTCUSDT"
+                ))
+                .await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("cancel-all orders is not implemented")
+        ));
+
+        assert!(matches!(
+            client
+                .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                    MarketType::Perpetual,
+                    "BTCUSDT",
+                ))
+                .await,
+            Err(ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            })
+        ));
+
+        assert!(matches!(
+            client
+                .cancel_all_orders(CancelAllOrdersRequest::for_symbol(MarketType::Spot, "   "))
+                .await,
+            Err(ExchangeClientError::Validation {
+                field: "symbol",
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn default_orderbook_subscription_should_validate_before_unsupported() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("paper"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        assert!(matches!(
+            client
+                .subscribe_orderbook(vec!["BTCUSDT".to_string()])
+                .await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("orderbook subscription is not implemented")
+        ));
+
+        assert!(matches!(
+            client.subscribe_orderbook(Vec::new()).await,
+            Err(ExchangeClientError::Validation {
+                field: "symbols",
+                ..
+            })
+        ));
+
+        assert!(matches!(
+            client.subscribe_orderbook(vec!["   ".to_string()]).await,
+            Err(ExchangeClientError::Validation {
+                field: "symbols",
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn default_recent_fills_path_should_validate_symbol_before_unsupported() {
+        let legacy: Box<dyn Exchange> = Box::new(crate::exchanges::MockExchange::new("paper"));
+        let client = LegacyExchangeClient::new(Arc::new(legacy), MarketType::Spot);
+
+        assert!(matches!(
+            client.get_recent_fills("BTCUSDT").await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("recent fills are not implemented")
+        ));
+
+        assert!(matches!(
+            client.get_recent_fills("   ").await,
+            Err(ExchangeClientError::Validation {
+                field: "symbol",
+                ..
+            })
+        ));
+    }
+
     #[test]
     fn order_status_mapping_should_cover_common_exchange_statuses() {
         assert_eq!(OrderStatus::from_exchange_status("NEW"), OrderStatus::New);
@@ -1438,7 +2402,6 @@ mod tests {
             OrderStatus::Unknown
         );
     }
-
     #[test]
     fn legacy_market_type_mapping_should_preserve_existing_futures_name() {
         assert_eq!(
@@ -1469,8 +2432,139 @@ mod tests {
         assert!(capabilities.supports_spot);
         assert!(capabilities.supports_public_ws);
         assert!(!capabilities.supports_positions);
+        assert!(!capabilities.supports_quote_market_order);
+        assert!(!capabilities.supports_amend_order);
+        assert!(!capabilities.supports_order_list);
         assert!(capabilities
             .unsupported_reason(ExchangeCapability::Positions)
             .is_some());
+        assert!(capabilities
+            .unsupported_reason(ExchangeCapability::QuoteMarketOrder)
+            .unwrap()
+            .contains("does not support"));
+    }
+
+    #[test]
+    fn spot_capability_matrix_should_match_binance_parity_baseline() {
+        let clients: Vec<(&str, Box<dyn ExchangeClient>, bool, bool, bool, bool)> = vec![
+            (
+                "binance",
+                Box::new(crate::exchanges::binance::spot::BinanceSpotClient::new(
+                    crate::exchanges::binance::spot::BinanceSpotConfig::default(),
+                )),
+                true,
+                true,
+                true,
+                true,
+            ),
+            (
+                "okx",
+                Box::new(crate::exchanges::okx::spot::OkxSpotClient::new(
+                    crate::exchanges::okx::spot::OkxSpotConfig::default(),
+                )),
+                true,
+                true,
+                false,
+                true,
+            ),
+            (
+                "bitget",
+                Box::new(crate::exchanges::bitget::BitgetSpotClient::new(
+                    crate::exchanges::bitget::BitgetSpotConfig::default(),
+                )),
+                true,
+                true,
+                false,
+                false,
+            ),
+            (
+                "gateio",
+                Box::new(crate::exchanges::gateio::GateIoSpotClient::new(
+                    crate::exchanges::gateio::GateIoSpotConfig::default(),
+                )),
+                true,
+                true,
+                false,
+                false,
+            ),
+            (
+                "mexc",
+                Box::new(crate::exchanges::mexc::MexcSpotClient::new(
+                    crate::exchanges::mexc::MexcSpotConfig::default(),
+                )),
+                true,
+                false,
+                false,
+                false,
+            ),
+            (
+                "coinex",
+                Box::new(crate::exchanges::coinex::CoinExSpotClient::new(
+                    crate::exchanges::coinex::CoinExSpotConfig::default(),
+                )),
+                true,
+                true,
+                false,
+                false,
+            ),
+            (
+                "kucoin",
+                Box::new(crate::exchanges::kucoin::KuCoinSpotClient::new(
+                    crate::exchanges::kucoin::KuCoinSpotConfig::default(),
+                )),
+                true,
+                true,
+                false,
+                true,
+            ),
+        ];
+
+        for (
+            exchange,
+            client,
+            supports_quote_market,
+            supports_amend,
+            supports_order_list,
+            supports_private_stream,
+        ) in clients
+        {
+            let capabilities = client.capabilities();
+
+            assert_eq!(capabilities.exchange, exchange);
+            assert_eq!(capabilities.market_type, MarketType::Spot, "{exchange}");
+            assert!(capabilities.supports_spot, "{exchange}");
+            assert!(!capabilities.supports_perpetual, "{exchange}");
+            assert!(capabilities.supports_market_order, "{exchange}");
+            assert!(capabilities.supports_limit_order, "{exchange}");
+            assert!(capabilities.supports_post_only, "{exchange}");
+            assert!(capabilities.supports_ioc, "{exchange}");
+            assert!(capabilities.supports_fok, "{exchange}");
+            assert!(capabilities.supports_cancel_order, "{exchange}");
+            assert!(capabilities.supports_cancel_all_orders, "{exchange}");
+            assert!(capabilities.supports_query_order, "{exchange}");
+            assert!(capabilities.supports_open_orders, "{exchange}");
+            assert!(capabilities.supports_balances, "{exchange}");
+            assert!(!capabilities.supports_positions, "{exchange}");
+            assert!(!capabilities.supports_leverage, "{exchange}");
+            assert!(!capabilities.supports_funding_rate, "{exchange}");
+            assert!(capabilities.supports_public_ws, "{exchange}");
+            assert_eq!(
+                capabilities.supports_private_user_stream, supports_private_stream,
+                "{exchange}"
+            );
+            assert!(capabilities.supports_fee_api, "{exchange}");
+            assert_eq!(
+                capabilities.supports_quote_market_order, supports_quote_market,
+                "{exchange}"
+            );
+            assert_eq!(
+                capabilities.supports_amend_order, supports_amend,
+                "{exchange}"
+            );
+            assert_eq!(
+                capabilities.supports_order_list, supports_order_list,
+                "{exchange}"
+            );
+        }
     }
 }

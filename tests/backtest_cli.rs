@@ -66,6 +66,9 @@ fn parses_fetch_klines_command() {
         BacktestCommand::RunShortLadderMtfExecution(_) => {
             panic!("expected fetch-klines command")
         }
+        BacktestCommand::ShortLadderMtfGrid(_) => {
+            panic!("expected fetch-klines command")
+        }
     }
 }
 
@@ -141,6 +144,9 @@ fn parses_run_mean_reversion_command() {
             panic!("expected run-mean-reversion command")
         }
         BacktestCommand::RunShortLadderMtfExecution(_) => {
+            panic!("expected run-mean-reversion command")
+        }
+        BacktestCommand::ShortLadderMtfGrid(_) => {
             panic!("expected run-mean-reversion command")
         }
     }
@@ -560,6 +566,59 @@ fn parses_analyze_mean_reversion_command() {
             assert_eq!(args.top_runs, 7);
         }
         _ => panic!("expected analyze-mean-reversion command"),
+    }
+}
+
+#[test]
+fn parses_short_ladder_mtf_grid_command() {
+    let cli = BacktestCli::try_parse_from([
+        "backtest",
+        "short-ladder-mtf-grid",
+        "--dataset",
+        "data/klines",
+        "--config",
+        "config/short_ladder.yml",
+        "--output-dir",
+        "reports/grid",
+        "--symbols",
+        "SOLUSDT,TIAUSDT",
+        "--start",
+        "2025-04-27T00:00:00Z",
+        "--end",
+        "2026-04-27T00:00:00Z",
+        "--order-cooldown-secs",
+        "300,600",
+        "--min-minutes-to-l4",
+        "15,30",
+        "--max-layers-per-hour",
+        "1,2",
+        "--mode",
+        "adverse_averaging",
+        "--take-profit-specs",
+        "fixed:1.2,trail:1.0:0.4",
+        "--skip-json-reports",
+    ])
+    .expect("cli should parse");
+
+    match cli.command {
+        BacktestCommand::ShortLadderMtfGrid(args) => {
+            assert_eq!(args.dataset, std::path::PathBuf::from("data/klines"));
+            assert_eq!(
+                args.config,
+                std::path::PathBuf::from("config/short_ladder.yml")
+            );
+            assert_eq!(args.output_dir, std::path::PathBuf::from("reports/grid"));
+            assert_eq!(args.symbols, "SOLUSDT,TIAUSDT");
+            assert_eq!(args.start, "2025-04-27T00:00:00Z");
+            assert_eq!(args.end, "2026-04-27T00:00:00Z");
+            assert_eq!(args.order_cooldown_secs, "300,600");
+            assert_eq!(args.min_minutes_to_l4, "15,30");
+            assert_eq!(args.max_layers_per_hour, "1,2");
+            assert_eq!(args.mode, "adverse_averaging");
+            assert_eq!(args.take_profit_specs, "fixed:1.2,trail:1.0:0.4");
+            assert!(args.skip_json_reports);
+        }
+        _ => panic!("expected short-ladder-mtf-grid command"),
     }
 }
 

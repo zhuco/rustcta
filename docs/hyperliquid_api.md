@@ -55,7 +55,7 @@
 
 ## 策略映射与覆盖说明
 - 行情驱动（网格、做市）：使用 `l2Book`/`bbo`/`trades` WS；若 WS 失效可回退 `POST /info` 的 `l2Book`。现有 `hyperliquid.rs` 尚未实现 WS，需要新增。
-- 下单/批量下单：对应 `order`/`orders` 动作；`trend_grid_v2` 的 `hyperliquid_batch_size` 应映射为 `orders` 列表长度；撮合模式需用单向持仓（不支持对冲）。
+- 下单/批量下单：对应 `order`/`orders` 动作；批量下单配置应映射为 `orders` 列表长度；撮合模式需用单向持仓（不支持对冲）。
 - 撤单：使用 `cancel` 或 `cancelByCloid`；批量撤销可一次传多条或使用 `scheduleCancel` 兜底。
 - 成交回报链路：首选 WS `userFills`/`orderUpdates`，回补使用 `userFillsByTime` 轮询；需存储 `startTime` 用于断线重连补数据。
 - 账户/仓位：`clearinghouseState` 返回单向仓位与保证金；策略不得假设存在多仓/空仓同时持有。

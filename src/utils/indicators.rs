@@ -1068,23 +1068,6 @@ impl TrendStrengthCalculator {
     }
 }
 
-/// 将趋势强度转换为趋势枚举
-pub fn trend_strength_to_enum(strength: f64) -> crate::strategies::trend_grid_v2::TrendStrength {
-    use crate::strategies::trend_grid_v2::TrendStrength;
-
-    if strength >= 0.7 {
-        TrendStrength::StrongBull
-    } else if strength >= 0.3 {
-        TrendStrength::Bull
-    } else if strength >= -0.3 {
-        TrendStrength::Neutral
-    } else if strength >= -0.7 {
-        TrendStrength::Bear
-    } else {
-        TrendStrength::StrongBear
-    }
-}
-
 /// 趋势强度计算
 pub struct TrendStrength;
 

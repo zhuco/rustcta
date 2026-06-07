@@ -16,7 +16,7 @@ impl HyperliquidWalletClient {
     pub fn new(api_base_url: impl Into<String>) -> Self {
         let base = api_base_url.into().trim_end_matches('/').to_string();
         Self {
-            client: Client::new(),
+            client: crate::core::http2_fix::shared_http_client(),
             info_url: format!("{base}/info"),
         }
     }

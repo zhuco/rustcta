@@ -71,7 +71,7 @@ impl BookHealth {
         health.last_book_update_at = Some(now);
         insert_unique(&mut health.fresh_symbols, symbol);
         health.stale_symbols.retain(|item| item != symbol);
-        if let Some(latency) = latency_ms {
+        if let Some(latency) = latency_ms.filter(|latency| *latency >= 0) {
             health.max_latency_ms = Some(health.max_latency_ms.unwrap_or(latency).max(latency));
             health.avg_latency_ms = Some(match health.avg_latency_ms {
                 Some(avg) => avg * 0.9 + latency as f64 * 0.1,

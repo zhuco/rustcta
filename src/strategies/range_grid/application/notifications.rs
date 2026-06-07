@@ -44,7 +44,7 @@ pub struct WeComNotifier {
 impl WeComNotifier {
     pub fn new(cfg: WeComConfig) -> Self {
         Self {
-            client: Client::new(),
+            client: crate::core::http2_fix::shared_http_client(),
             cfg,
         }
     }

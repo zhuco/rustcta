@@ -1092,13 +1092,8 @@ pub struct UniverseConfig {
 impl Default for UniverseConfig {
     fn default() -> Self {
         Self {
-            enabled_exchanges: vec![
-                ExchangeId::Binance,
-                ExchangeId::Okx,
-                ExchangeId::Bitget,
-                ExchangeId::Gate,
-            ],
-            symbols: vec![CanonicalSymbol::new("BTC", "USDT")],
+            enabled_exchanges: Vec::new(),
+            symbols: Vec::new(),
             mode: default_universe_mode(),
             target_symbol_count: None,
             max_symbol_count: None,
@@ -1206,9 +1201,9 @@ pub struct DetectionConfig {
 impl Default for DetectionConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            exchanges: default_detection_exchanges(),
-            symbols: default_detection_symbols(),
+            enabled: false,
+            exchanges: Vec::new(),
+            symbols: Vec::new(),
             depth_levels: default_detection_depth_levels(),
             stale_book_ms: default_detection_stale_book_ms(),
             estimated_notional_usdt: default_detection_estimated_notional_usdt(),
@@ -1314,6 +1309,12 @@ fn default_detection_jsonl_path() -> String {
 mod tests {
     use super::*;
 
+    fn enable_live_test_universe(config: &mut CrossExchangeArbitrageConfig) {
+        config.universe.enabled_exchanges =
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
+        config.universe.symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+    }
+
     fn enable_private_ws_for_live_universe(config: &mut CrossExchangeArbitrageConfig) {
         for exchange in config.universe.enabled_exchanges.clone() {
             config
@@ -1327,6 +1328,25 @@ mod tests {
     #[test]
     fn config_validate_should_accept_default_simulation() {
         CrossExchangeArbitrageConfig::default().validate().unwrap();
+    }
+
+    #[test]
+    fn config_default_usdt_file_should_match_three_venue_200_symbol_plan() {
+        let raw = std::fs::read_to_string("config/cross_exchange_arbitrage_usdt.yml").unwrap();
+        let config = serde_yaml::from_str::<CrossExchangeArbitrageConfig>(&raw).unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(
+            config.universe.enabled_exchanges,
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
+        );
+        assert_eq!(config.universe.symbols.len(), 200);
+        assert_eq!(config.market.min_common_exchanges, 3);
+        assert_eq!(config.sizing.target_notional_usdt, 5.0);
+        assert_eq!(config.sizing.max_positions_per_exchange, 10);
+        assert_eq!(config.execution.max_concurrent_maker_orders, 10);
+        assert_eq!(config.risk.max_open_bundles, 10);
+        assert_eq!(config.thresholds.lock_profit_dual_taker_pct, 0.0005);
     }
 
     #[test]
@@ -1347,6 +1367,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_live_test_universe(&mut config);
         enable_private_ws_for_live_universe(&mut config);
         config
             .exchanges
@@ -1367,6 +1388,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_live_test_universe(&mut config);
         enable_private_ws_for_live_universe(&mut config);
         config
             .exchanges
@@ -1390,6 +1412,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_live_test_universe(&mut config);
         enable_private_ws_for_live_universe(&mut config);
         config
             .exchanges
@@ -1410,6 +1433,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_live_test_universe(&mut config);
         enable_private_ws_for_live_universe(&mut config);
         config.execution.dry_run = false;
         for exchange in config.universe.enabled_exchanges.clone() {
@@ -1438,6 +1462,7 @@ mod tests {
         let mut config = CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
         config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        enable_live_test_universe(&mut config);
         config
             .exchanges
             .entry(ExchangeId::Binance)
@@ -1454,29 +1479,29 @@ mod tests {
 
     #[test]
     fn config_template_should_parse_and_validate() {
-        let raw = include_str!("../../../config/cross_exchange_arbitrage_usdt.yml");
+        let raw = include_str!("../../../config/cross_exchange_arbitrage.yml");
         let config: CrossExchangeArbitrageConfig =
             serde_yaml::from_str(raw).expect("template should parse");
 
         config.validate().expect("template should validate");
         assert_eq!(config.mode, RuntimeMode::Simulation);
-        assert!(config
-            .universe
-            .enabled_exchanges
-            .contains(&ExchangeId::Binance));
-        assert!(config
-            .universe
-            .symbols
-            .contains(&CanonicalSymbol::new("ARB", "USDT")));
-        assert!(!config
-            .universe
-            .symbols
-            .contains(&CanonicalSymbol::new("BTC", "USDT")));
-        assert_eq!(config.universe.mode, "curated_long_tail");
+        assert_eq!(
+            config.universe.enabled_exchanges,
+            vec![ExchangeId::Binance, ExchangeId::Okx]
+        );
+        assert_eq!(
+            config.universe.symbols,
+            vec![
+                CanonicalSymbol::new("BTC", "USDT"),
+                CanonicalSymbol::new("ETH", "USDT"),
+                CanonicalSymbol::new("SOL", "USDT"),
+            ]
+        );
+        assert_eq!(config.universe.mode, "static");
         assert_eq!(config.sizing.capital_fraction_of_smaller_equity, 0.10);
-        assert_eq!(config.risk.max_open_bundles, 3);
+        assert_eq!(config.risk.max_open_bundles, 1);
         assert!(config.routing.auto_failover);
-        assert!(config.funding.enabled);
+        assert!(!config.funding.enabled);
     }
 
     #[test]
@@ -1486,28 +1511,26 @@ mod tests {
         let config: CrossExchangeArbitrageConfig =
             serde_yaml::from_str(raw).expect("live-small example should parse");
 
-        config
-            .validate()
-            .expect("live-small example should validate");
-        assert_eq!(config.mode, RuntimeMode::LiveSmall);
         assert_eq!(
-            config.universe.enabled_exchanges,
-            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
+            config.validate().unwrap_err(),
+            ConfigValidationError::LiveModeRequiresWhitelist
         );
-        assert!(!config.universe.enabled_exchanges.contains(&ExchangeId::Okx));
+        assert_eq!(config.mode, RuntimeMode::LiveSmall);
+        assert!(config.universe.enabled_exchanges.is_empty());
+        assert!(config.universe.symbols.is_empty());
         assert_eq!(config.sizing.target_notional_usdt, 10.0);
         assert_eq!(config.sizing.max_notional_usdt, 10.0);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.execution.dry_run);
         assert_eq!(config.execution.max_concurrent_maker_orders, 1);
-        for exchange in &config.universe.enabled_exchanges {
+        for exchange in [ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate] {
+            let runtime = config.exchanges.get(&exchange).unwrap();
             assert!(
-                config
-                    .exchanges
-                    .get(exchange)
-                    .is_some_and(|runtime| runtime.private_ws_enabled),
-                "{exchange} should enable private websocket"
+                runtime.is_disabled(),
+                "{exchange} should be disabled by default"
             );
+            assert!(!runtime.private_ws_enabled);
+            assert!(!runtime.private_rest_enabled);
         }
         assert_eq!(
             config

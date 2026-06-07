@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,7 @@ use crate::control::spot_control::SpotSymbolControlConfig;
 use crate::exchanges::bitget::FeeOverride as BitgetFeeOverride;
 use crate::exchanges::coinex::FeeOverride as CoinExFeeOverride;
 use crate::exchanges::gateio::FeeOverride as GateIoFeeOverride;
+use crate::exchanges::kucoin::KuCoinSpotConfig;
 use crate::exchanges::mexc::FeeOverride as MexcFeeOverride;
 use crate::execution::{LiveDryRunConfig, OrderReconciliationConfig};
 use crate::live_preflight::LivePreflightConfig;
@@ -30,7 +31,29 @@ pub struct SpotSpotTakerArbitrageConfig {
     pub min_notional_per_trade: f64,
     pub max_notional_per_symbol: f64,
     pub max_total_notional: f64,
+    #[serde(default = "default_max_enabled_arbitrage_symbols")]
+    pub max_enabled_arbitrage_symbols: usize,
+    #[serde(default = "default_initial_entry_notional_usdt")]
+    pub initial_entry_notional_usdt: f64,
+    #[serde(default = "default_spread_duration_threshold_seconds")]
+    pub spread_duration_threshold_seconds: u64,
+    #[serde(default = "default_entry_order_timeout_seconds")]
+    pub entry_order_timeout_seconds: u64,
+    #[serde(default = "default_entry_maker_retries")]
+    pub entry_maker_retries: u32,
+    #[serde(default = "default_active_taker_notional_usdt")]
+    pub active_taker_notional_usdt: f64,
+    #[serde(default = "default_inactivity_exit_seconds")]
+    pub inactivity_exit_seconds: u64,
+    #[serde(default = "default_exit_order_timeout_seconds")]
+    pub exit_order_timeout_seconds: u64,
+    #[serde(default = "default_exit_maker_retries")]
+    pub exit_maker_retries: u32,
+    #[serde(default = "default_min_raw_spread_bps")]
+    pub min_raw_spread_bps: f64,
     pub min_net_spread_bps: f64,
+    #[serde(default = "default_max_raw_spread_bps")]
+    pub max_raw_spread_bps: f64,
     pub taker_fee_bps_override: Option<f64>,
     #[serde(default = "default_fee_config_path")]
     pub fee_config_path: String,
@@ -100,6 +123,8 @@ pub struct SpotSpotTakerArbitrageConfig {
     #[serde(default)]
     pub arbitrage_scanner: ArbitrageScannerConfig,
     #[serde(default)]
+    pub inventory_rebalance: InventoryRebalanceConfig,
+    #[serde(default)]
     pub initial_balances: HashMap<String, HashMap<String, f64>>,
     #[serde(default)]
     pub mexc: VenueRuntimeConfig,
@@ -109,6 +134,75 @@ pub struct SpotSpotTakerArbitrageConfig {
     pub gateio: VenueRuntimeConfig,
     #[serde(default)]
     pub bitget: VenueRuntimeConfig,
+    #[serde(default)]
+    pub kucoin: KuCoinSpotConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct InventoryRebalanceConfig {
+    pub enabled: bool,
+    pub allow_market_rebalance: bool,
+    pub allow_transfer_rebalance: bool,
+    pub allow_profit_covered_recovery: bool,
+    pub allow_emergency_recovery: bool,
+    pub allow_auto_initial_entry: bool,
+    pub allow_auto_exit: bool,
+    pub allow_lossy_rebalance_when_blocked: bool,
+    pub target_total_notional_usdt: f64,
+    pub min_cycles_buffer: u32,
+    pub target_cycles_buffer: u32,
+    pub no_loss_safety_bps: f64,
+    pub slippage_buffer_bps: f64,
+    pub profit_floor_usdt: f64,
+    pub max_profit_use_ratio: f64,
+    pub max_rebalance_notional_usdt: f64,
+    pub max_blocked_rebalance_loss_usdt: f64,
+    pub emergency_after_seconds: u64,
+    pub emergency_max_exposure_usdt: f64,
+    pub emergency_adverse_bps: f64,
+}
+
+impl Default for InventoryRebalanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allow_market_rebalance: true,
+            allow_transfer_rebalance: false,
+            allow_profit_covered_recovery: false,
+            allow_emergency_recovery: false,
+            allow_auto_initial_entry: false,
+            allow_auto_exit: false,
+            allow_lossy_rebalance_when_blocked: false,
+            target_total_notional_usdt: 20.0,
+            min_cycles_buffer: 3,
+            target_cycles_buffer: 5,
+            no_loss_safety_bps: 8.0,
+            slippage_buffer_bps: 5.0,
+            profit_floor_usdt: 0.02,
+            max_profit_use_ratio: 0.5,
+            max_rebalance_notional_usdt: 5.0,
+            max_blocked_rebalance_loss_usdt: 0.05,
+            emergency_after_seconds: 20,
+            emergency_max_exposure_usdt: 15.0,
+            emergency_adverse_bps: 30.0,
+        }
+    }
+}
+
+impl InventoryRebalanceConfig {
+    pub fn required_no_loss_bps(&self) -> f64 {
+        self.no_loss_safety_bps.max(0.0) + self.slippage_buffer_bps.max(0.0)
+    }
+
+    pub fn available_profit_budget(&self, symbol_realized_pnl: f64) -> f64 {
+        if !self.allow_profit_covered_recovery {
+            return 0.0;
+        }
+        ((symbol_realized_pnl - self.profit_floor_usdt).max(0.0)
+            * self.max_profit_use_ratio.clamp(0.0, 1.0))
+        .max(0.0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -152,7 +246,7 @@ impl Default for WebsocketMarketDataConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            exchanges: vec!["mexc".to_string(), "coinex".to_string()],
+            exchanges: Vec::new(),
             symbols: Vec::new(),
             depth: default_orderbook_depth(),
             stale_book_ms: default_ws_stale_book_ms(),
@@ -290,22 +384,39 @@ impl From<VenueFeeOverride> for BitgetFeeOverride {
 impl SpotSpotTakerArbitrageConfig {
     pub fn validate_safe_mode(&self) -> Result<()> {
         let mode = self.trading_mode.trim().to_ascii_lowercase();
-        if mode != "paper" && mode != "live_dry_run" {
+        if mode != "paper" && mode != "live_dry_run" && mode != "live" {
             return Err(anyhow!(
-                "spot_spot_taker_arbitrage only supports trading_mode: paper or live_dry_run"
+                "spot_spot_taker_arbitrage only supports trading_mode: paper, live_dry_run, or live"
             ));
         }
-        if self.live_trading_enabled {
+        if mode == "live" {
+            if !self.live_trading_enabled {
+                return Err(anyhow!(
+                    "trading_mode=live requires live_trading_enabled=true"
+                ));
+            }
+            if self.dry_run {
+                return Err(anyhow!("trading_mode=live requires dry_run=false"));
+            }
+        } else if self.live_trading_enabled {
             return Err(anyhow!(
-                "spot_spot_taker_arbitrage refuses to start with live_trading_enabled=true"
+                "live_trading_enabled=true requires trading_mode=live"
             ));
-        }
-        if !self.dry_run {
-            return Err(anyhow!(
-                "spot_spot_taker_arbitrage requires dry_run=true in this implementation"
-            ));
+        } else if !self.dry_run {
+            return Err(anyhow!("paper and live_dry_run modes require dry_run=true"));
         }
         self.live_dry_run.validate()?;
+        if self.inventory_rebalance.enabled {
+            if self.inventory_rebalance.target_total_notional_usdt <= 0.0
+                || self.inventory_rebalance.max_profit_use_ratio < 0.0
+                || self.inventory_rebalance.max_profit_use_ratio > 1.0
+                || self.inventory_rebalance.max_rebalance_notional_usdt <= 0.0
+                || self.inventory_rebalance.target_cycles_buffer
+                    < self.inventory_rebalance.min_cycles_buffer
+            {
+                return Err(anyhow!("invalid inventory_rebalance settings"));
+            }
+        }
         if mode == "live_dry_run" && !self.live_dry_run.enabled {
             return Err(anyhow!(
                 "trading_mode=live_dry_run requires live_dry_run.enabled=true"
@@ -339,6 +450,64 @@ impl SpotSpotTakerArbitrageConfig {
         if self.max_notional_per_symbol <= 0.0 || self.max_total_notional <= 0.0 {
             return Err(anyhow!("max notional limits must be positive"));
         }
+        if self.initial_entry_notional_usdt <= 0.0
+            || self.active_taker_notional_usdt <= 0.0
+            || self.spread_duration_threshold_seconds == 0
+            || self.entry_order_timeout_seconds == 0
+            || self.inactivity_exit_seconds == 0
+            || self.exit_order_timeout_seconds == 0
+        {
+            return Err(anyhow!("invalid spot arbitrage lifecycle settings"));
+        }
+        if self.max_raw_spread_bps <= 0.0 {
+            return Err(anyhow!("max_raw_spread_bps must be positive"));
+        }
+        if mode == "live" && self.max_raw_spread_bps > 1_000.0 + 1e-12 {
+            return Err(anyhow!(
+                "trading_mode=live requires max_raw_spread_bps <= 1000 so raw spot spreads above 10% are filtered"
+            ));
+        }
+        if mode == "live"
+            && (self.max_enabled_arbitrage_symbols == 0 || self.max_enabled_arbitrage_symbols > 5)
+        {
+            return Err(anyhow!(
+                "trading_mode=live requires max_enabled_arbitrage_symbols between 1 and 5"
+            ));
+        }
+        if mode == "live" {
+            if !self.small_live_gate.enabled || !self.small_live_gate.explicit_live_confirmation {
+                return Err(anyhow!(
+                    "trading_mode=live requires small_live_gate.enabled=true and explicit_live_confirmation=true"
+                ));
+            }
+            if self.small_live_gate.max_notional_per_order <= 0.0
+                || self.small_live_gate.max_total_notional <= 0.0
+                || self.small_live_gate.max_total_notional
+                    < self.small_live_gate.max_notional_per_order
+            {
+                return Err(anyhow!("invalid small_live_gate notional limits"));
+            }
+            let monitored_symbols = normalized_symbol_set(&self.symbols);
+            let live_symbols = normalized_symbol_set(&self.small_live_gate.enabled_symbols);
+            if live_symbols.is_empty() {
+                return Err(anyhow!(
+                    "trading_mode=live requires small_live_gate.enabled_symbols to be explicit"
+                ));
+            }
+            if !live_symbols.is_subset(&monitored_symbols) {
+                return Err(anyhow!(
+                    "small_live_gate.enabled_symbols must be a subset of monitored symbols"
+                ));
+            }
+            if self.live_preflight.enabled
+                && !self.live_preflight.symbols.is_empty()
+                && normalized_symbol_set(&self.live_preflight.symbols) != live_symbols
+            {
+                return Err(anyhow!(
+                    "live_preflight.symbols must match small_live_gate.enabled_symbols in live mode"
+                ));
+            }
+        }
         if self.market_data_mode == MarketDataMode::Replay && !self.replay.enabled {
             return Err(anyhow!(
                 "market_data_mode=replay requires replay.enabled=true"
@@ -347,6 +516,15 @@ impl SpotSpotTakerArbitrageConfig {
         if self.market_data_mode == MarketDataMode::WebsocketCache && !self.websocket.enabled {
             return Err(anyhow!(
                 "market_data_mode=websocket_cache requires websocket.enabled=true"
+            ));
+        }
+        if self.market_data_mode == MarketDataMode::WebsocketCache
+            && !self.websocket.symbols.is_empty()
+            && normalized_symbol_set(&self.websocket.symbols)
+                != normalized_symbol_set(&self.symbols)
+        {
+            return Err(anyhow!(
+                "websocket.symbols must be empty or match symbols exactly; otherwise scanned symbols may not be subscribed"
             ));
         }
         Ok(())
@@ -376,6 +554,18 @@ impl SpotSpotTakerArbitrageConfig {
     }
 }
 
+fn normalized_symbol_set(symbols: &[String]) -> BTreeSet<String> {
+    symbols
+        .iter()
+        .map(|symbol| {
+            symbol
+                .trim()
+                .replace(['-', '_', '/'], "")
+                .to_ascii_uppercase()
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct RecorderConfig {
     pub enable_database_recording: bool,
@@ -393,6 +583,12 @@ fn default_trading_mode() -> String {
 fn default_quote_asset() -> String {
     "USDT".to_string()
 }
+fn default_min_raw_spread_bps() -> f64 {
+    30.0
+}
+fn default_max_raw_spread_bps() -> f64 {
+    1_000.0
+}
 fn default_fee_config_path() -> String {
     "config/fees.yml".to_string()
 }
@@ -407,6 +603,35 @@ fn default_max_book_latency_ms() -> u64 {
 }
 fn default_one() -> usize {
     1
+}
+
+fn default_max_enabled_arbitrage_symbols() -> usize {
+    5
+}
+
+fn default_initial_entry_notional_usdt() -> f64 {
+    10.0
+}
+fn default_spread_duration_threshold_seconds() -> u64 {
+    30
+}
+fn default_entry_order_timeout_seconds() -> u64 {
+    30
+}
+fn default_entry_maker_retries() -> u32 {
+    5
+}
+fn default_active_taker_notional_usdt() -> f64 {
+    1.2
+}
+fn default_inactivity_exit_seconds() -> u64 {
+    3_600
+}
+fn default_exit_order_timeout_seconds() -> u64 {
+    60
+}
+fn default_exit_maker_retries() -> u32 {
+    10
 }
 fn default_cooldown_ms() -> u64 {
     5_000

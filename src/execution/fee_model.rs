@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::exchanges::unified::MarketType;
+use crate::exchanges::unified::{MarketType, OrderSide};
+use crate::utils::money;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +53,8 @@ pub struct FeeRate {
     pub maker_fee_bps: f64,
     pub taker_fee_bps: f64,
     pub fee_asset: Option<String>,
+    #[serde(default)]
+    pub rebate_ratio: Option<f64>,
     pub platform_token: Option<String>,
     #[serde(default)]
     pub platform_discount_enabled: bool,
@@ -137,6 +140,8 @@ pub struct FeeConfig {
     #[serde(default)]
     pub symbol_overrides: Vec<SymbolFeeOverride>,
     #[serde(default)]
+    pub side_overrides: Vec<SideFeeOverride>,
+    #[serde(default)]
     pub vip_overrides: Vec<SymbolFeeOverride>,
     #[serde(default)]
     pub exchange_api: Vec<SymbolFeeOverride>,
@@ -155,6 +160,7 @@ impl Default for FeeConfig {
                 maker_bps: 20.0,
                 taker_bps: 20.0,
                 fee_asset: Some("quote".to_string()),
+                rebate_ratio: None,
             },
         );
         fallback.insert(
@@ -163,6 +169,7 @@ impl Default for FeeConfig {
                 maker_bps: 2.0,
                 taker_bps: 5.0,
                 fee_asset: Some("quote".to_string()),
+                rebate_ratio: None,
             },
         );
 
@@ -176,6 +183,7 @@ impl Default for FeeConfig {
                             maker_bps: 0.0,
                             taker_bps: 5.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -184,6 +192,7 @@ impl Default for FeeConfig {
                             maker_bps: 0.0,
                             taker_bps: 2.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -197,6 +206,7 @@ impl Default for FeeConfig {
                             maker_bps: 20.0,
                             taker_bps: 20.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -205,6 +215,7 @@ impl Default for FeeConfig {
                             maker_bps: 3.0,
                             taker_bps: 5.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -218,6 +229,7 @@ impl Default for FeeConfig {
                             maker_bps: 10.0,
                             taker_bps: 10.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -226,6 +238,7 @@ impl Default for FeeConfig {
                             maker_bps: 2.0,
                             taker_bps: 5.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -239,6 +252,7 @@ impl Default for FeeConfig {
                             maker_bps: 10.0,
                             taker_bps: 10.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -247,6 +261,7 @@ impl Default for FeeConfig {
                             maker_bps: 2.0,
                             taker_bps: 6.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -260,6 +275,7 @@ impl Default for FeeConfig {
                             maker_bps: 10.0,
                             taker_bps: 10.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -268,6 +284,7 @@ impl Default for FeeConfig {
                             maker_bps: 2.0,
                             taker_bps: 6.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -281,6 +298,7 @@ impl Default for FeeConfig {
                             maker_bps: 10.0,
                             taker_bps: 10.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -289,6 +307,7 @@ impl Default for FeeConfig {
                             maker_bps: 2.0,
                             taker_bps: 5.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -302,6 +321,7 @@ impl Default for FeeConfig {
                             maker_bps: 8.0,
                             taker_bps: 10.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                     (
@@ -310,6 +330,7 @@ impl Default for FeeConfig {
                             maker_bps: 2.0,
                             taker_bps: 5.0,
                             fee_asset: Some("quote".to_string()),
+                            rebate_ratio: None,
                         },
                     ),
                 ]),
@@ -320,6 +341,7 @@ impl Default for FeeConfig {
             fallback,
             defaults,
             symbol_overrides: Vec::new(),
+            side_overrides: Vec::new(),
             vip_overrides: Vec::new(),
             exchange_api: Vec::new(),
             platform_tokens: Vec::new(),
@@ -334,6 +356,8 @@ pub struct FeePairConfig {
     pub taker_bps: f64,
     #[serde(default)]
     pub fee_asset: Option<String>,
+    #[serde(default)]
+    pub rebate_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +371,25 @@ pub struct SymbolFeeOverride {
     #[serde(default)]
     pub fee_asset: Option<String>,
     #[serde(default)]
+    pub rebate_ratio: Option<f64>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SideFeeOverride {
+    pub exchange: String,
+    pub market_type: String,
+    pub side: OrderSide,
+    #[serde(default)]
+    pub symbol: Option<String>,
+    pub maker_bps: f64,
+    pub taker_bps: f64,
+    #[serde(default)]
+    pub fee_asset: Option<String>,
+    #[serde(default)]
+    pub rebate_ratio: Option<f64>,
+    #[serde(default)]
     pub reason: Option<String>,
 }
 
@@ -355,6 +398,7 @@ pub struct FeeModel {
     fallback: HashMap<MarketType, FeePairConfig>,
     defaults: HashMap<(String, MarketType), FeePairConfig>,
     symbol_overrides: HashMap<(String, MarketType, String), FeePairConfig>,
+    side_overrides: HashMap<(String, MarketType, OrderSide, Option<String>), FeePairConfig>,
     vip_overrides: HashMap<(String, MarketType, Option<String>), FeePairConfig>,
     exchange_api: HashMap<(String, MarketType, Option<String>), FeePairConfig>,
     platform_tokens: HashMap<String, PlatformTokenDiscount>,
@@ -390,6 +434,11 @@ impl FeeModel {
             .into_iter()
             .filter_map(|item| override_key(item).map(|(key, fees)| (key.require_symbol(), fees)))
             .collect();
+        let side_overrides = config
+            .side_overrides
+            .into_iter()
+            .filter_map(side_override_key)
+            .collect();
         let vip_overrides = config
             .vip_overrides
             .into_iter()
@@ -412,6 +461,7 @@ impl FeeModel {
             fallback,
             defaults,
             symbol_overrides,
+            side_overrides,
             vip_overrides,
             exchange_api,
             platform_tokens,
@@ -453,7 +503,11 @@ impl FeeModel {
     }
 
     pub fn lookup(&self, key: &FeeLookupKey) -> FeeLookupResult {
-        let raw_rate = self.raw_rate(key);
+        self.lookup_for_side(key, None)
+    }
+
+    pub fn lookup_for_side(&self, key: &FeeLookupKey, side: Option<OrderSide>) -> FeeLookupResult {
+        let raw_rate = self.raw_rate(key, side);
         let mut effective_rate = raw_rate.clone();
         let mut platform_discount_applied = false;
         if let Some(discount) = self.platform_discount(&key.exchange) {
@@ -468,6 +522,11 @@ impl FeeModel {
                 platform_discount_applied = true;
             }
         }
+        if let Some(rebate_ratio) = raw_rate.rebate_ratio {
+            let multiplier = (1.0 - rebate_ratio.clamp(0.0, 1.0)).max(0.0);
+            effective_rate.maker_fee_bps *= multiplier;
+            effective_rate.taker_fee_bps *= multiplier;
+        }
         FeeLookupResult {
             fee_bps: effective_rate.fee_bps(key.liquidity_role),
             raw_fee_bps: raw_rate.fee_bps(key.liquidity_role),
@@ -478,8 +537,18 @@ impl FeeModel {
     }
 
     pub fn calculate_fee(&self, key: &FeeLookupKey, notional: f64) -> FeeCalculation {
-        let lookup = self.lookup(key);
-        let fee_amount = notional.max(0.0) * lookup.fee_bps / 10_000.0;
+        self.calculate_fee_for_side(key, None, notional)
+    }
+
+    pub fn calculate_fee_for_side(
+        &self,
+        key: &FeeLookupKey,
+        side: Option<OrderSide>,
+        notional: f64,
+    ) -> FeeCalculation {
+        let lookup = self.lookup_for_side(key, side);
+        let fee_amount = money::fee_amount_f64(notional, lookup.fee_bps)
+            .unwrap_or_else(|| notional.max(0.0) * lookup.fee_bps / 10_000.0);
         FeeCalculation {
             exchange: normalize_exchange(&key.exchange),
             market_type: key.market_type,
@@ -503,13 +572,24 @@ impl FeeModel {
         buy_notional: f64,
         sell_notional: f64,
     ) -> RoundTripFeeCalculation {
-        let buy_fee = self.calculate_fee(buy_key, buy_notional);
-        let sell_fee = self.calculate_fee(sell_key, sell_notional);
-        let gross_pnl = sell_notional - buy_notional;
-        let total_fee = buy_fee.fee_amount + sell_fee.fee_amount;
-        let net_pnl = gross_pnl - total_fee;
+        let buy_fee = self.calculate_fee_for_side(buy_key, Some(OrderSide::Buy), buy_notional);
+        let sell_fee = self.calculate_fee_for_side(sell_key, Some(OrderSide::Sell), sell_notional);
+        let gross_pnl =
+            money::subtract_f64(sell_notional, buy_notional, "sell_notional", "buy_notional")
+                .unwrap_or(sell_notional - buy_notional);
+        let total_fee = money::add_f64(
+            buy_fee.fee_amount,
+            sell_fee.fee_amount,
+            "buy_fee",
+            "sell_fee",
+        )
+        .unwrap_or(buy_fee.fee_amount + sell_fee.fee_amount);
+        let net_pnl = money::subtract_f64(gross_pnl, total_fee, "gross_pnl", "total_fee")
+            .unwrap_or(gross_pnl - total_fee);
         let total_fee_bps = if buy_notional > 0.0 {
-            total_fee / buy_notional * 10_000.0
+            money::divide_f64(total_fee, buy_notional, "total_fee", "buy_notional")
+                .and_then(|value| money::multiply_f64(value, 10_000.0, "fee_ratio", "bps_scale"))
+                .unwrap_or(total_fee / buy_notional * 10_000.0)
         } else {
             0.0
         };
@@ -533,6 +613,7 @@ impl FeeModel {
             maker_bps: taker_bps,
             taker_bps,
             fee_asset: Some("quote".to_string()),
+            rebate_ratio: None,
         };
         match symbol {
             Some(symbol) => {
@@ -640,7 +721,7 @@ impl FeeModel {
         rates
     }
 
-    fn raw_rate(&self, key: &FeeLookupKey) -> FeeRate {
+    fn raw_rate(&self, key: &FeeLookupKey, side: Option<OrderSide>) -> FeeRate {
         let exchange = normalize_exchange(&key.exchange);
         let symbol = key.symbol.as_ref().map(|symbol| normalize_symbol(symbol));
         let now = Utc::now();
@@ -673,6 +754,32 @@ impl FeeModel {
                     &exchange,
                     key.market_type,
                     Some(symbol.clone()),
+                    fees.clone(),
+                    FeeSource::SymbolOverride,
+                    now,
+                );
+            }
+        }
+        if let Some(side) = side {
+            if let Some(fees) = symbol
+                .as_ref()
+                .and_then(|symbol| {
+                    self.side_overrides.get(&(
+                        exchange.clone(),
+                        key.market_type,
+                        side,
+                        Some(symbol.clone()),
+                    ))
+                })
+                .or_else(|| {
+                    self.side_overrides
+                        .get(&(exchange.clone(), key.market_type, side, None))
+                })
+            {
+                return rate_from_pair(
+                    &exchange,
+                    key.market_type,
+                    symbol,
                     fees.clone(),
                     FeeSource::SymbolOverride,
                     now,
@@ -733,6 +840,7 @@ impl FeeModel {
                 maker_bps: 20.0,
                 taker_bps: 20.0,
                 fee_asset: Some("quote".to_string()),
+                rebate_ratio: None,
             });
         log::warn!(
             "fee model fallback used exchange={} market={:?} symbol={:?}",
@@ -775,6 +883,29 @@ fn override_key(item: SymbolFeeOverride) -> Option<(OverrideKey, FeePairConfig)>
         maker_bps: item.maker_bps,
         taker_bps: item.taker_bps,
         fee_asset: item.fee_asset,
+        rebate_ratio: item.rebate_ratio,
+    };
+    Some((key, fees))
+}
+
+fn side_override_key(
+    item: SideFeeOverride,
+) -> Option<(
+    (String, MarketType, OrderSide, Option<String>),
+    FeePairConfig,
+)> {
+    let market = parse_market_type(&item.market_type)?;
+    let key = (
+        normalize_exchange(&item.exchange),
+        market,
+        item.side,
+        item.symbol.as_ref().map(|symbol| normalize_symbol(symbol)),
+    );
+    let fees = FeePairConfig {
+        maker_bps: item.maker_bps,
+        taker_bps: item.taker_bps,
+        fee_asset: item.fee_asset,
+        rebate_ratio: item.rebate_ratio,
     };
     Some((key, fees))
 }
@@ -794,6 +925,7 @@ fn rate_from_pair(
         maker_fee_bps: fees.maker_bps,
         taker_fee_bps: fees.taker_bps,
         fee_asset: fees.fee_asset,
+        rebate_ratio: fees.rebate_ratio,
         platform_token: None,
         platform_discount_enabled: false,
         discount_multiplier: None,
@@ -854,6 +986,29 @@ mod tests {
             maker_bps: 0.0,
             taker_bps: 3.0,
             fee_asset: Some("quote".to_string()),
+            rebate_ratio: None,
+            reason: Some("test".to_string()),
+        });
+        config.side_overrides.push(SideFeeOverride {
+            exchange: "gateio".to_string(),
+            market_type: "spot".to_string(),
+            side: OrderSide::Buy,
+            symbol: Some("VSNUSDT".to_string()),
+            maker_bps: 30.0,
+            taker_bps: 30.0,
+            fee_asset: Some("base".to_string()),
+            rebate_ratio: Some(0.8),
+            reason: Some("test".to_string()),
+        });
+        config.side_overrides.push(SideFeeOverride {
+            exchange: "gateio".to_string(),
+            market_type: "spot".to_string(),
+            side: OrderSide::Sell,
+            symbol: Some("VSNUSDT".to_string()),
+            maker_bps: 10.0,
+            taker_bps: 10.0,
+            fee_asset: Some("quote".to_string()),
+            rebate_ratio: Some(0.8),
             reason: Some("test".to_string()),
         });
         config.platform_tokens.push(PlatformTokenDiscount {
@@ -928,6 +1083,25 @@ mod tests {
         let result = model().lookup(&FeeLookupKey::spot_taker("coinex", "BTCUSDT"));
         assert_eq!(result.fee_bps, 20.0);
         assert!(!result.platform_discount_applied);
+    }
+
+    #[test]
+    fn fee_model_side_override_should_apply_rebate_after_platform_discount() {
+        let result = model().lookup_for_side(
+            &FeeLookupKey::spot_taker("gateio", "VSNUSDT"),
+            Some(OrderSide::Buy),
+        );
+        assert_eq!(result.raw_fee_bps, 30.0);
+        assert!((result.fee_bps - 6.0).abs() < 1e-12);
+        assert_eq!(result.effective_rate.fee_asset.as_deref(), Some("base"));
+
+        let sell = model().lookup_for_side(
+            &FeeLookupKey::spot_taker("gateio", "VSNUSDT"),
+            Some(OrderSide::Sell),
+        );
+        assert_eq!(sell.raw_fee_bps, 10.0);
+        assert!((sell.fee_bps - 2.0).abs() < 1e-12);
+        assert_eq!(sell.effective_rate.fee_asset.as_deref(), Some("quote"));
     }
 
     #[test]

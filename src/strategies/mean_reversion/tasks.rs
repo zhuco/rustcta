@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use super::data::{parse_kline_message, verify_sequence, IncomingKline};
 use super::logging;
@@ -9,6 +9,7 @@ use super::model::{SymbolMeta, SymbolSnapshot, SymbolState};
 use super::planner;
 use super::utils::precision_from_step;
 use super::MeanReversionStrategy;
+use crate::core::ws_connect::connect_async;
 
 impl MeanReversionStrategy {
     pub(super) fn exchange_symbol(&self, symbol: &str) -> String {

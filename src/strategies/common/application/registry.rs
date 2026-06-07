@@ -7,14 +7,12 @@ use serde_yaml::Value;
 use super::{
     build_unified_risk_evaluator, Strategy, StrategyContext, StrategyDepsBuilder, StrategyInstance,
 };
-use crate::strategies::common::StrategyRiskLimits;
 use crate::strategies::mean_reversion::{MeanReversionConfig, MeanReversionStrategy};
 use crate::strategies::poisson_market_maker::{PoissonMMConfig, PoissonMarketMaker};
 use crate::strategies::range_grid::{
     application as range_application, RangeGridConfig, RangeGridStrategy,
 };
 use crate::strategies::short_ladder_live::{ShortLadderLiveConfig, ShortLadderLiveStrategy};
-use crate::strategies::trend_grid_v2::{TrendGridConfigV2, TrendGridStrategyV2};
 
 /// 策略工厂函数签名
 pub type StrategyFactoryFn =
@@ -59,7 +57,6 @@ impl StrategyRegistry {
 impl Default for StrategyRegistry {
     fn default() -> Self {
         let mut registry = StrategyRegistry::new();
-        registry.register("trend_grid", trend_grid_factory());
         registry.register("range_grid", range_grid_factory());
         registry.register("poisson", poisson_factory());
         registry.register("mean_reversion", mean_reversion_factory());
@@ -86,40 +83,6 @@ fn range_grid_factory(
 
         let strategy = RangeGridStrategy::create(config, deps)?;
         Ok(Box::new(strategy))
-    }
-}
-
-fn trend_grid_factory(
-) -> impl Fn(&Value, &StrategyContext) -> Result<Box<dyn StrategyInstance>> + Send + Sync + 'static
-{
-    |config_value, ctx| {
-        let config: TrendGridConfigV2 = serde_yaml::from_value(config_value.clone())?;
-        let risk_limits = trend_grid_risk_limits(&config);
-        let risk_evaluator = build_unified_risk_evaluator(
-            config.strategy.name.clone(),
-            ctx.global_risk.clone(),
-            Some(risk_limits.clone()),
-        );
-
-        let mut builder = StrategyDepsBuilder::from_context(ctx);
-        builder = builder.with_risk_evaluator(risk_evaluator);
-        let deps = builder.build()?;
-
-        let strategy = TrendGridStrategyV2::create(config, deps)?;
-        Ok(Box::new(strategy))
-    }
-}
-
-fn trend_grid_risk_limits(config: &TrendGridConfigV2) -> StrategyRiskLimits {
-    StrategyRiskLimits {
-        warning_scale_factor: Some(0.85),
-        danger_scale_factor: Some(0.6),
-        stop_loss_pct: Some(config.risk_control.max_drawdown),
-        max_inventory_notional: Some(config.risk_control.position_limit_per_symbol),
-        max_daily_loss: Some(config.risk_control.daily_loss_limit),
-        max_consecutive_losses: None,
-        inventory_skew_limit: None,
-        max_unrealized_loss: None,
     }
 }
 

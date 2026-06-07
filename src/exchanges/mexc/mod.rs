@@ -4,23 +4,27 @@ use std::time::Duration as StdDuration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
+use prost::Message as ProstMessage;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::core::error::ExchangeError as CoreExchangeError;
+use crate::core::ws_connect::connect_async;
 use crate::exchanges::client_order_id::{generate_client_order_id, validate_client_order_id};
 use crate::exchanges::spot_reservation::{BalanceReservation, BalanceReservationManager};
 use crate::exchanges::unified::{
-    round_price_to_tick, round_quantity_to_step, validate_order_against_symbol_rule, AssetBalance,
-    BalanceSnapshot, CancelOrderRequest, CancelOrderResponse, ExchangeClient, ExchangeClientError,
+    round_price_to_tick, round_quantity_to_step, validate_order_against_symbol_rule,
+    validate_order_lookup_id, validate_orderbook_depth, AmendOrderRequest, AssetBalance,
+    BalanceSnapshot, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeClient, ExchangeClientCapabilities, ExchangeClientError,
     ExchangeClientResult, ExchangeError, ExchangeErrorClass, ExchangeHealthStatus, FeeRate,
     FeeRateSource, MarketType, OrderBookLevel, OrderBookSnapshot, OrderRequest, OrderResponse,
-    OrderSide, OrderStatus, OrderType, PositionSide, SymbolRule, SymbolStatus, TimeInForce,
-    TradeFill, UserStreamEvent,
+    OrderSide, OrderStatus, OrderType, PositionSide, QuoteMarketOrderRequest, SymbolRule,
+    SymbolStatus, TimeInForce, TradeFill, UserStreamEvent,
 };
 use crate::utils::SignatureHelper;
 
@@ -107,7 +111,7 @@ impl MexcSpotClient {
     pub fn new(config: MexcSpotConfig) -> Self {
         Self {
             config,
-            http: reqwest::Client::new(),
+            http: crate::core::http2_fix::shared_http_client(),
             reservations: BalanceReservationManager::default(),
         }
     }
@@ -214,6 +218,26 @@ impl MexcSpotClient {
         }
     }
 
+    async fn reserve_for_quote_market_order(
+        &self,
+        request: &QuoteMarketOrderRequest,
+        rule: &SymbolRule,
+    ) -> ExchangeClientResult<Option<BalanceReservation>> {
+        if self.config.dry_run {
+            return Ok(None);
+        }
+        let snapshot = self.get_balances().await?;
+        self.reservations
+            .update_balances(self.exchange_name(), &snapshot.balances)?;
+        self.reservations
+            .reserve(
+                self.exchange_name(),
+                &rule.quote_asset,
+                request.quote_quantity,
+            )
+            .map(Some)
+    }
+
     fn dry_run_order_response(&self, request: &OrderRequest, symbol: &str) -> OrderResponse {
         OrderResponse {
             exchange: "mexc".to_string(),
@@ -233,6 +257,30 @@ impl MexcSpotClient {
             updated_at: None,
         }
     }
+
+    fn dry_run_quote_market_order_response(
+        &self,
+        request: &QuoteMarketOrderRequest,
+        symbol: &str,
+    ) -> OrderResponse {
+        OrderResponse {
+            exchange: "mexc".to_string(),
+            market_type: MarketType::Spot,
+            symbol: symbol.to_string(),
+            order_id: format!("dry-mexc-{}", Utc::now().timestamp_millis()),
+            client_order_id: request.client_order_id.clone(),
+            side: request.side,
+            position_side: PositionSide::None,
+            order_type: OrderType::Market,
+            status: OrderStatus::New,
+            price: None,
+            quantity: request.quote_quantity,
+            filled_quantity: 0.0,
+            average_price: None,
+            created_at: Utc::now(),
+            updated_at: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -243,6 +291,13 @@ impl ExchangeClient for MexcSpotClient {
 
     fn exchange_name(&self) -> &str {
         "mexc"
+    }
+
+    fn capabilities(&self) -> ExchangeClientCapabilities {
+        let mut capabilities = ExchangeClientCapabilities::spot(self.exchange_name());
+        capabilities.supports_cancel_all_orders = true;
+        capabilities.supports_quote_market_order = true;
+        capabilities
     }
 
     fn normalize_symbol(&self, symbol: &str) -> ExchangeClientResult<String> {
@@ -283,6 +338,7 @@ impl ExchangeClient for MexcSpotClient {
         depth: u16,
     ) -> ExchangeClientResult<OrderBookSnapshot> {
         let symbol = self.normalize_symbol(symbol)?;
+        validate_orderbook_depth(depth)?;
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), symbol.clone());
         params.insert("limit".to_string(), normalize_depth(depth).to_string());
@@ -311,17 +367,17 @@ impl ExchangeClient for MexcSpotClient {
                 },
             )?;
         }
+        let params = mexc_order_params(&request, &symbol)?;
+        if self.config.dry_run {
+            return Ok(self.dry_run_order_response(&request, &symbol));
+        }
         let rule = self
             .get_symbol_rule(&symbol)
             .await?
             .unwrap_or_else(|| fallback_rule(&symbol));
         validate_order_against_symbol_rule(&request, &rule)?;
         let mut reservation = self.reserve_for_order(&request, &rule).await?;
-        if self.config.dry_run {
-            return Ok(self.dry_run_order_response(&request, &symbol));
-        }
 
-        let params = mexc_order_params(&request, &symbol)?;
         let response = self
             .send_signed_request(Method::POST, "/api/v3/order", params)
             .await;
@@ -336,30 +392,97 @@ impl ExchangeClient for MexcSpotClient {
         }
     }
 
+    async fn place_quote_market_order(
+        &self,
+        mut request: QuoteMarketOrderRequest,
+    ) -> ExchangeClientResult<OrderResponse> {
+        request.validate()?;
+        if request.side != OrderSide::Buy {
+            return Err(ExchangeClientError::Unsupported(
+                "MEXC Spot quote-sized market orders are only supported for market buys"
+                    .to_string(),
+            ));
+        }
+        let symbol = self.normalize_symbol(&request.symbol)?;
+        request.symbol = symbol.clone();
+        ensure_quote_market_client_order_id(&mut request)?;
+        if self.config.dry_run {
+            return Ok(self.dry_run_quote_market_order_response(&request, &symbol));
+        }
+        let rule = self
+            .get_symbol_rule(&symbol)
+            .await?
+            .unwrap_or_else(|| fallback_rule(&symbol));
+        if request.quote_quantity < rule.min_notional {
+            return Err(ExchangeClientError::Validation {
+                field: "quote_quantity",
+                reason: format!(
+                    "quote quantity {} below min notional {} for {}",
+                    request.quote_quantity, rule.min_notional, symbol
+                ),
+            });
+        }
+        let mut reservation = self.reserve_for_quote_market_order(&request, &rule).await?;
+        let params = mexc_quote_market_order_params(&request, &symbol)?;
+        let response = self
+            .send_signed_request(Method::POST, "/api/v3/order", params)
+            .await;
+        match response {
+            Ok(value) => parse_order_response(&value, "mexc"),
+            Err(error) => {
+                if let Some(reservation) = reservation.as_mut() {
+                    let _ = self.reservations.release(reservation);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn amend_order(&self, request: AmendOrderRequest) -> ExchangeClientResult<OrderResponse> {
+        request.validate()?;
+        if request.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "MexcSpotClient only supports MarketType::Spot".to_string(),
+            });
+        }
+        ensure_amend_client_order_id(&request)?;
+        Err(ExchangeClientError::Unsupported(
+            "MEXC Spot v3 does not expose a native amend or cancel-replace endpoint; cancel and place a new order instead".to_string(),
+        ))
+    }
+
     async fn cancel_order(
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeClientResult<CancelOrderResponse> {
         request.validate()?;
+        if request.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "MexcSpotClient only supports MarketType::Spot".to_string(),
+            });
+        }
+        ensure_cancel_client_order_id(&request)?;
         let symbol = self.normalize_symbol(&request.symbol)?;
         if self.config.dry_run {
             return Ok(CancelOrderResponse {
                 exchange: "mexc".to_string(),
                 market_type: MarketType::Spot,
                 symbol,
-                order_id: request.order_id,
-                client_order_id: request.client_order_id,
+                order_id: request.order_id().map(str::to_string),
+                client_order_id: request.client_order_id().map(str::to_string),
                 status: OrderStatus::Cancelled,
                 cancelled_at: Utc::now(),
             });
         }
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), symbol.clone());
-        if let Some(order_id) = &request.order_id {
-            params.insert("orderId".to_string(), order_id.clone());
+        if let Some(order_id) = request.order_id() {
+            params.insert("orderId".to_string(), order_id.to_string());
         }
-        if let Some(client_order_id) = &request.client_order_id {
-            params.insert("origClientOrderId".to_string(), client_order_id.clone());
+        if let Some(client_order_id) = request.client_order_id() {
+            params.insert("origClientOrderId".to_string(), client_order_id.to_string());
         }
         let value = self
             .send_signed_request(Method::DELETE, "/api/v3/order", params)
@@ -368,9 +491,10 @@ impl ExchangeClient for MexcSpotClient {
             exchange: "mexc".to_string(),
             market_type: MarketType::Spot,
             symbol,
-            order_id: value_as_string(value.get("orderId")).or(request.order_id),
+            order_id: value_as_string(value.get("orderId"))
+                .or_else(|| request.order_id().map(str::to_string)),
             client_order_id: value_as_string(value.get("clientOrderId"))
-                .or(request.client_order_id),
+                .or_else(|| request.client_order_id().map(str::to_string)),
             status: value
                 .get("status")
                 .and_then(Value::as_str)
@@ -380,8 +504,43 @@ impl ExchangeClient for MexcSpotClient {
         })
     }
 
+    async fn cancel_all_orders(
+        &self,
+        request: CancelAllOrdersRequest,
+    ) -> ExchangeClientResult<CancelAllOrdersResponse> {
+        if request.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "MexcSpotClient only supports MarketType::Spot".to_string(),
+            });
+        }
+        let symbol = self.normalize_symbol(request.validate_symbol_required()?)?;
+        if self.config.dry_run {
+            return Ok(CancelAllOrdersResponse {
+                exchange: "mexc".to_string(),
+                market_type: MarketType::Spot,
+                symbol: Some(symbol),
+                cancelled_orders: 0,
+                cancelled_at: Utc::now(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert("symbol".to_string(), symbol.clone());
+        let value = self
+            .send_signed_request(Method::DELETE, "/api/v3/openOrders", params)
+            .await?;
+        Ok(CancelAllOrdersResponse {
+            exchange: "mexc".to_string(),
+            market_type: MarketType::Spot,
+            symbol: Some(symbol),
+            cancelled_orders: mexc_cancel_all_cancelled_count(&value)?,
+            cancelled_at: Utc::now(),
+        })
+    }
+
     async fn get_order(&self, symbol: &str, order_id: &str) -> ExchangeClientResult<OrderResponse> {
         let symbol = self.normalize_symbol(symbol)?;
+        let order_id = validate_order_lookup_id(order_id)?;
         let mut params = HashMap::new();
         params.insert("symbol".to_string(), symbol);
         params.insert("orderId".to_string(), order_id.to_string());
@@ -501,7 +660,7 @@ impl MexcSpotClient {
             .map(|symbol| {
                 serde_json::json!({
                     "method": "SUBSCRIPTION",
-                    "params": [format!("spot@public.limit.depth.v3.api@{}@{}", symbol, normalize_depth(self.config.orderbook_depth))]
+                    "params": [format!("spot@public.limit.depth.v3.api.pb@{}@{}", symbol, normalize_depth(self.config.orderbook_depth))]
                 })
                 .to_string()
             })
@@ -536,6 +695,19 @@ impl MexcSpotClient {
                                     }
                                     Ok(None) => {}
                                     Err(error) => log::warn!("MEXC Spot WS parse error: {}", error),
+                                }
+                            }
+                            Ok(Some(Ok(Message::Binary(raw)))) => {
+                                match parse_ws_orderbook_binary(&raw, self.config.stale_book_ms) {
+                                    Ok(Some(snapshot)) => {
+                                        if tx.send(snapshot).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        log::warn!("MEXC Spot WS binary parse error: {}", error)
+                                    }
                                 }
                             }
                             Ok(Some(Ok(Message::Ping(payload)))) => {
@@ -768,6 +940,160 @@ pub fn parse_ws_orderbook_message(
     parse_orderbook_snapshot(data, symbol, stale_book_ms).map(Some)
 }
 
+pub fn parse_ws_orderbook_binary(
+    raw: &[u8],
+    stale_book_ms: u64,
+) -> ExchangeClientResult<Option<OrderBookSnapshot>> {
+    let wrapper = MexcPushDataV3ApiWrapper::decode(raw)
+        .map_err(|error| CoreExchangeError::ParseError(error.to_string()))?;
+    let Some(depth) = wrapper.public_limit_depths else {
+        return Ok(None);
+    };
+    let bids = depth
+        .bids
+        .iter()
+        .map(mexc_pb_level)
+        .collect::<Result<Vec<_>, _>>()?;
+    let asks = depth
+        .asks
+        .iter()
+        .map(mexc_pb_level)
+        .collect::<Result<Vec<_>, _>>()?;
+    let exchange_timestamp = wrapper
+        .send_time
+        .or(wrapper.create_time)
+        .and_then(DateTime::<Utc>::from_timestamp_millis);
+    let received_at = Utc::now();
+    let latency_ms =
+        exchange_timestamp.map(|ts| received_at.signed_duration_since(ts).num_milliseconds());
+    let sequence = depth
+        .version
+        .parse::<u64>()
+        .ok()
+        .or_else(|| depth.event_type.parse::<u64>().ok());
+    Ok(Some(OrderBookSnapshot {
+        exchange: "mexc".to_string(),
+        market_type: MarketType::Spot,
+        symbol: wrapper
+            .symbol
+            .unwrap_or_else(|| {
+                symbol_from_mexc_channel(&wrapper.channel)
+                    .unwrap_or("UNKNOWN")
+                    .to_string()
+            })
+            .to_ascii_uppercase(),
+        best_bid: bids.first().map(|level| level.price),
+        best_ask: asks.first().map(|level| level.price),
+        bids,
+        asks,
+        exchange_timestamp,
+        received_at,
+        latency_ms,
+        sequence,
+        is_stale: latency_ms.is_some_and(|latency| latency > stale_book_ms as i64),
+    }))
+}
+
+fn mexc_pb_level(item: &MexcPublicLimitDepthV3ApiItem) -> ExchangeClientResult<OrderBookLevel> {
+    Ok(OrderBookLevel {
+        price: item
+            .price
+            .parse::<f64>()
+            .map_err(|error| CoreExchangeError::ParseError(error.to_string()))?,
+        quantity: item
+            .quantity
+            .parse::<f64>()
+            .map_err(|error| CoreExchangeError::ParseError(error.to_string()))?,
+    })
+}
+
+fn symbol_from_mexc_channel(channel: &str) -> Option<&str> {
+    channel.split('@').nth(2)
+}
+
+pub fn parse_private_stream_message(text: &str) -> ExchangeClientResult<Vec<UserStreamEvent>> {
+    let value: Value = serde_json::from_str(text).map_err(CoreExchangeError::from)?;
+    if value.get("success").and_then(Value::as_bool) == Some(true)
+        || value.get("code").and_then(Value::as_i64) == Some(0) && value.get("data").is_none()
+        || value
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(|method| method.contains("login") || method.contains("subscribe"))
+    {
+        return Ok(Vec::new());
+    }
+    let channel = value
+        .get("channel")
+        .or_else(|| value.get("method"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let payload = value
+        .get("data")
+        .or_else(|| value.get("d"))
+        .or_else(|| value.get("params"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let items = match payload {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![payload],
+        _ => Vec::new(),
+    };
+    let mut events = Vec::new();
+    for item in items {
+        if channel.contains("order") {
+            events.push(UserStreamEvent::Order(parse_order_response(&item, "mexc")?));
+        } else if channel.contains("deal") || channel.contains("trade") || channel.contains("fill")
+        {
+            events.push(UserStreamEvent::Fill(parse_fill(&item)?));
+        } else if channel.contains("balance")
+            || channel.contains("account")
+            || channel.contains("asset")
+        {
+            events.push(UserStreamEvent::Balance(parse_balance_snapshot(&json!({
+                "balances": [item],
+            }))?));
+        }
+    }
+    Ok(events)
+}
+
+#[derive(Clone, PartialEq, ProstMessage)]
+struct MexcPushDataV3ApiWrapper {
+    #[prost(string, tag = "1")]
+    channel: String,
+    #[prost(message, optional, tag = "303")]
+    public_limit_depths: Option<MexcPublicLimitDepthsV3Api>,
+    #[prost(string, optional, tag = "3")]
+    symbol: Option<String>,
+    #[prost(string, optional, tag = "4")]
+    symbol_id: Option<String>,
+    #[prost(int64, optional, tag = "5")]
+    create_time: Option<i64>,
+    #[prost(int64, optional, tag = "6")]
+    send_time: Option<i64>,
+}
+
+#[derive(Clone, PartialEq, ProstMessage)]
+struct MexcPublicLimitDepthsV3Api {
+    #[prost(message, repeated, tag = "1")]
+    asks: Vec<MexcPublicLimitDepthV3ApiItem>,
+    #[prost(message, repeated, tag = "2")]
+    bids: Vec<MexcPublicLimitDepthV3ApiItem>,
+    #[prost(string, tag = "3")]
+    event_type: String,
+    #[prost(string, tag = "4")]
+    version: String,
+}
+
+#[derive(Clone, PartialEq, ProstMessage)]
+struct MexcPublicLimitDepthV3ApiItem {
+    #[prost(string, tag = "1")]
+    price: String,
+    #[prost(string, tag = "2")]
+    quantity: String,
+}
+
 pub fn parse_order_response(value: &Value, exchange: &str) -> ExchangeClientResult<OrderResponse> {
     let symbol = required_str(value, "symbol")
         .unwrap_or("UNKNOWN")
@@ -834,6 +1160,21 @@ pub fn parse_fill(value: &Value) -> ExchangeClientResult<TradeFill> {
     })
 }
 
+pub fn mexc_cancel_all_cancelled_count(value: &Value) -> ExchangeClientResult<usize> {
+    let items = value
+        .as_array()
+        .ok_or_else(|| parser_error("mexc", "cancel-all response is not an array", value))?;
+    Ok(items
+        .iter()
+        .map(|item| {
+            item.get("orderReports")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or_else(|| usize::from(item.get("orderId").is_some()))
+        })
+        .sum())
+}
+
 fn mexc_order_params(
     request: &OrderRequest,
     symbol: &str,
@@ -860,6 +1201,73 @@ fn mexc_order_params(
         params.insert("timeInForce".to_string(), tif_to_mexc(tif).to_string());
     }
     Ok(params)
+}
+
+fn mexc_quote_market_order_params(
+    request: &QuoteMarketOrderRequest,
+    symbol: &str,
+) -> ExchangeClientResult<HashMap<String, String>> {
+    if request.side != OrderSide::Buy {
+        return Err(ExchangeClientError::Unsupported(
+            "MEXC Spot quote-sized market orders are only supported for market buys".to_string(),
+        ));
+    }
+    let mut params = HashMap::new();
+    params.insert("symbol".to_string(), symbol.to_string());
+    params.insert("side".to_string(), "BUY".to_string());
+    params.insert("type".to_string(), "MARKET".to_string());
+    params.insert(
+        "quoteOrderQty".to_string(),
+        request.quote_quantity.to_string(),
+    );
+    if let Some(client_order_id) = &request.client_order_id {
+        params.insert("newClientOrderId".to_string(), client_order_id.clone());
+    }
+    Ok(params)
+}
+
+fn ensure_quote_market_client_order_id(
+    request: &mut QuoteMarketOrderRequest,
+) -> ExchangeClientResult<()> {
+    if request.client_order_id.is_none() {
+        request.client_order_id = Some(MexcSpotClient::generate_client_order_id());
+    }
+    if let Some(client_order_id) = &request.client_order_id {
+        validate_client_order_id("mexc", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_amend_client_order_id(request: &AmendOrderRequest) -> ExchangeClientResult<()> {
+    for client_order_id in [request.client_order_id(), request.new_client_order_id()]
+        .into_iter()
+        .flatten()
+    {
+        validate_client_order_id("mexc", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn ensure_cancel_client_order_id(request: &CancelOrderRequest) -> ExchangeClientResult<()> {
+    if let Some(client_order_id) = request.client_order_id() {
+        validate_client_order_id("mexc", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn mexc_order_type(request: &OrderRequest) -> ExchangeClientResult<&'static str> {
@@ -1155,13 +1563,128 @@ fn default_depth() -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
     use super::*;
+
+    #[derive(Debug, Clone)]
+    struct SeenMexcRequest {
+        method: String,
+        path: String,
+        query: HashMap<String, String>,
+        headers: HashMap<String, String>,
+    }
+
+    async fn spawn_mexc_rest_server(
+        responses: Vec<Value>,
+    ) -> (String, Arc<Mutex<Vec<SeenMexcRequest>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_requests = Arc::clone(&seen);
+        let responses = Arc::new(Mutex::new(responses.into_iter()));
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buffer = vec![0_u8; 8192];
+                let bytes_read = stream.read(&mut buffer).await.unwrap();
+                let request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                let request = parse_seen_mexc_request(&request_text);
+                seen_requests.lock().unwrap().push(request);
+                let body = responses
+                    .lock()
+                    .unwrap()
+                    .next()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let body_text = body.to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body_text.len(),
+                    body_text
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+
+        (format!("http://{address}"), seen)
+    }
+
+    fn parse_seen_mexc_request(request_text: &str) -> SeenMexcRequest {
+        let mut lines = request_text.lines();
+        let request_line = lines.next().unwrap_or_default();
+        let mut request_parts = request_line.split_whitespace();
+        let method = request_parts.next().unwrap_or_default().to_string();
+        let target = request_parts.next().unwrap_or_default();
+        let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+        let query = query_text
+            .split('&')
+            .filter(|pair| !pair.is_empty())
+            .filter_map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                Some((key.to_string(), value.to_string()))
+            })
+            .collect();
+        let headers = lines
+            .take_while(|line| !line.trim().is_empty())
+            .filter_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                Some((key.to_ascii_lowercase(), value.trim().to_string()))
+            })
+            .collect();
+
+        SeenMexcRequest {
+            method,
+            path: path.to_string(),
+            query,
+            headers,
+        }
+    }
+
+    fn assert_signed_mexc_request(request: &SeenMexcRequest, method: &str, path: &str) {
+        assert_eq!(request.method, method);
+        assert_eq!(request.path, path);
+        assert_eq!(
+            request.headers.get("x-mexc-apikey").map(String::as_str),
+            Some("key")
+        );
+        assert!(request
+            .query
+            .get("timestamp")
+            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(
+            request.query.get("recvWindow").map(String::as_str),
+            Some("5000")
+        );
+        assert!(request
+            .query
+            .get("signature")
+            .is_some_and(|value| !value.is_empty()));
+    }
 
     #[test]
     fn mexc_request_signing_should_match_known_hmac() {
         let query = "symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1&price=11&recvWindow=5000&timestamp=1644489390087";
         let expected = SignatureHelper::hmac_sha256("secret", query);
         assert_eq!(sign_query("secret", query), expected);
+    }
+
+    #[test]
+    fn mexc_capabilities_should_advertise_cancel_all() {
+        let client = MexcSpotClient::new(MexcSpotConfig::default());
+        let capabilities = client.capabilities();
+        assert_eq!(capabilities.market_type, MarketType::Spot);
+        assert!(capabilities.supports_cancel_all_orders);
+        assert!(capabilities.supports_quote_market_order);
+        assert!(!capabilities.supports_amend_order);
+        assert!(!capabilities.supports_order_list);
+        assert!(capabilities.supports_open_orders);
+        assert!(capabilities.supports_fee_api);
     }
 
     #[test]
@@ -1193,6 +1716,454 @@ mod tests {
         assert_eq!(book.sequence, Some(42));
     }
 
+    #[tokio::test]
+    async fn mexc_orderbook_should_validate_depth_before_request() {
+        let client = MexcSpotClient::new(MexcSpotConfig::default());
+
+        let err = client.get_orderbook("BTCUSDT", 0).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation { field: "depth", .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn mexc_get_order_should_validate_order_id_before_request() {
+        let client = MexcSpotClient::new(MexcSpotConfig::default());
+
+        let err = client.get_order("BTCUSDT", "   ").await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn mexc_spot_client_should_route_common_private_rest_readbacks() {
+        let (base_url, seen) = spawn_mexc_rest_server(vec![
+            serde_json::json!({
+                "balances": [
+                    {"asset": "BTC", "free": "0.10000000", "locked": "0.02000000"},
+                    {"asset": "USDT", "free": "123.45", "locked": "1.55"}
+                ]
+            }),
+            serde_json::json!({
+                "symbol": "BTCUSDT",
+                "orderId": 1001,
+                "clientOrderId": "CLIENT1",
+                "price": "65000",
+                "origQty": "0.01",
+                "executedQty": "0.004",
+                "cummulativeQuoteQty": "259.8",
+                "status": "PARTIALLY_FILLED",
+                "timeInForce": "GTC",
+                "type": "LIMIT",
+                "side": "BUY",
+                "time": 1700000000000i64,
+                "updateTime": 1700000001000i64
+            }),
+            serde_json::json!([{
+                "symbol": "BTCUSDT",
+                "orderId": 1002,
+                "clientOrderId": "CLIENT2",
+                "price": "70000",
+                "origQty": "0.02",
+                "executedQty": "0",
+                "status": "NEW",
+                "timeInForce": "GTC",
+                "type": "LIMIT",
+                "side": "SELL",
+                "time": 1700000002000i64,
+                "updateTime": 1700000002000i64
+            }]),
+            serde_json::json!([{
+                "symbol": "BTCUSDT",
+                "makerCommission": "0.0008",
+                "takerCommission": "0.001"
+            }]),
+            serde_json::json!([{
+                "symbol": "BTCUSDT",
+                "id": 2001,
+                "orderId": 1001,
+                "clientOrderId": "CLIENT1",
+                "price": "64950",
+                "qty": "0.004",
+                "commission": "0.2598",
+                "commissionAsset": "USDT",
+                "isBuyer": true,
+                "time": 1700000001000i64
+            }]),
+        ])
+        .await;
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url,
+            dry_run: false,
+            ..MexcSpotConfig::default()
+        });
+
+        let balances = client.get_balances().await.unwrap();
+        assert_eq!(balances.exchange, "mexc");
+        assert_eq!(balances.market_type, MarketType::Spot);
+        assert_eq!(balances.balances.len(), 2);
+        assert_eq!(balances.balances[0].asset, "BTC");
+        assert_eq!(balances.balances[0].available, 0.1);
+        assert_eq!(balances.balances[0].locked_by_exchange, 0.02);
+
+        let order = client.get_order("BTCUSDT", "1001").await.unwrap();
+        assert_eq!(order.exchange, "mexc");
+        assert_eq!(order.market_type, MarketType::Spot);
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.order_id, "1001");
+        assert_eq!(order.client_order_id.as_deref(), Some("CLIENT1"));
+        assert_eq!(order.side, OrderSide::Buy);
+        assert_eq!(order.status, OrderStatus::PartiallyFilled);
+        assert_eq!(order.price, Some(65_000.0));
+        assert_eq!(order.quantity, 0.01);
+        assert_eq!(order.filled_quantity, 0.004);
+        assert_eq!(order.average_price, Some(64_950.0));
+
+        let open_orders = client.get_open_orders(Some("BTCUSDT")).await.unwrap();
+        assert_eq!(open_orders.len(), 1);
+        assert_eq!(open_orders[0].symbol, "BTCUSDT");
+        assert_eq!(open_orders[0].order_id, "1002");
+        assert_eq!(open_orders[0].client_order_id.as_deref(), Some("CLIENT2"));
+        assert_eq!(open_orders[0].side, OrderSide::Sell);
+        assert_eq!(open_orders[0].status, OrderStatus::New);
+        assert_eq!(open_orders[0].price, Some(70_000.0));
+        assert_eq!(open_orders[0].quantity, 0.02);
+        assert_eq!(open_orders[0].filled_quantity, 0.0);
+        assert_eq!(open_orders[0].average_price, None);
+
+        let fee_rate = client.get_fee_rate("BTCUSDT").await.unwrap();
+        assert_eq!(fee_rate.maker, 0.0008);
+        assert_eq!(fee_rate.taker, 0.001);
+
+        let fills = client.get_recent_fills("BTCUSDT").await.unwrap();
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.exchange, "mexc");
+        assert_eq!(fill.market_type, MarketType::Spot);
+        assert_eq!(fill.symbol, "BTCUSDT");
+        assert_eq!(fill.trade_id.as_deref(), Some("2001"));
+        assert_eq!(fill.order_id.as_deref(), Some("1001"));
+        assert_eq!(fill.client_order_id.as_deref(), Some("CLIENT1"));
+        assert_eq!(fill.side, OrderSide::Buy);
+        assert_eq!(fill.price, 64_950.0);
+        assert_eq!(fill.quantity, 0.004);
+        assert_eq!(fill.fee_asset.as_deref(), Some("USDT"));
+        assert_eq!(fill.fee_amount, Some(0.2598));
+
+        let requests = seen.lock().unwrap().clone();
+        assert_eq!(requests.len(), 5);
+        assert_signed_mexc_request(&requests[0], "GET", "/api/v3/account");
+        assert!(requests[0].query.get("symbol").is_none());
+
+        assert_signed_mexc_request(&requests[1], "GET", "/api/v3/order");
+        assert_eq!(
+            requests[1].query.get("symbol").map(String::as_str),
+            Some("BTCUSDT")
+        );
+        assert_eq!(
+            requests[1].query.get("orderId").map(String::as_str),
+            Some("1001")
+        );
+
+        assert_signed_mexc_request(&requests[2], "GET", "/api/v3/openOrders");
+        assert_eq!(
+            requests[2].query.get("symbol").map(String::as_str),
+            Some("BTCUSDT")
+        );
+
+        assert_signed_mexc_request(&requests[3], "GET", "/api/v3/tradeFee");
+        assert_eq!(
+            requests[3].query.get("symbol").map(String::as_str),
+            Some("BTCUSDT")
+        );
+
+        assert_signed_mexc_request(&requests[4], "GET", "/api/v3/myTrades");
+        assert_eq!(
+            requests[4].query.get("symbol").map(String::as_str),
+            Some("BTCUSDT")
+        );
+    }
+
+    #[tokio::test]
+    async fn mexc_spot_client_should_route_order_mutations() {
+        let symbol_rule = serde_json::json!({
+            "symbols": [{
+                "symbol": "DKAUSDT",
+                "status": "TRADING",
+                "baseAsset": "DKA",
+                "quoteAsset": "USDT",
+                "filters": [
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.0001"},
+                    {"filterType": "LOT_SIZE", "minQty": "1", "maxQty": "100000", "stepSize": "1"},
+                    {"filterType": "MIN_NOTIONAL", "minNotional": "5"}
+                ]
+            }]
+        });
+        let balances = serde_json::json!({
+            "balances": [
+                {"asset": "USDT", "free": "1000", "locked": "0"},
+                {"asset": "DKA", "free": "100", "locked": "0"}
+            ]
+        });
+        let fee = serde_json::json!([{
+            "symbol": "DKAUSDT",
+            "makerCommission": "0.0008",
+            "takerCommission": "0.001"
+        }]);
+        let (base_url, seen) = spawn_mexc_rest_server(vec![
+            symbol_rule.clone(),
+            balances.clone(),
+            fee.clone(),
+            serde_json::json!({
+                "symbol": "DKAUSDT",
+                "orderId": 2001,
+                "clientOrderId": "MXSPTLIMIT1",
+                "price": "1.23",
+                "origQty": "10",
+                "executedQty": "0",
+                "status": "NEW",
+                "timeInForce": "GTC",
+                "type": "LIMIT",
+                "side": "BUY",
+                "transactTime": 1700000000000i64
+            }),
+            symbol_rule.clone(),
+            balances,
+            serde_json::json!({
+                "symbol": "DKAUSDT",
+                "orderId": 2002,
+                "clientOrderId": "MXSPTQUOTE1",
+                "price": "0",
+                "origQty": "25.5",
+                "executedQty": "0",
+                "status": "NEW",
+                "type": "MARKET",
+                "side": "BUY",
+                "transactTime": 1700000001000i64
+            }),
+            serde_json::json!({
+                "symbol": "DKAUSDT",
+                "orderId": 2001,
+                "clientOrderId": "MXSPTLIMIT1",
+                "status": "CANCELED"
+            }),
+            serde_json::json!([
+                {"symbol": "DKAUSDT", "orderId": 2002, "clientOrderId": "MXSPTQUOTE1", "status": "CANCELED"},
+                {"symbol": "DKAUSDT", "orderId": 2003, "clientOrderId": "MXSPTSELL1", "status": "CANCELED"}
+            ]),
+        ])
+        .await;
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url,
+            dry_run: false,
+            ..MexcSpotConfig::default()
+        });
+
+        let limit_order = client
+            .place_order(OrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                side: OrderSide::Buy,
+                position_side: PositionSide::None,
+                order_type: OrderType::Limit,
+                time_in_force: Some(TimeInForce::GTC),
+                quantity: 10.0,
+                price: Some(1.23),
+                client_order_id: Some("MXSPTLIMIT1".to_string()),
+                reduce_only: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(limit_order.exchange, "mexc");
+        assert_eq!(limit_order.market_type, MarketType::Spot);
+        assert_eq!(limit_order.symbol, "DKAUSDT");
+        assert_eq!(limit_order.order_id, "2001");
+        assert_eq!(limit_order.client_order_id.as_deref(), Some("MXSPTLIMIT1"));
+        assert_eq!(limit_order.side, OrderSide::Buy);
+        assert_eq!(limit_order.order_type, OrderType::Limit);
+        assert_eq!(limit_order.status, OrderStatus::New);
+        assert_eq!(limit_order.price, Some(1.23));
+        assert_eq!(limit_order.quantity, 10.0);
+
+        let mut quote_request = QuoteMarketOrderRequest::spot_buy("DKAUSDT", 25.5);
+        quote_request.client_order_id = Some("MXSPTQUOTE1".to_string());
+        let quote_order = client
+            .place_quote_market_order(quote_request)
+            .await
+            .unwrap();
+        assert_eq!(quote_order.exchange, "mexc");
+        assert_eq!(quote_order.market_type, MarketType::Spot);
+        assert_eq!(quote_order.symbol, "DKAUSDT");
+        assert_eq!(quote_order.order_id, "2002");
+        assert_eq!(quote_order.client_order_id.as_deref(), Some("MXSPTQUOTE1"));
+        assert_eq!(quote_order.side, OrderSide::Buy);
+        assert_eq!(quote_order.order_type, OrderType::Market);
+        assert_eq!(quote_order.status, OrderStatus::New);
+
+        let cancelled = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("2001".to_string()),
+                client_order_id: Some("MXSPTLIMIT1".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(cancelled.exchange, "mexc");
+        assert_eq!(cancelled.market_type, MarketType::Spot);
+        assert_eq!(cancelled.symbol, "DKAUSDT");
+        assert_eq!(cancelled.order_id.as_deref(), Some("2001"));
+        assert_eq!(cancelled.client_order_id.as_deref(), Some("MXSPTLIMIT1"));
+        assert_eq!(cancelled.status, OrderStatus::Cancelled);
+
+        let cancelled_all = client
+            .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                MarketType::Spot,
+                "DKAUSDT",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(cancelled_all.exchange, "mexc");
+        assert_eq!(cancelled_all.market_type, MarketType::Spot);
+        assert_eq!(cancelled_all.symbol.as_deref(), Some("DKAUSDT"));
+        assert_eq!(cancelled_all.cancelled_orders, 2);
+
+        let capabilities = client.capabilities();
+        assert!(!capabilities.supports_amend_order);
+        assert!(!capabilities.supports_order_list);
+        let amend_error = client
+            .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                MarketType::Spot,
+                "DKAUSDT",
+                "2001",
+                5.0,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            amend_error,
+            ExchangeClientError::Unsupported(message)
+                if message.contains("does not expose a native amend")
+        ));
+
+        let requests = seen.lock().unwrap().clone();
+        assert_eq!(requests.len(), 9);
+
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(requests[0].path, "/api/v3/exchangeInfo");
+        assert!(requests[0].query.is_empty());
+
+        assert_signed_mexc_request(&requests[1], "GET", "/api/v3/account");
+        assert!(requests[1].query.get("symbol").is_none());
+
+        assert_signed_mexc_request(&requests[2], "GET", "/api/v3/tradeFee");
+        assert_eq!(
+            requests[2].query.get("symbol").map(String::as_str),
+            Some("DKAUSDT")
+        );
+
+        assert_signed_mexc_request(&requests[3], "POST", "/api/v3/order");
+        assert_eq!(
+            requests[3].query.get("symbol").map(String::as_str),
+            Some("DKAUSDT")
+        );
+        assert_eq!(
+            requests[3].query.get("side").map(String::as_str),
+            Some("BUY")
+        );
+        assert_eq!(
+            requests[3].query.get("type").map(String::as_str),
+            Some("LIMIT")
+        );
+        assert_eq!(
+            requests[3].query.get("quantity").map(String::as_str),
+            Some("10")
+        );
+        assert_eq!(
+            requests[3].query.get("price").map(String::as_str),
+            Some("1.23")
+        );
+        assert_eq!(
+            requests[3].query.get("timeInForce").map(String::as_str),
+            Some("GTC")
+        );
+        assert_eq!(
+            requests[3]
+                .query
+                .get("newClientOrderId")
+                .map(String::as_str),
+            Some("MXSPTLIMIT1")
+        );
+
+        assert_eq!(requests[4].method, "GET");
+        assert_eq!(requests[4].path, "/api/v3/exchangeInfo");
+        assert!(requests[4].query.is_empty());
+
+        assert_signed_mexc_request(&requests[5], "GET", "/api/v3/account");
+        assert!(requests[5].query.get("symbol").is_none());
+
+        assert_signed_mexc_request(&requests[6], "POST", "/api/v3/order");
+        assert_eq!(
+            requests[6].query.get("symbol").map(String::as_str),
+            Some("DKAUSDT")
+        );
+        assert_eq!(
+            requests[6].query.get("side").map(String::as_str),
+            Some("BUY")
+        );
+        assert_eq!(
+            requests[6].query.get("type").map(String::as_str),
+            Some("MARKET")
+        );
+        assert_eq!(
+            requests[6].query.get("quoteOrderQty").map(String::as_str),
+            Some("25.5")
+        );
+        assert_eq!(
+            requests[6]
+                .query
+                .get("newClientOrderId")
+                .map(String::as_str),
+            Some("MXSPTQUOTE1")
+        );
+        assert!(!requests[6].query.contains_key("quantity"));
+
+        assert_signed_mexc_request(&requests[7], "DELETE", "/api/v3/order");
+        assert_eq!(
+            requests[7].query.get("symbol").map(String::as_str),
+            Some("DKAUSDT")
+        );
+        assert_eq!(
+            requests[7].query.get("orderId").map(String::as_str),
+            Some("2001")
+        );
+        assert_eq!(
+            requests[7]
+                .query
+                .get("origClientOrderId")
+                .map(String::as_str),
+            Some("MXSPTLIMIT1")
+        );
+
+        assert_signed_mexc_request(&requests[8], "DELETE", "/api/v3/openOrders");
+        assert_eq!(
+            requests[8].query.get("symbol").map(String::as_str),
+            Some("DKAUSDT")
+        );
+    }
+
     #[test]
     fn mexc_order_status_mapping_should_cover_spot_statuses() {
         assert_eq!(map_mexc_order_status("NEW"), OrderStatus::New);
@@ -1202,6 +2173,546 @@ mod tests {
         );
         assert_eq!(map_mexc_order_status("FILLED"), OrderStatus::Filled);
         assert_eq!(map_mexc_order_status("CANCELED"), OrderStatus::Cancelled);
+    }
+
+    #[test]
+    fn mexc_cancel_all_should_count_orders_and_order_lists() {
+        let value = serde_json::json!([
+            {"symbol":"BTCUSDT","orderId":1,"clientOrderId":"plain","status":"CANCELED"},
+            {"orderListId":2,"symbol":"BTCUSDT","orderReports":[
+                {"symbol":"BTCUSDT","orderId":3,"status":"CANCELED"},
+                {"symbol":"BTCUSDT","orderId":4,"status":"CANCELED"}
+            ]}
+        ]);
+        assert_eq!(mexc_cancel_all_cancelled_count(&value).unwrap(), 3);
+    }
+
+    #[test]
+    fn mexc_quote_market_order_params_should_use_quote_order_qty_for_buy() {
+        let mut request = QuoteMarketOrderRequest::spot_buy("DKAUSDT", 25.5);
+        request.client_order_id = Some("ldry-mexc-quote-1".to_string());
+
+        let params = mexc_quote_market_order_params(&request, "DKAUSDT").unwrap();
+
+        assert_eq!(params.get("symbol").map(String::as_str), Some("DKAUSDT"));
+        assert_eq!(params.get("side").map(String::as_str), Some("BUY"));
+        assert_eq!(params.get("type").map(String::as_str), Some("MARKET"));
+        assert_eq!(
+            params.get("quoteOrderQty").map(String::as_str),
+            Some("25.5")
+        );
+        assert!(!params.contains_key("quantity"));
+        assert_eq!(
+            params.get("newClientOrderId").map(String::as_str),
+            Some("ldry-mexc-quote-1")
+        );
+
+        let sell = QuoteMarketOrderRequest {
+            side: OrderSide::Sell,
+            ..request
+        };
+        assert!(mexc_quote_market_order_params(&sell, "DKAUSDT").is_err());
+    }
+
+    #[tokio::test]
+    async fn mexc_place_order_should_ack_in_dry_run_without_symbol_rule_readback() {
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            dry_run: true,
+            ..MexcSpotConfig::default()
+        });
+
+        let response = client
+            .place_order(OrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                side: OrderSide::Buy,
+                position_side: PositionSide::None,
+                order_type: OrderType::Limit,
+                time_in_force: Some(TimeInForce::GTC),
+                quantity: 10.0,
+                price: Some(1.23),
+                client_order_id: None,
+                reduce_only: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.exchange, "mexc");
+        assert_eq!(response.market_type, MarketType::Spot);
+        assert_eq!(response.symbol, "DKAUSDT");
+        assert_eq!(response.side, OrderSide::Buy);
+        assert_eq!(response.order_type, OrderType::Limit);
+        assert_eq!(response.price, Some(1.23));
+        assert_eq!(response.quantity, 10.0);
+        assert_eq!(response.status, OrderStatus::New);
+        assert!(response.client_order_id.is_some());
+        assert!(response.order_id.starts_with("dry-mexc-"));
+    }
+
+    #[tokio::test]
+    async fn mexc_quote_market_order_should_ack_in_dry_run() {
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            dry_run: true,
+            ..MexcSpotConfig::default()
+        });
+
+        let response = client
+            .place_quote_market_order(QuoteMarketOrderRequest::spot_buy("DKAUSDT", 25.5))
+            .await
+            .unwrap();
+
+        assert_eq!(response.exchange, "mexc");
+        assert_eq!(response.symbol, "DKAUSDT");
+        assert_eq!(response.side, OrderSide::Buy);
+        assert_eq!(response.order_type, OrderType::Market);
+        assert_eq!(response.quantity, 25.5);
+        assert!(response.client_order_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn mexc_cancel_order_should_validate_market_type_in_dry_run() {
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            dry_run: true,
+            ..MexcSpotConfig::default()
+        });
+
+        let response = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.exchange, "mexc");
+        assert_eq!(response.market_type, MarketType::Spot);
+        assert_eq!(response.symbol, "DKAUSDT");
+        assert_eq!(response.order_id.as_deref(), Some("1001"));
+
+        let response = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("   ".to_string()),
+                client_order_id: Some("CANCELCLIENT1".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.order_id, None);
+        assert_eq!(response.client_order_id.as_deref(), Some("CANCELCLIENT1"));
+
+        let error = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Perpetual,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("only supports MarketType::Spot"));
+
+        let error = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: None,
+                client_order_id: Some("bad/id".to_string()),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn mexc_cancel_all_orders_should_ack_and_validate_market_type_in_dry_run() {
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            dry_run: true,
+            ..MexcSpotConfig::default()
+        });
+
+        let response = client
+            .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                MarketType::Spot,
+                "DKAUSDT",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.exchange, "mexc");
+        assert_eq!(response.market_type, MarketType::Spot);
+        assert_eq!(response.symbol.as_deref(), Some("DKAUSDT"));
+        assert_eq!(response.cancelled_orders, 0);
+
+        let error = client
+            .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                MarketType::Perpetual,
+                "DKAUSDT",
+            ))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("only supports MarketType::Spot"));
+    }
+
+    #[tokio::test]
+    async fn mexc_order_list_should_validate_before_unsupported() {
+        use crate::exchanges::unified::{
+            OrderListConditionalLeg, OrderListLegType, OrderListRequest,
+        };
+
+        fn oco_request() -> OrderListRequest {
+            OrderListRequest::Oco {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                list_client_order_id: Some("MEXCOCOLIST1".to_string()),
+                side: OrderSide::Sell,
+                quantity: 5.0,
+                above: OrderListConditionalLeg {
+                    order_type: OrderListLegType::LimitMaker,
+                    price: Some(2.0),
+                    stop_price: None,
+                    time_in_force: None,
+                    client_order_id: Some("MEXCABOVE1".to_string()),
+                },
+                below: OrderListConditionalLeg {
+                    order_type: OrderListLegType::StopLossLimit,
+                    price: Some(0.8),
+                    stop_price: Some(0.9),
+                    time_in_force: Some(TimeInForce::GTC),
+                    client_order_id: Some("MEXCBELOW1".to_string()),
+                },
+            }
+        }
+
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            dry_run: false,
+            base_url: "http://127.0.0.1:9".to_string(),
+            ..MexcSpotConfig::default()
+        });
+        assert!(!client.capabilities().supports_order_list);
+
+        assert!(matches!(
+            client.place_order_list(oco_request()).await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("order lists are not implemented")
+        ));
+
+        let mut invalid_market_type = oco_request();
+        if let OrderListRequest::Oco { market_type, .. } = &mut invalid_market_type {
+            *market_type = MarketType::Perpetual;
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_market_type).await,
+            Err(ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            })
+        ));
+
+        let mut empty_symbol = oco_request();
+        if let OrderListRequest::Oco { symbol, .. } = &mut empty_symbol {
+            symbol.clear();
+        }
+        assert!(matches!(
+            client.place_order_list(empty_symbol).await,
+            Err(ExchangeClientError::Validation {
+                field: "symbol",
+                ..
+            })
+        ));
+
+        let mut missing_limit_price = oco_request();
+        if let OrderListRequest::Oco { above, .. } = &mut missing_limit_price {
+            above.price = None;
+        }
+        assert!(matches!(
+            client.place_order_list(missing_limit_price).await,
+            Err(ExchangeClientError::Validation { field: "price", .. })
+        ));
+
+        let mut missing_stop_price = oco_request();
+        if let OrderListRequest::Oco { below, .. } = &mut missing_stop_price {
+            below.stop_price = None;
+        }
+        assert!(matches!(
+            client.place_order_list(missing_stop_price).await,
+            Err(ExchangeClientError::Validation {
+                field: "stop_price",
+                ..
+            })
+        ));
+
+        let mut invalid_list_client_id = oco_request();
+        if let OrderListRequest::Oco {
+            list_client_order_id,
+            ..
+        } = &mut invalid_list_client_id
+        {
+            *list_client_order_id = Some("bad/id".to_string());
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_list_client_id).await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+
+        let mut invalid_leg_client_id = oco_request();
+        if let OrderListRequest::Oco { below, .. } = &mut invalid_leg_client_id {
+            below.client_order_id = Some("bad/id".to_string());
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_leg_client_id).await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn mexc_spot_private_stream_parser_should_parse_order_fill_balance_and_ignore_control() {
+        let order_events = parse_private_stream_message(
+            r#"{
+                "channel":"spot@private.orders.v3.api@BTCUSDT",
+                "data":[{
+                    "symbol":"BTCUSDT",
+                    "orderId":"order-1",
+                    "clientOrderId":"client-1",
+                    "side":"BUY",
+                    "type":"LIMIT",
+                    "status":"PARTIALLY_FILLED",
+                    "price":"65000",
+                    "origQty":"0.02",
+                    "executedQty":"0.01",
+                    "cummulativeQuoteQty":"650.1",
+                    "transactTime":1700000000000,
+                    "updateTime":1700000000100
+                }]
+            }"#,
+        )
+        .unwrap();
+        match &order_events[0] {
+            UserStreamEvent::Order(order) => {
+                assert_eq!(order.exchange, "mexc");
+                assert_eq!(order.market_type, MarketType::Spot);
+                assert_eq!(order.symbol, "BTCUSDT");
+                assert_eq!(order.order_id, "order-1");
+                assert_eq!(order.client_order_id.as_deref(), Some("client-1"));
+                assert_eq!(order.side, OrderSide::Buy);
+                assert_eq!(order.position_side, PositionSide::None);
+                assert_eq!(order.order_type, OrderType::Limit);
+                assert_eq!(order.status, OrderStatus::PartiallyFilled);
+                assert_eq!(order.price, Some(65_000.0));
+                assert_eq!(order.quantity, 0.02);
+                assert_eq!(order.filled_quantity, 0.01);
+                assert_eq!(order.average_price, Some(65_010.0));
+            }
+            other => panic!("expected MEXC order event, got {other:?}"),
+        }
+
+        let fill_events = parse_private_stream_message(
+            r#"{
+                "method":"spot.private.deals",
+                "d":{
+                    "symbol":"BTCUSDT",
+                    "id":"trade-1",
+                    "orderId":"order-1",
+                    "clientOrderId":"client-1",
+                    "isBuyer":false,
+                    "price":"66000",
+                    "qty":"0.03",
+                    "commissionAsset":"BTC",
+                    "commission":"0.00003",
+                    "time":1700000000200
+                }
+            }"#,
+        )
+        .unwrap();
+        match &fill_events[0] {
+            UserStreamEvent::Fill(fill) => {
+                assert_eq!(fill.exchange, "mexc");
+                assert_eq!(fill.market_type, MarketType::Spot);
+                assert_eq!(fill.symbol, "BTCUSDT");
+                assert_eq!(fill.trade_id.as_deref(), Some("trade-1"));
+                assert_eq!(fill.order_id.as_deref(), Some("order-1"));
+                assert_eq!(fill.client_order_id.as_deref(), Some("client-1"));
+                assert_eq!(fill.side, OrderSide::Sell);
+                assert_eq!(fill.price, 66_000.0);
+                assert_eq!(fill.quantity, 0.03);
+                assert_eq!(fill.fee_asset.as_deref(), Some("BTC"));
+                assert_eq!(fill.fee_amount, Some(0.00003));
+            }
+            other => panic!("expected MEXC fill event, got {other:?}"),
+        }
+
+        let balance_events = parse_private_stream_message(
+            r#"{
+                "channel":"spot.private.account",
+                "params":{
+                    "asset":"USDT",
+                    "free":"80",
+                    "locked":"20"
+                }
+            }"#,
+        )
+        .unwrap();
+        match &balance_events[0] {
+            UserStreamEvent::Balance(snapshot) => {
+                assert_eq!(snapshot.exchange, "mexc");
+                assert_eq!(snapshot.market_type, MarketType::Spot);
+                assert_eq!(snapshot.balances.len(), 1);
+                let balance = &snapshot.balances[0];
+                assert_eq!(balance.asset, "USDT");
+                assert_eq!(balance.total, 100.0);
+                assert_eq!(balance.available, 80.0);
+                assert_eq!(balance.locked, 20.0);
+                assert_eq!(balance.locked_by_exchange, 20.0);
+            }
+            other => panic!("expected MEXC balance event, got {other:?}"),
+        }
+
+        assert!(
+            parse_private_stream_message(r#"{"method":"login","success":true}"#)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            parse_private_stream_message(r#"{"code":0,"msg":"subscribed"}"#)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn mexc_amend_order_should_be_explicitly_unsupported() {
+        let client = MexcSpotClient::new(MexcSpotConfig {
+            dry_run: true,
+            ..MexcSpotConfig::default()
+        });
+
+        let error = client
+            .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                MarketType::Spot,
+                "DKAUSDT",
+                "1001",
+                5.0,
+            ))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExchangeClientError::Unsupported(message)
+                if message.contains("does not expose a native amend")
+        ));
+
+        let error = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: Some("   ".to_string()),
+                new_client_order_id: Some("   ".to_string()),
+                new_quantity: 4.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ExchangeClientError::Unsupported(_)));
+
+        let error = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+                new_client_order_id: Some("LDRYMEXCNEW".to_string()),
+                new_quantity: 4.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ExchangeClientError::Unsupported(_)));
+
+        let error = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: None,
+                client_order_id: Some("bad/id".to_string()),
+                new_client_order_id: None,
+                new_quantity: 4.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+
+        let error = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+                new_client_order_id: Some("bad/id".to_string()),
+                new_quantity: 4.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+
+        let error = client
+            .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                MarketType::Perpetual,
+                "DKAUSDT",
+                "1001",
+                5.0,
+            ))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            }
+        ));
+
+        let error = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Perpetual,
+                symbol: "DKAUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+                new_client_order_id: Some("LDRYMEXCNEW".to_string()),
+                new_quantity: 4.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            }
+        ));
     }
 
     #[test]

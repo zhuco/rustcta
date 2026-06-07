@@ -57,12 +57,13 @@ funding:
 
 exchanges:
   binance:
-    enabled: true
+    enabled: false
+    operating_mode: disabled
     position_mode: hedge
     ws_batch_size: 80
     env_prefix: BINANCE
-    private_rest_enabled: true
-    private_ws_enabled: true
+    private_rest_enabled: false
+    private_ws_enabled: false
     private_ws_run:
       connect_timeout_ms: 10000
       reconnect_delay_ms: 2000
@@ -79,15 +80,16 @@ exchanges:
       rest_private:
         - https://fapi.binance.com
   bitget:
-    enabled: true
+    enabled: false
+    operating_mode: disabled
     position_mode: hedge
     ws_batch_size: 50
     env_prefix: BITGET
     # Bitget Demo Trading requires separate demo API keys. Set true only with demo keys;
     # production live-small must leave this false.
     demo_trading: false
-    private_rest_enabled: true
-    private_ws_enabled: true
+    private_rest_enabled: false
+    private_ws_enabled: false
     private_ws_run:
       connect_timeout_ms: 10000
       reconnect_delay_ms: 2000
@@ -103,7 +105,8 @@ exchanges:
       rest_private:
         - https://api.bitget.com
   gate:
-    enabled: true
+    enabled: false
+    operating_mode: disabled
     position_mode: hedge
     ws_batch_size: 80
     env_prefix: GATE
@@ -114,8 +117,8 @@ exchanges:
     # private_rest_base_url: https://api-testnet.gateapi.io/api/v4
     # private_ws_url: wss://ws-testnet.gate.com/v4/ws/futures/usdt
     demo_trading: false
-    private_rest_enabled: true
-    private_ws_enabled: true
+    private_rest_enabled: false
+    private_ws_enabled: false
     private_ws_run:
       connect_timeout_ms: 10000
       reconnect_delay_ms: 2000
@@ -179,18 +182,11 @@ alerts:
   reconcile_critical_alert: true
 
 universe:
-  enabled_exchanges:
-    - binance
-    - bitget
-    - gate
-  symbols:
-    - BTC/USDT
-    - ETH/USDT
+  enabled_exchanges: []
+  symbols: []
   mode: static
-  target_symbol_count: 2
-  max_symbol_count: 2
-  include_symbols:
-    - BTC/USDT
-    - ETH/USDT
+  target_symbol_count: 0
+  max_symbol_count: 0
+  include_symbols: []
   exclude_symbols: []
   min_24h_quote_volume: 10000000.0

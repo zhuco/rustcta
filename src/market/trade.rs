@@ -17,6 +17,7 @@ pub struct NormalizedTrade {
 
 impl NormalizedTrade {
     pub fn notional(&self) -> f64 {
-        self.price * self.quantity
+        crate::utils::money::notional_f64(self.price, self.quantity)
+            .unwrap_or(self.price * self.quantity)
     }
 }

@@ -470,80 +470,7 @@ impl Exchange for OkxExchange {
             order_request.market_type,
         )?;
 
-        #[derive(Serialize)]
-        struct OkxOrderRequest {
-            #[serde(rename = "instId")]
-            inst_id: String,
-            #[serde(rename = "tdMode")]
-            td_mode: String,
-            side: String,
-            #[serde(rename = "ordType")]
-            ord_type: String,
-            sz: String,
-            #[serde(rename = "clOrdId", skip_serializing_if = "Option::is_none")]
-            client_order_id: Option<String>,
-            #[serde(rename = "posSide", skip_serializing_if = "Option::is_none")]
-            position_side: Option<String>,
-            #[serde(rename = "reduceOnly", skip_serializing_if = "Option::is_none")]
-            reduce_only: Option<bool>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            px: Option<String>,
-        }
-
-        let position_side = order_request
-            .params
-            .as_ref()
-            .and_then(|params| params.get("positionSide").or_else(|| params.get("posSide")))
-            .map(|side| side.to_ascii_lowercase())
-            .filter(|side| side == "long" || side == "short" || side == "net");
-        let td_mode = order_request
-            .params
-            .as_ref()
-            .and_then(|params| params.get("tdMode").or_else(|| params.get("mgnMode")))
-            .cloned()
-            .unwrap_or_else(|| match order_request.market_type {
-                MarketType::Spot => "cash".to_string(),
-                MarketType::Futures => "isolated".to_string(),
-            });
-        let ord_type = if order_request.post_only.unwrap_or(false) {
-            "post_only".to_string()
-        } else {
-            match order_request
-                .time_in_force
-                .as_deref()
-                .map(str::to_ascii_uppercase)
-                .as_deref()
-            {
-                Some("IOC") => "ioc".to_string(),
-                Some("FOK") => "fok".to_string(),
-                _ => match order_request.order_type {
-                    OrderType::Market => "market".to_string(),
-                    OrderType::Limit => "limit".to_string(),
-                    OrderType::StopLimit => "conditional".to_string(),
-                    OrderType::StopMarket => "market".to_string(),
-                    OrderType::TakeProfitLimit => "limit".to_string(),
-                    OrderType::TakeProfitMarket => "market".to_string(),
-                    OrderType::TrailingStop => "market".to_string(),
-                },
-            }
-        };
-
-        let request_body = OkxOrderRequest {
-            inst_id: exchange_symbol,
-            td_mode,
-            side: match order_request.side {
-                OrderSide::Buy => "buy".to_string(),
-                OrderSide::Sell => "sell".to_string(),
-            },
-            ord_type,
-            sz: order_request.amount.to_string(),
-            client_order_id: order_request.client_order_id.clone(),
-            position_side,
-            reduce_only: order_request.reduce_only,
-            px: order_request.price.map(|p| p.to_string()),
-        };
-
-        let body = serde_json::to_string(&request_body)?;
+        let body = okx_create_order_body(&exchange_symbol, &order_request)?;
 
         #[derive(Deserialize)]
         struct OkxOrderResponse {
@@ -673,9 +600,8 @@ impl Exchange for OkxExchange {
             u_time: String,
         }
 
-        let orders: Vec<OkxOrder> = self
-            .send_signed_request("GET", "/api/v5/trade/order", "")
-            .await?;
+        let endpoint = okx_request_path("/api/v5/trade/order", &params);
+        let orders: Vec<OkxOrder> = self.send_signed_request("GET", &endpoint, "").await?;
 
         if let Some(order) = orders.first() {
             let filled = order.fill_sz.parse::<f64>().unwrap_or(0.0);
@@ -767,9 +693,8 @@ impl Exchange for OkxExchange {
             u_time: String,
         }
 
-        let orders: Vec<OkxOrder> = self
-            .send_signed_request("GET", "/api/v5/trade/orders-pending", "")
-            .await?;
+        let endpoint = okx_request_path("/api/v5/trade/orders-pending", &params);
+        let orders: Vec<OkxOrder> = self.send_signed_request("GET", &endpoint, "").await?;
 
         let mut result = Vec::new();
         for order in orders {
@@ -867,9 +792,8 @@ impl Exchange for OkxExchange {
             u_time: String,
         }
 
-        let orders: Vec<OkxOrder> = self
-            .send_signed_request("GET", "/api/v5/trade/orders-history", "")
-            .await?;
+        let endpoint = okx_request_path("/api/v5/trade/orders-history", &params);
+        let orders: Vec<OkxOrder> = self.send_signed_request("GET", &endpoint, "").await?;
 
         let mut result = Vec::new();
         for order in orders {
@@ -1023,9 +947,8 @@ impl Exchange for OkxExchange {
             ts: String,
         }
 
-        let trades: Vec<OkxMyTrade> = self
-            .send_signed_request("GET", "/api/v5/trade/fills", "")
-            .await?;
+        let endpoint = okx_request_path("/api/v5/trade/fills", &params);
+        let trades: Vec<OkxMyTrade> = self.send_signed_request("GET", &endpoint, "").await?;
 
         let mut result = Vec::new();
         for trade in trades {
@@ -1386,9 +1309,8 @@ impl Exchange for OkxExchange {
             u_time: String,
         }
 
-        let positions: Vec<OkxPosition> = self
-            .send_signed_request("GET", "/api/v5/account/positions", "")
-            .await?;
+        let endpoint = okx_request_path("/api/v5/account/positions", &query_params);
+        let positions: Vec<OkxPosition> = self.send_signed_request("GET", &endpoint, "").await?;
 
         let mut result = Vec::new();
         for pos in positions {
@@ -1432,22 +1354,7 @@ impl Exchange for OkxExchange {
             self.symbol_converter
                 .to_exchange_symbol(symbol, "okx", MarketType::Futures)?;
 
-        #[derive(Serialize)]
-        struct OkxLeverageRequest {
-            #[serde(rename = "instId")]
-            inst_id: String,
-            lever: String,
-            #[serde(rename = "mgnMode")]
-            mgn_mode: String, // isolated 或 cross
-        }
-
-        let request_body = OkxLeverageRequest {
-            inst_id: exchange_symbol,
-            lever: leverage.to_string(),
-            mgn_mode: "isolated".to_string(), // 默认逐仓模式
-        };
-
-        let body = serde_json::to_string(&[request_body])?;
+        let body = okx_set_leverage_body(&exchange_symbol, leverage)?;
 
         #[derive(Deserialize)]
         struct OkxLeverageResponse {
@@ -1466,26 +1373,13 @@ impl Exchange for OkxExchange {
     }
 
     async fn set_position_mode(&self, dual_side: bool) -> Result<()> {
-        #[derive(Serialize)]
-        struct OkxPositionModeRequest {
-            #[serde(rename = "posMode")]
-            pos_mode: String,
-        }
-
         #[derive(Deserialize)]
         struct OkxPositionModeResponse {
             #[serde(rename = "posMode")]
             pos_mode: String,
         }
 
-        let request_body = OkxPositionModeRequest {
-            pos_mode: if dual_side {
-                "long_short_mode".to_string()
-            } else {
-                "net_mode".to_string()
-            },
-        };
-        let body = serde_json::to_string(&request_body)?;
+        let body = okx_position_mode_body(dual_side)?;
 
         let _response: Vec<OkxPositionModeResponse> = self
             .send_signed_request("POST", "/api/v5/account/set-position-mode", &body)
@@ -1504,17 +1398,9 @@ impl Exchange for OkxExchange {
             MarketType::Futures => "SWAP",
         };
 
-        #[derive(Serialize)]
-        struct OkxCancelAllRequest {
-            #[serde(rename = "instType")]
-            inst_type: String,
-            #[serde(rename = "instId")]
-            inst_id: Option<String>,
-        }
-
-        let request_body = OkxCancelAllRequest {
-            inst_type: inst_type.to_string(),
-            inst_id: if let Some(symbol) = symbol {
+        let body = okx_cancel_all_body(
+            inst_type,
+            if let Some(symbol) = symbol {
                 Some(
                     self.symbol_converter
                         .to_exchange_symbol(symbol, "okx", market_type)?,
@@ -1522,9 +1408,7 @@ impl Exchange for OkxExchange {
             } else {
                 None
             },
-        };
-
-        let body = serde_json::to_string(&[request_body])?;
+        )?;
 
         #[derive(Deserialize)]
         struct OkxCancelResponse {
@@ -1904,6 +1788,145 @@ impl OkxExchange {
         );
         Ok(Box::new(client))
     }
+}
+
+fn okx_request_path(endpoint: &str, params: &HashMap<String, String>) -> String {
+    if params.is_empty() {
+        return endpoint.to_string();
+    }
+    format!(
+        "{}?{}",
+        endpoint,
+        SignatureHelper::build_query_string(params)
+    )
+}
+
+#[derive(Serialize)]
+struct OkxOrderRequestBody {
+    #[serde(rename = "instId")]
+    inst_id: String,
+    #[serde(rename = "tdMode")]
+    td_mode: String,
+    side: String,
+    #[serde(rename = "ordType")]
+    ord_type: String,
+    sz: String,
+    #[serde(rename = "clOrdId", skip_serializing_if = "Option::is_none")]
+    client_order_id: Option<String>,
+    #[serde(rename = "posSide", skip_serializing_if = "Option::is_none")]
+    position_side: Option<String>,
+    #[serde(rename = "reduceOnly", skip_serializing_if = "Option::is_none")]
+    reduce_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    px: Option<String>,
+}
+
+fn okx_create_order_body(exchange_symbol: &str, order_request: &OrderRequest) -> Result<String> {
+    let position_side = order_request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("positionSide").or_else(|| params.get("posSide")))
+        .map(|side| side.to_ascii_lowercase())
+        .filter(|side| side == "long" || side == "short" || side == "net");
+    let td_mode = order_request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("tdMode").or_else(|| params.get("mgnMode")))
+        .cloned()
+        .unwrap_or_else(|| match order_request.market_type {
+            MarketType::Spot => "cash".to_string(),
+            MarketType::Futures => "isolated".to_string(),
+        });
+    let tif = order_request
+        .time_in_force
+        .as_deref()
+        .map(str::to_ascii_uppercase);
+    let ord_type = if order_request.post_only.unwrap_or(false)
+        || matches!(tif.as_deref(), Some("GTX" | "POC" | "POST_ONLY"))
+    {
+        "post_only".to_string()
+    } else {
+        match tif.as_deref() {
+            Some("IOC") => "ioc".to_string(),
+            Some("FOK") => "fok".to_string(),
+            _ => match order_request.order_type {
+                OrderType::Market => "market".to_string(),
+                OrderType::Limit => "limit".to_string(),
+                OrderType::StopLimit => "conditional".to_string(),
+                OrderType::StopMarket => "market".to_string(),
+                OrderType::TakeProfitLimit => "limit".to_string(),
+                OrderType::TakeProfitMarket => "market".to_string(),
+                OrderType::TrailingStop => "market".to_string(),
+            },
+        }
+    };
+
+    serde_json::to_string(&OkxOrderRequestBody {
+        inst_id: exchange_symbol.to_string(),
+        td_mode,
+        side: match order_request.side {
+            OrderSide::Buy => "buy".to_string(),
+            OrderSide::Sell => "sell".to_string(),
+        },
+        ord_type,
+        sz: order_request.amount.to_string(),
+        client_order_id: order_request.client_order_id.clone(),
+        position_side,
+        reduce_only: order_request.reduce_only,
+        px: order_request.price.map(|price| price.to_string()),
+    })
+    .map_err(ExchangeError::from)
+}
+
+#[derive(Serialize)]
+struct OkxLeverageRequestBody {
+    #[serde(rename = "instId")]
+    inst_id: String,
+    lever: String,
+    #[serde(rename = "mgnMode")]
+    mgn_mode: String,
+}
+
+fn okx_set_leverage_body(exchange_symbol: &str, leverage: u32) -> Result<String> {
+    serde_json::to_string(&[OkxLeverageRequestBody {
+        inst_id: exchange_symbol.to_string(),
+        lever: leverage.to_string(),
+        mgn_mode: "isolated".to_string(),
+    }])
+    .map_err(ExchangeError::from)
+}
+
+#[derive(Serialize)]
+struct OkxPositionModeRequestBody {
+    #[serde(rename = "posMode")]
+    pos_mode: String,
+}
+
+fn okx_position_mode_body(dual_side: bool) -> Result<String> {
+    serde_json::to_string(&OkxPositionModeRequestBody {
+        pos_mode: if dual_side {
+            "long_short_mode".to_string()
+        } else {
+            "net_mode".to_string()
+        },
+    })
+    .map_err(ExchangeError::from)
+}
+
+#[derive(Serialize)]
+struct OkxCancelAllRequestBody {
+    #[serde(rename = "instType")]
+    inst_type: String,
+    #[serde(rename = "instId", skip_serializing_if = "Option::is_none")]
+    inst_id: Option<String>,
+}
+
+fn okx_cancel_all_body(inst_type: &str, inst_id: Option<String>) -> Result<String> {
+    serde_json::to_string(&[OkxCancelAllRequestBody {
+        inst_type: inst_type.to_string(),
+        inst_id,
+    }])
+    .map_err(ExchangeError::from)
 }
 
 #[derive(Clone)]
@@ -2608,6 +2631,78 @@ mod tests {
         async fn handle_message(&self, _message: WsMessage) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn okx_signed_get_request_path_should_include_query_params() {
+        let params = HashMap::from([
+            ("instType".to_string(), "SWAP".to_string()),
+            ("instId".to_string(), "BTC-USDT-SWAP".to_string()),
+            ("ordId".to_string(), "12345".to_string()),
+        ]);
+        let path = okx_request_path("/api/v5/trade/order", &params);
+        assert!(path.starts_with("/api/v5/trade/order?"));
+        assert!(path.contains("instType=SWAP"));
+        assert!(path.contains("instId=BTC-USDT-SWAP"));
+        assert!(path.contains("ordId=12345"));
+    }
+
+    #[test]
+    fn okx_core_should_build_private_request_bodies() {
+        let mut params = HashMap::new();
+        params.insert("posSide".to_string(), "Long".to_string());
+        params.insert("mgnMode".to_string(), "cross".to_string());
+        let mut order = OrderRequest::new(
+            "BTC/USDT".to_string(),
+            OrderSide::Buy,
+            OrderType::Limit,
+            0.01,
+            Some(65_000.0),
+            MarketType::Futures,
+        );
+        order.params = Some(params);
+        order.client_order_id = Some("client-1".to_string());
+        order.time_in_force = Some("GTX".to_string());
+        order.reduce_only = Some(true);
+
+        let body: serde_json::Value =
+            serde_json::from_str(&okx_create_order_body("BTC-USDT-SWAP", &order).unwrap()).unwrap();
+        assert_eq!(body["instId"], "BTC-USDT-SWAP");
+        assert_eq!(body["tdMode"], "cross");
+        assert_eq!(body["posSide"], "long");
+        assert_eq!(body["ordType"], "post_only");
+        assert_eq!(body["clOrdId"], "client-1");
+        assert_eq!(body["reduceOnly"], true);
+
+        order.time_in_force = Some("IOC".to_string());
+        order.post_only = None;
+        let ioc: serde_json::Value =
+            serde_json::from_str(&okx_create_order_body("BTC-USDT-SWAP", &order).unwrap()).unwrap();
+        assert_eq!(ioc["ordType"], "ioc");
+
+        let leverage: serde_json::Value =
+            serde_json::from_str(&okx_set_leverage_body("BTC-USDT-SWAP", 5).unwrap()).unwrap();
+        assert_eq!(leverage[0]["instId"], "BTC-USDT-SWAP");
+        assert_eq!(leverage[0]["lever"], "5");
+        assert_eq!(leverage[0]["mgnMode"], "isolated");
+
+        let hedge: serde_json::Value =
+            serde_json::from_str(&okx_position_mode_body(true).unwrap()).unwrap();
+        assert_eq!(hedge["posMode"], "long_short_mode");
+        let one_way: serde_json::Value =
+            serde_json::from_str(&okx_position_mode_body(false).unwrap()).unwrap();
+        assert_eq!(one_way["posMode"], "net_mode");
+
+        let cancel_all: serde_json::Value = serde_json::from_str(
+            &okx_cancel_all_body("SWAP", Some("BTC-USDT-SWAP".to_string())).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(cancel_all[0]["instType"], "SWAP");
+        assert_eq!(cancel_all[0]["instId"], "BTC-USDT-SWAP");
+
+        let cancel_all_by_type: serde_json::Value =
+            serde_json::from_str(&okx_cancel_all_body("SWAP", None).unwrap()).unwrap();
+        assert!(cancel_all_by_type[0].get("instId").is_none());
     }
 
     #[test]

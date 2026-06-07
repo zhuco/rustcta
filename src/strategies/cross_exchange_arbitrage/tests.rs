@@ -11,6 +11,8 @@ use crate::market::{BookLevel, CanonicalSymbol, ExchangeId};
 
 fn base_config() -> CrossExchangeArbitrageConfig {
     let mut config = CrossExchangeArbitrageConfig::default();
+    config.detection.exchanges = vec![ExchangeId::Binance, ExchangeId::Okx];
+    config.detection.symbols = vec!["BTCUSDT".to_string()];
     config.detection.estimated_slippage_bps = 2.0;
     config.detection.safety_buffer_bps = 3.0;
     config.detection.min_net_spread_bps = 5.0;

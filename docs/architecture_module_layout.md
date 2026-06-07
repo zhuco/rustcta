@@ -1,7 +1,28 @@
 # Architecture Module Layout
 
-This document describes the current repository architecture after the exchange
-adapter cleanup and legacy strategy removal.
+This document describes the current repository architecture after the
+industrial workspace split, exchange adapter cleanup, and legacy strategy
+removal.
+
+## Workspace Layout
+
+```text
+apps/        thin process entrypoints: gateway, supervisor, control-api, cli, backtest
+crates/      reusable platform crates and API contracts
+strategies/  independent strategy crates and adapter-free migrating cores
+tools/       operator, audit, migration, and diagnostic commands
+web-ui/      Dioxus control panel workspace
+src/         legacy root crate, compatibility runtime, and remaining concrete behavior
+config/      active runtime configs, exchange examples, and supervisor specs
+docs/        current-state architecture, operations, and migration docs
+scripts/     local automation and validation helpers
+tests/       integration, regression, fixture, and live-readonly tests
+```
+
+`src/` remains intentionally present while concrete runtime behavior is being
+pulled into the workspace crates. New code should prefer the workspace
+boundaries above and use `src/` only for compatibility paths that have not been
+extracted yet.
 
 ## Layer Map
 

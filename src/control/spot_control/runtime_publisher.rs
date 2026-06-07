@@ -257,35 +257,41 @@ impl SpotControlRuntimePublisher {
                 .maximum_concurrent_requests_per_exchange
                 .max(1),
         ));
-        if self
-            .should_poll(exchange, RuntimePollComponent::Balances)
-            .await
+        if self.config.polling.poll_balances
+            && self
+                .should_poll(exchange, RuntimePollComponent::Balances)
+                .await
         {
             let _permit = semaphore.clone().acquire_owned().await;
             self.poll_balances(exchange, client.clone()).await;
         }
-        if self
-            .should_poll(exchange, RuntimePollComponent::OpenOrders)
-            .await
+        if self.config.polling.poll_open_orders
+            && self
+                .should_poll(exchange, RuntimePollComponent::OpenOrders)
+                .await
         {
             let _permit = semaphore.clone().acquire_owned().await;
             self.poll_open_orders(exchange, client.clone()).await;
         }
-        if self
-            .should_poll(exchange, RuntimePollComponent::RecentFills)
-            .await
+        if self.config.polling.poll_recent_fills
+            && self
+                .should_poll(exchange, RuntimePollComponent::RecentFills)
+                .await
         {
             let _permit = semaphore.clone().acquire_owned().await;
             self.poll_recent_fills(exchange, client.clone()).await;
         }
-        if self
-            .should_poll(exchange, RuntimePollComponent::SymbolRules)
-            .await
+        if self.config.polling.poll_symbol_rules
+            && self
+                .should_poll(exchange, RuntimePollComponent::SymbolRules)
+                .await
         {
             let _permit = semaphore.clone().acquire_owned().await;
             self.poll_symbol_rules(exchange, client.clone()).await;
         }
-        if self.should_poll(exchange, RuntimePollComponent::Fees).await {
+        if self.config.polling.poll_fees
+            && self.should_poll(exchange, RuntimePollComponent::Fees).await
+        {
             let _permit = semaphore.acquire_owned().await;
             self.poll_fee_probe(exchange, client).await;
         }

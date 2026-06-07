@@ -18,7 +18,7 @@ pub fn is_book_fresh(book: &OrderBookSnapshot, stale_book_ms: u64, max_latency_m
     }
     if book
         .latency_ms
-        .is_some_and(|latency| latency > max_latency_ms as i64)
+        .is_some_and(|latency| latency > max_latency_ms as i64 || latency < -1_000)
     {
         return false;
     }

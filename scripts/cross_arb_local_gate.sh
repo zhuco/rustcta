@@ -54,7 +54,7 @@ case "$profile" in
     run cargo run --bin cross_arb_preflight -- --config "$config_path" --timeout-ms "$timeout_ms" --private
     ;;
   server-smoke)
-    run cargo check --bin cross_arb_preflight --bin cross_arb_observe --bin cross_arb_server
+    run cargo check --bin cross_arb_preflight --bin cross_arb_observe --bin cross_arb_live
     run python3 -m py_compile scripts/public_connectivity_probe.py
     run cargo run --bin cross_arb_preflight -- --config "$config_path" --timeout-ms "$timeout_ms"
     ;;

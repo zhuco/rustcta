@@ -698,27 +698,3 @@ portfolio:
     max_gross_notional_usdt: "20000"
     max_single_asset_gross_share: "0.35"
   symbol_overrides: {}
-
-monitor:
-  enabled: true
-  bind_addr: 127.0.0.1:8095
-  database_path: logs/smart_money_monitor.sqlite
-  hyperliquid_api_base_url: https://api.hyperliquid.xyz
-  binance_rest_base_url: https://fapi.binance.com
-  symbols:
-    - BTCUSDT
-    - ETHUSDT
-    - SOLUSDT
-    - HYPEUSDT
-    - ZECUSDT
-  simulation_interval_secs: 60
-  order_notional_usdt: "1000"
-  max_symbol_position_notional_usdt: "1000"
-  max_total_position_notional_usdt: "5000"
-  simulation_position_reset_at: "2026-06-04T02:20:00+00:00"
-  wallet_fill_lookback_secs: 900
-  copy_max_fill_age_secs: 120
-  min_wallet_trade_notional_usdt: "250"
-  copy_signal_threshold: "0.65"
-  synthetic_activity_enabled: false
-  wallets: *smart_money_hyperliquid_wallets

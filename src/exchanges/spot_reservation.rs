@@ -116,6 +116,25 @@ impl BalanceReservationManager {
         Ok(())
     }
 
+    pub fn release_asset_reservation(
+        &self,
+        exchange: &str,
+        asset: &str,
+        amount: f64,
+    ) -> ExchangeClientResult<()> {
+        if !amount.is_finite() || amount <= 0.0 {
+            return Ok(());
+        }
+        self.adjust_reserved(exchange, asset, -amount)?;
+        log::info!(
+            "spot balance reservation released exchange={} asset={} amount={}",
+            exchange,
+            asset.to_ascii_uppercase(),
+            amount
+        );
+        Ok(())
+    }
+
     pub fn settle(
         &self,
         reservation: &mut BalanceReservation,
@@ -250,6 +269,18 @@ mod tests {
         let mut reservation = manager.reserve("mexc", "USDT", 50.0).unwrap();
 
         manager.settle(&mut reservation, 50.0, true).unwrap();
+
+        assert_eq!(manager.locally_reserved("mexc", "USDT"), 0.0);
+    }
+
+    #[test]
+    fn release_asset_reservation_releases_without_handle() {
+        let manager = manager_with_usdt();
+        manager.reserve("mexc", "USDT", 50.0).unwrap();
+
+        manager
+            .release_asset_reservation("mexc", "USDT", 50.0)
+            .unwrap();
 
         assert_eq!(manager.locally_reserved("mexc", "USDT"), 0.0);
     }

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "strategy_id": "funding_arb_live",
+  "strategy_kind": "funding_arbitrage",
+  "run_id": "local",
+  "tenant_id": "local",
+  "config_path": "config/funding_rate_arbitrage_usdt.yml",
+  "command": "cargo",
+  "args": [
+    "run",
+    "--bin",
+    "funding_arb_live",
+    "--",
+    "--config",
+    "config/funding_rate_arbitrage_usdt.yml"
+  ],
+  "working_dir": ".",
+  "log_path": "logs/supervisor/funding_arb_live.log",
+  "restart_backoff_ms": 5000
+}

@@ -14,16 +14,47 @@ use rustcta::control::spot_control::{
 };
 use rustcta::exchanges::spot_reservation::BalanceReservationManager;
 use rustcta::exchanges::unified::{
-    AssetBalance, BalanceSnapshot, CancelOrderRequest, CancelOrderResponse, ExchangeClient,
-    ExchangeClientError, ExchangeClientResult, FeeRate, FeeRateSource, MarketType,
-    OrderBookSnapshot, OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType,
-    PositionSide, SymbolRule, SymbolStatus, TimeInForce, TradeFill,
+    AmendOrderRequest, AssetBalance, BalanceSnapshot, CancelAllOrdersRequest, CancelOrderRequest,
+    CancelOrderResponse, ExchangeClient, ExchangeClientError, ExchangeClientResult, FeeRate,
+    FeeRateSource, MarketType, OrderBookSnapshot, OrderListConditionalLeg, OrderListLegType,
+    OrderListRequest, OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType, PositionSide,
+    QuoteMarketOrderRequest, SymbolRule, SymbolStatus, TimeInForce, TradeFill,
 };
 
 use support::live_readonly::{
     assert_no_secret_leak, offline_test_report, MutationCallDetector, PermissionStatus,
     ReadOnlyGuardClient, ReadOnlyPermissionReport,
 };
+
+fn assert_readonly_guard<T: std::fmt::Debug>(result: ExchangeClientResult<T>, endpoint: &str) {
+    match result {
+        Err(ExchangeClientError::Classified(error)) => {
+            assert_eq!(
+                error.class,
+                rustcta::exchanges::unified::ExchangeErrorClass::PermissionDenied
+            );
+            assert_eq!(error.code.as_deref(), Some("readonly_guard"));
+            assert!(
+                error.message.contains(endpoint),
+                "readonly guard message should name {endpoint}: {}",
+                error.message
+            );
+        }
+        other => panic!("expected readonly guard error for {endpoint}, got {other:?}"),
+    }
+}
+
+fn test_readonly_config() -> support::live_readonly::LiveReadonlyTestConfig {
+    support::live_readonly::LiveReadonlyTestConfig {
+        symbol: "BTCUSDT".to_string(),
+        market_type: MarketType::Spot,
+        duration_seconds: 1,
+        output_dir: std::path::PathBuf::from("target/live_readonly_tests"),
+        require_no_withdraw_permission: true,
+        max_rest_requests_per_minute: 6_000,
+        safe_debug_balances: false,
+    }
+}
 
 #[tokio::test]
 async fn live_readonly_harness_should_block_place_order() {
@@ -34,8 +65,72 @@ async fn live_readonly_harness_should_block_place_order() {
         .place_order(OrderRequest::spot_market_buy("BTCUSDT", 0.001))
         .await;
 
-    assert!(result.is_err());
+    assert_readonly_guard(result, "place_order");
     assert_eq!(detector.count("place_order"), 1);
+}
+
+#[tokio::test]
+async fn live_readonly_harness_should_block_quote_market_order() {
+    let detector = Arc::new(MutationCallDetector::default());
+    let client = ReadOnlyGuardClient::new(MockReadonlyClient::default(), detector.clone());
+
+    let result = client
+        .place_quote_market_order(QuoteMarketOrderRequest::spot_buy("BTCUSDT", 25.0))
+        .await;
+
+    assert_readonly_guard(result, "place_quote_market_order");
+    assert_eq!(detector.count("place_quote_market_order"), 1);
+}
+
+#[tokio::test]
+async fn live_readonly_harness_should_block_amend_order() {
+    let detector = Arc::new(MutationCallDetector::default());
+    let client = ReadOnlyGuardClient::new(MockReadonlyClient::default(), detector.clone());
+
+    let result = client
+        .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+            MarketType::Spot,
+            "BTCUSDT",
+            "order-1",
+            0.001,
+        ))
+        .await;
+
+    assert_readonly_guard(result, "amend_order");
+    assert_eq!(detector.count("amend_order"), 1);
+}
+
+#[tokio::test]
+async fn live_readonly_harness_should_block_order_list() {
+    let detector = Arc::new(MutationCallDetector::default());
+    let client = ReadOnlyGuardClient::new(MockReadonlyClient::default(), detector.clone());
+
+    let result = client
+        .place_order_list(OrderListRequest::Oco {
+            market_type: MarketType::Spot,
+            symbol: "BTCUSDT".to_string(),
+            list_client_order_id: None,
+            side: OrderSide::Sell,
+            quantity: 0.001,
+            above: OrderListConditionalLeg {
+                order_type: OrderListLegType::LimitMaker,
+                price: Some(70_000.0),
+                stop_price: None,
+                time_in_force: None,
+                client_order_id: None,
+            },
+            below: OrderListConditionalLeg {
+                order_type: OrderListLegType::StopLossLimit,
+                price: Some(59_500.0),
+                stop_price: Some(60_000.0),
+                time_in_force: Some(TimeInForce::GTC),
+                client_order_id: None,
+            },
+        })
+        .await;
+
+    assert_readonly_guard(result, "place_order_list");
+    assert_eq!(detector.count("place_order_list"), 1);
 }
 
 #[tokio::test]
@@ -52,8 +147,24 @@ async fn live_readonly_harness_should_block_cancel_order() {
         })
         .await;
 
-    assert!(result.is_err());
+    assert_readonly_guard(result, "cancel_order");
     assert_eq!(detector.count("cancel_order"), 1);
+}
+
+#[tokio::test]
+async fn live_readonly_harness_should_block_cancel_all_orders() {
+    let detector = Arc::new(MutationCallDetector::default());
+    let client = ReadOnlyGuardClient::new(MockReadonlyClient::default(), detector.clone());
+
+    let result = client
+        .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+            MarketType::Spot,
+            "BTCUSDT",
+        ))
+        .await;
+
+    assert_readonly_guard(result, "cancel_all_orders");
+    assert_eq!(detector.count("cancel_all_orders"), 1);
 }
 
 #[tokio::test]
@@ -65,6 +176,36 @@ async fn live_readonly_harness_should_allow_readonly_calls() {
     assert!(client.get_open_orders(None).await.is_ok());
     assert!(client.get_recent_fills("BTCUSDT").await.is_ok());
     assert_eq!(detector.total_mutations(), 0);
+}
+
+#[test]
+fn mutation_detector_should_count_all_guarded_mutation_paths() {
+    let detector = MutationCallDetector::default();
+    for method in [
+        "place_order",
+        "place_quote_market_order",
+        "amend_order",
+        "place_order_list",
+        "cancel_order",
+        "cancel_all_orders",
+    ] {
+        detector.record(method);
+    }
+
+    assert_eq!(detector.total_mutations(), 6);
+}
+
+#[tokio::test]
+async fn readonly_validation_should_report_guard_mutation_count() {
+    let detector = Arc::new(MutationCallDetector::default());
+    let client = ReadOnlyGuardClient::new(MockReadonlyClient::default(), detector);
+    let config = test_readonly_config();
+    let mut report = offline_test_report("mock");
+
+    support::live_readonly::validate_authenticated_readonly(&client, &config, &mut report).await;
+
+    assert_eq!(report.mutation_calls_detected, 0);
+    report.assert_no_critical_errors();
 }
 
 #[test]

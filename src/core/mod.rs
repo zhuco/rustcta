@@ -2,6 +2,7 @@
 pub mod config;
 pub mod error;
 pub mod exchange;
+pub mod http2_fix;
 pub mod memory_pool;
 pub mod monitoring;
 pub mod order_cache;
@@ -11,6 +12,7 @@ pub mod risk_manager;
 pub mod traits;
 pub mod types;
 pub mod websocket;
+pub mod ws_connect;
 
 // 性能优化模块 - 暂时禁用直到修复编译错误
 // pub mod enhanced_memory_pool;

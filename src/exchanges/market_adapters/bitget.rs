@@ -16,7 +16,7 @@ use crate::market::{
 
 const BITGET_REST_BASE: &str = "https://api.bitget.com";
 const BITGET_PUBLIC_WS: &str = "wss://ws.bitget.com/v2/ws/public";
-const BITGET_PRODUCT_TYPE: &str = "usdt-futures";
+const BITGET_PRODUCT_TYPE: &str = "USDT-FUTURES";
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BitgetMarketAdapter;

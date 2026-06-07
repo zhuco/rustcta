@@ -653,7 +653,7 @@ impl TrendIntradayStrategy {
         let interval = Duration::from_secs(cfg.interval_secs.max(60));
         let webhook = cfg.webhook_url.clone();
         let handle = tokio::spawn(async move {
-            let client = Client::new();
+            let client = crate::core::http2_fix::shared_http_client();
             loop {
                 if !strategy.is_running().await {
                     break;

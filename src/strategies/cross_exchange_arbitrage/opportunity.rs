@@ -13,6 +13,8 @@ use crate::market::{
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MarketSnapshot {
@@ -316,19 +318,39 @@ fn build_opportunity(
         now,
     );
     let mut reject_reasons = risk_decision.reject_reasons;
+    if maker_snapshot.instrument.is_none() || taker_snapshot.instrument.is_none() {
+        reject_reasons.push(RejectReason::PrecisionInvalid);
+    }
     if sized_pair
         .as_ref()
         .map(|pair| !pair.executable)
         .unwrap_or(false)
-        || maker_notional_usdt
-            .map(|notional| notional > config.sizing.max_notional_usdt)
-            .unwrap_or(false)
+    {
+        reject_reasons.push(RejectReason::PrecisionInvalid);
+    }
+    if maker_notional_usdt
+        .map(|notional| notional > config.sizing.max_notional_usdt)
+        .unwrap_or(false)
         || taker_notional_usdt
             .map(|notional| notional > config.sizing.max_notional_usdt)
             .unwrap_or(false)
     {
-        reject_reasons.push(RejectReason::PrecisionInvalid);
+        reject_reasons.push(RejectReason::NotionalOverLimit);
     }
+    warn_precision_notional_roundup(
+        canonical_symbol,
+        &maker_book.exchange,
+        maker_notional_usdt,
+        target_notional,
+        config.sizing.max_notional_usdt,
+    );
+    warn_precision_notional_roundup(
+        canonical_symbol,
+        &taker_book.exchange,
+        taker_notional_usdt,
+        target_notional,
+        config.sizing.max_notional_usdt,
+    );
     let route_thresholds = config
         .thresholds
         .route_thresholds(&long_snapshot.book.exchange, &short_snapshot.book.exchange);
@@ -343,6 +365,7 @@ fn build_opportunity(
     if maker_taker_net_edge < route_thresholds.min_open_maker_taker_net_edge {
         reject_reasons.push(RejectReason::NetEdgeTooSmall);
     }
+    dedup_reject_reasons(&mut reject_reasons);
 
     Opportunity {
         opportunity_id: opportunity_id(
@@ -391,6 +414,39 @@ fn build_opportunity(
         created_at: now,
         expires_at: now + Duration::milliseconds(config.risk.stale_quote_ms),
     }
+}
+
+fn warn_precision_notional_roundup(
+    canonical_symbol: &CanonicalSymbol,
+    exchange: &ExchangeId,
+    notional: Option<f64>,
+    target_notional: f64,
+    max_notional: f64,
+) {
+    let Some(notional) = notional else {
+        return;
+    };
+    let warning_floor = (target_notional + 0.2).min(max_notional);
+    if notional <= warning_floor || notional > max_notional {
+        return;
+    }
+    static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let key = format!("{exchange}:{canonical_symbol}");
+    let mut warned = WARNED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !warned.insert(key) {
+        return;
+    }
+    log::warn!(
+        "cross-arb sizing rounded notional above target but within max exchange={} symbol={} target_notional_usdt={} rounded_notional_usdt={} max_notional_usdt={}",
+        exchange,
+        canonical_symbol,
+        target_notional,
+        notional,
+        max_notional
+    );
 }
 
 fn maker_limit_price(
@@ -464,6 +520,11 @@ fn min_route_status(a: RouteStatus, b: RouteStatus) -> RouteStatus {
         (Degraded, _) | (_, Degraded) => Degraded,
         _ => Healthy,
     }
+}
+
+fn dedup_reject_reasons(reasons: &mut Vec<RejectReason>) {
+    let mut seen = std::collections::HashSet::new();
+    reasons.retain(|reason| seen.insert(reason.clone()));
 }
 
 fn opportunity_id(
@@ -698,6 +759,29 @@ mod tests {
         assert!(!best
             .reject_reasons
             .contains(&RejectReason::PrecisionInvalid));
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_opportunity_should_require_instrument_metadata_before_open() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let long_snapshot = MarketSnapshot::healthy(book(ExchangeId::Binance, 99.0, 100.0, 10.0));
+        let short_snapshot = MarketSnapshot::healthy(book(ExchangeId::Okx, 104.0, 105.0, 10.0))
+            .with_instrument(instrument(ExchangeId::Okx, &symbol, 10.0, 0.1, 5.0));
+        let mut config = config();
+        config.thresholds.min_open_raw_spread = 0.0;
+        config.thresholds.min_open_maker_taker_net_edge = -1.0;
+
+        let opportunities =
+            scan_opportunities(&symbol, &[long_snapshot, short_snapshot], &config, now);
+
+        assert!(!opportunities.is_empty());
+        assert!(opportunities
+            .iter()
+            .all(|opportunity| !opportunity.can_open));
+        assert!(opportunities.iter().all(|opportunity| opportunity
+            .reject_reasons
+            .contains(&RejectReason::PrecisionInvalid)));
     }
 
     #[test]

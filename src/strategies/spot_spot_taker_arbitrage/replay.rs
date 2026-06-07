@@ -147,6 +147,7 @@ pub fn replay_symbol_rules(
                     coinex: fallback_rule("coinex", &normalized, &config.quote_asset),
                     gateio: None,
                     bitget: None,
+                    kucoin: None,
                 },
             )
         })

@@ -23,110 +23,141 @@ impl<'a> RangeRegimeClassifier<'a> {
         current_regime: MarketRegime,
         grid_active: bool,
     ) -> RegimeDecision {
-        let filters = &self.symbol_config.regime_filters;
+        let core_symbol = core_symbol_config(self.symbol_config);
+        let core_indicator_config = core_indicator_config(self.indicator_config);
+        let classifier = rustcta_strategy_range_grid::RangeRegimeClassifier::new(
+            &core_symbol,
+            &core_indicator_config,
+        );
+        let decision = classifier.evaluate(
+            &core_indicator_snapshot(snapshot),
+            core_market_regime(current_regime),
+            grid_active,
+        );
+        regime_decision_from_core(decision)
+    }
+}
 
-        let adx_ok = snapshot.adx <= filters.adx_max;
-        let slope_abs = snapshot.slope_metric.abs();
-        let slope_ok = slope_abs <= filters.slope_threshold;
+fn core_symbol_config(symbol: &SymbolConfig) -> rustcta_strategy_range_grid::SymbolConfig {
+    rustcta_strategy_range_grid::SymbolConfig {
+        config_id: symbol.config_id.clone(),
+        enabled: symbol.enabled,
+        account: rustcta_strategy_range_grid::AccountConfig {
+            id: symbol.account.id.clone(),
+            exchange: symbol.account.exchange.clone(),
+            env_prefix: symbol.account.env_prefix.clone(),
+        },
+        symbol: symbol.symbol.clone(),
+        precision: rustcta_strategy_range_grid::SymbolPrecision {
+            price_digits: symbol.precision.price_digits,
+            amount_digits: symbol.precision.amount_digits,
+        },
+        grid: rustcta_strategy_range_grid::GridConfig {
+            grid_spacing_pct: symbol.grid.grid_spacing_pct,
+            levels_per_side: symbol.grid.levels_per_side,
+            base_order_notional: symbol.grid.base_order_notional,
+            max_position_notional: symbol.grid.max_position_notional,
+        },
+        regime_filters: rustcta_strategy_range_grid::RegimeFilterConfig {
+            min_liquidity_usd: symbol.regime_filters.min_liquidity_usd,
+            require_conditions: symbol.regime_filters.require_conditions,
+            adx_max: symbol.regime_filters.adx_max,
+            bbw_quantile: symbol.regime_filters.bbw_quantile,
+            slope_threshold: symbol.regime_filters.slope_threshold,
+        },
+        order: rustcta_strategy_range_grid::OrderConfig {
+            post_only: symbol.order.post_only,
+            tif: symbol.order.tif.clone(),
+        },
+        market_exit: rustcta_strategy_range_grid::MarketExitConfig {
+            use_market_order: symbol.market_exit.use_market_order,
+        },
+    }
+}
 
-        if !adx_ok || !slope_ok {
-            let mut reasons = Vec::new();
-            if !adx_ok {
-                reasons.push(format!("ADX {:.2} > {:.2}", snapshot.adx, filters.adx_max));
-            }
-            if !slope_ok {
-                reasons.push(format!(
-                    "中轨斜率 {:.2} > {:.2}",
-                    slope_abs, filters.slope_threshold
-                ));
-            }
+fn core_indicator_config(config: &IndicatorConfig) -> rustcta_strategy_range_grid::IndicatorConfig {
+    rustcta_strategy_range_grid::IndicatorConfig {
+        lower_timeframe: rustcta_strategy_range_grid::LowerTimeframeConfig {
+            timeframe: config.lower_timeframe.timeframe.clone(),
+            bollinger: rustcta_strategy_range_grid::BollingerConfig {
+                length: config.lower_timeframe.bollinger.length,
+                k: config.lower_timeframe.bollinger.k,
+            },
+            rsi: rustcta_strategy_range_grid::RsiConfig {
+                length: config.lower_timeframe.rsi.length,
+                overbought: config.lower_timeframe.rsi.overbought,
+                oversold: config.lower_timeframe.rsi.oversold,
+            },
+            atr: rustcta_strategy_range_grid::AtrConfig {
+                length: config.lower_timeframe.atr.length,
+                stop_multiplier: config.lower_timeframe.atr.stop_multiplier,
+                trail_multiplier: config.lower_timeframe.atr.trail_multiplier,
+            },
+        },
+        higher_timeframe: rustcta_strategy_range_grid::HigherTimeframeConfig {
+            timeframe: config.higher_timeframe.timeframe.clone(),
+            adx_length: config.higher_timeframe.adx_length,
+            adx_threshold: config.higher_timeframe.adx_threshold,
+            bbw_window: config.higher_timeframe.bbw_window,
+            bbw_quantile: config.higher_timeframe.bbw_quantile,
+            slope_threshold: config.higher_timeframe.slope_threshold,
+            choppiness: config
+                .higher_timeframe
+                .choppiness
+                .as_ref()
+                .map(|choppiness| rustcta_strategy_range_grid::ChoppinessConfig {
+                    enabled: choppiness.enabled,
+                    threshold: choppiness.threshold,
+                }),
+        },
+    }
+}
 
-            let new_regime = if snapshot.slope_metric >= 0.0 {
-                MarketRegime::TrendUp
-            } else {
-                MarketRegime::TrendDown
-            };
+fn core_indicator_snapshot(
+    snapshot: &IndicatorSnapshot,
+) -> rustcta_strategy_range_grid::IndicatorSnapshot {
+    rustcta_strategy_range_grid::IndicatorSnapshot {
+        timestamp: snapshot.timestamp,
+        last_price: snapshot.last_price,
+        lower_band_ratio: snapshot.lower_band_ratio,
+        z_score: snapshot.z_score,
+        rsi: snapshot.rsi,
+        atr: snapshot.atr,
+        adx: snapshot.adx,
+        bbw_percentile: snapshot.bbw_percentile,
+        slope_metric: snapshot.slope_metric,
+        choppiness: snapshot.choppiness,
+    }
+}
 
-            return RegimeDecision {
-                new_regime,
-                activate_grid: false,
-                deactivate_grid: grid_active,
-                reason: Some(format!("趋势指标触发: {}", reasons.join(" | "))),
-            };
-        }
+fn core_market_regime(regime: MarketRegime) -> rustcta_strategy_range_grid::MarketRegime {
+    match regime {
+        MarketRegime::Range => rustcta_strategy_range_grid::MarketRegime::Range,
+        MarketRegime::TrendUp => rustcta_strategy_range_grid::MarketRegime::TrendUp,
+        MarketRegime::TrendDown => rustcta_strategy_range_grid::MarketRegime::TrendDown,
+        MarketRegime::Cooldown => rustcta_strategy_range_grid::MarketRegime::Cooldown,
+        MarketRegime::Disabled => rustcta_strategy_range_grid::MarketRegime::Disabled,
+    }
+}
 
-        let mut satisfied = 0usize;
-        let mut reasons = Vec::new();
+fn market_regime_from_core(regime: rustcta_strategy_range_grid::MarketRegime) -> MarketRegime {
+    match regime {
+        rustcta_strategy_range_grid::MarketRegime::Range => MarketRegime::Range,
+        rustcta_strategy_range_grid::MarketRegime::TrendUp => MarketRegime::TrendUp,
+        rustcta_strategy_range_grid::MarketRegime::TrendDown => MarketRegime::TrendDown,
+        rustcta_strategy_range_grid::MarketRegime::Cooldown => MarketRegime::Cooldown,
+        rustcta_strategy_range_grid::MarketRegime::Disabled => MarketRegime::Disabled,
+    }
+}
 
-        if adx_ok {
-            satisfied += 1;
-            reasons.push(format!("ADX {:.2} <= {:.2}", snapshot.adx, filters.adx_max));
-        }
-
-        if snapshot.bbw_percentile <= filters.bbw_quantile {
-            satisfied += 1;
-            reasons.push(format!(
-                "BBW分位 {:.2} <= {:.2}",
-                snapshot.bbw_percentile, filters.bbw_quantile
-            ));
-        }
-
-        if slope_ok {
-            satisfied += 1;
-            reasons.push(format!(
-                "中轨斜率 {:.2} <= {:.2}",
-                slope_abs, filters.slope_threshold
-            ));
-        }
-
-        let rsi_cfg = &self.indicator_config.lower_timeframe.rsi;
-        let rsi_in_range = snapshot.rsi >= rsi_cfg.oversold && snapshot.rsi <= rsi_cfg.overbought;
-        if rsi_in_range {
-            satisfied += 1;
-            reasons.push(format!(
-                "RSI {:.2} 位于 [{:.0}, {:.0}]",
-                snapshot.rsi, rsi_cfg.oversold, rsi_cfg.overbought
-            ));
-        }
-
-        let z_score_ok = snapshot.z_score.abs() <= 2.0;
-        if z_score_ok {
-            satisfied += 1;
-            reasons.push(format!("Zscore {:.2} 绝对值 <= 2", snapshot.z_score));
-        }
-
-        let is_range = satisfied >= filters.require_conditions;
-
-        if is_range {
-            let mut decision = RegimeDecision {
-                new_regime: MarketRegime::Range,
-                activate_grid: !grid_active,
-                deactivate_grid: false,
-                reason: Some(reasons.join(" | ")),
-            };
-            if current_regime != MarketRegime::Range {
-                decision.activate_grid = true;
-            }
-            decision
-        } else {
-            let new_regime = if snapshot.slope_metric >= 0.0 {
-                MarketRegime::TrendUp
-            } else {
-                MarketRegime::TrendDown
-            };
-
-            let reason = format!(
-                "条件满足 {} / {}，检测为趋势({:?})",
-                satisfied, filters.require_conditions, new_regime
-            );
-
-            RegimeDecision {
-                new_regime,
-                activate_grid: false,
-                deactivate_grid: grid_active,
-                reason: Some(reason),
-            }
-        }
+fn regime_decision_from_core(
+    decision: rustcta_strategy_range_grid::RegimeDecision,
+) -> RegimeDecision {
+    RegimeDecision {
+        new_regime: market_regime_from_core(decision.new_regime),
+        activate_grid: decision.activate_grid,
+        deactivate_grid: decision.deactivate_grid,
+        reason: decision.reason,
     }
 }
 

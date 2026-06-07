@@ -1,10 +1,10 @@
 #![allow(clippy::items_after_test_module)]
 
 use crate::execution::{
-    AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
-    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand,
-    CountdownCancelAllAck, CountdownCancelAllCommand, LeverageAck, LeverageCommand, OrderAck,
-    OrderCommand, PositionModeAck, PositionModeCommand, TradingAdapter,
+    AmendOrderAck, AmendOrderCommand, BatchPlaceAck, BatchPlaceCommand, CancelAck, CancelAllAck,
+    CancelAllCommand, CancelBatchAck, CancelBatchCommand, CancelCommand, ClosePositionAck,
+    ClosePositionCommand, CountdownCancelAllAck, CountdownCancelAllCommand, LeverageAck,
+    LeverageCommand, OrderAck, OrderCommand, PositionModeAck, PositionModeCommand, TradingAdapter,
 };
 use crate::market::ExchangeId;
 use anyhow::{anyhow, Result};
@@ -22,10 +22,11 @@ pub struct ExecutionRouter {
 mod tests {
     use super::*;
     use crate::execution::{
-        CountdownCancelAllCommand, ExchangeBalance, ExchangePosition, OrderCommandStatus,
-        OrderQuery, OrderState, PositionMode, TradingCapabilities,
+        BundleLeg, CountdownCancelAllCommand, ExchangeBalance, ExchangePosition,
+        OrderCommandStatus, OrderIntent, OrderQuery, OrderSide, OrderState, OrderType,
+        PositionMode, PositionSide, TimeInForce, TradingCapabilities,
     };
-    use crate::market::{CanonicalSymbol, ExchangeSymbol};
+    use crate::market::{CanonicalSymbol, ExchangeSymbol, RuntimeMode};
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -151,6 +152,49 @@ mod tests {
         assert_eq!(ack.timeout_secs, 30);
     }
 
+    #[tokio::test]
+    async fn router_should_dry_run_batch_place_without_adapter_side_effects() {
+        let adapter = Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Binance,
+            leverage_calls: AtomicUsize::new(0),
+        });
+        let mut router = ExecutionRouter::new(true);
+        router.register_adapter(adapter);
+
+        let order = OrderCommand::new(
+            RuntimeMode::LiveSmall,
+            "bundle-1",
+            BundleLeg::Maker,
+            1,
+            ExchangeId::Binance,
+            CanonicalSymbol::new("BTC", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT"),
+            OrderIntent::OpenLongMaker,
+            OrderSide::Buy,
+            PositionSide::Long,
+            OrderType::Limit,
+            0.001,
+            Some(65_000.0),
+            TimeInForce::PostOnly,
+            true,
+            false,
+            None,
+            Utc::now(),
+        );
+        let ack = router
+            .route_batch_orders(BatchPlaceCommand::new(
+                ExchangeId::Binance,
+                [order],
+                Utc::now(),
+            ))
+            .await
+            .expect("dry-run batch-place ack");
+
+        assert!(!ack.accepted);
+        assert_eq!(ack.placed_orders, 0);
+        assert_eq!(ack.order_acks.len(), 1);
+    }
+
     #[test]
     fn position_mode_should_identify_hedge_mode() {
         assert!(PositionMode::Hedge.is_hedge());
@@ -205,6 +249,20 @@ impl ExecutionRouter {
             )
         })?;
         adapter.place_order(command).await
+    }
+
+    pub async fn route_batch_orders(&self, command: BatchPlaceCommand) -> Result<BatchPlaceAck> {
+        if self.dry_run {
+            return Ok(BatchPlaceAck::dry_run(&command, Utc::now()));
+        }
+
+        let adapter = self.adapters.get(&command.exchange).ok_or_else(|| {
+            anyhow!(
+                "missing trading adapter for exchange {}",
+                command.exchange.as_str()
+            )
+        })?;
+        adapter.place_batch_orders(command).await
     }
 
     pub async fn route_cancel(&self, command: CancelCommand) -> Result<CancelAck> {

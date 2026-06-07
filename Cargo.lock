@@ -670,6 +670,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
+name = "either"
+version = "1.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,6 +1064,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range-header"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1321,6 +1333,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
 
 [[package]]
+name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1449,6 +1470,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
+
+[[package]]
 name = "matchit"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1465,6 +1495,16 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -1501,6 +1541,15 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nu-ansi-term"
+version = "0.50.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+dependencies = [
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1691,6 +1740,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89ae43fd86e4158d6db51ad8e2b80f313af9cc74f5c0e03ccb87de09998732de"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "prost"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deb1435c188b76130da55f17a466d252ff7b1418b2ad3e037d127b94e3411f29"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -1968,7 +2040,7 @@ checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
 
 [[package]]
 name = "rustcta"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1991,12 +2063,18 @@ dependencies = [
  "lru",
  "once_cell",
  "parking_lot",
+ "prost",
  "rand",
  "reqwest",
  "rmp-serde",
  "rusqlite",
  "rust_decimal",
  "rust_decimal_macros",
+ "rustcta-reporting",
+ "rustcta-strategy-funding-arbitrage",
+ "rustcta-strategy-range-grid",
+ "rustcta-strategy-sdk",
+ "rustcta-strategy-spot-spot-arbitrage",
  "secp256k1",
  "serde",
  "serde_json",
@@ -2009,9 +2087,401 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tower-http",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
  "url",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "rustcta-backtest"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "rustcta",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rustcta-backtest-app"
+version = "0.3.9"
+dependencies = [
+ "clap",
+ "rustcta-backtest",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-control-api"
+version = "0.3.9"
+dependencies = [
+ "axum",
+ "chrono",
+ "rustcta-event-ledger",
+ "rustcta-supervisor",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "rustcta-control-api-app"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "rustcta-control-api",
+ "rustcta-event-ledger",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http",
+]
+
+[[package]]
+name = "rustcta-core-compat"
+version = "0.3.9"
+dependencies = [
+ "rustcta-exchange-api",
+ "rustcta-execution-api",
+ "rustcta-strategy-sdk",
+ "rustcta-types",
+]
+
+[[package]]
+name = "rustcta-event-ledger"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-exchange-api"
+version = "0.3.9"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-exchange-gateway"
+version = "0.3.9"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
+ "chrono",
+ "hex",
+ "hmac",
+ "reqwest",
+ "rustcta-exchange-api",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+]
+
+[[package]]
+name = "rustcta-execution-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "rustcta-execution-router"
+version = "0.3.9"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rustcta-event-ledger",
+ "rustcta-exchange-api",
+ "rustcta-exchange-gateway",
+ "rustcta-execution-api",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-gateway"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "rustcta-exchange-api",
+ "rustcta-exchange-gateway",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "rustcta-industrial-cli"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rustcta-event-ledger",
+ "rustcta-supervisor",
+ "rustcta-tools-ops",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-reporting"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-avellaneda-stoikov"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-cross-exchange-arbitrage"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-funding-arbitrage"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-hedged-grid"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-mean-reversion"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-poisson-market-maker"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-range-grid"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-execution-api",
+ "rustcta-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-short-ladder-live"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-spot-spot-arbitrage"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-strategy-trend"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "rustcta-strategy-sdk",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-supervisor"
+version = "0.3.9"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rustcta-supervisor-app"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "rustcta-supervisor",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "rustcta-tools-ops"
+version = "0.3.9"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "clap",
+ "dotenv",
+ "flate2",
+ "futures-util",
+ "log",
+ "reqwest",
+ "rmp-serde",
+ "rustcta-reporting",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "tokio-tungstenite",
+ "url",
+]
+
+[[package]]
+name = "rustcta-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -2276,6 +2746,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2458,6 +2937,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "time"
 version = "0.3.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2621,10 +3109,22 @@ checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
 dependencies = [
  "bitflags 2.9.2",
  "bytes",
+ "futures-core",
+ "futures-util",
  "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "http-range-header",
+ "httpdate",
+ "mime",
+ "mime_guess",
+ "percent-encoding",
  "pin-project-lite",
+ "tokio",
+ "tokio-util",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -2647,7 +3147,19 @@ checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
  "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -2657,6 +3169,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2054a14f5307d601f88daf0553e1cbf472acc4f2c51afab632431cdcd72124d5"
+dependencies = [
+ "matchers",
+ "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
+ "serde",
+ "serde_json",
+ "sharded-slab",
+ "smallvec",
+ "thread_local",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]
@@ -2690,6 +3245,12 @@ name = "typenum"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dccffe3ce07af9386bfd29e80c0ab1a8205a2fc34e4bcd40364df902cfa8f3f"
+
+[[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
 
 [[package]]
 name = "unicode-ident"
@@ -2761,6 +3322,12 @@ dependencies = [
  "serde",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vcpkg"

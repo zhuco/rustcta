@@ -184,6 +184,30 @@ pub struct HedgeRecordReadModel {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BundleCloseMetricReadModel {
+    pub bundle_id: String,
+    pub symbol: String,
+    pub long_exchange: String,
+    pub short_exchange: String,
+    pub quantity: f64,
+    pub target_notional_usdt: f64,
+    pub entry_edge_pct: Option<f64>,
+    pub open_fee_paid_usdt: f64,
+    pub close_fee_est_usdt: f64,
+    pub gross_spread_pnl_usdt: f64,
+    pub realized_funding_pnl_usdt: f64,
+    pub close_spread_pct: f64,
+    pub close_profit_pct: f64,
+    pub close_threshold_pct: f64,
+    pub close_maker_exchange: String,
+    pub close_maker_side: String,
+    pub close_maker_price: f64,
+    pub close_maker_book_spread_pct: f64,
+    pub closeable: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HedgeRepairTaskStatus {

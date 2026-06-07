@@ -7,6 +7,7 @@ use super::{
 use crate::exchanges::unified::{
     validate_min_notional, validate_quantity_step, OrderBookLevel, OrderBookSnapshot,
 };
+use crate::utils::money;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SimulatedLeg {
@@ -83,7 +84,8 @@ pub fn execute_paper_taker_taker(
     let sell_fee_bps = opportunity.sell_fee_bps;
     let buy_leg = simulate_taker_buy(&buy_book.asks, opportunity.quantity, buy_fee_bps)?;
     let sell_leg = simulate_taker_sell(&sell_book.bids, opportunity.quantity, sell_fee_bps)?;
-    let quote_needed = buy_leg.notional + buy_leg.fee;
+    let quote_needed = money::add_f64(buy_leg.notional, buy_leg.fee, "buy_notional", "buy_fee")
+        .unwrap_or(buy_leg.notional + buy_leg.fee);
 
     let mut quote_reservation = inventory.reserve(
         buy_exchange,
@@ -117,8 +119,17 @@ pub fn execute_paper_taker_taker(
         sell_leg.fee,
     );
 
-    let gross_pnl = sell_leg.notional - buy_leg.notional;
-    let net_pnl = gross_pnl - buy_leg.fee - sell_leg.fee;
+    let gross_pnl = money::subtract_f64(
+        sell_leg.notional,
+        buy_leg.notional,
+        "sell_notional",
+        "buy_notional",
+    )
+    .unwrap_or(sell_leg.notional - buy_leg.notional);
+    let total_fee = money::add_f64(buy_leg.fee, sell_leg.fee, "buy_fee", "sell_fee")
+        .unwrap_or(buy_leg.fee + sell_leg.fee);
+    let net_pnl = money::subtract_f64(gross_pnl, total_fee, "gross_pnl", "total_fee")
+        .unwrap_or(gross_pnl - total_fee);
     inventory.add_pnl(gross_pnl, net_pnl);
 
     Ok(SimulatedTradeRecord {
@@ -155,15 +166,21 @@ fn consume_levels(
             break;
         }
         let fill_qty = remaining.min(level.quantity);
-        notional += fill_qty * level.price;
+        let fill_notional =
+            money::notional_f64(level.price, fill_qty).unwrap_or(level.price * fill_qty);
+        notional = money::add_f64(notional, fill_notional, "notional", "fill_notional")
+            .unwrap_or(notional + fill_notional);
         remaining -= fill_qty;
     }
     if remaining > 1e-12 {
         return Err(RejectionReason::InsufficientDepth);
     }
-    let fee = notional * taker_fee_bps / 10_000.0;
+    let fee = money::fee_amount_f64(notional, taker_fee_bps)
+        .unwrap_or(notional * taker_fee_bps / 10_000.0);
+    let average_price = money::divide_f64(notional, quantity, "notional", "quantity")
+        .unwrap_or(notional / quantity);
     Ok(SimulatedLeg {
-        average_price: notional / quantity,
+        average_price,
         quantity,
         notional,
         fee,

@@ -1,10 +1,11 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
 use serde::Serialize;
 use tokio::sync::mpsc;
+
+use crate::utils::rotating_file;
 
 use super::{OpportunityRecord, RecorderConfig, SimulatedTradeRecord};
 
@@ -55,24 +56,14 @@ impl StrategyRecorder {
 }
 
 fn append_jsonl(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    serde_json::to_writer(&mut file, event)?;
-    writeln!(file)?;
-    Ok(())
+    rotating_file::append_json_line(path, event)
 }
 
 fn append_csv(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
-    let write_header = !Path::new(path).exists();
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    if write_header {
-        writeln!(
-            file,
-            "event_type,timestamp,symbol,buy_exchange,sell_exchange,buy_price,sell_price,raw_spread_bps,net_spread_bps,notional,quantity,accepted,rejection_reason,rejection_detail,buy_fee_bps,sell_fee_bps,fee_source_buy,fee_source_sell,platform_discount_applied,estimated_total_fee,estimated_net_pnl,buy_book_age_ms,sell_book_age_ms,buy_book_source,sell_book_source,buy_latency_ms,sell_latency_ms,gross_pnl,net_pnl,fees"
-        )?;
-    }
-    match event {
-        RecorderEvent::Opportunity(record) => writeln!(
-            file,
+    const HEADER: &[u8] = b"event_type,timestamp,symbol,buy_exchange,sell_exchange,buy_price,sell_price,raw_spread_bps,net_spread_bps,notional,quantity,accepted,rejection_reason,rejection_detail,buy_fee_bps,sell_fee_bps,fee_source_buy,fee_source_sell,platform_discount_applied,estimated_total_fee,estimated_net_pnl,buy_book_age_ms,sell_book_age_ms,buy_book_source,sell_book_source,buy_latency_ms,sell_latency_ms,gross_pnl,net_pnl,fees\n";
+
+    let row = match event {
+        RecorderEvent::Opportunity(record) => format!(
             "opportunity,{},{},{},{},{},{},{},{},{},{},{},{:?},{:?},{},{},{:?},{:?},{},{},{},{},{},{:?},{:?},{:?},{:?},,,",
             record.timestamp.to_rfc3339(),
             record.symbol,
@@ -100,9 +91,8 @@ fn append_csv(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
             record.sell_book_source,
             record.buy_latency_ms,
             record.sell_latency_ms
-        )?,
-        RecorderEvent::SimulatedTrade(record) => writeln!(
-            file,
+        ),
+        RecorderEvent::SimulatedTrade(record) => format!(
             "simulated_trade,{},{},{},{},{},{},,,{},{},,,,,,,,,,,,,,,,,{},{},{}",
             record.timestamp.to_rfc3339(),
             record.symbol,
@@ -115,9 +105,17 @@ fn append_csv(path: &str, event: &RecorderEvent) -> std::io::Result<()> {
             record.gross_pnl,
             record.net_pnl,
             record.buy_fee + record.sell_fee
-        )?,
-    }
-    Ok(())
+        ),
+    };
+    let mut row = row.into_bytes();
+    row.push(b'\n');
+    rotating_file::append_record(
+        path,
+        Some(HEADER),
+        &row,
+        rotating_file::DEFAULT_MAX_FILE_BYTES,
+        rotating_file::DEFAULT_MAX_FILES,
+    )
 }
 
 #[cfg(test)]

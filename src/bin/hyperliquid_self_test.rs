@@ -10,7 +10,7 @@ use std::env;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
-    env_logger::init();
+    rustcta::utils::init_tracing_logger("info");
 
     // 环境变量读取
     let vault_address = env::var("HYPERLIQUID_WALLET_ADDRESS")

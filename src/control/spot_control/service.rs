@@ -119,6 +119,7 @@ impl SpotControlService {
     }
 
     pub async fn read_model(&self) -> SpotControlReadModel {
+        self.reload_lifecycle_store().await;
         let state = self.state.read().await;
         SpotControlReadModel {
             symbols: state.symbols.values().cloned().collect(),
@@ -702,6 +703,191 @@ impl SpotControlService {
         )
     }
 
+    pub async fn complete_market_liquidation(
+        &self,
+        symbol: String,
+        request: VersionedSymbolRequest,
+        idempotency_key: String,
+        final_state: SpotSymbolLifecycleState,
+        summary: Value,
+    ) -> ControlCommandResponse {
+        let payload = serde_json::to_value(&request).unwrap_or_else(|_| json!({}));
+        let symbol = super::normalize_symbol(&symbol);
+        let command = self.prepare_command(
+            SymbolOperationType::MarketLiquidate,
+            &symbol,
+            payload,
+            &request.requested_by,
+            request.expected_version,
+            idempotency_key,
+        );
+        let mut state = self.state.write().await;
+        if let Some(response) = self.duplicate_response(&state, &command.idempotency_key) {
+            return response;
+        }
+        let previous = state.symbols.get(&symbol).cloned();
+        let Some(mut managed) = previous.clone() else {
+            return self.reject_locked(
+                &mut state,
+                command,
+                vec![ValidationError::critical(
+                    "symbol_not_managed",
+                    "symbol is not managed by spot control",
+                )],
+                None,
+            );
+        };
+        if let Some(error) = expected_version_error(Some(&managed), request.expected_version) {
+            return self.reject_locked(&mut state, command, vec![error], Some(&managed));
+        }
+        if !matches!(
+            final_state,
+            SpotSymbolLifecycleState::DisabledClean
+                | SpotSymbolLifecycleState::DustRemaining
+                | SpotSymbolLifecycleState::ManualInterventionRequired
+        ) {
+            return self.reject_locked(
+                &mut state,
+                command,
+                vec![ValidationError::critical(
+                    "invalid_liquidation_final_state",
+                    "market liquidation may only complete as DisabledClean, DustRemaining, or ManualInterventionRequired",
+                )],
+                Some(&managed),
+            );
+        }
+        let previous_state = managed.lifecycle_state;
+        if let Err(error) = transition_symbol(
+            &mut managed,
+            SpotSymbolLifecycleState::LiquidatingMarket,
+            &command.command_id,
+        )
+        .and_then(|_| transition_symbol(&mut managed, final_state, &command.command_id))
+        {
+            return self.reject_locked(
+                &mut state,
+                command,
+                vec![ValidationError::critical("invalid_transition", error)],
+                Some(&managed),
+            );
+        }
+        managed.disabled_at_optional = Some(Utc::now());
+        managed.disabled_reason_optional =
+            Some("MarketLiquidate completed by strategy runtime".to_string());
+        self.accept_symbol_update(
+            &mut state,
+            command,
+            managed,
+            previous_state,
+            final_state,
+            Vec::new(),
+            summary,
+        )
+    }
+
+    pub async fn sync_runtime_active_symbol(
+        &self,
+        symbol: String,
+        selected_exchanges: Vec<String>,
+        allowed_directions: Vec<super::EnabledDirection>,
+        requested_by: impl Into<String>,
+    ) -> Option<ManagedSpotSymbol> {
+        let symbol = super::normalize_symbol(&symbol);
+        let requested_by = requested_by.into();
+        let mut state = self.state.write().await;
+        let previous = state.symbols.get(&symbol).cloned();
+        if previous
+            .as_ref()
+            .is_some_and(|item| item.lifecycle_state.blocks_new_arbitrage())
+        {
+            return previous;
+        }
+        let now = Utc::now();
+        let mut managed = previous.clone().unwrap_or_else(|| {
+            ManagedSpotSymbol::new_disabled(symbol.clone(), "USDT", requested_by.clone(), now)
+        });
+        let previous_state = managed.lifecycle_state;
+        managed.lifecycle_state = SpotSymbolLifecycleState::Active;
+        managed.selected_exchanges = super::normalize_exchange_list(&selected_exchanges);
+        managed.allowed_directions = allowed_directions
+            .into_iter()
+            .map(super::EnabledDirection::normalized)
+            .collect();
+        managed.enable_mode = self.config.default_enable_mode;
+        managed.enabled_at_optional.get_or_insert(now);
+        managed.disabled_at_optional = None;
+        managed.disabled_reason_optional = None;
+        managed.requested_by = requested_by.clone();
+        managed.version += 1;
+        managed.updated_at = now;
+        managed.normalize_in_place();
+        state
+            .symbols
+            .insert(managed.internal_symbol.clone(), managed.clone());
+        self.persist_symbol(&managed);
+        self.record_audit_locked(
+            &mut state,
+            AuditEvent::new(
+                None,
+                requested_by,
+                "RuntimeActiveSync",
+                managed.internal_symbol.clone(),
+                Some(previous_state),
+                Some(managed.lifecycle_state),
+                "synced",
+                "strategy runtime synced active arbitraging symbol",
+                json!({
+                    "selected_exchanges": managed.selected_exchanges,
+                    "allowed_directions": managed.allowed_directions,
+                }),
+            ),
+        );
+        Some(managed)
+    }
+
+    pub async fn sync_runtime_closed_symbol(
+        &self,
+        symbol: String,
+        requested_by: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Option<ManagedSpotSymbol> {
+        let symbol = super::normalize_symbol(&symbol);
+        let requested_by = requested_by.into();
+        let reason = reason.into();
+        let mut state = self.state.write().await;
+        let Some(mut managed) = state.symbols.get(&symbol).cloned() else {
+            return None;
+        };
+        if managed.lifecycle_state != SpotSymbolLifecycleState::Active {
+            return Some(managed);
+        }
+        let previous_state = managed.lifecycle_state;
+        managed.lifecycle_state = SpotSymbolLifecycleState::DisabledClean;
+        managed.disabled_at_optional = Some(Utc::now());
+        managed.disabled_reason_optional = Some(reason.clone());
+        managed.version += 1;
+        managed.updated_at = Utc::now();
+        state
+            .symbols
+            .insert(managed.internal_symbol.clone(), managed.clone());
+        self.persist_symbol(&managed);
+        self.record_audit_locked(
+            &mut state,
+            AuditEvent::new(
+                None,
+                requested_by,
+                "RuntimeClosedSync",
+                managed.internal_symbol.clone(),
+                Some(previous_state),
+                Some(managed.lifecycle_state),
+                "synced",
+                "strategy runtime synced closed arbitraging symbol",
+                json!({ "reason": reason }),
+            ),
+        );
+        Some(managed)
+    }
+
     pub async fn effective_tradability(
         &self,
         symbol: &str,
@@ -709,10 +895,19 @@ impl SpotControlService {
         sell_exchange: &str,
         strategy_mode: &str,
     ) -> EffectiveTradability {
+        self.reload_lifecycle_store().await;
         let state = self.state.read().await;
         let symbol = super::normalize_symbol(symbol);
         let Some(managed) = state.symbols.get(&symbol) else {
-            return EffectiveTradability::evaluate(false, true, true, true, true);
+            return EffectiveTradability::evaluate(
+                self.config
+                    .default_enable_mode
+                    .allows_strategy_mode(strategy_mode),
+                true,
+                true,
+                true,
+                true,
+            );
         };
         let lifecycle_allows = managed.lifecycle_state.allows_new_arbitrage()
             && managed.allows_direction(buy_exchange, sell_exchange)
@@ -724,6 +919,38 @@ impl SpotControlService {
             true,
             state.locks.operation_allows_arbitrage(&symbol),
         )
+    }
+
+    pub async fn reload_lifecycle_store(&self) {
+        if self.lifecycle_path.as_os_str().is_empty() {
+            return;
+        }
+        match read_jsonl::<ManagedSpotSymbol>(&self.lifecycle_path) {
+            Ok(symbol_events) => {
+                let mut state = self.state.write().await;
+                for mut symbol in symbol_events {
+                    symbol.normalize_in_place();
+                    let should_update = state
+                        .symbols
+                        .get(&symbol.internal_symbol)
+                        .map(|existing| {
+                            symbol.version > existing.version
+                                || symbol.updated_at > existing.updated_at
+                        })
+                        .unwrap_or(true);
+                    if should_update {
+                        state.symbols.insert(symbol.internal_symbol.clone(), symbol);
+                    }
+                }
+            }
+            Err(error) => {
+                log::warn!(
+                    "failed to reload spot control lifecycle store {}: {}",
+                    self.lifecycle_path.display(),
+                    error
+                );
+            }
+        }
     }
 
     fn plan_freeze(

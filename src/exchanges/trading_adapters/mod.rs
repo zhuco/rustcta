@@ -9,13 +9,15 @@ pub use crate::exchanges::private_perp::{
     private_perp_trading_adapter_for_with_base_url_and_instruments,
     private_perp_trading_adapter_for_with_instruments,
 };
+use crate::exchanges::BinanceExchange;
 use crate::execution::{
     AmendOrderAck, AmendOrderCommand, CancelAck, CancelAllAck, CancelAllCommand, CancelBatchAck,
-    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand, ExchangeBalance,
-    ExchangePosition, FillEvent, FillLiquidity, FillQuery, LeverageAck, LeverageCommand,
-    MarginMode, OrderAck, OrderCommand, OrderCommandStatus, OrderQuery, OrderSide, OrderState,
-    OrderType, PositionMode, PositionModeAck, PositionModeCommand, PositionSide,
-    SymbolAccountConfig, TimeInForce, TradeFeeSnapshot, TradingAdapter, TradingCapabilities,
+    CancelBatchCommand, CancelCommand, ClosePositionAck, ClosePositionCommand,
+    CountdownCancelAllAck, CountdownCancelAllCommand, ExchangeBalance, ExchangePosition, FillEvent,
+    FillLiquidity, FillQuery, LeverageAck, LeverageCommand, MarginMode, OrderAck, OrderCommand,
+    OrderCommandStatus, OrderQuery, OrderSide, OrderState, OrderType, PositionMode,
+    PositionModeAck, PositionModeCommand, PositionSide, SymbolAccountConfig, TimeInForce,
+    TradeFeeSnapshot, TradingAdapter, TradingCapabilities,
 };
 use crate::market::{
     canonical_from_exchange_symbol, exchange_symbol_for, CanonicalSymbol, ExchangeId,
@@ -139,6 +141,17 @@ impl ExchangeTradingAdapter {
         } else {
             Err(anyhow!(
                 "{} trading adapter does not support position mode changes",
+                self.exchange_id
+            ))
+        }
+    }
+
+    fn ensure_countdown_cancel_all_supported(&self) -> Result<()> {
+        if self.capabilities.supports_countdown_cancel_all {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "{} trading adapter does not support countdown cancel-all",
                 self.exchange_id
             ))
         }
@@ -554,6 +567,46 @@ impl TradingAdapter for ExchangeTradingAdapter {
         })
     }
 
+    async fn set_countdown_cancel_all(
+        &self,
+        command: CountdownCancelAllCommand,
+    ) -> Result<CountdownCancelAllAck> {
+        self.ensure_private_trading_enabled("set_countdown_cancel_all")?;
+        self.ensure_countdown_cancel_all_supported()?;
+        if self.exchange_id != ExchangeId::Binance {
+            anyhow::bail!(
+                "{} core trading adapter countdown cancel-all is not wired",
+                self.exchange_id
+            );
+        }
+        let exchange_symbol = command
+            .exchange_symbol
+            .as_ref()
+            .ok_or_else(|| anyhow!("binance countdown cancel-all requires an exchange symbol"))?;
+        let binance = self
+            .exchange
+            .as_any()
+            .downcast_ref::<BinanceExchange>()
+            .ok_or_else(|| anyhow!("binance countdown cancel-all requires BinanceExchange"))?;
+        binance
+            .set_futures_countdown_cancel_all(
+                &canonical_for_exchange_symbol(exchange_symbol),
+                command.timeout_secs,
+            )
+            .await?;
+        let acknowledged_at = Utc::now();
+        Ok(CountdownCancelAllAck {
+            exchange: self.exchange_id.clone(),
+            exchange_symbol: command.exchange_symbol,
+            timeout_secs: command.timeout_secs,
+            trigger_time: (command.timeout_secs > 0)
+                .then(|| acknowledged_at + chrono::Duration::seconds(command.timeout_secs as i64)),
+            accepted: true,
+            message: None,
+            acknowledged_at,
+        })
+    }
+
     async fn load_symbol_rules(&self, symbol: &ExchangeSymbol) -> Result<Option<InstrumentMeta>> {
         if let Some(canonical) = canonical_from_exchange_symbol(&symbol.exchange, &symbol.symbol) {
             if let Some(instrument) = self.instruments.get(&canonical) {
@@ -607,10 +660,16 @@ pub struct PrivateTradingSupport {
 
 pub fn private_trading_support_for(exchange: &ExchangeId) -> PrivateTradingSupport {
     match exchange {
-        ExchangeId::Binance | ExchangeId::Okx => PrivateTradingSupport {
+        ExchangeId::Binance => PrivateTradingSupport {
             exchange: exchange.clone(),
             private_trading_enabled: true,
-            capabilities: TradingCapabilities::default(),
+            capabilities: private_perp_trading_capabilities(exchange.clone()),
+            disabled_reason: None,
+        },
+        ExchangeId::Okx => PrivateTradingSupport {
+            exchange: exchange.clone(),
+            private_trading_enabled: true,
+            capabilities: private_perp_trading_capabilities(exchange.clone()),
             disabled_reason: None,
         },
         ExchangeId::Bitget
@@ -646,6 +705,7 @@ fn disabled_trading_capabilities() -> TradingCapabilities {
         supports_position_mode_change: false,
         supports_close_position: false,
         supports_countdown_cancel_all: false,
+        supports_batch_place_orders: false,
     }
 }
 
@@ -1083,6 +1143,11 @@ mod tests {
         let binance = private_trading_support_for(&ExchangeId::Binance);
         assert!(binance.private_trading_enabled);
         assert!(binance.capabilities.supports_limit_orders);
+        assert!(binance.capabilities.supports_countdown_cancel_all);
+
+        let okx = private_trading_support_for(&ExchangeId::Okx);
+        assert!(okx.private_trading_enabled);
+        assert!(okx.capabilities.supports_countdown_cancel_all);
     }
 
     #[tokio::test]

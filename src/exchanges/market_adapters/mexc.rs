@@ -69,7 +69,7 @@ impl MarketDataAdapter for MexcMarketAdapter {
         &self,
         symbols: &[CanonicalSymbol],
     ) -> anyhow::Result<Vec<MarketFundingSnapshot>> {
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let recv_ts = Utc::now();
         let wanted = symbols.iter().cloned().collect::<HashSet<_>>();
         let request_symbols = if symbols.is_empty() {

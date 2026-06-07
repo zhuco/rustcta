@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::exchanges::client_order_id::{generate_client_order_id, validate_client_order_id};
 use crate::exchanges::symbol_registry::validate_order_with_rule;
 use crate::exchanges::unified::{
-    MarketType, OrderRequest, OrderSide, OrderType, PositionSide, SymbolStatus, TimeInForce,
+    round_price_to_tick, round_quantity_to_step, MarketType, OrderRequest, OrderSide, OrderType,
+    PositionSide, SymbolStatus, TimeInForce,
 };
 use crate::execution::FeeSource;
 
@@ -57,7 +58,7 @@ fn check_config_safety(
 ) -> Vec<LivePreflightCheck> {
     let mut checks = Vec::new();
     let mode = state.trading_mode.trim().to_ascii_lowercase();
-    if mode == "paper" || mode == "live_dry_run" {
+    if mode == "paper" || mode == "live_dry_run" || mode == "live" {
         checks.push(pass(
             Gate::ConfigSafety,
             "trading_mode_safe",
@@ -67,29 +68,49 @@ fn check_config_safety(
         checks.push(fail(
             Gate::ConfigSafety,
             "trading_mode_safe",
-            "trading_mode must be paper or live_dry_run for preflight stage",
+            "trading_mode must be paper, live_dry_run, or live",
         ));
     }
-    checks.push(if state.live_trading_enabled {
+    checks.push(if mode == "live" && state.live_trading_enabled {
+        pass(
+            Gate::ConfigSafety,
+            "live_trading_flag",
+            "live_trading_enabled=true",
+        )
+    } else if mode == "live" {
         fail(
             Gate::ConfigSafety,
-            "live_trading_disabled",
-            "live_trading_enabled must remain false in this stage",
+            "live_trading_flag",
+            "trading_mode=live requires live_trading_enabled=true",
+        )
+    } else if state.live_trading_enabled {
+        fail(
+            Gate::ConfigSafety,
+            "live_trading_flag",
+            "live_trading_enabled=true requires trading_mode=live",
         )
     } else {
         pass(
             Gate::ConfigSafety,
-            "live_trading_disabled",
+            "live_trading_flag",
             "live_trading_enabled=false",
         )
     });
-    checks.push(if state.dry_run {
-        pass(Gate::ConfigSafety, "dry_run_enabled", "dry_run=true")
+    checks.push(if mode == "live" && !state.dry_run {
+        pass(Gate::ConfigSafety, "dry_run_mode", "dry_run=false")
+    } else if mode == "live" {
+        fail(
+            Gate::ConfigSafety,
+            "dry_run_mode",
+            "trading_mode=live requires dry_run=false",
+        )
+    } else if state.dry_run {
+        pass(Gate::ConfigSafety, "dry_run_mode", "dry_run=true")
     } else {
         fail(
             Gate::ConfigSafety,
-            "dry_run_enabled",
-            "dry_run must be true for preflight stage",
+            "dry_run_mode",
+            "paper and live_dry_run modes require dry_run=true",
         )
     });
     checks.push(match config.max_live_notional_per_trade {
@@ -472,12 +493,26 @@ fn order_validation_check(
     symbol: &str,
     rule: &crate::exchanges::unified::SymbolRule,
 ) -> LivePreflightCheck {
+    let quantity = if rule.step_size > 0.0 {
+        round_quantity_to_step(
+            rule.min_quantity.max(rule.step_size).max(1e-12),
+            rule.step_size,
+            true,
+        )
+        .max(rule.step_size)
+    } else {
+        rule.min_quantity.max(1e-12)
+    };
     let price = if rule.tick_size > 0.0 {
-        (rule.min_notional / rule.min_quantity.max(rule.step_size.max(1e-12))).max(rule.tick_size)
+        round_price_to_tick(
+            (rule.min_notional / quantity.max(1e-12)).max(rule.tick_size),
+            rule.tick_size,
+            true,
+        )
+        .max(rule.tick_size)
     } else {
         1.0
     };
-    let quantity = rule.min_quantity.max(rule.step_size).max(1e-12);
     let order = OrderRequest {
         market_type,
         symbol: symbol.to_string(),
@@ -976,10 +1011,15 @@ pub fn api_permissions_from_env(exchanges: &[String]) -> HashMap<String, ApiPerm
         .map(|exchange| {
             let normalized = normalize_exchange(exchange);
             let prefix = normalized.to_ascii_uppercase();
-            let key_present = std::env::var(format!("{prefix}_API_KEY")).is_ok()
-                || std::env::var(format!("{}_KEY", prefix)).is_ok();
-            let secret_present = std::env::var(format!("{prefix}_API_SECRET")).is_ok()
-                || std::env::var(format!("{}_SECRET", prefix)).is_ok();
+            let mut key_aliases = vec![format!("{prefix}_API_KEY"), format!("{}_KEY", prefix)];
+            let mut secret_aliases =
+                vec![format!("{prefix}_API_SECRET"), format!("{}_SECRET", prefix)];
+            if normalized == "gateio" {
+                key_aliases.push("GATE_API_KEY".to_string());
+                secret_aliases.push("GATE_API_SECRET".to_string());
+            }
+            let key_present = key_aliases.iter().any(|key| env_value_present(key));
+            let secret_present = secret_aliases.iter().any(|key| env_value_present(key));
             (
                 normalized,
                 ApiPermissionState {
@@ -993,6 +1033,10 @@ pub fn api_permissions_from_env(exchanges: &[String]) -> HashMap<String, ApiPerm
             )
         })
         .collect()
+}
+
+fn env_value_present(key: &str) -> bool {
+    std::env::var(key).is_ok_and(|value| !value.trim().is_empty())
 }
 
 fn normalize_exchange(exchange: &str) -> String {

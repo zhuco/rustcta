@@ -2,6 +2,7 @@
 
 use super::state::PositionSide;
 use crate::market::{CanonicalSymbol, ExchangeId};
+use crate::utils::money;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -57,9 +58,13 @@ impl FundingModel {
     }
 
     pub fn leg_funding(position_side: PositionSide, notional_usdt: f64, funding_rate: f64) -> f64 {
+        let abs_notional = notional_usdt.abs();
+        let funding =
+            money::multiply_f64(abs_notional, funding_rate, "notional_usdt", "funding_rate")
+                .unwrap_or(abs_notional * funding_rate);
         match position_side {
-            PositionSide::Long => -notional_usdt.abs() * funding_rate,
-            PositionSide::Short => notional_usdt.abs() * funding_rate,
+            PositionSide::Long => -funding,
+            PositionSide::Short => funding,
         }
     }
 
@@ -122,12 +127,20 @@ impl FundingModel {
             Self::leg_funding(PositionSide::Long, long_notional_usdt, long_funding_rate);
         let short_leg_funding =
             Self::leg_funding(PositionSide::Short, short_notional_usdt, short_funding_rate);
-        let net_funding = long_leg_funding + short_leg_funding;
+        let net_funding = money::add_f64(
+            long_leg_funding,
+            short_leg_funding,
+            "long_funding",
+            "short_funding",
+        )
+        .unwrap_or(long_leg_funding + short_leg_funding);
         let base_notional = long_notional_usdt
             .abs()
             .max(short_notional_usdt.abs())
             .max(1.0);
-        let net_funding_rate = net_funding / base_notional;
+        let net_funding_rate =
+            money::divide_f64(net_funding, base_notional, "net_funding", "base_notional")
+                .unwrap_or(net_funding / base_notional);
         let next_funding_time =
             earliest_future(long_next_funding_time, short_next_funding_time, now);
         let minutes_to_funding =

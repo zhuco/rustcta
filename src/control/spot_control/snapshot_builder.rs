@@ -1067,6 +1067,7 @@ fn fee_model_from_dashboard(model: &DashboardReadModel) -> FeeModel {
                 maker_bps: fee.maker_fee_bps,
                 taker_bps: fee.taker_fee_bps,
                 fee_asset: Some("quote".to_string()),
+                rebate_ratio: None,
                 reason: Some(format!("dashboard_fee_source:{:?}", fee.source)),
             })
         })

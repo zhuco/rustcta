@@ -9,7 +9,8 @@ use tokio::sync::mpsc;
 use crate::core::error::ExchangeError;
 use crate::exchanges::client_order_id::{generate_client_order_id, validate_client_order_id};
 use crate::exchanges::unified::{
-    AssetBalance, BalanceSnapshot, CancelOrderRequest, CancelOrderResponse, ExchangeClient,
+    validate_order_lookup_id, validate_orderbook_depth, AssetBalance, BalanceSnapshot,
+    CancelOrderRequest, CancelOrderResponse, ExchangeClient, ExchangeClientCapabilities,
     ExchangeClientError, ExchangeClientResult, FeeRate, LiquidityRole, MarketType, OrderBookLevel,
     OrderBookSnapshot, OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType,
     PositionSide, TradeFill, UserStreamEvent,
@@ -123,6 +124,12 @@ impl ExchangeClient for PaperExchangeClient {
         &self.exchange_name
     }
 
+    fn capabilities(&self) -> ExchangeClientCapabilities {
+        let mut capabilities = ExchangeClientCapabilities::spot(self.exchange_name());
+        capabilities.supports_private_user_stream = true;
+        capabilities
+    }
+
     fn normalize_symbol(&self, symbol: &str) -> ExchangeClientResult<String> {
         normalize_symbol(symbol)
     }
@@ -137,8 +144,9 @@ impl ExchangeClient for PaperExchangeClient {
         symbol: &str,
         depth: u16,
     ) -> ExchangeClientResult<OrderBookSnapshot> {
-        let state = self.lock_state()?;
         let symbol = normalize_symbol(symbol)?;
+        validate_orderbook_depth(depth)?;
+        let state = self.lock_state()?;
         let mut book = state
             .books
             .get(&symbol)
@@ -180,12 +188,14 @@ impl ExchangeClient for PaperExchangeClient {
                 ),
             });
         }
+        validate_cancel_client_order_id(&request)?;
         state.cancel_order(request, Utc::now())
     }
 
     async fn get_order(&self, symbol: &str, order_id: &str) -> ExchangeClientResult<OrderResponse> {
         let state = self.lock_state()?;
         let symbol = normalize_symbol(symbol)?;
+        let order_id = validate_order_lookup_id(order_id)?;
         let order = state
             .orders
             .get(order_id)
@@ -220,6 +230,7 @@ impl ExchangeClient for PaperExchangeClient {
     }
 
     async fn get_fee_rate(&self, _symbol: &str) -> ExchangeClientResult<FeeRate> {
+        self.normalize_symbol(_symbol)?;
         let state = self.lock_state()?;
         Ok(FeeRate::new(
             state.config.maker_fee_rate,
@@ -238,6 +249,12 @@ impl ExchangeClient for PaperExchangeClient {
         &self,
         symbols: Vec<String>,
     ) -> ExchangeClientResult<mpsc::Receiver<OrderBookSnapshot>> {
+        if symbols.is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "symbols",
+                reason: "at least one symbol is required".to_string(),
+            });
+        }
         let normalized_symbols = symbols
             .into_iter()
             .map(|symbol| normalize_symbol(&symbol))
@@ -808,10 +825,10 @@ impl PaperExchangeState {
         now: DateTime<Utc>,
     ) -> ExchangeClientResult<CancelOrderResponse> {
         let lookup = request
-            .order_id
-            .clone()
+            .order_id()
+            .map(str::to_string)
             .or_else(|| {
-                request.client_order_id.as_ref().and_then(|client_id| {
+                request.client_order_id().and_then(|client_id| {
                     self.orders
                         .values()
                         .find(|order| order.response.client_order_id.as_deref() == Some(client_id))
@@ -1211,6 +1228,18 @@ fn ensure_client_order_id(request: &mut OrderRequest) -> ExchangeClientResult<()
     Ok(())
 }
 
+fn validate_cancel_client_order_id(request: &CancelOrderRequest) -> ExchangeClientResult<()> {
+    if let Some(client_order_id) = &request.client_order_id {
+        validate_client_order_id("paper", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
 fn infer_symbol_assets(symbol: &str, default_quote: &str) -> (String, String) {
     let normalized = symbol.replace(['/', '-', '_'], "").to_ascii_uppercase();
     for quote in ["USDT", "USDC", "USD", "BTC", "ETH", "EUR"] {
@@ -1324,6 +1353,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn paper_capabilities_should_match_implemented_streams() {
+        let client = PaperExchangeClient::new(PaperExchangeConfig::default());
+        let capabilities = client.capabilities();
+
+        assert_eq!(capabilities.market_type, MarketType::Spot);
+        assert!(capabilities.supports_public_ws);
+        assert!(capabilities.supports_private_user_stream);
+        assert!(!capabilities.supports_quote_market_order);
+        assert!(!capabilities.supports_amend_order);
+        assert!(!capabilities.supports_order_list);
+    }
+
     #[tokio::test]
     async fn paper_market_buy_should_consume_asks_and_charge_taker_fee() {
         let client = client_with_balances(vec![("USDT", 10_000.0)]);
@@ -1347,6 +1389,116 @@ mod tests {
         assert!((btc.available - 0.5).abs() < 1e-9);
         let book = client.get_orderbook("BTCUSDT", 5).await.unwrap();
         assert!((book.asks[0].quantity - 0.5).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn paper_get_order_should_validate_order_id_before_lookup() {
+        let client = PaperExchangeClient::new(PaperExchangeConfig::default());
+
+        let err = client.get_order("BTCUSDT", "   ").await.unwrap_err();
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn paper_orderbook_should_validate_depth_before_lookup() {
+        let client = client_with_balances(vec![("USDT", 10_000.0)]);
+        client.update_orderbook(fresh_book()).unwrap();
+
+        let err = client.get_orderbook("BTCUSDT", 0).await.unwrap_err();
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation { field: "depth", .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn paper_cancel_order_should_validate_client_order_id_before_lookup() {
+        let client = PaperExchangeClient::new(PaperExchangeConfig::default());
+
+        let err = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "BTCUSDT".to_string(),
+                order_id: None,
+                client_order_id: Some("bad/id".to_string()),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn paper_cancel_order_should_ignore_blank_order_id_when_client_id_is_present() {
+        let client = client_with_balances(vec![("USDT", 1_000.0)]);
+        client.update_orderbook(fresh_book()).unwrap();
+        let order = client
+            .place_order(OrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "BTCUSDT".to_string(),
+                side: OrderSide::Buy,
+                position_side: PositionSide::None,
+                order_type: OrderType::Limit,
+                time_in_force: None,
+                quantity: 0.1,
+                price: Some(95.0),
+                client_order_id: Some("PAPER-CANCEL-1".to_string()),
+                reduce_only: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(order.status, OrderStatus::New);
+
+        let cancelled = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "BTCUSDT".to_string(),
+                order_id: Some("   ".to_string()),
+                client_order_id: Some("PAPER-CANCEL-1".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(cancelled.status, OrderStatus::Cancelled);
+        assert_eq!(cancelled.order_id.as_deref(), Some(order.order_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn paper_fee_rate_should_validate_symbol() {
+        let client = PaperExchangeClient::new(PaperExchangeConfig::default());
+
+        let err = client.get_fee_rate("   ").await.unwrap_err();
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "symbol",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn paper_orderbook_subscription_should_reject_empty_symbols() {
+        let client = PaperExchangeClient::new(PaperExchangeConfig::default());
+
+        let err = client.subscribe_orderbook(Vec::new()).await.unwrap_err();
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "symbols",
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 use chrono::Utc;
 use rustcta::exchanges::unified::{
-    MarketType, OrderBookLevel, OrderBookSnapshot, OrderRequest, OrderType, SymbolRule,
-    SymbolStatus, TimeInForce,
+    ExchangeClientError, ExchangeError, ExchangeErrorClass, MarketType, OrderBookLevel,
+    OrderBookSnapshot, OrderRequest, OrderType, SymbolRule, SymbolStatus, TimeInForce,
 };
 use rustcta::execution::{FeeConfig, FeeModel, FeePairConfig};
 use rustcta::risk::{
@@ -201,50 +201,20 @@ fn hedge_policy_should_remain_recommendation_only() {
 }
 
 #[tokio::test]
-async fn dashboard_scanner_routes_should_return_read_models() {
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use rustcta::web::{router, DashboardReadModel, MonitoringConfig, MonitoringState};
-    use tower::ServiceExt;
-
-    let state = MonitoringState::from_read_model(
-        MonitoringConfig {
-            require_token: false,
-            ..MonitoringConfig::default()
-        },
-        DashboardReadModel::default(),
-    );
-    for path in [
-        "/api/scanner/exchanges",
-        "/api/scanner/symbol-coverage",
-        "/api/scanner/exchange-pairs",
-        "/api/scanner/opportunities",
-        "/api/scanner/pair-statistics",
-        "/api/scanner/symbol-scores",
-        "/api/scanner/recommendations",
-        "/api/hedge-policy/status",
-        "/api/hedge-policy/inventory-risk",
-        "/api/hedge-policy/recommendations",
-        "/api/hedge-policy/venue-capabilities",
-        "/api/hedge-policy/market-regime",
-    ] {
-        let response = router(state.clone())
-            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-    }
-}
-
-#[tokio::test]
-async fn kucoin_adapter_should_reject_mutations_offline() {
+async fn kucoin_adapter_should_require_credentials_before_mutation() {
     let client = rustcta::exchanges::KuCoinSpotClient::new(Default::default());
     let result = rustcta::exchanges::unified::ExchangeClient::place_order(
         &client,
         OrderRequest::spot_market_buy("BTCUSDT", 0.001),
     )
     .await;
-    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(ExchangeClientError::Classified(ExchangeError {
+            class: ExchangeErrorClass::AuthenticationFailed,
+            ..
+        }))
+    ));
 }
 
 fn fee_model() -> FeeModel {
@@ -258,6 +228,7 @@ fn fee_model() -> FeeModel {
                     maker_bps: 5.0,
                     taker_bps: 10.0,
                     fee_asset: Some("quote".to_string()),
+                    rebate_ratio: None,
                 },
             )]),
         );

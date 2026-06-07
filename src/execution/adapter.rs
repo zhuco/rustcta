@@ -20,6 +20,7 @@ pub struct TradingCapabilities {
     pub supports_position_mode_change: bool,
     pub supports_close_position: bool,
     pub supports_countdown_cancel_all: bool,
+    pub supports_batch_place_orders: bool,
 }
 
 impl Default for TradingCapabilities {
@@ -37,6 +38,7 @@ impl Default for TradingCapabilities {
             supports_position_mode_change: true,
             supports_close_position: true,
             supports_countdown_cancel_all: false,
+            supports_batch_place_orders: false,
         }
     }
 }
@@ -61,6 +63,63 @@ impl OrderAck {
             accepted: false,
             status: OrderCommandStatus::Planned,
             message: Some("dry-run: order was not sent to adapter".to_string()),
+            acknowledged_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchPlaceCommand {
+    pub exchange: ExchangeId,
+    pub orders: Vec<OrderCommand>,
+    pub requested_at: DateTime<Utc>,
+}
+
+impl BatchPlaceCommand {
+    pub fn new(
+        exchange: ExchangeId,
+        orders: impl IntoIterator<Item = OrderCommand>,
+        requested_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            exchange,
+            orders: orders.into_iter().collect(),
+            requested_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchPlaceError {
+    pub order: OrderCommand,
+    pub code: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BatchPlaceAck {
+    pub exchange: ExchangeId,
+    pub accepted: bool,
+    pub placed_orders: usize,
+    pub order_acks: Vec<OrderAck>,
+    pub failed_orders: Vec<BatchPlaceError>,
+    pub message: Option<String>,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+impl BatchPlaceAck {
+    pub fn dry_run(command: &BatchPlaceCommand, acknowledged_at: DateTime<Utc>) -> Self {
+        Self {
+            exchange: command.exchange.clone(),
+            accepted: false,
+            placed_orders: 0,
+            order_acks: command
+                .orders
+                .iter()
+                .map(|order| OrderAck::dry_run(order, acknowledged_at))
+                .collect(),
+            failed_orders: Vec::new(),
+            message: Some("dry-run: batch-place was not sent to adapter".to_string()),
             acknowledged_at,
         }
     }
@@ -435,7 +494,8 @@ impl FillEvent {
         if self.quote_quantity > 0.0 {
             self.quote_quantity
         } else {
-            self.price * self.quantity
+            crate::utils::money::notional_f64(self.price, self.quantity)
+                .unwrap_or(self.price * self.quantity)
         }
     }
 }
@@ -625,6 +685,8 @@ pub struct AmendOrderCommand {
     pub exchange_symbol: ExchangeSymbol,
     pub client_order_id: Option<String>,
     pub exchange_order_id: Option<String>,
+    #[serde(default)]
+    pub original_side: Option<OrderSide>,
     pub new_client_order_id: Option<String>,
     pub new_quantity: Option<f64>,
     pub new_price: Option<f64>,
@@ -740,6 +802,15 @@ pub trait TradingAdapter: Send + Sync {
     fn capabilities(&self) -> TradingCapabilities;
 
     async fn place_order(&self, command: OrderCommand) -> anyhow::Result<OrderAck>;
+    async fn place_batch_orders(
+        &self,
+        _command: BatchPlaceCommand,
+    ) -> anyhow::Result<BatchPlaceAck> {
+        anyhow::bail!(
+            "trading adapter {} does not support batch-place",
+            self.exchange()
+        )
+    }
     async fn cancel_order(&self, command: CancelCommand) -> anyhow::Result<CancelAck>;
     async fn cancel_all_orders(&self, _command: CancelAllCommand) -> anyhow::Result<CancelAllAck> {
         anyhow::bail!(

@@ -84,7 +84,9 @@ impl MarketDataAdapter for BinanceMarketAdapter {
     }
 
     async fn load_instruments(&self) -> anyhow::Result<Vec<InstrumentMeta>> {
-        let value: Value = reqwest::get(format!("{BINANCE_FAPI_BASE}/fapi/v1/exchangeInfo"))
+        let value: Value = crate::core::http2_fix::shared_http_client()
+            .get(format!("{BINANCE_FAPI_BASE}/fapi/v1/exchangeInfo"))
+            .send()
             .await?
             .error_for_status()?
             .json()
@@ -105,7 +107,7 @@ impl MarketDataAdapter for BinanceMarketAdapter {
         &self,
         symbols: &[CanonicalSymbol],
     ) -> anyhow::Result<Vec<MarketFundingSnapshot>> {
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let mut snapshots = Vec::with_capacity(symbols.len());
 
         if symbols.is_empty() || symbols.len() > 20 {
@@ -202,7 +204,7 @@ impl MarketDataAdapter for BinanceMarketAdapter {
         depth: u16,
     ) -> anyhow::Result<OrderBookSnapshot> {
         let limit = depth.clamp(5, 20).to_string();
-        let value: Value = reqwest::Client::new()
+        let value: Value = crate::core::http2_fix::shared_http_client()
             .get(format!("{BINANCE_FAPI_BASE}/fapi/v1/depth"))
             .query(&[
                 ("symbol", symbol.symbol.as_str()),

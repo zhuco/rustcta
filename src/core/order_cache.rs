@@ -2,11 +2,11 @@
 //! 用于减少对交易所的查询请求
 
 use crate::core::types::{MarketType, Order};
+use dashmap::DashMap;
 use log::{debug, info};
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 
 /// 缓存项
 #[derive(Clone, Debug)]
@@ -33,52 +33,47 @@ impl<T> CacheItem<T> {
 /// 订单缓存管理器
 pub struct OrderCache {
     /// 活跃订单缓存 (symbol -> orders)
-    open_orders: Arc<RwLock<HashMap<String, CacheItem<Vec<Order>>>>>,
+    open_orders: Arc<DashMap<String, CacheItem<Vec<Order>>>>,
     /// 单个订单缓存 (order_id -> order)
-    order_by_id: Arc<RwLock<HashMap<String, CacheItem<Order>>>>,
+    order_by_id: Arc<DashMap<String, CacheItem<Order>>>,
     /// 默认TTL
     default_ttl: Duration,
     /// 缓存命中统计
-    hit_count: Arc<RwLock<u64>>,
+    hit_count: Arc<AtomicU64>,
     /// 缓存未命中统计
-    miss_count: Arc<RwLock<u64>>,
+    miss_count: Arc<AtomicU64>,
 }
 
 impl OrderCache {
     /// 创建新的订单缓存
     pub fn new(ttl_seconds: u64) -> Self {
         Self {
-            open_orders: Arc::new(RwLock::new(HashMap::new())),
-            order_by_id: Arc::new(RwLock::new(HashMap::new())),
+            open_orders: Arc::new(DashMap::new()),
+            order_by_id: Arc::new(DashMap::new()),
             default_ttl: Duration::from_secs(ttl_seconds),
-            hit_count: Arc::new(RwLock::new(0)),
-            miss_count: Arc::new(RwLock::new(0)),
+            hit_count: Arc::new(AtomicU64::new(0)),
+            miss_count: Arc::new(AtomicU64::new(0)),
         }
     }
 
     /// 获取缓存的活跃订单
     pub async fn get_open_orders(&self, symbol: &str) -> Option<Vec<Order>> {
-        let cache = self.open_orders.read().await;
-
-        if let Some(item) = cache.get(symbol) {
+        if let Some(item) = self.open_orders.get(symbol) {
             if !item.is_expired() {
-                let mut hits = self.hit_count.write().await;
-                *hits += 1;
+                self.hit_count.fetch_add(1, Ordering::Relaxed);
                 debug!("缓存命中: {} 活跃订单", symbol);
                 return Some(item.data.clone());
             }
         }
 
-        let mut misses = self.miss_count.write().await;
-        *misses += 1;
+        self.miss_count.fetch_add(1, Ordering::Relaxed);
         debug!("缓存未命中: {} 活跃订单", symbol);
         None
     }
 
     /// 缓存活跃订单
     pub async fn set_open_orders(&self, symbol: String, orders: Vec<Order>) {
-        let mut cache = self.open_orders.write().await;
-        cache.insert(
+        self.open_orders.insert(
             symbol.clone(),
             CacheItem::new(orders.clone(), self.default_ttl),
         );
@@ -87,25 +82,21 @@ impl OrderCache {
 
     /// 获取单个订单缓存
     pub async fn get_order(&self, order_id: &str) -> Option<Order> {
-        let cache = self.order_by_id.read().await;
-
-        if let Some(item) = cache.get(order_id) {
+        if let Some(item) = self.order_by_id.get(order_id) {
             if !item.is_expired() {
-                let mut hits = self.hit_count.write().await;
-                *hits += 1;
+                self.hit_count.fetch_add(1, Ordering::Relaxed);
                 return Some(item.data.clone());
             }
         }
 
-        let mut misses = self.miss_count.write().await;
-        *misses += 1;
+        self.miss_count.fetch_add(1, Ordering::Relaxed);
         None
     }
 
     /// 缓存单个订单
     pub async fn set_order(&self, order: Order) {
-        let mut cache = self.order_by_id.write().await;
-        cache.insert(order.id.clone(), CacheItem::new(order, self.default_ttl));
+        self.order_by_id
+            .insert(order.id.clone(), CacheItem::new(order, self.default_ttl));
     }
 
     /// 通过WebSocket更新订单状态
@@ -114,8 +105,7 @@ impl OrderCache {
         self.set_order(order.clone()).await;
 
         // 更新活跃订单列表
-        let mut open_orders = self.open_orders.write().await;
-        if let Some(item) = open_orders.get_mut(symbol) {
+        if let Some(mut item) = self.open_orders.get_mut(symbol) {
             // 查找并更新订单
             let mut found = false;
             for cached_order in &mut item.data {
@@ -143,17 +133,14 @@ impl OrderCache {
 
     /// 清理过期缓存
     pub async fn cleanup(&self) {
-        let mut open_orders = self.open_orders.write().await;
-        let mut order_by_id = self.order_by_id.write().await;
+        let before_open = self.open_orders.len();
+        let before_single = self.order_by_id.len();
 
-        let before_open = open_orders.len();
-        let before_single = order_by_id.len();
+        self.open_orders.retain(|_, item| !item.is_expired());
+        self.order_by_id.retain(|_, item| !item.is_expired());
 
-        open_orders.retain(|_, item| !item.is_expired());
-        order_by_id.retain(|_, item| !item.is_expired());
-
-        let removed_open = before_open - open_orders.len();
-        let removed_single = before_single - order_by_id.len();
+        let removed_open = before_open - self.open_orders.len();
+        let removed_single = before_single - self.order_by_id.len();
 
         if removed_open > 0 || removed_single > 0 {
             info!(
@@ -165,8 +152,8 @@ impl OrderCache {
 
     /// 获取缓存统计
     pub async fn get_stats(&self) -> (u64, u64, f64) {
-        let hits = *self.hit_count.read().await;
-        let misses = *self.miss_count.read().await;
+        let hits = self.hit_count.load(Ordering::Relaxed);
+        let misses = self.miss_count.load(Ordering::Relaxed);
         let total = hits + misses;
         let hit_rate = if total > 0 {
             (hits as f64 / total as f64) * 100.0
@@ -179,14 +166,13 @@ impl OrderCache {
 
     /// 使特定订单的缓存失效
     pub async fn invalidate_order(&self, order_id: &str) {
-        let mut order_by_id = self.order_by_id.write().await;
-        if order_by_id.remove(order_id).is_some() {
+        if self.order_by_id.remove(order_id).is_some() {
             debug!("订单缓存失效: {}", order_id);
         }
 
         // 也从活跃订单缓存中移除
-        let mut open_orders = self.open_orders.write().await;
-        for (symbol, item) in open_orders.iter_mut() {
+        for mut item in self.open_orders.iter_mut() {
+            let symbol = item.key().clone();
             let original_len = item.data.len();
             item.data.retain(|o| o.id != order_id);
             if item.data.len() != original_len {
@@ -198,19 +184,15 @@ impl OrderCache {
 
     /// 使特定交易对的活跃订单缓存失效
     pub async fn invalidate_open_orders(&self, symbol: &str) {
-        let mut open_orders = self.open_orders.write().await;
-        if open_orders.remove(symbol).is_some() {
+        if self.open_orders.remove(symbol).is_some() {
             debug!("活跃订单缓存失效: {}", symbol);
         }
     }
 
     /// 清空所有缓存
     pub async fn clear(&self) {
-        let mut open_orders = self.open_orders.write().await;
-        let mut order_by_id = self.order_by_id.write().await;
-
-        open_orders.clear();
-        order_by_id.clear();
+        self.open_orders.clear();
+        self.order_by_id.clear();
 
         info!("所有订单缓存已清空");
     }

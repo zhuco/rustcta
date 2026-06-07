@@ -1,4 +1,4 @@
-# 对冲网格策略开发文档
+# multi_hedged_grid 内部对冲网格引擎文档
 
 ## 1. 策略概述
 - **目标**：通过在多个高相关交易对上配置多空底仓与网格，持续捕捉价差收益并降低底仓成本。
@@ -6,7 +6,7 @@
   - 每个交易对可独立设定底仓方向（Long/Short）与网格参数。
   - 多币种组合中同时存在做多网格与做空网格，实现组合级对冲。
   - 库存不足时，自动将网格中心贴近最新成交价，维持做 T 频率。
-  - 成交后的挂单补单流程复用现有趋势网格 / 自动网格的实现。
+  - 成交后的挂单补单流程由 `src/strategies/hedged_grid` 内部引擎维护。
 
 ## 2. 适用场景与收益来源
 - **行情条件**：主流币、平台币、L2 核心标的等具有高流动性、强相关性，波动中枢呈缓慢趋势或震荡；对极端单边行情需配套杀阈。
@@ -20,7 +20,7 @@
 | 功能 | 复用模块 | 说明 |
 | --- | --- | --- |
 | 账户管理 & 下单 | `cta::account_manager` + `exchanges::*` | 使用统一的 `OrderRequest` 与 `create_batch_orders`；保留 Binance 批量下单修复。 |
-| 网格补单引擎 | `strategies::trend_grid_v2::operations` | 成交 → 撤边缘 → 补单流程复用，减少重复开发。 |
+| 网格补单引擎 | `strategies::hedged_grid::engine` | 作为 `multi_hedged_grid` 的单 symbol 内部引擎，维护成交 -> 撤边缘 -> 补单流程。 |
 | 行情缓存 | `mean_reversion::model::SymbolSnapshot` + `common::shared_data` | 可选，用于波动率/趋势评估与网格自适应。 |
 | 风控／通知 | `common::application` + `utils::webhook` | 共享统一风控接口与企业微信通知渠道。 |
 
@@ -28,10 +28,10 @@
 ```
 src/strategies/hedged_grid/
 ├── config.rs      # 策略配置、底仓与网格定义
-├── mod.rs         # 对外导出，注册 StrategyInstance
+├── mod.rs         # 内部模块导出
 ├── controller.rs  # 配置解析、依赖注入、任务启动
 ├── manager.rs     # 每个交易对的运行状态（底仓、网格中心、敞口）
-├── grid_engine.rs # 调用 trend_grid 补单逻辑，生成价位与数量
+├── engine.rs      # 生成价位、数量和补单动作
 ├── hedging.rs     # 相关性计算、权重再平衡、底仓调节
 ├── risk.rs        # 组合保证金、回撤、资金费率风控
 ├── tasks.rs       # 行情订阅、定时调度、心跳检查
@@ -46,7 +46,7 @@ src/strategies/hedged_grid/
    - `kill_switch`：极端行情触发条件（如价格跌破关键支撑、净敞口超标、实时 VaR 超阈）。
 2. **初始化**：
    - 查询账户当前持仓、资金费率、最新行情与历史波动，计算底仓差值与可用保证金。
-   - 通过 `trend_grid_v2::operations::reset_grid` 生成首批挂单；若波动率 > 上限则放宽 spacing 或暂缓部署。
+   - 通过 `hedged_grid::GridEngine::rebuild_grid` 生成首批挂单；若波动率 > 上限则放宽 spacing 或暂缓部署。
 3. **实时执行**：
    - 成交 → 撤销最远端订单 → 根据 spacing/vol-adjusted spacing 重新补单（复用现有补单逻辑）。
    - 底仓不足时，根据库存偏差回归系数将网格中心贴近最新价；底仓超限时削减近端网格或主动冲击平仓。
@@ -71,7 +71,7 @@ src/strategies/hedged_grid/
 ## 7. 配置示例
 ```yaml
 strategy:
-  name: "Hedged Grid"
+  name: "multi_hedged_grid"
   enabled: true
   market_type: "Futures"
 
@@ -116,13 +116,13 @@ execution:
 
 logging:
   level: "info"
-  file: "logs/hedged_grid.log"
+  file: "logs/multi_hedged_grid.log"
 ```
 
 ## 8. 开发步骤
 1. **配置与模型**：在 `config.rs` 定义新结构，解析 YAML 时复用 `serde`。
 2. **状态管理**：扩展运行时状态记录底仓、网格中心、敞口、补单队列、波动指标、资金费率、回撤曲线。
-3. **网格引擎**：通过适配器调用 `trend_grid_v2::operations::submit_orders`，并增加波动自适应与库存偏差约束。
+3. **网格引擎**：通过 `multi_hedged_grid` 内部的 `hedged_grid` 引擎生成订单动作，并增加波动自适应与库存偏差约束。
 4. **对冲模块**：实现 `hedging.rs`，计算相关矩阵、敞口差值，触发底仓调整或网格移位；支持资金费率与跨市场对冲策略。
 5. **风控串联**：使用 `common::build_unified_risk_evaluator` 叠加组合级风险指标、Kill Switch、VaR/回撤监控。
 6. **任务调度**：参考 `range_grid::application::tasks`，实现行情订阅、定期再平衡、风险扫描、资金费率检查。

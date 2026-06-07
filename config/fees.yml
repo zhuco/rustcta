@@ -74,14 +74,52 @@ fees:
       fee_asset: quote
       reason: "special campaign fee"
 
+  side_overrides:
+    - exchange: gateio
+      market_type: spot
+      side: Buy
+      symbol: VSNUSDT
+      maker_bps: 30
+      taker_bps: 30
+      fee_asset: base
+      rebate_ratio: 0.8
+      reason: "VSN spot account fee: buy charges base asset; 80% fee rebate"
+    - exchange: gateio
+      market_type: spot
+      side: Sell
+      symbol: VSNUSDT
+      maker_bps: 10
+      taker_bps: 10
+      fee_asset: quote
+      rebate_ratio: 0.8
+      reason: "VSN spot account fee: sell charges USDT; 80% fee rebate"
+    - exchange: bitget
+      market_type: spot
+      side: Buy
+      symbol: VSNUSDT
+      maker_bps: 10
+      taker_bps: 10
+      fee_asset: platform_token
+      rebate_ratio: 0.6
+      reason: "VSN spot account fee with BGB discount and 60% fee rebate"
+    - exchange: bitget
+      market_type: spot
+      side: Sell
+      symbol: VSNUSDT
+      maker_bps: 10
+      taker_bps: 10
+      fee_asset: platform_token
+      rebate_ratio: 0.6
+      reason: "VSN spot account fee with BGB discount and 60% fee rebate"
+
   platform_tokens:
     - exchange: gateio
       token: GT
-      enabled: false
+      enabled: true
       discount_multiplier: 0.8
     - exchange: bitget
       token: BGB
-      enabled: false
+      enabled: true
       discount_multiplier: 0.8
     - exchange: binance
       token: BNB

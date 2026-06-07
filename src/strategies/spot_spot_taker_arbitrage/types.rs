@@ -56,6 +56,7 @@ pub struct CommonSymbolRules {
     pub coinex: SymbolRule,
     pub gateio: Option<SymbolRule>,
     pub bitget: Option<SymbolRule>,
+    pub kucoin: Option<SymbolRule>,
 }
 
 impl CommonSymbolRules {
@@ -79,6 +80,7 @@ pub enum RejectionReason {
     InsufficientQuoteBalance,
     InsufficientBaseBalance,
     NetSpreadBelowThreshold,
+    AbnormalSpread,
     NotionalLimit,
     Cooldown,
     ExchangeHealth,

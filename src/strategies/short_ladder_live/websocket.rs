@@ -1,9 +1,9 @@
+use crate::core::ws_connect::connect_async;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use tokio::time::{sleep, Duration as TokioDuration};
-use tokio_tungstenite::connect_async;
 
 use super::logging;
 use super::ShortLadderLiveStrategy;

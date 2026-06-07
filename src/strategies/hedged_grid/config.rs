@@ -1,327 +1,510 @@
 use serde::{Deserialize, Serialize};
 
-/// 策略基础信息
+use crate::core::types::OrderSide;
+
+use crate::core::types::MarketType;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StrategyInfo {
-    pub name: String,
-    pub version: String,
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    #[serde(default = "default_strategy_type")]
-    pub strategy_type: String,
-    #[serde(default = "default_market_type")]
-    pub market_type: String,
+pub struct StrategyConfig {
+    pub symbol: String,
+    #[serde(default = "default_require_hedge_mode")]
+    pub require_hedge_mode: bool,
+    #[serde(default)]
+    pub price_reference: PriceReference,
+    #[serde(default)]
+    pub risk_reference: RiskReference,
+    pub grid: GridConfig,
+    pub follow: FollowConfig,
+    pub execution: ExecutionConfig,
+    pub precision: PrecisionConfig,
+    pub fees: FeeConfig,
+    pub risk: RiskLimits,
 }
 
-/// 全局账户配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BaseAccountConfig {
+pub struct StrategyMeta {
+    pub name: String,
+    #[serde(default)]
+    pub log_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountConfig {
     pub account_id: String,
     #[serde(default = "default_market_type")]
-    pub market_type: String,
+    pub market_type: MarketType,
 }
 
-/// 网格精度配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollingConfig {
+    #[serde(default = "default_tick_interval_ms")]
+    pub tick_interval_ms: u64,
+    #[serde(default = "default_reconcile_interval_ms")]
+    pub reconcile_interval_ms: u64,
+    #[serde(default = "default_trade_fetch_limit")]
+    pub trade_fetch_limit: u32,
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    #[serde(default = "default_watchdog_timeout_secs")]
+    pub watchdog_timeout_secs: u64,
+    #[serde(default = "default_trade_reconcile_interval_ms")]
+    pub trade_reconcile_interval_ms: u64,
+    #[serde(default = "default_cancel_unknown_interval_ms")]
+    pub cancel_unknown_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSocketRuntimeConfig {
+    #[serde(default = "default_ws_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_ws_keepalive_interval_secs")]
+    pub keepalive_interval_secs: u64,
+    #[serde(default = "default_ws_reconnect_delay_ms")]
+    pub reconnect_delay_ms: u64,
+    #[serde(default = "default_ws_max_reconnect_delay_ms")]
+    pub max_reconnect_delay_ms: u64,
+}
+
+impl Default for WebSocketRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_ws_enabled(),
+            keepalive_interval_secs: default_ws_keepalive_interval_secs(),
+            reconnect_delay_ms: default_ws_reconnect_delay_ms(),
+            max_reconnect_delay_ms: default_ws_max_reconnect_delay_ms(),
+        }
+    }
+}
+
+impl Default for PollingConfig {
+    fn default() -> Self {
+        Self {
+            tick_interval_ms: default_tick_interval_ms(),
+            reconcile_interval_ms: default_reconcile_interval_ms(),
+            trade_fetch_limit: default_trade_fetch_limit(),
+            request_timeout_secs: default_request_timeout_secs(),
+            watchdog_timeout_secs: default_watchdog_timeout_secs(),
+            trade_reconcile_interval_ms: default_trade_reconcile_interval_ms(),
+            cancel_unknown_interval_ms: default_cancel_unknown_interval_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeExecutionConfig {
+    #[serde(default = "default_startup_cancel_all")]
+    pub startup_cancel_all: bool,
+    #[serde(default = "default_shutdown_cancel_all")]
+    pub shutdown_cancel_all: bool,
+    #[serde(default = "default_max_consecutive_failures")]
+    pub max_consecutive_failures: u32,
+}
+
+impl Default for RuntimeExecutionConfig {
+    fn default() -> Self {
+        Self {
+            startup_cancel_all: default_startup_cancel_all(),
+            shutdown_cancel_all: default_shutdown_cancel_all(),
+            max_consecutive_failures: default_max_consecutive_failures(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeConfig {
+    pub strategy: StrategyMeta,
+    pub account: AccountConfig,
+    pub engine: StrategyConfig,
+    #[serde(default)]
+    pub polling: PollingConfig,
+    #[serde(default)]
+    pub websocket: WebSocketRuntimeConfig,
+    #[serde(default)]
+    pub execution: RuntimeExecutionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridConfig {
+    pub levels_per_side: usize,
+    #[serde(default = "default_grid_spacing_pct")]
+    pub grid_spacing_pct: f64,
+    #[serde(default)]
+    pub grid_spacing_abs: Option<f64>,
+    pub order_notional: f64,
+    #[serde(default)]
+    pub order_qty: Option<f64>,
+    #[serde(default = "default_strict_pairing")]
+    pub strict_pairing: bool,
+    #[serde(default = "default_fill_remaining_slots_with_opens")]
+    pub fill_remaining_slots_with_opens: bool,
+    #[serde(default = "default_refill_open_slots_enabled")]
+    pub refill_open_slots_enabled: bool,
+    #[serde(default = "default_normalize_open_grid_enabled")]
+    pub normalize_open_grid_enabled: bool,
+    #[serde(default = "default_follow_open_enabled")]
+    pub follow_open_enabled: bool,
+    #[serde(default = "default_repair_near_gap_enabled")]
+    pub repair_near_gap_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowConfig {
+    #[serde(default = "default_max_gap_steps")]
+    pub max_gap_steps: f64,
+    #[serde(default = "default_follow_cooldown_ms")]
+    pub follow_cooldown_ms: u64,
+    #[serde(default = "default_max_follow_actions_per_minute")]
+    pub max_follow_actions_per_minute: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionConfig {
+    #[serde(default = "default_cooldown_ms")]
+    pub cooldown_ms: u64,
+    #[serde(default = "default_post_only")]
+    pub post_only: bool,
+    #[serde(default = "default_post_only_retries")]
+    pub post_only_retries: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrecisionConfig {
-    pub price_step: f64,
-    pub amount_step: f64,
+    pub tick_size: f64,
+    pub step_size: f64,
+    #[serde(default)]
+    pub min_qty: Option<f64>,
     #[serde(default)]
     pub min_notional: Option<f64>,
     #[serde(default)]
     pub price_digits: Option<u32>,
     #[serde(default)]
-    pub amount_digits: Option<u32>,
+    pub qty_digits: Option<u32>,
 }
 
-/// 网格配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GridConfig {
-    /// 网格间距（价差）
-    pub spacing: f64,
-    /// 网格间距模式：绝对价差或百分比
-    #[serde(default = "default_spacing_mode")]
-    pub spacing_mode: SpacingMode,
-    /// 单笔下单数量（基础币数量）
-    pub order_size: f64,
-    /// 每侧网格层数
-    #[serde(default = "default_levels_per_side")]
-    pub levels_per_side: u32,
-    /// 网格刷新间隔（秒）
-    #[serde(default = "default_refresh_interval")]
-    pub refresh_interval_secs: u64,
+pub struct FeeConfig {
+    pub maker_fee: f64,
+    pub taker_fee: f64,
 }
 
-impl GridConfig {
-    pub fn spacing_mode(&self) -> SpacingMode {
-        self.spacing_mode
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RiskLimits {
+    pub max_net_notional: f64,
+    pub max_total_notional: f64,
+    pub margin_ratio_limit: f64,
+    pub funding_rate_limit: f64,
+    pub funding_cost_limit: f64,
 }
 
-/// 网格间距模式
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum SpacingMode {
-    Absolute,
-    Percentage,
+pub enum PriceReference {
+    Mid,
+    Last,
 }
 
-impl Default for SpacingMode {
+impl Default for PriceReference {
     fn default() -> Self {
-        SpacingMode::Absolute
+        PriceReference::Mid
     }
 }
 
-/// 底仓方向
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum SymbolDirection {
-    Long,
-    Short,
+pub enum RiskReference {
+    Mark,
+    Last,
 }
 
-impl Default for SymbolDirection {
+impl Default for RiskReference {
     fn default() -> Self {
-        SymbolDirection::Long
+        RiskReference::Mark
     }
 }
 
-/// 单个交易对配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SymbolConfig {
-    pub config_id: String,
-    pub symbol: String,
-    #[serde(default)]
-    pub direction: SymbolDirection,
-    #[serde(default)]
-    pub account_id: Option<String>,
-    /// 目标底仓（正值代表多仓，负值代表空仓）
-    #[serde(default)]
-    pub target_position: f64,
-    /// 最低库存占目标底仓比例（0-1），用于触发补仓护栏
-    #[serde(default)]
-    pub min_inventory_ratio: Option<f64>,
-    /// 最低库存（按报价货币计价）
-    #[serde(default)]
-    pub min_inventory_quote: Option<f64>,
-    /// 最大允许绝对仓位
-    #[serde(default = "default_position_limit")]
-    pub position_limit: f64,
-    /// 最大允许仓位（按报价货币计价）
-    #[serde(default)]
-    pub position_limit_quote: Option<f64>,
-    #[serde(default = "default_enable_flag")]
-    pub enabled: bool,
-    pub grid: GridConfig,
-    pub precision: PrecisionConfig,
+#[derive(Debug, Clone)]
+pub struct ResolvedPrecision {
+    pub tick_size: f64,
+    pub step_size: f64,
+    pub min_qty: f64,
+    pub min_notional: f64,
+    pub price_digits: u32,
+    pub qty_digits: u32,
 }
 
-/// 对冲矩阵配置（预留）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct HedgeMatrixConfig {
-    #[serde(default)]
-    pub correlation_window: Option<u64>,
-    #[serde(default)]
-    pub min_correlation: Option<f64>,
-    #[serde(default)]
-    pub rebalance_interval: Option<u64>,
-}
-
-/// 风控配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RiskControlConfig {
-    #[serde(default = "default_max_leverage")]
-    pub max_leverage: f64,
-    #[serde(default = "default_drawdown_pct")]
-    pub max_drawdown_pct: f64,
-    #[serde(default = "default_daily_loss")]
-    pub max_daily_loss: f64,
-    #[serde(default)]
-    pub emergency_stop_trigger: Option<f64>,
-}
-
-/// 执行配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionConfig {
-    #[serde(default = "bool_true")]
-    pub startup_cancel_all: bool,
-    #[serde(default = "bool_true")]
-    pub shutdown_cancel_all: bool,
-    #[serde(default = "default_rebalance_interval")]
-    pub rebalance_interval_secs: u64,
-    #[serde(default = "default_taker_reset_delay")]
-    pub taker_reset_delay_secs: u64,
-    #[serde(default)]
-    pub process_per_symbol: bool,
-}
-
-/// 日志配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingConfig {
-    #[serde(default = "default_log_level")]
-    pub level: String,
-    #[serde(default = "default_log_file")]
-    pub file: String,
-    #[serde(default = "bool_true")]
-    pub console: bool,
-}
-
-/// 对冲网格策略配置总览
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HedgedGridConfig {
-    pub strategy: StrategyInfo,
-    pub base_account: BaseAccountConfig,
-    pub symbols: Vec<SymbolConfig>,
-    #[serde(default)]
-    pub hedge_matrix: Option<HedgeMatrixConfig>,
-    #[serde(default = "default_risk_control")]
-    pub risk_control: RiskControlConfig,
-    #[serde(default = "default_execution")]
-    pub execution: ExecutionConfig,
-    #[serde(default = "default_logging")]
-    pub logging: LoggingConfig,
-}
-
-impl HedgedGridConfig {
+impl StrategyConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if !self.strategy.enabled {
-            return Err("策略未启用".to_string());
+        if self.symbol.trim().is_empty() {
+            return Err("symbol 不能为空".to_string());
         }
-        if self.symbols.is_empty() {
-            return Err("至少配置一个交易对".to_string());
+        if !(1..=10).contains(&self.grid.levels_per_side) {
+            return Err("levels_per_side 必须在 1..=10".to_string());
         }
-        for symbol in &self.symbols {
-            if symbol.grid.spacing <= 0.0 {
-                return Err(format!("{} spacing 必须大于0", symbol.config_id));
+        if let Some(abs) = self.grid.grid_spacing_abs {
+            if abs <= 0.0 {
+                return Err("grid_spacing_abs 必须大于0".to_string());
             }
-            if symbol.grid.order_size <= 0.0 {
-                return Err(format!("{} order_size 必须大于0", symbol.config_id));
+        } else if self.grid.grid_spacing_pct <= 0.0 {
+            return Err("grid_spacing_pct 必须大于0".to_string());
+        }
+        if let Some(qty) = self.grid.order_qty {
+            if qty <= 0.0 {
+                return Err("order_qty 必须大于0".to_string());
             }
-            match symbol.grid.spacing_mode {
-                SpacingMode::Absolute | SpacingMode::Percentage => {}
-            }
-            if symbol.grid.levels_per_side == 0 {
-                return Err(format!("{} levels_per_side 必须大于0", symbol.config_id));
-            }
-            if symbol.position_limit <= 0.0 {
-                return Err(format!("{} position_limit 必须大于0", symbol.config_id));
-            }
-            if let Some(min_quote) = symbol.min_inventory_quote {
-                if min_quote < 0.0 {
-                    return Err(format!(
-                        "{} min_inventory_quote 不能为负数",
-                        symbol.config_id
-                    ));
-                }
-            }
-            if let Some(limit_quote) = symbol.position_limit_quote {
-                if limit_quote <= 0.0 {
-                    return Err(format!(
-                        "{} position_limit_quote 必须大于0",
-                        symbol.config_id
-                    ));
-                }
-            }
-            if let Some(ratio) = symbol.min_inventory_ratio {
-                if !(0.0..=1.0).contains(&ratio) {
-                    return Err(format!(
-                        "{} min_inventory_ratio 必须在0到1之间",
-                        symbol.config_id
-                    ));
-                }
-            }
+        } else if self.grid.order_notional <= 0.0 {
+            return Err("order_notional 必须大于0".to_string());
+        }
+        if self.precision.tick_size <= 0.0 || self.precision.step_size <= 0.0 {
+            return Err("tick_size/step_size 必须大于0".to_string());
         }
         Ok(())
     }
 }
 
-fn default_enabled() -> bool {
+impl PrecisionConfig {
+    pub fn resolve(&self) -> ResolvedPrecision {
+        let price_digits = self
+            .price_digits
+            .unwrap_or_else(|| precision_from_step(self.tick_size));
+        let qty_digits = self
+            .qty_digits
+            .unwrap_or_else(|| precision_from_step(self.step_size));
+        let min_qty = self.min_qty.unwrap_or(self.step_size);
+        let min_notional = self.min_notional.unwrap_or(0.0);
+        ResolvedPrecision {
+            tick_size: self.tick_size,
+            step_size: self.step_size,
+            min_qty,
+            min_notional,
+            price_digits,
+            qty_digits,
+        }
+    }
+}
+
+impl ResolvedPrecision {
+    pub fn quantize_price(&self, price: f64) -> f64 {
+        if price <= 0.0 {
+            return 0.0;
+        }
+        apply_precision(price, self.tick_size, self.price_digits)
+    }
+
+    pub fn quantize_price_for_side(&self, price: f64, side: OrderSide) -> f64 {
+        if price <= 0.0 {
+            return 0.0;
+        }
+        // 防止浮点边界误差导致二次量化时多跳一个 tick。
+        let eps = 1e-9;
+        let adjusted = if self.tick_size > 0.0 {
+            let multiples = price / self.tick_size;
+            match side {
+                OrderSide::Buy => (multiples + eps).floor() * self.tick_size,
+                OrderSide::Sell => (multiples - eps).ceil() * self.tick_size,
+            }
+        } else {
+            price
+        };
+        let factor = 10f64.powi(self.price_digits as i32);
+        match side {
+            OrderSide::Buy => ((adjusted * factor) + eps).floor() / factor,
+            OrderSide::Sell => ((adjusted * factor) - eps).ceil() / factor,
+        }
+    }
+
+    pub fn quantize_qty(&self, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+        apply_precision(qty, self.step_size, self.qty_digits)
+    }
+
+    pub fn quantize_qty_up(&self, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+        let eps = 1e-9;
+        let adjusted = if self.step_size > 0.0 {
+            let multiples = ((qty / self.step_size) - eps).ceil();
+            multiples * self.step_size
+        } else {
+            qty
+        };
+        let factor = 10f64.powi(self.qty_digits as i32);
+        ((adjusted * factor) - eps).ceil() / factor
+    }
+
+    pub fn quantize_qty_nearest(&self, qty: f64) -> f64 {
+        if qty <= 0.0 {
+            return 0.0;
+        }
+        let adjusted = if self.step_size > 0.0 {
+            let multiples = (qty / self.step_size).round();
+            multiples * self.step_size
+        } else {
+            qty
+        };
+        let factor = 10f64.powi(self.qty_digits as i32);
+        (adjusted * factor).round() / factor
+    }
+}
+
+fn default_require_hedge_mode() -> bool {
     true
 }
 
-fn default_strategy_type() -> String {
-    "HedgedGrid".to_string()
+fn default_market_type() -> MarketType {
+    MarketType::Futures
 }
 
-fn default_market_type() -> String {
-    "Futures".to_string()
+fn default_fill_remaining_slots_with_opens() -> bool {
+    true
 }
 
-fn default_levels_per_side() -> u32 {
-    2
+fn default_refill_open_slots_enabled() -> bool {
+    true
 }
 
-fn default_refresh_interval() -> u64 {
-    60
+fn default_normalize_open_grid_enabled() -> bool {
+    true
 }
 
-fn default_spacing_mode() -> SpacingMode {
-    SpacingMode::Absolute
+fn default_follow_open_enabled() -> bool {
+    true
 }
 
-fn default_position_limit() -> f64 {
+fn default_repair_near_gap_enabled() -> bool {
+    false
+}
+
+fn default_grid_spacing_pct() -> f64 {
+    0.0
+}
+
+fn default_strict_pairing() -> bool {
+    false
+}
+
+fn default_max_gap_steps() -> f64 {
     1.0
 }
 
-fn default_max_leverage() -> f64 {
-    2.0
+fn default_follow_cooldown_ms() -> u64 {
+    800
 }
 
-fn default_drawdown_pct() -> f64 {
-    0.12
+fn default_max_follow_actions_per_minute() -> usize {
+    30
 }
 
-fn default_daily_loss() -> f64 {
-    100.0
+fn default_cooldown_ms() -> u64 {
+    500
 }
 
-fn bool_true() -> bool {
+fn default_post_only() -> bool {
     true
 }
 
-fn default_rebalance_interval() -> u64 {
-    120
-}
-
-fn default_taker_reset_delay() -> u64 {
+fn default_post_only_retries() -> u32 {
     3
 }
 
-fn default_log_level() -> String {
-    "info".to_string()
+fn default_tick_interval_ms() -> u64 {
+    1000
 }
 
-fn default_log_file() -> String {
-    "logs/strategies/hedged_grid.log".to_string()
+fn default_reconcile_interval_ms() -> u64 {
+    3000
 }
 
-fn default_risk_control() -> RiskControlConfig {
-    RiskControlConfig {
-        max_leverage: default_max_leverage(),
-        max_drawdown_pct: default_drawdown_pct(),
-        max_daily_loss: default_daily_loss(),
-        emergency_stop_trigger: None,
-    }
+fn default_trade_fetch_limit() -> u32 {
+    50
 }
 
-fn default_execution() -> ExecutionConfig {
-    ExecutionConfig {
-        startup_cancel_all: true,
-        shutdown_cancel_all: true,
-        rebalance_interval_secs: default_rebalance_interval(),
-        taker_reset_delay_secs: default_taker_reset_delay(),
-        process_per_symbol: false,
-    }
+fn default_request_timeout_secs() -> u64 {
+    15
 }
 
-fn default_logging() -> LoggingConfig {
-    LoggingConfig {
-        level: default_log_level(),
-        file: default_log_file(),
-        console: true,
-    }
+fn default_watchdog_timeout_secs() -> u64 {
+    60
 }
 
-fn default_enable_flag() -> bool {
+fn default_trade_reconcile_interval_ms() -> u64 {
+    30000
+}
+
+fn default_cancel_unknown_interval_ms() -> u64 {
+    60000
+}
+
+fn default_ws_enabled() -> bool {
     true
+}
+
+fn default_ws_keepalive_interval_secs() -> u64 {
+    1200
+}
+
+fn default_ws_reconnect_delay_ms() -> u64 {
+    1000
+}
+
+fn default_ws_max_reconnect_delay_ms() -> u64 {
+    30000
+}
+
+fn default_startup_cancel_all() -> bool {
+    true
+}
+
+fn default_shutdown_cancel_all() -> bool {
+    true
+}
+
+fn default_max_consecutive_failures() -> u32 {
+    5
+}
+
+fn precision_from_step(step: f64) -> u32 {
+    if step == 0.0 {
+        return 8;
+    }
+    let s = format!("{:.10}", step);
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() > 1 {
+        parts[1].trim_end_matches('0').len() as u32
+    } else {
+        0
+    }
+}
+
+fn apply_precision(value: f64, step: f64, digits: u32) -> f64 {
+    let eps = 1e-9;
+    let adjusted = if step > 0.0 {
+        ((value / step) + eps).floor() * step
+    } else {
+        value
+    };
+    let factor = 10f64.powi(digits as i32);
+    ((adjusted * factor) + eps).floor() / factor
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ResolvedPrecision;
+
+    #[test]
+    fn quantize_qty_up_should_not_overshoot_exact_step_after_rounding() {
+        let precision = ResolvedPrecision {
+            tick_size: 0.01,
+            step_size: 0.01,
+            min_qty: 0.01,
+            min_notional: 5.0,
+            price_digits: 2,
+            qty_digits: 2,
+        };
+
+        assert_eq!(precision.quantize_qty_up(5.0 / 83.32), 0.07);
+        assert_eq!(precision.quantize_qty_up(0.07), 0.07);
+    }
 }

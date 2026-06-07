@@ -53,8 +53,14 @@ pub fn build_report(
         .map(|check| check.message.clone())
         .collect::<Vec<_>>();
 
+    let live_target = config.target_mode.eq_ignore_ascii_case("live")
+        || config
+            .target_mode
+            .eq_ignore_ascii_case("small_live_taker_taker");
     let decision = if fail_count > 0 || !critical_failures.is_empty() {
         LiveReadinessDecision::Blocked
+    } else if live_target && config.require_api_key_trade_permission {
+        LiveReadinessDecision::ReadyForSmallLive
     } else if warn_count > 0 || unknown_count > 0 {
         LiveReadinessDecision::ReadyForLiveDryRun
     } else if config.require_api_key_trade_permission {

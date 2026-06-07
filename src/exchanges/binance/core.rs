@@ -829,6 +829,35 @@ impl BinanceExchange {
         Ok(new_listen_key)
     }
 
+    /// 设置 USD-M futures 自动撤销全部挂单倒计时。
+    ///
+    /// `timeout_secs = 0` 会取消已设置的倒计时；非零值会在交易所侧设置
+    /// `/fapi/v1/countdownCancelAll` 的 `countdownTime` 毫秒值。
+    pub async fn set_futures_countdown_cancel_all(
+        &self,
+        symbol: &str,
+        timeout_secs: u32,
+    ) -> Result<()> {
+        let exchange_symbol =
+            self.symbol_converter
+                .to_exchange_symbol(symbol, "binance", MarketType::Futures)?;
+        let mut params = HashMap::new();
+        params.insert("symbol".to_string(), exchange_symbol);
+        params.insert(
+            "countdownTime".to_string(),
+            timeout_secs.saturating_mul(1_000).to_string(),
+        );
+        let _response: serde_json::Value = self
+            .send_signed_request(
+                "POST",
+                "/fapi/v1/countdownCancelAll",
+                params,
+                MarketType::Futures,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// 发送认证请求
     async fn send_signed_request<T>(
         &self,

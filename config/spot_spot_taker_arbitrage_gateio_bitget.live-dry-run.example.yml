@@ -19,7 +19,7 @@ websocket:
   stale_book_ms: 1000
   reconnect_interval_ms: 1000
   max_reconnect_attempts: 0
-  record_books: true
+  record_books: false
   book_recording_path: data/gateio_bitget_books.jsonl
   record_top_of_book_only: true
   heartbeat_timeout_ms: 10000
@@ -29,7 +29,7 @@ live_dry_run:
   enabled: true
   build_order_requests: true
   submit_orders: false
-  max_notional_per_order: 5
+  max_notional_per_order: 10
   max_total_notional: 50
   require_preflight_pass: true
   require_fresh_books: true
@@ -97,7 +97,6 @@ small_live_gate:
   enabled_exchanges:
     - gateio
     - bitget
-  env_var: RUSTCTA_ENABLE_SMALL_LIVE
 
 live_preflight:
   enabled: true
@@ -131,6 +130,7 @@ live_preflight:
 
 monitoring:
   enabled: true
+  http_enabled: false
   bind_addr: "127.0.0.1:8080"
   expose_publicly: false
   require_token: true
@@ -139,12 +139,24 @@ monitoring:
   max_recent_trades: 500
   max_recent_risk_events: 500
   refresh_interval_ms: 1000
+  snapshot_path: data/control_api/dashboard_snapshot.json
 
 max_notional_per_trade: 5
 min_notional_per_trade: 1
 max_notional_per_symbol: 50
 max_total_notional: 50
-min_net_spread_bps: 5
+max_enabled_arbitrage_symbols: 5
+initial_entry_notional_usdt: 10
+spread_duration_threshold_seconds: 30
+entry_order_timeout_seconds: 30
+entry_maker_retries: 5
+active_taker_notional_usdt: 1.2
+inactivity_exit_seconds: 3600
+exit_order_timeout_seconds: 60
+exit_maker_retries: 10
+min_raw_spread_bps: 30
+min_net_spread_bps: 0
+max_raw_spread_bps: 1000
 taker_fee_bps_override: null
 fee_config_path: config/fees.yml
 disabled_registry_path: config/disabled_symbols.yml
@@ -176,14 +188,9 @@ initial_balances:
     USDT: 50
 
 gateio:
-  api_key: ${GATEIO_API_KEY}
-  api_secret: ${GATEIO_API_SECRET}
   base_url: https://api.gateio.ws/api/v4
   websocket_url: wss://api.gateio.ws/ws/v4/
 
 bitget:
-  api_key: ${BITGET_API_KEY}
-  api_secret: ${BITGET_API_SECRET}
-  passphrase: ${BITGET_API_PASSPHRASE}
   base_url: https://api.bitget.com
   websocket_url: wss://ws.bitget.com/v2/ws/public

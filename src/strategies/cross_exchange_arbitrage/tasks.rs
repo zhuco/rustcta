@@ -5,13 +5,14 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     load_jsonl_storage_events, scan_opportunities, ArbSignal, ArbitrageFillRecord,
-    ArbitrageMarketSnapshotRecord, ArbitrageOrderRecord, AsyncJsonlStorageSink, BundleReadModel,
-    CrossArbDashboardStatus, CrossArbStorageEvent, CrossExchangeArbitrageConfig,
-    HedgeRecordReadModel, HedgeRecordStatus, HedgeRepairTaskReadModel, HedgeRepairTaskStatus,
-    InMemoryStorageSink, MakerLegKind, MarketSnapshot, Opportunity, OpportunityReadModel,
-    OrderSide as StrategyOrderSide, PortfolioExposureSummary, PositionManager,
-    PrivateStreamHealthReadModel, RiskEventReadModel, RiskStateReadModel, RouteReadModel,
-    SimulatedBundleState, SimulatedBundleStatus, StorageSink, StrategyRiskState, StrategyRoute,
+    ArbitrageMarketSnapshotRecord, ArbitrageOrderRecord, AsyncJsonlStorageSink,
+    BundleCloseMetricReadModel, BundleReadModel, CrossArbDashboardStatus, CrossArbStorageEvent,
+    CrossExchangeArbitrageConfig, HedgeRecordReadModel, HedgeRecordStatus,
+    HedgeRepairTaskReadModel, HedgeRepairTaskStatus, InMemoryStorageSink, MakerLegKind,
+    MarketSnapshot, Opportunity, OpportunityReadModel, OrderSide as StrategyOrderSide,
+    PortfolioExposureSummary, PositionManager, PrivateStreamHealthReadModel, RiskEventReadModel,
+    RiskStateReadModel, RouteReadModel, SimulatedBundleState, SimulatedBundleStatus, StorageSink,
+    StrategyRiskState, StrategyRoute,
 };
 use crate::execution::{
     AccountSyncState, ArbitrageBundle, BundleLeg, ExchangePosition, FillEvent, OrderCommand,
@@ -1946,6 +1947,18 @@ impl CrossArbRuntime {
         signals
     }
 
+    pub fn record_instrument(
+        &mut self,
+        instrument: crate::market::InstrumentMeta,
+        now: DateTime<Utc>,
+    ) {
+        self.storage
+            .record(CrossArbStorageEvent::Instrument(instrument.clone()), now);
+        if let Some(storage) = self.persistent_storage.as_mut() {
+            storage.record(CrossArbStorageEvent::Instrument(instrument), now);
+        }
+    }
+
     pub fn on_private_event(&mut self, event: PrivateEvent) {
         let recorded_at = event.received_at;
         log_live_private_event(&self.state.config, &event);
@@ -1983,6 +1996,20 @@ impl CrossArbRuntime {
             if let Some(storage) = self.persistent_storage.as_mut() {
                 storage.record(CrossArbStorageEvent::HedgeRecord(record), recorded_at);
             }
+        }
+    }
+
+    pub fn persist_close_metric(
+        &mut self,
+        metric: BundleCloseMetricReadModel,
+        recorded_at: DateTime<Utc>,
+    ) {
+        self.storage.record(
+            CrossArbStorageEvent::CloseMetric(metric.clone()),
+            recorded_at,
+        );
+        if let Some(storage) = self.persistent_storage.as_mut() {
+            storage.record(CrossArbStorageEvent::CloseMetric(metric), recorded_at);
         }
     }
 
@@ -2285,6 +2312,16 @@ mod tests {
     use crate::market::{BookLevel, ExchangeSymbol, OrderBook5};
     use crate::strategies::cross_exchange_arbitrage::signal::ArbSignalAction;
 
+    fn config_with_universe(
+        symbols: Vec<CanonicalSymbol>,
+        enabled_exchanges: Vec<ExchangeId>,
+    ) -> CrossExchangeArbitrageConfig {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.symbols = symbols;
+        config.universe.enabled_exchanges = enabled_exchanges;
+        config
+    }
+
     fn book(exchange: ExchangeId, bid: f64, ask: f64) -> OrderBook5 {
         OrderBook5::new(
             exchange.clone(),
@@ -2536,12 +2573,15 @@ mod tests {
     #[test]
     fn runtime_should_block_open_for_symbol_with_unmanaged_account_position() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut config = config_with_universe(
+            vec![symbol.clone()],
+            vec![ExchangeId::Binance, ExchangeId::Gate],
+        );
         config.risk.orphan_exposure_blocks_new_entries = false;
         config.thresholds.min_open_raw_spread = 0.0;
         config.thresholds.min_open_maker_taker_net_edge = 0.0;
         let mut state = CrossArbRuntimeState::new(config, now);
-        let symbol = CanonicalSymbol::new("BTC", "USDT");
         state.replace_account_positions_from_rest(
             ExchangeId::Gate,
             &[ExchangePosition {
@@ -2584,13 +2624,15 @@ mod tests {
     #[test]
     fn runtime_should_delay_close_only_until_unpaired_threshold() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
+        let mut config = config_with_universe(
+            vec![
+                CanonicalSymbol::new("BTC", "USDT"),
+                CanonicalSymbol::new("ETH", "USDT"),
+                CanonicalSymbol::new("SOL", "USDT"),
+            ],
+            vec![ExchangeId::Gate, ExchangeId::Bitget],
+        );
         config.risk.orphan_close_only_after_count = 3;
-        config.universe.symbols = vec![
-            CanonicalSymbol::new("BTC", "USDT"),
-            CanonicalSymbol::new("ETH", "USDT"),
-            CanonicalSymbol::new("SOL", "USDT"),
-        ];
         let mut state = CrossArbRuntimeState::new(config, now);
 
         state.record_unpaired_exchange_positions(
@@ -2669,7 +2711,13 @@ mod tests {
     #[test]
     fn runtime_should_report_strategy_unpaired_account_positions() {
         let now = Utc::now();
-        let mut state = CrossArbRuntimeState::new(CrossExchangeArbitrageConfig::default(), now);
+        let mut state = CrossArbRuntimeState::new(
+            config_with_universe(
+                vec![CanonicalSymbol::new("BTC", "USDT")],
+                vec![ExchangeId::Gate],
+            ),
+            now,
+        );
 
         state.record_unpaired_exchange_positions(
             &[ExchangePosition {
@@ -2717,8 +2765,10 @@ mod tests {
     #[test]
     fn runtime_restore_should_ignore_external_position_pair_when_no_strategy_record() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
-        config.universe.symbols = vec![CanonicalSymbol::new("NEWT", "USDT")];
+        let config = config_with_universe(
+            vec![CanonicalSymbol::new("NEWT", "USDT")],
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate],
+        );
         let mut state = CrossArbRuntimeState::new(config, now);
         let symbol = CanonicalSymbol::new("NEWT", "USDT");
         let positions = vec![
@@ -2772,8 +2822,10 @@ mod tests {
     #[test]
     fn runtime_restore_should_reuse_persisted_hedge_record_for_position_pair() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
-        config.universe.symbols = vec![CanonicalSymbol::new("NEWT", "USDT")];
+        let config = config_with_universe(
+            vec![CanonicalSymbol::new("NEWT", "USDT")],
+            vec![ExchangeId::Binance, ExchangeId::Bitget],
+        );
         let mut state = CrossArbRuntimeState::new(config, now);
         let symbol = CanonicalSymbol::new("NEWT", "USDT");
         let original_id = "bundle-signal-crossarb-newtusdt-binance-bitget-longmakerbuy-1";
@@ -2861,8 +2913,10 @@ mod tests {
     #[test]
     fn runtime_restore_should_leave_residual_position_quantity_unpaired() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
-        config.universe.symbols = vec![CanonicalSymbol::new("SPCX", "USDT")];
+        let config = config_with_universe(
+            vec![CanonicalSymbol::new("SPCX", "USDT")],
+            vec![ExchangeId::Gate, ExchangeId::Bitget],
+        );
         let mut state = CrossArbRuntimeState::new(config, now);
         let symbol = CanonicalSymbol::new("SPCX", "USDT");
         let original_id = "bundle-signal-crossarb-spcxusdt-gate-bitget-longmakerbuy-1";
@@ -2950,8 +3004,10 @@ mod tests {
     #[test]
     fn runtime_restore_should_reuse_persisted_single_leg_repair_record() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
-        config.universe.symbols = vec![CanonicalSymbol::new("INIT", "USDT")];
+        let config = config_with_universe(
+            vec![CanonicalSymbol::new("INIT", "USDT")],
+            vec![ExchangeId::Gate, ExchangeId::Binance],
+        );
         let mut state = CrossArbRuntimeState::new(config, now);
         let symbol = CanonicalSymbol::new("INIT", "USDT");
         let bundle_id = "bundle-signal-crossarb-initusdt-gate-binance-longmakerbuy-1";
@@ -3029,8 +3085,10 @@ mod tests {
     #[test]
     fn runtime_restore_should_not_claim_repair_leg_as_single_existing_leg() {
         let now = Utc::now();
-        let mut config = CrossExchangeArbitrageConfig::default();
-        config.universe.symbols = vec![CanonicalSymbol::new("SPCX", "USDT")];
+        let config = config_with_universe(
+            vec![CanonicalSymbol::new("SPCX", "USDT")],
+            vec![ExchangeId::Gate, ExchangeId::Bitget],
+        );
         let mut state = CrossArbRuntimeState::new(config, now);
         let symbol = CanonicalSymbol::new("SPCX", "USDT");
         let bundle_id = "bundle-signal-crossarb-spcxusdt-gate-bitget-longmakerbuy-1";
@@ -3350,8 +3408,14 @@ mod tests {
     #[test]
     fn runtime_restore_should_reuse_existing_open_bundle_without_position_state() {
         let now = Utc::now();
-        let mut state = CrossArbRuntimeState::new(CrossExchangeArbitrageConfig::default(), now);
         let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut state = CrossArbRuntimeState::new(
+            config_with_universe(
+                vec![symbol.clone()],
+                vec![ExchangeId::Bitget, ExchangeId::Gate],
+            ),
+            now,
+        );
         state.open_bundles.insert(
             "bundle-signal-crossarb-btcusdt-bitget-gate-shortmakersell-1".to_string(),
             SimulatedBundleState {

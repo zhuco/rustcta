@@ -147,7 +147,7 @@ impl PositionReporter {
             }
         });
 
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let response = client.post(&self.webhook_url).json(&message).send().await?;
 
         if !response.status().is_success() {

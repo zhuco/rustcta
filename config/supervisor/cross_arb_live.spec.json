@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "strategy_id": "cross_arb_live",
+  "strategy_kind": "cross_exchange_arbitrage",
+  "run_id": "local",
+  "tenant_id": "local",
+  "config_path": "config/cross_exchange_arbitrage_usdt.yml",
+  "command": "cargo",
+  "args": [
+    "run",
+    "--bin",
+    "cross_arb_live",
+    "--",
+    "--config",
+    "config/cross_exchange_arbitrage_usdt.yml"
+  ],
+  "working_dir": ".",
+  "log_path": "logs/supervisor/cross_arb_live.log",
+  "restart_backoff_ms": 5000
+}

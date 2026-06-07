@@ -1211,11 +1211,12 @@ fn funding_client_order_id(
     suffix: i64,
     attempt: Option<u32>,
 ) -> String {
-    let exchange_code = compact_exchange_code(exchange);
-    match attempt {
-        Some(attempt) => format!("fa-{exchange_code}-{action}-{suffix}-{attempt}"),
-        None => format!("fa-{exchange_code}-{action}-{suffix}"),
-    }
+    rustcta_strategy_funding_arbitrage::funding_client_order_id(
+        compact_exchange_code(exchange),
+        action,
+        suffix,
+        attempt,
+    )
 }
 
 fn compact_exchange_code(exchange: &ExchangeId) -> &str {
@@ -1249,26 +1250,7 @@ async fn sleep_chrono(wait: ChronoDuration) {
 }
 
 fn next_scan_time(now: DateTime<Utc>, scan_minute: u32) -> Result<DateTime<Utc>> {
-    if scan_minute > 59 {
-        bail!("scan_minute must be <= 59");
-    }
-    let current_hour = Utc
-        .with_ymd_and_hms(
-            now.year(),
-            now.month(),
-            now.day(),
-            now.hour(),
-            scan_minute,
-            0,
-        )
-        .single()
-        .ok_or_else(|| anyhow!("failed to build current hour scan time"))?;
-    let next = if now < current_hour {
-        current_hour
-    } else {
-        current_hour + ChronoDuration::hours(1)
-    };
-    Ok(next)
+    rustcta_strategy_funding_arbitrage::next_scan_time(now, scan_minute)
 }
 
 fn option_f64(value: Option<f64>) -> String {

@@ -13,8 +13,9 @@ use crate::exchanges::unified::{
     MarketType, OrderBookSnapshot, OrderRequest, OrderSide, OrderType, PositionSide, SymbolRule,
     TimeInForce,
 };
-use crate::execution::{FeeCalculation, FeeLookupKey, FeeModel, FeeRole};
+use crate::execution::{FeeAssetMode, FeeCalculation, FeeLookupKey, FeeModel, FeeRole};
 use crate::risk::DisabledRegistry;
+use crate::utils::money;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LiveDryRunConfig {
@@ -72,6 +73,8 @@ impl LiveDryRunConfig {
 pub struct LiveDryRunOrderPlan {
     pub plan_id: String,
     pub timestamp: DateTime<Utc>,
+    #[serde(default = "default_plan_intent")]
+    pub intent: String,
     pub exchange: String,
     pub market_type: MarketType,
     pub symbol: String,
@@ -152,9 +155,58 @@ pub struct LiveDryRunOrderInput<'a> {
     pub fee_model: &'a FeeModel,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LiveDryRunOrderStyle {
+    pub order_type: OrderType,
+    pub time_in_force: Option<TimeInForce>,
+    pub price: Option<f64>,
+    pub request_price: Option<f64>,
+    pub fee_role: FeeRole,
+}
+
+impl LiveDryRunOrderStyle {
+    pub fn taker_limit(price: f64) -> Self {
+        Self {
+            order_type: OrderType::IOC,
+            time_in_force: Some(TimeInForce::IOC),
+            price: Some(price),
+            request_price: Some(price),
+            fee_role: FeeRole::Taker,
+        }
+    }
+
+    pub fn maker_post_only(price: f64) -> Self {
+        Self {
+            order_type: OrderType::PostOnly,
+            time_in_force: Some(TimeInForce::GTC),
+            price: Some(price),
+            request_price: Some(price),
+            fee_role: FeeRole::Maker,
+        }
+    }
+
+    pub fn market_taker(reference_price: f64) -> Self {
+        Self {
+            order_type: OrderType::Market,
+            time_in_force: None,
+            price: Some(reference_price),
+            request_price: None,
+            fee_role: FeeRole::Taker,
+        }
+    }
+}
+
 pub fn build_live_dry_run_order_plan(
     config: &LiveDryRunConfig,
     input: LiveDryRunOrderInput<'_>,
+) -> Result<LiveDryRunOrderPlan> {
+    build_live_dry_run_order_plan_with_style(config, input, None)
+}
+
+pub fn build_live_dry_run_order_plan_with_style(
+    config: &LiveDryRunConfig,
+    input: LiveDryRunOrderInput<'_>,
+    style: Option<LiveDryRunOrderStyle>,
 ) -> Result<LiveDryRunOrderPlan> {
     config.validate()?;
     let timestamp = Utc::now();
@@ -202,6 +254,8 @@ pub fn build_live_dry_run_order_plan(
         raw_price > 0.0,
         format!("price={raw_price}"),
     );
+    let style = style.unwrap_or_else(|| LiveDryRunOrderStyle::taker_limit(raw_price));
+    let raw_price = style.price.unwrap_or(raw_price);
 
     let capped_notional = input
         .desired_notional
@@ -221,12 +275,19 @@ pub fn build_live_dry_run_order_plan(
         input.side == OrderSide::Buy,
     );
     let raw_quantity = if rounded_price > 0.0 {
-        capped_notional / rounded_price
+        money::divide_f64(
+            capped_notional,
+            rounded_price,
+            "capped_notional",
+            "rounded_price",
+        )
+        .unwrap_or(capped_notional / rounded_price)
     } else {
         0.0
     };
     let rounded_quantity = round_quantity_to_step(raw_quantity, input.symbol_rule.step_size, false);
-    let notional = rounded_price * rounded_quantity;
+    let notional = money::notional_f64(rounded_price, rounded_quantity)
+        .unwrap_or(rounded_price * rounded_quantity);
 
     let client_order_id =
         generate_client_order_id(&exchange, input.market_type, "ldry").into_string();
@@ -241,10 +302,10 @@ pub fn build_live_dry_run_order_plan(
         symbol: input.symbol_rule.exchange_symbol.clone(),
         side: input.side,
         position_side: PositionSide::None,
-        order_type: OrderType::IOC,
-        time_in_force: Some(TimeInForce::IOC),
+        order_type: style.order_type,
+        time_in_force: style.time_in_force,
         quantity: rounded_quantity,
-        price: Some(rounded_price),
+        price: style.request_price,
         client_order_id: Some(client_order_id.clone()),
         reduce_only: false,
     };
@@ -258,21 +319,30 @@ pub fn build_live_dry_run_order_plan(
             .unwrap_or_else(|error| error.to_string()),
     );
 
-    let fee_estimate = input.fee_model.calculate_fee(
+    let fee_estimate = input.fee_model.calculate_fee_for_side(
         &FeeLookupKey {
             exchange: exchange.clone(),
             market_type: input.market_type,
             symbol: Some(symbol.clone()),
-            liquidity_role: FeeRole::Taker,
+            liquidity_role: style.fee_role,
         },
+        Some(input.side),
         notional,
     );
 
     let (required_balance_asset, required_balance_amount) = match input.side {
-        OrderSide::Buy => (
-            input.symbol_rule.quote_asset.clone(),
-            notional + fee_estimate.fee_amount,
-        ),
+        OrderSide::Buy => {
+            let quote_fee = if fee_estimate.fee_asset_mode == FeeAssetMode::Quote {
+                fee_estimate.fee_amount
+            } else {
+                0.0
+            };
+            (
+                input.symbol_rule.quote_asset.clone(),
+                money::add_f64(notional, quote_fee, "notional", "quote_fee")
+                    .unwrap_or(notional + quote_fee),
+            )
+        }
         OrderSide::Sell => (input.symbol_rule.base_asset.clone(), rounded_quantity),
     };
     let available = input
@@ -308,6 +378,7 @@ pub fn build_live_dry_run_order_plan(
     Ok(LiveDryRunOrderPlan {
         plan_id: format!("ldry-{}-{}", exchange, timestamp.timestamp_micros()),
         timestamp,
+        intent: default_plan_intent(),
         exchange,
         market_type: input.market_type,
         symbol,
@@ -328,6 +399,10 @@ pub fn build_live_dry_run_order_plan(
         rejection_reason,
         order_request: request,
     })
+}
+
+fn default_plan_intent() -> String {
+    "arbitrage".to_string()
 }
 
 pub fn append_live_dry_run_plan(path: impl AsRef<Path>, plan: &LiveDryRunOrderPlan) -> Result<()> {

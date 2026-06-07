@@ -18,9 +18,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    connect_async, tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
+    tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream,
 };
 
+use crate::core::ws_connect::connect_async;
 /// Hyperliquid 交易所实现（仅单向持仓）
 pub struct HyperliquidExchange {
     client: Client,
@@ -228,7 +229,7 @@ impl HyperliquidExchange {
         let signing_address = Self::signing_address_from_key(&signing_key);
 
         Self {
-            client: Client::new(),
+            client: crate::core::http2_fix::shared_http_client(),
             base_url,
             ws_url,
             account_address,

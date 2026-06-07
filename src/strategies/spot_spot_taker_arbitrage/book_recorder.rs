@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::data as shared_data;
 use crate::exchanges::unified::OrderBookLevel;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use crate::utils::rotating_file;
+use std::fs;
 use std::path::Path;
 
 use super::{BookSource, CachedBook};
@@ -191,8 +191,5 @@ pub fn append_book_record(path: &str, record: &BookRecord) -> std::io::Result<()
     if let Some(parent) = Path::new(path).parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    serde_json::to_writer(&mut file, record)?;
-    writeln!(file)?;
-    Ok(())
+    rotating_file::append_json_line(path, record)
 }

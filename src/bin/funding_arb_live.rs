@@ -30,7 +30,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    rustcta::utils::init_tracing_logger("info");
 
     let args = Args::parse();
     if !args.confirm_live_order {

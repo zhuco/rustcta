@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "strategy_id": "account_position_reporter",
+  "strategy_kind": "account_position_report",
+  "run_id": "local",
+  "tenant_id": "local",
+  "config_path": "config/account_position_reporter.yml",
+  "command": "cargo",
+  "args": [
+    "run",
+    "--bin",
+    "account_position_reporter",
+    "--",
+    "--config",
+    "config/account_position_reporter.yml"
+  ],
+  "working_dir": ".",
+  "log_path": "logs/supervisor/account_position_reporter.log",
+  "restart_backoff_ms": 5000
+}

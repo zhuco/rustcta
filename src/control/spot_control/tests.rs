@@ -50,6 +50,25 @@ fn enable_request(expected_version: u64) -> EnableSymbolRequest {
     }
 }
 
+#[test]
+fn disabled_inventory_states_should_allow_repeated_market_liquidation_request() {
+    assert!(validate_transition(
+        SpotSymbolLifecycleState::DisabledClean,
+        SpotSymbolLifecycleState::DisableRequested
+    )
+    .is_ok());
+    assert!(validate_transition(
+        SpotSymbolLifecycleState::DisabledWithInventory,
+        SpotSymbolLifecycleState::DisableRequested
+    )
+    .is_ok());
+    assert!(validate_transition(
+        SpotSymbolLifecycleState::DustRemaining,
+        SpotSymbolLifecycleState::DisableRequested
+    )
+    .is_ok());
+}
+
 fn runtime_rule(exchange: &str) -> SymbolRule {
     SymbolRule {
         exchange: exchange.to_string(),
@@ -163,6 +182,7 @@ fn runtime_fee_model() -> FeeModel {
                         maker_bps: 10.0,
                         taker_bps: 10.0,
                         fee_asset: Some("quote".to_string()),
+                        rebate_ratio: None,
                     },
                 )]),
             ),
@@ -174,6 +194,7 @@ fn runtime_fee_model() -> FeeModel {
                         maker_bps: 10.0,
                         taker_bps: 10.0,
                         fee_asset: Some("quote".to_string()),
+                        rebate_ratio: None,
                     },
                 )]),
             ),
@@ -568,6 +589,87 @@ async fn disabled_to_enable_requested_to_active_should_persist() {
 }
 
 #[tokio::test]
+async fn runtime_active_sync_should_persist_arbitraging_symbol() {
+    let dir = tempdir().unwrap();
+    let config = SpotSymbolControlConfig {
+        enabled: true,
+        command_store_path: dir
+            .path()
+            .join("commands.jsonl")
+            .to_string_lossy()
+            .to_string(),
+        audit_store_path: dir.path().join("audit.jsonl").to_string_lossy().to_string(),
+        lifecycle_store_path: dir
+            .path()
+            .join("symbols.jsonl")
+            .to_string_lossy()
+            .to_string(),
+        ..SpotSymbolControlConfig::default()
+    };
+    let service = SpotControlService::load_or_new(config.clone()).unwrap();
+    let request = enable_request(0);
+
+    let synced = service
+        .sync_runtime_active_symbol(
+            request.symbol.clone(),
+            request.selected_exchanges.clone(),
+            request.allowed_directions.clone(),
+            "strategy_runtime",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(synced.lifecycle_state, SpotSymbolLifecycleState::Active);
+    assert_eq!(synced.selected_exchanges, vec!["bitget", "gateio"]);
+    assert_eq!(synced.allowed_directions, request.allowed_directions);
+    let model = service.read_model().await;
+    assert!(model
+        .symbols
+        .iter()
+        .any(|symbol| symbol.internal_symbol == "AURORAUSDT"
+            && symbol.lifecycle_state == SpotSymbolLifecycleState::Active));
+
+    let reloaded = SpotControlService::load_or_new(config).unwrap();
+    let symbol = reloaded.symbol("AURORAUSDT").await.unwrap();
+    assert_eq!(symbol.lifecycle_state, SpotSymbolLifecycleState::Active);
+    assert_eq!(symbol.selected_exchanges, vec!["bitget", "gateio"]);
+    assert_eq!(symbol.version, 1);
+}
+
+#[tokio::test]
+async fn runtime_closed_sync_should_mark_active_symbol_disabled_clean() {
+    let service = SpotControlService::new_in_memory(SpotSymbolControlConfig {
+        enabled: true,
+        ..SpotSymbolControlConfig::default()
+    });
+    let request = enable_request(0);
+    service
+        .sync_runtime_active_symbol(
+            request.symbol,
+            request.selected_exchanges,
+            request.allowed_directions,
+            "strategy_runtime",
+        )
+        .await
+        .unwrap();
+
+    let synced = service
+        .sync_runtime_closed_symbol("AURORAUSDT".to_string(), "strategy_runtime", "exit_closed")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        synced.lifecycle_state,
+        SpotSymbolLifecycleState::DisabledClean
+    );
+    assert_eq!(
+        synced.disabled_reason_optional.as_deref(),
+        Some("exit_closed")
+    );
+    assert_eq!(synced.version, 2);
+}
+
+#[tokio::test]
 async fn duplicate_idempotency_key_should_return_previous_command() {
     let service = SpotControlService::new_in_memory(SpotSymbolControlConfig {
         enabled: true,
@@ -682,6 +784,61 @@ async fn market_liquidate_should_create_ioc_limit_dry_run_plan_only() {
     let model = service.read_model().await;
     assert_eq!(model.liquidation_plans.len(), 1);
     assert!(!model.liquidation_plans[0].would_submit_order);
+}
+
+#[tokio::test]
+async fn completed_market_liquidation_should_mark_symbol_disabled_clean() {
+    let service = SpotControlService::new_in_memory(SpotSymbolControlConfig {
+        enabled: true,
+        ..SpotSymbolControlConfig::default()
+    });
+    service.set_validation_snapshot(ready_snapshot()).await;
+    let _ = service
+        .enable(enable_request(0), "idem-enable-market-complete".to_string())
+        .await;
+    let _ = service
+        .disable(
+            DisableSymbolRequest {
+                symbol: "AURORAUSDT".to_string(),
+                selected_exchanges: vec!["gateio".to_string()],
+                mode: DisableMode::MarketLiquidate,
+                cancel_active_orders: true,
+                include_managed_inventory_only: true,
+                maximum_liquidation_loss_usdt: Some(2.0),
+                maximum_slippage_bps: Some(30.0),
+                requested_by: "operator".to_string(),
+                expected_version: 1,
+            },
+            "idem-market-complete".to_string(),
+        )
+        .await;
+    let response = service
+        .complete_market_liquidation(
+            "AURORAUSDT".to_string(),
+            VersionedSymbolRequest {
+                requested_by: "strategy_runtime".to_string(),
+                expected_version: 2,
+            },
+            "idem-market-complete-runtime".to_string(),
+            SpotSymbolLifecycleState::DisabledClean,
+            serde_json::json!({
+                "submitted_count": 1,
+                "filled_count": 1,
+                "dust_remaining": false,
+            }),
+        )
+        .await;
+    assert_eq!(response.status, CommandStatus::Completed);
+    assert_eq!(
+        response.lifecycle_state,
+        Some(SpotSymbolLifecycleState::DisabledClean)
+    );
+    let symbol = service.symbol("AURORAUSDT").await.unwrap();
+    assert_eq!(
+        symbol.lifecycle_state,
+        SpotSymbolLifecycleState::DisabledClean
+    );
+    assert_eq!(symbol.version, 3);
 }
 
 #[tokio::test]

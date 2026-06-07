@@ -145,6 +145,12 @@ async fn run_exchange_loop<C>(
         }
 
         log::info!(
+            "websocket book manager subscribing exchange={} market={:?} symbol_count={}",
+            exchange,
+            market_type,
+            symbols.len()
+        );
+        log::debug!(
             "websocket book manager subscribing exchange={} market={:?} symbols={}",
             exchange,
             market_type,

@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::control::spot_control::SpotControlReadModel;
-use crate::exchanges::unified::{MarketType, SymbolRule};
+use crate::control::spot_control::{RuntimePublisherHealth, SpotControlReadModel};
+use crate::exchanges::unified::{MarketType, OrderResponse, SymbolRule};
 use crate::execution::FeeSource;
 use crate::execution::{
     BalanceMismatchSeverity, BalanceReconciliationReport, LiveDryRunOrderPlan,
@@ -36,12 +36,18 @@ fn default_refresh_interval_ms() -> u64 {
     1_000
 }
 
+fn default_snapshot_path() -> String {
+    "data/control_api/dashboard_snapshot.json".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitoringConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default = "default_bind_addr")]
     pub bind_addr: String,
+    #[serde(default)]
+    pub http_enabled: bool,
     #[serde(default)]
     pub expose_publicly: bool,
     #[serde(default = "default_true")]
@@ -56,6 +62,8 @@ pub struct MonitoringConfig {
     pub max_recent_risk_events: usize,
     #[serde(default = "default_refresh_interval_ms")]
     pub refresh_interval_ms: u64,
+    #[serde(default = "default_snapshot_path")]
+    pub snapshot_path: String,
 }
 
 impl Default for MonitoringConfig {
@@ -63,6 +71,7 @@ impl Default for MonitoringConfig {
         Self {
             enabled: false,
             bind_addr: default_bind_addr(),
+            http_enabled: false,
             expose_publicly: false,
             require_token: true,
             token_env: default_token_env(),
@@ -70,6 +79,7 @@ impl Default for MonitoringConfig {
             max_recent_trades: default_recent_limit(),
             max_recent_risk_events: default_recent_limit(),
             refresh_interval_ms: default_refresh_interval_ms(),
+            snapshot_path: default_snapshot_path(),
         }
     }
 }
@@ -283,9 +293,14 @@ pub struct ConfigSummaryView {
     pub trading_mode: String,
     pub live_trading_enabled: bool,
     pub dry_run: bool,
+    pub min_raw_spread_bps: Option<f64>,
+    pub min_net_spread_bps: Option<f64>,
+    pub max_raw_spread_bps: Option<f64>,
     pub max_notional_per_trade: Option<f64>,
     pub max_notional_per_symbol: Option<f64>,
     pub max_total_notional: Option<f64>,
+    pub max_enabled_arbitrage_symbols: Option<usize>,
+    pub initial_entry_notional_usdt: Option<f64>,
     pub fee_config_summary: Option<String>,
     pub disabled_config_summary: Option<String>,
     pub secrets_redacted: bool,
@@ -315,6 +330,10 @@ pub struct DashboardReadModel {
     pub live_preflight_enabled: bool,
     pub live_preflight: Option<LivePreflightReport>,
     pub live_dry_run_orders: Vec<LiveDryRunOrderPlan>,
+    #[serde(default)]
+    pub open_orders: Vec<OrderResponse>,
+    #[serde(default)]
+    pub open_orders_last_updated_at: Option<DateTime<Utc>>,
     pub order_reconciliation_config: OrderReconciliationConfig,
     pub order_reconciliation_status: Option<OrderReconciliationResult>,
     pub balance_reconciliation: Option<BalanceReconciliationReport>,
@@ -324,6 +343,7 @@ pub struct DashboardReadModel {
     pub arbitrage_opportunities: Vec<ArbitrageOpportunityAnalysis>,
     pub arbitrage_statistics: Vec<ArbitrageStatisticsSnapshot>,
     pub spot_control: Option<SpotControlReadModel>,
+    pub runtime_publisher_health: Option<RuntimePublisherHealth>,
     pub five_exchange_scanner: FiveExchangeScannerReadModel,
     pub hedge_policy: HedgePolicyReadModel,
 }
@@ -362,6 +382,8 @@ impl Default for DashboardReadModel {
             live_preflight_enabled: false,
             live_preflight: None,
             live_dry_run_orders: Vec::new(),
+            open_orders: Vec::new(),
+            open_orders_last_updated_at: None,
             order_reconciliation_config: OrderReconciliationConfig::default(),
             order_reconciliation_status: None,
             balance_reconciliation: None,
@@ -380,6 +402,7 @@ impl Default for DashboardReadModel {
             arbitrage_opportunities: Vec::new(),
             arbitrage_statistics: Vec::new(),
             spot_control: None,
+            runtime_publisher_health: None,
             five_exchange_scanner: FiveExchangeScannerReadModel::default(),
             hedge_policy: HedgePolicyReadModel::default(),
         }

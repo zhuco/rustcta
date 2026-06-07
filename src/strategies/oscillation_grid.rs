@@ -1,5 +1,5 @@
 /// 震荡网格策略
-/// 基于 trend_grid_v2.rs 修改，去掉趋势跟踪部分
+/// 震荡网格策略，去掉趋势跟踪部分。
 /// 专门用于震荡市场的固定网格交易
 
 use std::collections::{HashMap, HashSet};

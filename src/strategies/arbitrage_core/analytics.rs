@@ -1,5 +1,4 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -8,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::exchanges::unified::{MarketType, OrderSide};
 use crate::execution::FeeSource;
+use crate::utils::rotating_file;
 
 use super::capital_model::{
     calculate_capital_requirement, expected_return_on_capital, expected_return_on_capital_per_hour,
@@ -376,14 +376,8 @@ pub fn record_analysis_jsonl(
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
-    serde_json::to_writer(&mut file, analysis)?;
-    writeln!(file)?;
-    Ok(())
+    rotating_file::append_json_line(path, analysis)
+        .with_context(|| format!("failed to append {}", path.display()))
 }
 
 pub fn execution_mode_candidates(config: &ArbitrageScannerConfig) -> Vec<ExecutionModeCandidate> {

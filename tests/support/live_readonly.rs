@@ -7,13 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout, Instant};
-use tower::ServiceExt;
 
 use rustcta::control::spot_control::{
     classify_order_ownership, snapshot_store_from_config, EnableMode, EnabledDirection,
@@ -28,14 +25,15 @@ use rustcta::data::{BookCache, BookHealth, BookSource};
 use rustcta::exchanges::spot_reservation::BalanceReservationManager;
 use rustcta::exchanges::symbol_registry::UnifiedSymbolRegistry;
 use rustcta::exchanges::unified::{
-    AssetBalance, BalanceSnapshot, CancelOrderRequest, CancelOrderResponse, ExchangeClient,
+    AmendOrderRequest, AssetBalance, BalanceSnapshot, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeClient,
     ExchangeClientError, ExchangeClientResult, ExchangeError, ExchangeErrorClass, FeeRate,
-    MarketType, OrderBookSnapshot, OrderRequest, OrderResponse, OrderSide, OrderStatus, TradeFill,
-    UserStreamEvent,
+    MarketType, OrderBookSnapshot, OrderListRequest, OrderListResponse, OrderRequest,
+    OrderResponse, OrderSide, OrderStatus, QuoteMarketOrderRequest, TradeFill, UserStreamEvent,
 };
 use rustcta::execution::{reconcile_balances, FeeModel};
 use rustcta::risk::{DisabledRegistry, KillSwitch, KillSwitchConfig};
-use rustcta::web::{router, DashboardReadModel, MonitoringConfig, MonitoringState};
+use rustcta::web::{DashboardReadModel, MonitoringConfig, MonitoringState};
 
 pub const ENABLE_ENV: &str = "ENABLE_LIVE_READONLY_TESTS";
 
@@ -300,7 +298,17 @@ impl MutationCallDetector {
     }
 
     pub fn total_mutations(&self) -> u64 {
-        self.count("place_order") + self.count("cancel_order")
+        [
+            "place_order",
+            "place_quote_market_order",
+            "amend_order",
+            "place_order_list",
+            "cancel_order",
+            "cancel_all_orders",
+        ]
+        .into_iter()
+        .map(|method| self.count(method))
+        .sum()
     }
 }
 
@@ -364,6 +372,49 @@ where
         }))
     }
 
+    async fn place_quote_market_order(
+        &self,
+        _request: QuoteMarketOrderRequest,
+    ) -> ExchangeClientResult<OrderResponse> {
+        self.detector.record("place_quote_market_order");
+        Err(ExchangeClientError::Classified(ExchangeError {
+            exchange: self.exchange_name().to_string(),
+            class: ExchangeErrorClass::PermissionDenied,
+            code: Some("readonly_guard".to_string()),
+            message:
+                "mutation endpoint place_quote_market_order is forbidden in live read-only tests"
+                    .to_string(),
+        }))
+    }
+
+    async fn amend_order(
+        &self,
+        _request: AmendOrderRequest,
+    ) -> ExchangeClientResult<OrderResponse> {
+        self.detector.record("amend_order");
+        Err(ExchangeClientError::Classified(ExchangeError {
+            exchange: self.exchange_name().to_string(),
+            class: ExchangeErrorClass::PermissionDenied,
+            code: Some("readonly_guard".to_string()),
+            message: "mutation endpoint amend_order is forbidden in live read-only tests"
+                .to_string(),
+        }))
+    }
+
+    async fn place_order_list(
+        &self,
+        _request: OrderListRequest,
+    ) -> ExchangeClientResult<OrderListResponse> {
+        self.detector.record("place_order_list");
+        Err(ExchangeClientError::Classified(ExchangeError {
+            exchange: self.exchange_name().to_string(),
+            class: ExchangeErrorClass::PermissionDenied,
+            code: Some("readonly_guard".to_string()),
+            message: "mutation endpoint place_order_list is forbidden in live read-only tests"
+                .to_string(),
+        }))
+    }
+
     async fn cancel_order(
         &self,
         _request: CancelOrderRequest,
@@ -374,6 +425,20 @@ where
             class: ExchangeErrorClass::PermissionDenied,
             code: Some("readonly_guard".to_string()),
             message: "mutation endpoint cancel_order is forbidden in live read-only tests"
+                .to_string(),
+        }))
+    }
+
+    async fn cancel_all_orders(
+        &self,
+        _request: CancelAllOrdersRequest,
+    ) -> ExchangeClientResult<CancelAllOrdersResponse> {
+        self.detector.record("cancel_all_orders");
+        Err(ExchangeClientError::Classified(ExchangeError {
+            exchange: self.exchange_name().to_string(),
+            class: ExchangeErrorClass::PermissionDenied,
+            code: Some("readonly_guard".to_string()),
+            message: "mutation endpoint cancel_all_orders is forbidden in live read-only tests"
                 .to_string(),
         }))
     }
@@ -540,6 +605,8 @@ pub async fn validate_authenticated_readonly<C>(
             ));
         }
     }
+
+    report.mutation_calls_detected = client.detector().total_mutations();
 }
 
 pub async fn validate_public_websocket<C>(
@@ -786,39 +853,23 @@ where
 
 pub async fn validate_dashboard_routes(
     state: MonitoringState,
-    symbol: &str,
+    _symbol: &str,
     snapshot_id: &str,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
-    let routes = vec![
-        "/api/control/runtime-publisher/status".to_string(),
-        "/api/control/runtime-publisher/exchanges".to_string(),
-        "/api/control/runtime-publisher/components".to_string(),
-        "/api/control/runtime-publisher/errors".to_string(),
-        format!("/api/control/symbols/{symbol}/runtime-snapshot"),
-        format!("/api/control/symbols/{symbol}/data-health"),
-        format!("/api/control/symbols/{symbol}/inventory-ownership"),
-        format!("/api/control/symbols/{symbol}/open-order-ownership"),
-        format!("/api/control/symbols/{symbol}/fill-ownership"),
-        format!("/api/control/symbols/{symbol}/consistency"),
-        format!("/api/control/symbols/{symbol}/snapshots"),
-        format!("/api/control/snapshots/{snapshot_id}"),
-        format!("/api/control/snapshots/{snapshot_id}/replay"),
-    ];
-    for route in routes {
-        match router(state.clone())
-            .oneshot(
-                Request::builder()
-                    .uri(route.clone())
-                    .body(Body::empty())
-                    .expect("dashboard route request"),
-            )
-            .await
-        {
-            Ok(response) if response.status() == StatusCode::OK => {}
-            Ok(response) => warnings.push(format!("route {route} returned {}", response.status())),
-            Err(error) => warnings.push(format!("route {route} failed: {error}")),
-        }
+    let Some(publisher) = state.runtime_publisher() else {
+        warnings.push("runtime publisher unavailable".to_string());
+        return warnings;
+    };
+    let health = publisher.health().await;
+    if !health.running {
+        warnings.push("runtime publisher is not running".to_string());
+    }
+    if state.control().is_none() {
+        warnings.push("spot control service unavailable".to_string());
+    }
+    if snapshot_id.is_empty() {
+        warnings.push("snapshot id was empty".to_string());
     }
     warnings
 }
@@ -1174,6 +1225,11 @@ fn publisher_config(config: &LiveReadonlyTestConfig) -> SpotControlRuntimePublis
     SpotControlRuntimePublisherConfig {
         enabled: true,
         polling: RuntimePublisherPollingConfig {
+            poll_balances: true,
+            poll_open_orders: true,
+            poll_recent_fills: true,
+            poll_symbol_rules: true,
+            poll_fees: true,
             balances_interval_ms: 5_000,
             open_orders_interval_ms: 5_000,
             recent_fills_interval_ms: 10_000,

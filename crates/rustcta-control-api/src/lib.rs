@@ -1,0 +1,1883 @@
+pub mod models;
+pub mod read_models;
+pub mod router;
+pub mod routes;
+pub mod state;
+
+pub use models::*;
+pub use router::router;
+pub use state::ControlApiState;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use chrono::Utc;
+    use rustcta_event_ledger::{EventKind, InMemoryLedger, LedgerReader};
+    use rustcta_supervisor::{
+        LifecycleCommand, LifecycleCommandRecord, ProcessStatus, StrategyProcess,
+        SUPERVISOR_SCHEMA_VERSION,
+    };
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    #[test]
+    fn snapshot_should_be_secret_free_by_shape() {
+        let snapshot = ControlApiStateSnapshot {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            generated_at: Utc::now(),
+            strategies: Vec::new(),
+            gateway: None,
+            agents: Vec::new(),
+            risk: Default::default(),
+            fees: Default::default(),
+            logs: Default::default(),
+            inventory: Default::default(),
+            books: Default::default(),
+            exchanges: Default::default(),
+            recent_trades: Default::default(),
+            recent_opportunities: Default::default(),
+            opportunities: Default::default(),
+            symbols: Default::default(),
+        };
+        let value = serde_json::to_value(snapshot).unwrap();
+        let text = value.to_string();
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+    }
+
+    #[test]
+    fn credential_status_should_not_include_raw_secret_fields() {
+        let status = CredentialStatusResponse {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            slots: vec![CredentialSlotStatus {
+                slot_id: "slot-1".to_string(),
+                exchange_id: "binance".to_string(),
+                tenant_id: Some("tenant-a".to_string()),
+                configured: true,
+                last_verified_at: None,
+                health: CredentialHealth::Unknown,
+            }],
+        };
+        let text = serde_json::to_string(&status).unwrap();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+    }
+
+    #[tokio::test]
+    async fn generic_workspace_and_credentials_routes_should_return_public_dtos() {
+        let app = router(ControlApiState::empty_local());
+
+        let workspace = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspace")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(workspace.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(workspace.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["agent_count"], 0);
+        assert_eq!(value["strategy_count"], 0);
+        assert_eq!(value["risk_status"], "unknown");
+        assert_eq!(value["active_risk_event_count"], 0);
+        assert_eq!(value["log_event_count"], 0);
+
+        let status = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(status.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let status_value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status_value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(status_value["agent_count"], value["agent_count"]);
+        assert_eq!(status_value["strategy_count"], value["strategy_count"]);
+
+        for path in ["/api/config", "/api/config/summary"] {
+            let config = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(config.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(config.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+            assert_eq!(value["agent_count"], 0);
+            assert_eq!(value["process_count"], 0);
+            assert_eq!(value["gateway_configured"], false);
+            assert_eq!(value["credentials_status_only"], true);
+            let text = value.to_string();
+            assert!(!text.contains("api_key"));
+            assert!(!text.contains("api_secret"));
+            assert!(!text.contains("passphrase"));
+            assert!(!text.contains("authorization"));
+        }
+
+        let credentials = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/credentials/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(credentials.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(credentials.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["slots"].as_array().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let inventory = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/inventory")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(inventory.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(inventory.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 0);
+
+        let books = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/books")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(books.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(books.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let exchanges = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/exchanges")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(exchanges.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(exchanges.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let recent_trades = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/trades/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recent_trades.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(recent_trades.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let recent_opportunities = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/opportunities/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recent_opportunities.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(recent_opportunities.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let opportunities = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/opportunities")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(opportunities.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(opportunities.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["recent"].as_array().unwrap().len(), 0);
+        assert_eq!(value["arbitrage"].as_array().unwrap().len(), 0);
+        assert_eq!(value["statistics"].as_object().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let symbols = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/symbols")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(symbols.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(symbols.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["symbol_rules"].as_array().unwrap().len(), 0);
+        assert_eq!(value["spot_control"].as_object().unwrap().len(), 0);
+        assert_eq!(
+            value["scanner"]["symbol_coverage"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            value["scanner"]["recommendations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+    }
+
+    #[tokio::test]
+    async fn public_control_api_should_not_expose_legacy_raw_key_routes() {
+        let app = router(ControlApiState::empty_local());
+        let legacy_key_route = format!("/api/{}-{}-{}", "exchange", "api", "keys");
+
+        for request in [
+            Request::builder()
+                .method("GET")
+                .uri(&legacy_key_route)
+                .body(Body::empty())
+                .unwrap(),
+            Request::builder()
+                .method("POST")
+                .uri(&legacy_key_route)
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("{legacy_key_route}/binance"))
+                .body(Body::empty())
+                .unwrap(),
+        ] {
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert!(
+                matches!(
+                    response.status(),
+                    StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+                ),
+                "legacy raw-key route returned unexpected status {}",
+                response.status()
+            );
+            assert_ne!(response.status(), StatusCode::OK);
+        }
+
+        let credentials = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/credentials/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(credentials.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(credentials.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+    }
+
+    #[tokio::test]
+    async fn detail_routes_should_return_agent_process_and_command_records() {
+        let snapshot = ControlApiStateSnapshot {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            generated_at: Utc::now(),
+            strategies: vec![StrategyProcess {
+                schema_version: SUPERVISOR_SCHEMA_VERSION,
+                strategy_id: "strategy-1".to_string(),
+                strategy_kind: "mock".to_string(),
+                run_id: "run-1".to_string(),
+                tenant_id: "tenant-a".to_string(),
+                config_path: "config/mock.yml".to_string(),
+                status: ProcessStatus::Running,
+                process_id: Some(42),
+                started_at: None,
+                last_heartbeat_at: None,
+                last_snapshot_at: None,
+                restart_count: 0,
+                last_exit_code: None,
+                last_error: None,
+                log_path: Some("/tmp/strategy-1.log".to_string()),
+            }],
+            gateway: None,
+            agents: vec![AgentSummary {
+                agent_id: "agent-a".to_string(),
+                tenant_id: "tenant-a".to_string(),
+                status: AgentConnectionStatus::Connected,
+                last_heartbeat_at: None,
+                capabilities: vec!["supervisor".to_string()],
+            }],
+            risk: Default::default(),
+            fees: Default::default(),
+            logs: Default::default(),
+            inventory: Default::default(),
+            books: Default::default(),
+            exchanges: Default::default(),
+            recent_trades: Default::default(),
+            recent_opportunities: Default::default(),
+            opportunities: Default::default(),
+            symbols: Default::default(),
+        };
+        let app = router(ControlApiState::new(snapshot));
+
+        let agent = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agents/agent-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(agent.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(agent.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["agent_id"], "agent-a");
+
+        let process = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/processes/strategy-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(process.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(process.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["strategy_id"], "strategy-1");
+        assert_eq!(value["log_configured"], true);
+        assert!(value.get("log_path").is_none());
+
+        let missing_agent = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agents/missing")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_agent.status(), StatusCode::NOT_FOUND);
+
+        let command = LifecycleCommandRecord {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            command_id: "cmd-detail".to_string(),
+            strategy_id: "strategy-1".to_string(),
+            run_id: Some("run-1".to_string()),
+            command: LifecycleCommand::Restart,
+            requested_by: Some("operator-a".to_string()),
+            idempotency_key: "idem-detail".to_string(),
+            requested_at: Utc::now(),
+        };
+        let accepted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/commands")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(accepted.status(), StatusCode::OK);
+
+        let detail = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/commands/cmd-detail")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(detail.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(detail.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["command_id"], "cmd-detail");
+    }
+
+    #[tokio::test]
+    async fn local_agent_should_overlay_composed_snapshot() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-agent-overlay-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let registry_path = temp_dir.join("registry.json");
+        let snapshot_path = temp_dir.join("dashboard_snapshot.json");
+        std::fs::write(
+            &registry_path,
+            serde_json::json!({
+                "schema_version": 1,
+                "captured_at": "2026-06-07T12:00:02Z",
+                "processes": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &snapshot_path,
+            serde_json::json!({
+                "live_trading_enabled": false,
+                "risk_events": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let app = router(
+            ControlApiState::empty_local()
+                .with_local_agent(
+                    "local-agent",
+                    "tenant-a",
+                    ["control-api", "supervisor-reader"],
+                )
+                .with_supervisor_registry_path(&registry_path)
+                .with_legacy_dashboard_snapshot_path(&snapshot_path),
+        );
+
+        let workspace = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspace")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(workspace.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(workspace.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["agent_count"], 1);
+
+        let agent = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agents/local-agent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(agent.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(agent.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["tenant_id"], "tenant-a");
+        assert_eq!(value["status"], "connected");
+        assert_eq!(value["capabilities"].as_array().unwrap().len(), 2);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn generic_risk_fees_and_logs_routes_should_return_public_empty_views() {
+        let app = router(ControlApiState::empty_local());
+
+        let risk = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/risk")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(risk.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(risk.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["status"], "unknown");
+        assert_eq!(value["kill_switch_active"], false);
+        assert_eq!(value["events"].as_array().unwrap().len(), 0);
+
+        let risk_events = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/risk/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(risk_events.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(risk_events.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.as_array().unwrap().len(), 0);
+
+        let fees = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/fees")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fees.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(fees.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["total_fee_usdt"], 0.0);
+        assert_eq!(value["venues"].as_array().unwrap().len(), 0);
+
+        let logs = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(logs.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["events"].as_array().unwrap().len(), 0);
+
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+    }
+
+    #[tokio::test]
+    async fn strategy_logs_should_return_empty_view_when_unconfigured() {
+        let app = router(ControlApiState::empty_local());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategy-logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["configured"], false);
+        assert_eq!(value["readable"], false);
+        assert_eq!(value["events"].as_array().unwrap().len(), 0);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+    }
+
+    #[tokio::test]
+    async fn strategy_logs_should_tail_and_redact_configured_file() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-strategy-log-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("strategy.log");
+        std::fs::write(
+            &path,
+            [
+                "2026-06-07T12:00:00Z INFO strategy booted",
+                "2026-06-07T12:00:01Z DEBUG heartbeat ok",
+                "2026-06-07T12:00:02Z WARN stale book",
+                "2026-06-07T12:00:03Z ERROR token appeared in source log",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let app = router(
+            ControlApiState::empty_local()
+                .with_strategy_log_path(&path)
+                .with_strategy_log_tail_limits(2, 4096),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategy-logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["configured"], true);
+        assert_eq!(value["readable"], true);
+        assert_eq!(value["event_count"], 2);
+        assert_eq!(value["events"][0]["level"], "warn");
+        assert_eq!(
+            value["events"][0]["message"],
+            "2026-06-07T12:00:02Z WARN stale book"
+        );
+        assert_eq!(value["events"][1]["level"], "error");
+        assert_eq!(value["events"][1]["message"], "[redacted log line]");
+        let text = value.to_string();
+        assert!(!text.contains("token appeared"));
+        assert!(!text.contains(path.to_string_lossy().as_ref()));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn legacy_dashboard_snapshot_should_back_public_read_routes() {
+        let mut inventory_row = serde_json::Map::new();
+        inventory_row.insert("exchange".to_string(), serde_json::json!("binance"));
+        inventory_row.insert("symbol".to_string(), serde_json::json!("BTC/USDT"));
+        inventory_row.insert("total_usdt".to_string(), serde_json::json!(125.5));
+        inventory_row.insert(["api", "key"].join("_"), serde_json::json!("hidden"));
+        inventory_row.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        inventory_row.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        inventory_row.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        let mut book_row = serde_json::Map::new();
+        book_row.insert("exchange".to_string(), serde_json::json!("binance"));
+        book_row.insert("symbol".to_string(), serde_json::json!("BTC/USDT"));
+        book_row.insert("bid".to_string(), serde_json::json!(67500.0));
+        book_row.insert("ask".to_string(), serde_json::json!(67501.0));
+        book_row.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["api", "key"].join("_"): "hidden",
+                "visible": true
+            }),
+        );
+        book_row.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        book_row.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        book_row.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        let mut exchange_row = serde_json::Map::new();
+        exchange_row.insert("exchange".to_string(), serde_json::json!("binance"));
+        exchange_row.insert("status".to_string(), serde_json::json!("online"));
+        exchange_row.insert("market_type".to_string(), serde_json::json!("spot"));
+        exchange_row.insert(["api", "key"].join("_"), serde_json::json!("hidden"));
+        exchange_row.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        exchange_row.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        exchange_row.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        exchange_row.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["api", "secret"].join("_"): "hidden",
+                "public": "visible"
+            }),
+        );
+        let mut trade_row = serde_json::Map::new();
+        trade_row.insert("exchange".to_string(), serde_json::json!("binance"));
+        trade_row.insert("symbol".to_string(), serde_json::json!("BTC/USDT"));
+        trade_row.insert("side".to_string(), serde_json::json!("buy"));
+        trade_row.insert("price".to_string(), serde_json::json!(67500.0));
+        trade_row.insert("qty".to_string(), serde_json::json!(0.01));
+        trade_row.insert(["api", "key"].join("_"), serde_json::json!("hidden"));
+        trade_row.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        trade_row.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        trade_row.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        trade_row.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["api", "key"].join("_"): "hidden",
+                "visible": "trade"
+            }),
+        );
+        let mut opportunity_row = serde_json::Map::new();
+        opportunity_row.insert("opportunity_id".to_string(), serde_json::json!("opp-1"));
+        opportunity_row.insert("exchange".to_string(), serde_json::json!("binance"));
+        opportunity_row.insert("symbol".to_string(), serde_json::json!("ETH/USDT"));
+        opportunity_row.insert("spread_bps".to_string(), serde_json::json!(12.5));
+        opportunity_row.insert("score".to_string(), serde_json::json!(0.87));
+        opportunity_row.insert(["api", "key"].join("_"), serde_json::json!("hidden"));
+        opportunity_row.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        opportunity_row.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        opportunity_row.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        opportunity_row.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["api", "secret"].join("_"): "hidden",
+                "visible": "opportunity"
+            }),
+        );
+        let mut arbitrage_row = serde_json::Map::new();
+        arbitrage_row.insert("opportunity_id".to_string(), serde_json::json!("arb-1"));
+        arbitrage_row.insert("long_exchange".to_string(), serde_json::json!("binance"));
+        arbitrage_row.insert("short_exchange".to_string(), serde_json::json!("okx"));
+        arbitrage_row.insert("symbol".to_string(), serde_json::json!("ETH/USDT"));
+        arbitrage_row.insert("spread_bps".to_string(), serde_json::json!(18.5));
+        arbitrage_row.insert(["api", "key"].join("_"), serde_json::json!("hidden"));
+        arbitrage_row.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        arbitrage_row.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        arbitrage_row.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        arbitrage_row.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["author", "ization"].join(""): "hidden",
+                "visible": "arbitrage"
+            }),
+        );
+        let mut arbitrage_statistics = serde_json::Map::new();
+        arbitrage_statistics.insert("total".to_string(), serde_json::json!(1));
+        arbitrage_statistics.insert("profitable".to_string(), serde_json::json!(1));
+        arbitrage_statistics.insert("max_spread_bps".to_string(), serde_json::json!(18.5));
+        arbitrage_statistics.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        arbitrage_statistics.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["pass", "phrase"].join(""): "hidden",
+                "visible": "statistics"
+            }),
+        );
+        let mut symbol_rule = serde_json::Map::new();
+        symbol_rule.insert("exchange".to_string(), serde_json::json!("binance"));
+        symbol_rule.insert("symbol".to_string(), serde_json::json!("BTC/USDT"));
+        symbol_rule.insert("price_increment".to_string(), serde_json::json!("0.01"));
+        symbol_rule.insert(["api", "key"].join("_"), serde_json::json!("hidden"));
+        symbol_rule.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["api", "secret"].join("_"): "hidden",
+                "visible": "rule"
+            }),
+        );
+        let mut spot_control = serde_json::Map::new();
+        spot_control.insert("enabled".to_string(), serde_json::json!(true));
+        spot_control.insert("max_symbols".to_string(), serde_json::json!(20));
+        spot_control.insert(["pass", "phrase"].join(""), serde_json::json!("hidden"));
+        spot_control.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["author", "ization"].join(""): "hidden",
+                "visible": "control"
+            }),
+        );
+        let mut symbol_coverage = serde_json::Map::new();
+        symbol_coverage.insert("exchange".to_string(), serde_json::json!("binance"));
+        symbol_coverage.insert("symbols".to_string(), serde_json::json!(["BTC/USDT"]));
+        symbol_coverage.insert(["author", "ization"].join(""), serde_json::json!("hidden"));
+        symbol_coverage.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["api", "key"].join("_"): "hidden",
+                "visible": "coverage"
+            }),
+        );
+        let mut recommendation = serde_json::Map::new();
+        recommendation.insert("symbol".to_string(), serde_json::json!("BTC/USDT"));
+        recommendation.insert("action".to_string(), serde_json::json!("enable"));
+        recommendation.insert("reason".to_string(), serde_json::json!("liquid"));
+        recommendation.insert(["api", "secret"].join("_"), serde_json::json!("hidden"));
+        recommendation.insert(
+            "nested".to_string(),
+            serde_json::json!({
+                ["pass", "phrase"].join(""): "hidden",
+                "visible": "recommendation"
+            }),
+        );
+        let legacy = serde_json::json!({
+            "live_trading_enabled": true,
+            "live_preflight_enabled": true,
+            "kill_switch": {"active": true},
+            "risk_events": [
+                {
+                    "timestamp": "2026-06-07T12:00:00Z",
+                    "event_type": "RiskState",
+                    "symbol": "BTC/USDT",
+                    "exchange": "binance",
+                    "severity": "critical",
+                    "reason": "stale_book",
+                    "details": "book age exceeded threshold"
+                }
+            ],
+            "fees": [
+                {
+                    "exchange": "binance",
+                    "market_type": "futures",
+                    "maker_fee_rate": 0.0002,
+                    "taker_fee_rate": 0.0004,
+                    "fee_paid_usdt": 1.25,
+                    "rebate_usdt": 0.25
+                }
+            ],
+            "inventory": [serde_json::Value::Object(inventory_row)],
+            "books": [serde_json::Value::Object(book_row)],
+            "exchanges": [serde_json::Value::Object(exchange_row)],
+            "trades": [serde_json::Value::Object(trade_row)],
+            "opportunities": [serde_json::Value::Object(opportunity_row)],
+            "arbitrage_opportunities": [serde_json::Value::Object(arbitrage_row)],
+            "arbitrage_statistics": serde_json::Value::Object(arbitrage_statistics),
+            "spot_symbol_rules": [serde_json::Value::Object(symbol_rule)],
+            "spot_control": serde_json::Value::Object(spot_control),
+            "five_exchange_scanner": {
+                "symbol_coverage": [serde_json::Value::Object(symbol_coverage)],
+                "recommendations": [serde_json::Value::Object(recommendation)]
+            }
+        });
+        let app = router(ControlApiState::from_legacy_dashboard_snapshot(&legacy));
+
+        let risk = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/risk")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(risk.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(risk.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["status"], "blocked");
+        assert_eq!(value["kill_switch_active"], true);
+        assert_eq!(value["open_risk_event_count"], 1);
+        assert_eq!(value["events"][0]["severity"], "critical");
+        assert_eq!(value["events"][0]["scope"], "binance:BTC/USDT");
+
+        let risk_events = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/risk/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(risk_events.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(risk_events.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.as_array().unwrap().len(), 1);
+        assert_eq!(value[0]["severity"], "critical");
+        assert_eq!(
+            value[0]["message"],
+            "stale_book: book age exceeded threshold"
+        );
+        assert_eq!(value[0]["scope"], "binance:BTC/USDT");
+
+        let fees = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/fees")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fees.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(fees.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["total_fee_usdt"], 1.25);
+        assert_eq!(value["realized_rebate_usdt"], 0.25);
+        assert_eq!(value["venues"][0]["exchange_id"], "binance");
+
+        let logs = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(logs.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 1);
+        assert_eq!(value["events"][0]["level"], "error");
+        assert!(value["events"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("stale_book"));
+
+        let inventory = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/inventory")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(inventory.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(inventory.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(value["rows"][0]["exchange"], "binance");
+        assert_eq!(value["rows"][0]["symbol"], "BTC/USDT");
+        assert_eq!(value["rows"][0]["total_usdt"], 125.5);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let books = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/books")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(books.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(books.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(value["rows"][0]["exchange"], "binance");
+        assert_eq!(value["rows"][0]["symbol"], "BTC/USDT");
+        assert_eq!(value["rows"][0]["bid"], 67500.0);
+        assert_eq!(value["rows"][0]["ask"], 67501.0);
+        assert_eq!(value["rows"][0]["nested"]["visible"], true);
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let exchanges = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/exchanges")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(exchanges.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(exchanges.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(value["rows"][0]["exchange"], "binance");
+        assert_eq!(value["rows"][0]["status"], "online");
+        assert_eq!(value["rows"][0]["market_type"], "spot");
+        assert_eq!(value["rows"][0]["nested"]["public"], "visible");
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let recent_trades = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/trades/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recent_trades.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(recent_trades.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(value["rows"][0]["exchange"], "binance");
+        assert_eq!(value["rows"][0]["symbol"], "BTC/USDT");
+        assert_eq!(value["rows"][0]["side"], "buy");
+        assert_eq!(value["rows"][0]["price"], 67500.0);
+        assert_eq!(value["rows"][0]["qty"], 0.01);
+        assert_eq!(value["rows"][0]["nested"]["visible"], "trade");
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let recent_opportunities = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/opportunities/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recent_opportunities.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(recent_opportunities.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(value["rows"][0]["opportunity_id"], "opp-1");
+        assert_eq!(value["rows"][0]["exchange"], "binance");
+        assert_eq!(value["rows"][0]["symbol"], "ETH/USDT");
+        assert_eq!(value["rows"][0]["spread_bps"], 12.5);
+        assert_eq!(value["rows"][0]["score"], 0.87);
+        assert_eq!(value["rows"][0]["nested"]["visible"], "opportunity");
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let opportunities = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/opportunities")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(opportunities.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(opportunities.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["recent"].as_array().unwrap().len(), 1);
+        assert_eq!(value["recent"][0]["opportunity_id"], "opp-1");
+        assert_eq!(value["recent"][0]["nested"]["visible"], "opportunity");
+        assert_eq!(value["arbitrage"].as_array().unwrap().len(), 1);
+        assert_eq!(value["arbitrage"][0]["opportunity_id"], "arb-1");
+        assert_eq!(value["arbitrage"][0]["long_exchange"], "binance");
+        assert_eq!(value["arbitrage"][0]["short_exchange"], "okx");
+        assert_eq!(value["arbitrage"][0]["nested"]["visible"], "arbitrage");
+        assert_eq!(value["statistics"]["total"], 1);
+        assert_eq!(value["statistics"]["profitable"], 1);
+        assert_eq!(value["statistics"]["max_spread_bps"], 18.5);
+        assert_eq!(value["statistics"]["nested"]["visible"], "statistics");
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+
+        let symbols = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/symbols")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(symbols.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(symbols.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], CONTROL_API_SCHEMA_VERSION);
+        assert_eq!(value["symbol_rules"].as_array().unwrap().len(), 1);
+        assert_eq!(value["symbol_rules"][0]["exchange"], "binance");
+        assert_eq!(value["symbol_rules"][0]["symbol"], "BTC/USDT");
+        assert_eq!(value["symbol_rules"][0]["price_increment"], "0.01");
+        assert_eq!(value["symbol_rules"][0]["nested"]["visible"], "rule");
+        assert_eq!(value["spot_control"]["enabled"], true);
+        assert_eq!(value["spot_control"]["max_symbols"], 20);
+        assert_eq!(value["spot_control"]["nested"]["visible"], "control");
+        assert_eq!(
+            value["scanner"]["symbol_coverage"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            value["scanner"]["symbol_coverage"][0]["exchange"],
+            "binance"
+        );
+        assert_eq!(
+            value["scanner"]["symbol_coverage"][0]["symbols"][0],
+            "BTC/USDT"
+        );
+        assert_eq!(
+            value["scanner"]["symbol_coverage"][0]["nested"]["visible"],
+            "coverage"
+        );
+        assert_eq!(
+            value["scanner"]["recommendations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(value["scanner"]["recommendations"][0]["symbol"], "BTC/USDT");
+        assert_eq!(value["scanner"]["recommendations"][0]["action"], "enable");
+        assert_eq!(
+            value["scanner"]["recommendations"][0]["nested"]["visible"],
+            "recommendation"
+        );
+        let text = value.to_string();
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+        assert!(!text.contains("authorization"));
+    }
+
+    #[tokio::test]
+    async fn legacy_dashboard_snapshot_path_should_refresh_on_each_request() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-snapshot-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("dashboard_snapshot.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "live_trading_enabled": false,
+                "risk_events": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let app = router(ControlApiState::empty_local().with_legacy_dashboard_snapshot_path(&path));
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/risk")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(first.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["open_risk_event_count"], 0);
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "live_trading_enabled": true,
+                "risk_events": [
+                    {
+                        "timestamp": "2026-06-07T12:00:00Z",
+                        "event_type": "RiskState",
+                        "severity": "warning",
+                        "reason": "latency"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/risk")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(second.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["status"], "warning");
+        assert_eq!(value["open_risk_event_count"], 1);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn supervisor_registry_path_should_back_processes_and_process_logs() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-supervisor-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let registry_path = temp_dir.join("registry.json");
+        let log_path = temp_dir.join("strategy.log");
+        std::fs::write(
+            &log_path,
+            [
+                "2026-06-07T12:00:00Z INFO process booted",
+                "2026-06-07T12:00:01Z WARN process lagging",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            &registry_path,
+            serde_json::json!({
+                "schema_version": 1,
+                "captured_at": "2026-06-07T12:00:02Z",
+                "processes": [
+                    {
+                        "schema_version": 1,
+                        "strategy_id": "strategy-a",
+                        "strategy_kind": "mock",
+                        "run_id": "run-a",
+                        "tenant_id": "tenant-a",
+                        "config_path": "config/mock.yml",
+                        "status": "Running",
+                        "process_id": 123,
+                        "started_at": "2026-06-07T12:00:00Z",
+                        "last_heartbeat_at": "2026-06-07T12:00:01Z",
+                        "last_snapshot_at": null,
+                        "restart_count": 0,
+                        "last_exit_code": null,
+                        "last_error": null,
+                        "log_path": log_path
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let app = router(
+            ControlApiState::empty_local()
+                .with_supervisor_registry_path(&registry_path)
+                .with_strategy_log_tail_limits(10, 4096),
+        );
+
+        let processes = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/processes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(processes.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(processes.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.as_array().unwrap().len(), 1);
+        assert_eq!(value[0]["strategy_id"], "strategy-a");
+
+        let logs = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/processes/strategy-a/logs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logs.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(logs.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["target"], "strategy-a");
+        assert_eq!(value["configured"], true);
+        assert_eq!(value["readable"], true);
+        assert_eq!(value["events"].as_array().unwrap().len(), 2);
+        assert_eq!(value["events"][1]["level"], "warn");
+        assert!(!value
+            .to_string()
+            .contains(log_path.to_string_lossy().as_ref()));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn legacy_snapshot_should_not_hide_supervisor_registry_processes() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-composed-snapshot-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let registry_path = temp_dir.join("registry.json");
+        let snapshot_path = temp_dir.join("dashboard_snapshot.json");
+        std::fs::write(
+            &registry_path,
+            serde_json::json!({
+                "schema_version": 1,
+                "captured_at": "2026-06-07T12:00:02Z",
+                "processes": [
+                    {
+                        "schema_version": 1,
+                        "strategy_id": "strategy-b",
+                        "strategy_kind": "mock",
+                        "run_id": "run-b",
+                        "tenant_id": "tenant-b",
+                        "config_path": "config/mock.yml",
+                        "status": "Running",
+                        "process_id": 456,
+                        "started_at": "2026-06-07T12:00:00Z",
+                        "last_heartbeat_at": "2026-06-07T12:00:01Z",
+                        "last_snapshot_at": null,
+                        "restart_count": 0,
+                        "last_exit_code": null,
+                        "last_error": null,
+                        "log_path": null
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &snapshot_path,
+            serde_json::json!({
+                "live_trading_enabled": true,
+                "risk_events": [
+                    {
+                        "timestamp": "2026-06-07T12:00:00Z",
+                        "event_type": "RiskState",
+                        "severity": "warning",
+                        "reason": "latency"
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let app = router(
+            ControlApiState::empty_local()
+                .with_supervisor_registry_path(&registry_path)
+                .with_legacy_dashboard_snapshot_path(&snapshot_path),
+        );
+
+        let workspace = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspace")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(workspace.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(workspace.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["process_count"], 1);
+        assert_eq!(value["strategy_count"], 1);
+        assert_eq!(value["risk_status"], "warning");
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn accepted_operator_command_should_write_audit_event() {
+        let ledger = Arc::new(InMemoryLedger::new());
+        let state = ControlApiState::empty_local().with_audit_ledger(ledger.clone());
+        let app = router(state);
+        let command = LifecycleCommandRecord {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            command_id: "cmd-1".to_string(),
+            strategy_id: "strategy-1".to_string(),
+            run_id: Some("run-1".to_string()),
+            command: LifecycleCommand::Restart,
+            requested_by: Some("operator-a".to_string()),
+            idempotency_key: "idem-1".to_string(),
+            requested_at: Utc::now(),
+        };
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/commands")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let events = ledger.replay(None).await.expect("replay audit events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::OperatorCommandEvent);
+        assert_eq!(events[0].identity.command_id.as_deref(), Some("cmd-1"));
+        assert_eq!(
+            events[0].identity.idempotency_key.as_deref(),
+            Some("idem-1")
+        );
+        let text = serde_json::to_string(&events[0]).unwrap();
+        assert!(text.contains("operator_lifecycle_command"));
+        assert!(!text.contains("api_key"));
+        assert!(!text.contains("api_secret"));
+        assert!(!text.contains("passphrase"));
+
+        let event_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(event_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(event_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["commands"].as_array().unwrap().len(), 1);
+        assert_eq!(value["ledger_events"].as_array().unwrap().len(), 1);
+        assert_eq!(value["ledger_events"][0]["kind"], "operator_command_event");
+
+        let audit_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/audit")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(audit_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(audit_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 1);
+        assert_eq!(value["events"][0]["kind"], "operator_command_event");
+
+        let alias_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/control/audit")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(alias_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(alias_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 1);
+        assert_eq!(value["events"][0]["kind"], "operator_command_event");
+    }
+
+    #[tokio::test]
+    async fn event_routes_should_filter_attached_ledger_from_sequence() {
+        let ledger = Arc::new(InMemoryLedger::new());
+        let state = ControlApiState::empty_local().with_audit_ledger(ledger);
+        let app = router(state);
+
+        for index in 1..=2 {
+            let command = LifecycleCommandRecord {
+                schema_version: SUPERVISOR_SCHEMA_VERSION,
+                command_id: format!("cmd-{index}"),
+                strategy_id: "strategy-1".to_string(),
+                run_id: Some("run-1".to_string()),
+                command: LifecycleCommand::Restart,
+                requested_by: Some("operator-a".to_string()),
+                idempotency_key: format!("idem-{index}"),
+                requested_at: Utc::now(),
+            };
+
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/commands")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let event_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/events?from_sequence=2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(event_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(event_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["from_sequence"], 2);
+        assert_eq!(value["commands"].as_array().unwrap().len(), 2);
+        assert_eq!(value["ledger_events"].as_array().unwrap().len(), 1);
+        assert_eq!(value["ledger_events"][0]["sequence"], 2);
+        assert_eq!(value["ledger_events"][0]["identity"]["command_id"], "cmd-2");
+
+        for path in [
+            "/api/audit?from_sequence=2",
+            "/api/control/audit?from_sequence=2",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["from_sequence"], 2);
+            assert_eq!(value["events"].as_array().unwrap().len(), 1);
+            assert_eq!(value["events"][0]["sequence"], 2);
+            assert_eq!(value["events"][0]["identity"]["command_id"], "cmd-2");
+        }
+
+        let invalid_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/events?from_sequence=abc")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn event_routes_should_return_empty_lists_without_ledger() {
+        let app = router(ControlApiState::empty_local());
+
+        let event_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(event_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(event_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["commands"].as_array().unwrap().len(), 0);
+        assert_eq!(value["ledger_events"].as_array().unwrap().len(), 0);
+
+        let audit_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/audit")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(audit_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(audit_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 0);
+
+        let alias_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/control/audit")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(alias_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(alias_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["events"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn web_strategy_management_should_create_and_update_registry_processes() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-strategy-management-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let registry_path = temp_dir.join("registry.json");
+        let log_path = temp_dir.join("spot-arb-a.log");
+        let app =
+            router(ControlApiState::empty_local().with_supervisor_registry_path(&registry_path));
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/strategies")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "strategy_id": "spot-arb-a",
+                            "strategy_kind": "spot_spot_arbitrage",
+                            "tenant_id": "local",
+                            "config_path": "config/spot_spot_taker_arbitrage.yml",
+                            "log_path": log_path,
+                            "command": "sh",
+                            "args": ["-c", "sleep 30"]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(create.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["strategy_id"], "spot-arb-a");
+        assert_eq!(value["status"], "Stopped");
+        assert_eq!(value["log_configured"], true);
+        assert!(value.get("log_path").is_none());
+
+        let start = LifecycleCommandRecord {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            command_id: "cmd-start-spot".to_string(),
+            strategy_id: "spot-arb-a".to_string(),
+            run_id: Some("run-web-1".to_string()),
+            command: LifecycleCommand::Start,
+            requested_by: Some("web".to_string()),
+            idempotency_key: "idem-start-spot".to_string(),
+            requested_at: Utc::now(),
+        };
+        let accepted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/strategies/spot-arb-a/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&start).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(accepted.status(), StatusCode::OK);
+
+        let detail = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/strategies/spot-arb-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(detail.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(detail.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["status"], "Running");
+        assert_eq!(value["run_id"], "run-web-1");
+        assert!(value["process_id"].as_u64().is_some());
+
+        let stop = LifecycleCommandRecord {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            command_id: "cmd-stop-spot".to_string(),
+            strategy_id: "spot-arb-a".to_string(),
+            run_id: Some("run-web-1".to_string()),
+            command: LifecycleCommand::Stop,
+            requested_by: Some("web".to_string()),
+            idempotency_key: "idem-stop-spot".to_string(),
+            requested_at: Utc::now(),
+        };
+        let stopped = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/strategies/spot-arb-a/command")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&stop).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stopped.status(), StatusCode::OK);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+}

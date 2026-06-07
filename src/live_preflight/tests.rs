@@ -151,11 +151,25 @@ fn config_safety_should_pass_in_paper_mode() {
 }
 
 #[test]
-fn config_safety_should_fail_if_live_trading_enabled() {
+fn config_safety_should_fail_if_live_trading_enabled_outside_live_mode() {
     let mut state = state();
     state.live_trading_enabled = true;
     let report = run_live_preflight(config(), &state);
-    assert!(statuses(&report, "live_trading_disabled").contains(&LivePreflightCheckStatus::Fail));
+    assert!(statuses(&report, "live_trading_flag").contains(&LivePreflightCheckStatus::Fail));
+}
+
+#[test]
+fn config_safety_should_pass_in_live_mode_with_real_order_flags() {
+    let mut state = state();
+    state.trading_mode = "live".to_string();
+    state.live_trading_enabled = true;
+    state.dry_run = false;
+    let mut config = config();
+    config.require_api_key_trade_permission = true;
+    let report = run_live_preflight(config, &state);
+    assert!(statuses(&report, "trading_mode_safe").contains(&LivePreflightCheckStatus::Pass));
+    assert!(statuses(&report, "live_trading_flag").contains(&LivePreflightCheckStatus::Pass));
+    assert!(statuses(&report, "dry_run_mode").contains(&LivePreflightCheckStatus::Pass));
 }
 
 #[test]

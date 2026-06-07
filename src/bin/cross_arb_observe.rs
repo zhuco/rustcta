@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -27,6 +28,10 @@ use serde::Serialize;
 struct Args {
     #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
     config: PathBuf,
+    #[arg(long, default_value_t = 5_000)]
+    request_timeout_ms: u64,
+    #[arg(long)]
+    max_symbols: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,12 +59,20 @@ struct ObserveError {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let config = load_config(&args.config)?;
+    let mut config = load_config(&args.config)?;
     config
         .validate()
         .context("invalid cross arbitrage config")?;
+    if let Some(max_symbols) = args.max_symbols {
+        config.universe.symbols.truncate(max_symbols);
+    }
 
-    let mut summary = observe_once(args.config, config).await?;
+    let mut summary = observe_once(
+        args.config,
+        config,
+        Duration::from_millis(args.request_timeout_ms),
+    )
+    .await?;
     summary.opportunities.sort_by(|left, right| {
         right
             .maker_taker_net_edge
@@ -73,6 +86,7 @@ async fn main() -> Result<()> {
 async fn observe_once(
     config_path: PathBuf,
     config: CrossExchangeArbitrageConfig,
+    request_timeout: Duration,
 ) -> Result<ObserveSummary> {
     let adapters = configured_adapters(&config);
     let now = Utc::now();
@@ -87,31 +101,41 @@ async fn observe_once(
 
     for adapter in &adapters {
         let exchange = adapter.exchange();
-        let supported_symbols = match adapter.load_instruments().await {
-            Ok(instruments) => {
-                let mut supported = HashSet::new();
-                for instrument in instruments
-                    .into_iter()
-                    .filter(|instrument| instrument.is_tradeable_usdt_perpetual())
-                {
-                    supported.insert(instrument.canonical_symbol.clone());
-                    instruments_by_exchange_symbol.insert(
-                        (exchange.clone(), instrument.canonical_symbol.clone()),
-                        instrument,
-                    );
+        let supported_symbols =
+            match tokio::time::timeout(request_timeout, adapter.load_instruments()).await {
+                Ok(Ok(instruments)) => {
+                    let mut supported = HashSet::new();
+                    for instrument in instruments
+                        .into_iter()
+                        .filter(|instrument| instrument.is_tradeable_usdt_perpetual())
+                    {
+                        supported.insert(instrument.canonical_symbol.clone());
+                        instruments_by_exchange_symbol.insert(
+                            (exchange.clone(), instrument.canonical_symbol.clone()),
+                            instrument,
+                        );
+                    }
+                    supported
                 }
-                supported
-            }
-            Err(err) => {
-                errors.push(ObserveError {
-                    exchange: exchange.as_str().to_string(),
-                    symbol: None,
-                    kind: "instruments",
-                    message: err.to_string(),
-                });
-                HashSet::new()
-            }
-        };
+                Ok(Err(err)) => {
+                    errors.push(ObserveError {
+                        exchange: exchange.as_str().to_string(),
+                        symbol: None,
+                        kind: "instruments",
+                        message: err.to_string(),
+                    });
+                    HashSet::new()
+                }
+                Err(_) => {
+                    errors.push(ObserveError {
+                        exchange: exchange.as_str().to_string(),
+                        symbol: None,
+                        kind: "instruments",
+                        message: format!("timed out after {} ms", request_timeout.as_millis()),
+                    });
+                    HashSet::new()
+                }
+            };
         let symbols_for_exchange = config
             .universe
             .symbols
@@ -127,34 +151,53 @@ async fn observe_once(
                 .insert(exchange.clone());
             let symbol = exchange_symbol_for(&exchange, canonical);
 
-            match adapter.fetch_orderbook_snapshot(&symbol, 5).await {
-                Ok(book) => {
+            match tokio::time::timeout(
+                request_timeout,
+                adapter.fetch_orderbook_snapshot(&symbol, 5),
+            )
+            .await
+            {
+                Ok(Ok(book)) => {
                     cache.upsert_orderbook_at(book, now);
                     books_loaded += 1;
                     exchanges_seen.insert(exchange.as_str().to_string());
                 }
-                Err(err) => errors.push(ObserveError {
+                Ok(Err(err)) => errors.push(ObserveError {
                     exchange: exchange.as_str().to_string(),
                     symbol: Some(canonical.to_string()),
                     kind: "orderbook",
                     message: err.to_string(),
                 }),
+                Err(_) => errors.push(ObserveError {
+                    exchange: exchange.as_str().to_string(),
+                    symbol: Some(canonical.to_string()),
+                    kind: "orderbook",
+                    message: format!("timed out after {} ms", request_timeout.as_millis()),
+                }),
             }
         }
 
-        match adapter.load_funding(&symbols_for_exchange).await {
-            Ok(snapshots) => {
+        match tokio::time::timeout(request_timeout, adapter.load_funding(&symbols_for_exchange))
+            .await
+        {
+            Ok(Ok(snapshots)) => {
                 for snapshot in snapshots {
                     cache.upsert_funding(snapshot);
                     funding_loaded += 1;
                     exchanges_seen.insert(exchange.as_str().to_string());
                 }
             }
-            Err(err) => errors.push(ObserveError {
+            Ok(Err(err)) => errors.push(ObserveError {
                 exchange: exchange.as_str().to_string(),
                 symbol: None,
                 kind: "funding",
                 message: err.to_string(),
+            }),
+            Err(_) => errors.push(ObserveError {
+                exchange: exchange.as_str().to_string(),
+                symbol: None,
+                kind: "funding",
+                message: format!("timed out after {} ms", request_timeout.as_millis()),
             }),
         }
     }

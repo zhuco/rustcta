@@ -23,7 +23,7 @@ websocket:
   stale_book_ms: 1000
   reconnect_interval_ms: 1000
   max_reconnect_attempts: 0
-  record_books: true
+  record_books: false
   book_recording_path: data/market_books.jsonl
   record_top_of_book_only: true
   heartbeat_timeout_ms: 10000
@@ -43,6 +43,7 @@ replay:
 
 monitoring:
   enabled: false
+  http_enabled: false
   bind_addr: "127.0.0.1:8080"
   expose_publicly: false
   require_token: true
@@ -51,6 +52,7 @@ monitoring:
   max_recent_trades: 500
   max_recent_risk_events: 500
   refresh_interval_ms: 1000
+  snapshot_path: data/control_api/dashboard_snapshot.json
 
 live_preflight:
   enabled: true
@@ -87,7 +89,9 @@ max_notional_per_trade: 25.0
 min_notional_per_trade: 5.0
 max_notional_per_symbol: 250.0
 max_total_notional: 500.0
-min_net_spread_bps: 5.0
+min_raw_spread_bps: 30.0
+min_net_spread_bps: 0.0
+max_raw_spread_bps: 1000.0
 taker_fee_bps_override: 10.0
 slippage_bps: 3.0
 safety_buffer_bps: 2.0
@@ -126,8 +130,6 @@ initial_balances:
     CUDIS: 10000.0
 
 mexc:
-  api_key: ${MEXC_API_KEY}
-  api_secret: ${MEXC_API_SECRET}
   base_url: https://api.mexc.com
   websocket_url: wss://wbs-api.mexc.com/ws
   fee_override:
@@ -135,8 +137,6 @@ mexc:
     taker_fee_rate: 0.001
 
 coinex:
-  api_key: ${COINEX_API_KEY}
-  api_secret: ${COINEX_API_SECRET}
   base_url: https://api.coinex.com/v2
   websocket_url: wss://socket.coinex.com/v2/spot
   symbol_mappings:

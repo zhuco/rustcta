@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "strategy_id": "trend_report",
+  "strategy_kind": "trend_report",
+  "run_id": "local",
+  "tenant_id": "local",
+  "config_path": "config/trend_report.yml",
+  "command": "cargo",
+  "args": [
+    "run",
+    "--bin",
+    "trend_report",
+    "--",
+    "--config",
+    "config/trend_report.yml"
+  ],
+  "working_dir": ".",
+  "log_path": "logs/supervisor/trend_report.log",
+  "restart_backoff_ms": 5000
+}

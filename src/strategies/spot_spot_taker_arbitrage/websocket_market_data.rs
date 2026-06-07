@@ -5,6 +5,7 @@ use crate::data::{BookHealth, WebSocketBookManager, WebSocketBookManagerConfig};
 use crate::exchanges::bitget::BitgetSpotClient;
 use crate::exchanges::coinex::CoinExSpotClient;
 use crate::exchanges::gateio::GateIoSpotClient;
+use crate::exchanges::kucoin::KuCoinSpotClient;
 use crate::exchanges::mexc::MexcSpotClient;
 
 #[derive(Clone)]
@@ -19,6 +20,7 @@ pub async fn start_websocket_market_data(
     coinex: CoinExSpotClient,
     gateio: GateIoSpotClient,
     bitget: BitgetSpotClient,
+    kucoin: KuCoinSpotClient,
     cache: BookCache,
 ) -> Result<WebsocketMarketDataRuntime> {
     let symbols = if config.websocket.symbols.is_empty() {
@@ -48,24 +50,25 @@ pub async fn start_websocket_market_data(
             book_recording_path: config.websocket.book_recording_path.clone(),
         },
     );
+    let exchanges = if config.websocket.exchanges.is_empty() {
+        &config.exchanges
+    } else {
+        &config.websocket.exchanges
+    };
 
-    if config
-        .websocket
-        .exchanges
+    if exchanges
         .iter()
         .any(|exchange| exchange.eq_ignore_ascii_case("mexc"))
     {
         manager.spawn_exchange(mexc);
     }
-    if config
-        .websocket
-        .exchanges
+    if exchanges
         .iter()
         .any(|exchange| exchange.eq_ignore_ascii_case("coinex"))
     {
         manager.spawn_exchange(coinex);
     }
-    if config.websocket.exchanges.iter().any(|exchange| {
+    if exchanges.iter().any(|exchange| {
         matches!(
             exchange.trim().to_ascii_lowercase().as_str(),
             "gate" | "gateio" | "gate.io"
@@ -73,13 +76,17 @@ pub async fn start_websocket_market_data(
     }) {
         manager.spawn_exchange(gateio);
     }
-    if config
-        .websocket
-        .exchanges
+    if exchanges
         .iter()
         .any(|exchange| exchange.eq_ignore_ascii_case("bitget"))
     {
         manager.spawn_exchange(bitget);
+    }
+    if exchanges
+        .iter()
+        .any(|exchange| exchange.eq_ignore_ascii_case("kucoin"))
+    {
+        manager.spawn_exchange(kucoin);
     }
     Ok(WebsocketMarketDataRuntime { recorder, health })
 }

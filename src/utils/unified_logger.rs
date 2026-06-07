@@ -8,6 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+use tracing_subscriber::{fmt, EnvFilter};
 
 /// 日志配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +19,33 @@ pub struct LogConfig {
     pub retention_days: u32,
     pub console_output: bool,
     pub format: String,
+}
+
+pub fn init_tracing_logger(default_level: &str) {
+    let _ = tracing_log::LogTracer::init();
+
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
+
+    let subscriber = fmt()
+        .json()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_current_span(true)
+        .with_span_list(true)
+        .finish();
+
+    let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
+pub fn trading_span(exchange: &str, symbol: &str, strategy: &str) -> tracing::Span {
+    tracing::info_span!(
+        "trading",
+        exchange = %exchange,
+        symbol = %symbol,
+        strategy = %strategy
+    )
 }
 
 impl Default for LogConfig {
@@ -431,20 +459,7 @@ pub fn init_strategy_logger(
     strategy_name: &str,
     _log_level: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let env = env_logger::Env::default().filter_or("RUST_LOG", _log_level);
-
-    env_logger::Builder::from_env(env)
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "[{}] [{}] [{}] {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                record.level(),
-                record.target(),
-                record.args()
-            )
-        })
-        .init();
+    init_tracing_logger(_log_level);
 
     let log_dir = "logs/strategies";
     if !Path::new(log_dir).exists() {

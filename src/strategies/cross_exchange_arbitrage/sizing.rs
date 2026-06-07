@@ -191,7 +191,22 @@ pub fn size_hedge_pair_for_notional(
     if maker.valid && taker.valid {
         let common_base_quantity = maker
             .normalized_base_quantity
-            .min(taker.normalized_base_quantity);
+            .min(taker.normalized_base_quantity)
+            .max(min_valid_base_quantity(
+                maker_instrument,
+                maker_reference_price,
+                maker_limit_price,
+            ))
+            .max(min_valid_base_quantity(
+                taker_instrument,
+                taker_reference_price,
+                None,
+            ));
+        let common_base_quantity = common_base_quantity_on_both_quantity_grids(
+            maker_instrument,
+            taker_instrument,
+            common_base_quantity,
+        );
         let maker = size_exchange_leg_for_base_quantity(
             maker_instrument,
             target_notional_usdt,
@@ -228,6 +243,62 @@ fn sized_pair_from_legs(maker: ExchangeLegSize, taker: ExchangeLegSize) -> Sized
         executable: reject_reasons.is_empty(),
         reject_reasons,
     }
+}
+
+fn common_base_quantity_on_both_quantity_grids(
+    maker_instrument: &InstrumentMeta,
+    taker_instrument: &InstrumentMeta,
+    base_quantity: f64,
+) -> f64 {
+    ceil_base_quantity(maker_instrument, base_quantity)
+        .max(ceil_base_quantity(taker_instrument, base_quantity))
+}
+
+fn ceil_base_quantity(instrument: &InstrumentMeta, base_quantity: f64) -> f64 {
+    if base_quantity <= 0.0 || !base_quantity.is_finite() {
+        return base_quantity;
+    }
+    let contract_size = if instrument.contract_size.is_finite() && instrument.contract_size > 0.0 {
+        instrument.contract_size
+    } else {
+        1.0
+    };
+    let raw_quantity = base_quantity / contract_size;
+    instrument.quantize_quantity(raw_quantity, RoundingMode::Ceil) * contract_size
+}
+
+fn min_valid_base_quantity(
+    instrument: &InstrumentMeta,
+    reference_price: f64,
+    price: Option<f64>,
+) -> f64 {
+    let validation_price = price.unwrap_or(reference_price);
+    if validation_price <= 0.0 || !validation_price.is_finite() {
+        return 0.0;
+    }
+
+    let contract_size = if instrument.contract_size.is_finite() && instrument.contract_size > 0.0 {
+        instrument.contract_size
+    } else {
+        1.0
+    };
+    let min_base_from_qty = if instrument.min_qty.is_finite() && instrument.min_qty > 0.0 {
+        instrument.min_qty * contract_size
+    } else {
+        0.0
+    };
+    let min_base_from_notional =
+        if instrument.min_notional.is_finite() && instrument.min_notional > 0.0 {
+            instrument.min_notional / validation_price
+        } else {
+            0.0
+        };
+    let min_raw_quantity = min_base_from_qty.max(min_base_from_notional) / contract_size;
+    if min_raw_quantity <= 0.0 || !min_raw_quantity.is_finite() {
+        return 0.0;
+    }
+
+    instrument.quantize_quantity(min_raw_quantity, RoundingMode::Ceil) * contract_size
 }
 
 fn invalid_leg(
@@ -336,20 +407,38 @@ mod tests {
     }
 
     #[test]
-    fn sizing_should_reject_when_common_base_quantity_breaks_leg_minimum() {
+    fn sizing_should_raise_common_base_quantity_to_exchange_min_notional() {
         let bitget = instrument(ExchangeId::Bitget, "SMCIUSDT", 1.0, 0.01, 0.01, 0.01, 5.0);
         let gate = instrument(ExchangeId::Gate, "SMCI_USDT", 1.0, 0.01, 0.1, 0.1, 0.0);
 
         let pair = size_hedge_pair_for_notional(&bitget, 46.622, Some(46.622), &gate, 47.11, 6.0);
 
-        assert!(!pair.executable);
-        assert_eq!(pair.maker.normalized_base_quantity, 0.1);
-        assert_eq!(pair.taker.normalized_base_quantity, 0.1);
-        assert!(pair
-            .maker
-            .violations
-            .iter()
-            .any(|violation| violation == "BelowMinNotional"));
+        assert!(pair.executable, "{:?}", pair.reject_reasons);
+        assert_eq!(pair.maker.normalized_base_quantity, 0.2);
+        assert_eq!(pair.taker.normalized_base_quantity, 0.2);
+        assert!(pair.maker.normalized_notional_usdt.unwrap() >= 5.0);
+        assert!(pair.taker.normalized_notional_usdt.unwrap() >= 5.0);
+    }
+
+    #[test]
+    fn sizing_should_keep_five_usdt_leg_valid_when_flooring_would_drop_below_min_notional() {
+        let bitget = instrument(ExchangeId::Bitget, "ALTUSDT", 1.0, 0.000001, 1.0, 1.0, 5.0);
+        let binance = instrument(ExchangeId::Binance, "ALTUSDT", 1.0, 0.000001, 1.0, 1.0, 5.0);
+
+        let pair = size_hedge_pair_for_notional(
+            &bitget,
+            0.005563,
+            Some(0.005563),
+            &binance,
+            0.005573,
+            5.0,
+        );
+
+        assert!(pair.executable, "{:?}", pair.reject_reasons);
+        assert_eq!(pair.maker.normalized_base_quantity, 899.0);
+        assert_eq!(pair.taker.normalized_base_quantity, 899.0);
+        assert!(pair.maker.normalized_notional_usdt.unwrap() >= 5.0);
+        assert!(pair.taker.normalized_notional_usdt.unwrap() >= 5.0);
     }
 
     #[test]

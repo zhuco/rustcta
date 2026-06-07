@@ -1,0 +1,16 @@
+[package]
+name = "rustcta-execution-api"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Stable RustCTA execution command and event protocol"
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+rustcta-types = { path = "../rustcta-types" }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+serde_json = "1.0"

@@ -51,7 +51,7 @@ impl MarketDataAdapter for BybitMarketAdapter {
     }
 
     async fn load_instruments(&self) -> anyhow::Result<Vec<InstrumentMeta>> {
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let mut cursor: Option<String> = None;
         let mut instruments = Vec::new();
 
@@ -102,7 +102,7 @@ impl MarketDataAdapter for BybitMarketAdapter {
         &self,
         symbols: &[CanonicalSymbol],
     ) -> anyhow::Result<Vec<MarketFundingSnapshot>> {
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let recv_ts = Utc::now();
         let mut request = client
             .get(format!("{BYBIT_REST_BASE}/v5/market/tickers"))
@@ -170,7 +170,7 @@ impl MarketDataAdapter for BybitMarketAdapter {
         }
 
         let limit = depth.clamp(1, 50).to_string();
-        let value: Value = reqwest::Client::new()
+        let value: Value = crate::core::http2_fix::shared_http_client()
             .get(format!("{BYBIT_REST_BASE}/v5/market/orderbook"))
             .query(&[
                 ("category", BYBIT_CATEGORY),

@@ -5,20 +5,22 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex, OnceLock,
 };
 use std::thread;
 
 use crate::execution::{FillEvent, OrderState, PrivateEvent};
-use crate::market::{CanonicalSymbol, ExchangeId};
+use crate::market::{CanonicalSymbol, ExchangeId, InstrumentMeta};
 
 use super::{
-    ArbSignal, FundingSettlement, HedgeRecordReadModel, HedgeRepairTaskReadModel, MarketSnapshot,
-    NormalizedDepthSnapshot, Opportunity, OpportunityRecord, SimulatedBundleState,
+    ArbSignal, BundleCloseMetricReadModel, FundingSettlement, HedgeRecordReadModel,
+    HedgeRepairTaskReadModel, MarketSnapshot, NormalizedDepthSnapshot, Opportunity,
+    OpportunityRecord, SimulatedBundleState,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CrossArbStorageEvent {
+    Instrument(InstrumentMeta),
     MarketSnapshot(ArbitrageMarketSnapshotRecord),
     DetectedOpportunity(OpportunityRecord),
     OrderTransition(ArbitrageOrderRecord),
@@ -31,6 +33,7 @@ pub enum CrossArbStorageEvent {
     Signal(ArbSignal),
     Bundle(SimulatedBundleState),
     HedgeRecord(HedgeRecordReadModel),
+    CloseMetric(BundleCloseMetricReadModel),
     HedgeRepairTask(HedgeRepairTaskReadModel),
     FundingSettlement(FundingSettlement),
     PrivateEvent(PrivateEvent),
@@ -309,9 +312,10 @@ impl StorageSink for JsonlStorageSink {
 
 #[derive(Debug)]
 pub struct AsyncJsonlStorageSink {
-    sender: mpsc::Sender<StoredCrossArbEvent>,
+    sender: Option<mpsc::Sender<StoredCrossArbEvent>>,
     next_event_id: u64,
     healthy: Arc<AtomicBool>,
+    writer: Option<thread::JoinHandle<()>>,
 }
 
 impl AsyncJsonlStorageSink {
@@ -324,7 +328,7 @@ impl AsyncJsonlStorageSink {
         let (sender, receiver) = mpsc::channel::<StoredCrossArbEvent>();
         let healthy = Arc::new(AtomicBool::new(true));
         let writer_healthy = Arc::clone(&healthy);
-        thread::Builder::new()
+        let writer = thread::Builder::new()
             .name("cross-arb-jsonl-recorder".to_string())
             .spawn(move || {
                 while let Ok(event) = receiver.recv() {
@@ -335,9 +339,10 @@ impl AsyncJsonlStorageSink {
             })
             .map_err(std::io::Error::other)?;
         Ok(Self {
-            sender,
+            sender: Some(sender),
             next_event_id,
             healthy,
+            writer: Some(writer),
         })
     }
 
@@ -361,18 +366,52 @@ impl StorageSink for AsyncJsonlStorageSink {
             event,
         };
         self.next_event_id += 1;
-        if self.sender.send(stored).is_err() {
+        if self
+            .sender
+            .as_ref()
+            .is_none_or(|sender| sender.send(stored).is_err())
+        {
             self.healthy.store(false, Ordering::SeqCst);
         }
     }
 }
 
+impl Drop for AsyncJsonlStorageSink {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(writer) = self.writer.take() {
+            if writer.join().is_err() {
+                self.healthy.store(false, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
 fn append_stored_event(path: &Path, stored: &StoredCrossArbEvent) -> std::io::Result<()> {
+    let path_key = path.to_string_lossy().to_string();
+    let lock = {
+        let mut locks = jsonl_path_locks()
+            .lock()
+            .map_err(|_| std::io::Error::other("cross-arb jsonl lock table poisoned"))?;
+        locks
+            .entry(path_key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    let _guard = lock
+        .lock()
+        .map_err(|_| std::io::Error::other("cross-arb jsonl file lock poisoned"))?;
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     serde_json::to_writer(&mut file, stored)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
     file.write_all(b"\n")?;
     Ok(())
+}
+
+fn jsonl_path_locks() -> &'static Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>> {
+    static LOCKS: OnceLock<Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>> =
+        OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 fn existing_jsonl_lines(path: &Path) -> std::io::Result<u64> {
@@ -400,7 +439,9 @@ pub fn load_jsonl_storage_events(
 
     let mut events = Vec::new();
     for path in paths {
-        let file = fs::File::open(path)?;
+        let file = fs::File::open(&path)?;
+        let mut malformed_lines = 0usize;
+        let mut first_error = None;
         for line in BufReader::new(file).lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -408,8 +449,19 @@ pub fn load_jsonl_storage_events(
             }
             match serde_json::from_str::<StoredCrossArbEvent>(&line) {
                 Ok(event) => events.push(event),
-                Err(error) => log::warn!("skip malformed cross-arb jsonl event: {error}"),
+                Err(error) => {
+                    malformed_lines += 1;
+                    first_error.get_or_insert_with(|| error.to_string());
+                }
             }
+        }
+        if malformed_lines > 0 {
+            log::warn!(
+                "skip malformed cross-arb jsonl events file={} malformed_lines={} first_error={}",
+                path.display(),
+                malformed_lines,
+                first_error.unwrap_or_else(|| "unknown parse error".to_string())
+            );
         }
     }
     events.sort_by(|left, right| {
@@ -424,7 +476,9 @@ pub fn load_jsonl_storage_events(
 mod tests {
     use super::*;
     use crate::market::RuntimeMode;
-    use crate::market::{CanonicalSymbol, ExchangeId};
+    use crate::market::{
+        CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta, InstrumentStatus,
+    };
     use crate::strategies::cross_exchange_arbitrage::ArbSignal;
     use crate::strategies::cross_exchange_arbitrage::{
         FundingModel, OpportunityDecision, OpportunityRecord, PositionSide,
@@ -488,6 +542,69 @@ mod tests {
             storage.events()[0].event,
             CrossArbStorageEvent::PrivateEvent(_)
         ));
+    }
+
+    #[test]
+    fn storage_should_persist_instrument_precision_rules_to_jsonl() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let now = Utc::now();
+        let mut storage = JsonlStorageSink::for_day(tempdir.path(), now).expect("jsonl sink");
+        let instrument = InstrumentMeta::new(
+            ExchangeId::Gate,
+            CanonicalSymbol::new("EDGE", "USDT"),
+            ExchangeSymbol::new(ExchangeId::Gate, "EDGE_USDT"),
+            "EDGE",
+            "USDT",
+            "USDT",
+            ContractType::LinearPerpetual,
+            1.0,
+            0.0001,
+            1.0,
+            1.0,
+            5.0,
+            4,
+            0,
+            InstrumentStatus::Trading,
+        );
+
+        storage.record(CrossArbStorageEvent::Instrument(instrument.clone()), now);
+
+        let raw = std::fs::read_to_string(storage.path()).expect("jsonl contents");
+        let stored = raw.lines().next().expect("one event");
+        let event: StoredCrossArbEvent = serde_json::from_str(stored).expect("stored event");
+        assert!(matches!(
+            &event.event,
+            CrossArbStorageEvent::Instrument(stored) if stored == &instrument
+        ));
+    }
+
+    #[test]
+    fn storage_should_keep_concurrent_async_jsonl_writes_line_atomic() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let now = Utc::now();
+        let path = tempdir.path().join("cross_arb_events_concurrent.jsonl");
+        let mut left = AsyncJsonlStorageSink::new(&path).expect("left sink");
+        let mut right = AsyncJsonlStorageSink::new(&path).expect("right sink");
+
+        for _ in 0..100 {
+            left.record(
+                CrossArbStorageEvent::Signal(ArbSignal::noop(RuntimeMode::Simulation, now)),
+                now,
+            );
+            right.record(
+                CrossArbStorageEvent::Signal(ArbSignal::noop(RuntimeMode::Simulation, now)),
+                now,
+            );
+        }
+        drop(left);
+        drop(right);
+
+        let raw = std::fs::read_to_string(path).expect("jsonl contents");
+        let lines = raw.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 200);
+        for line in lines {
+            serde_json::from_str::<StoredCrossArbEvent>(line).expect("line is atomic json event");
+        }
     }
 
     #[test]

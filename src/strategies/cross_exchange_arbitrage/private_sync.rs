@@ -19,8 +19,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::{sleep, timeout, Duration as TokioDuration};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
+use crate::core::ws_connect::connect_async;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateRestSnapshot {
     pub exchange: ExchangeId,

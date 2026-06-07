@@ -17,7 +17,6 @@ pub struct SmartMoneyServiceConfig {
     pub binance_collector: BinanceCollectorConfig,
     pub hyperliquid_wallet_ingestion: HyperliquidWalletIngestionConfig,
     pub portfolio: SmartMoneyPortfolioConfig,
-    pub monitor: SmartMoneyMonitorConfig,
 }
 
 impl Default for SmartMoneyServiceConfig {
@@ -33,7 +32,6 @@ impl Default for SmartMoneyServiceConfig {
             binance_collector: BinanceCollectorConfig::default(),
             hyperliquid_wallet_ingestion: HyperliquidWalletIngestionConfig::default(),
             portfolio: SmartMoneyPortfolioConfig::default(),
-            monitor: SmartMoneyMonitorConfig::default(),
         }
     }
 }
@@ -288,57 +286,6 @@ impl From<&PortfolioConstraintsConfig> for PortfolioConstraints {
             max_leverage: value.max_leverage,
             max_gross_notional_usdt: value.max_gross_notional_usdt,
             max_single_asset_gross_share: value.max_single_asset_gross_share,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SmartMoneyMonitorConfig {
-    pub enabled: bool,
-    pub bind_addr: String,
-    pub database_path: String,
-    pub hyperliquid_api_base_url: String,
-    pub binance_rest_base_url: String,
-    pub symbols: Vec<String>,
-    pub simulation_interval_secs: u64,
-    pub order_notional_usdt: Decimal,
-    pub max_symbol_position_notional_usdt: Decimal,
-    pub max_total_position_notional_usdt: Decimal,
-    pub simulation_position_reset_at: Option<String>,
-    pub wallet_fill_lookback_secs: u64,
-    pub copy_max_fill_age_secs: u64,
-    pub min_wallet_trade_notional_usdt: Decimal,
-    pub copy_signal_threshold: Decimal,
-    pub synthetic_activity_enabled: bool,
-    pub wallets: Vec<TrackedWalletConfig>,
-}
-
-impl Default for SmartMoneyMonitorConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            bind_addr: "127.0.0.1:8095".to_string(),
-            database_path: "logs/smart_money_monitor.sqlite".to_string(),
-            hyperliquid_api_base_url: "https://api.hyperliquid.xyz".to_string(),
-            binance_rest_base_url: "https://fapi.binance.com".to_string(),
-            symbols: vec![
-                "BTCUSDT".to_string(),
-                "ETHUSDT".to_string(),
-                "SOLUSDT".to_string(),
-                "HYPEUSDT".to_string(),
-            ],
-            simulation_interval_secs: 60,
-            order_notional_usdt: Decimal::new(1000, 0),
-            max_symbol_position_notional_usdt: Decimal::new(1000, 0),
-            max_total_position_notional_usdt: Decimal::new(5000, 0),
-            simulation_position_reset_at: None,
-            wallet_fill_lookback_secs: 15 * 60,
-            copy_max_fill_age_secs: 2 * 60,
-            min_wallet_trade_notional_usdt: Decimal::new(250, 0),
-            copy_signal_threshold: Decimal::new(65, 2),
-            synthetic_activity_enabled: false,
-            wallets: Vec::new(),
         }
     }
 }

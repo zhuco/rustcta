@@ -1,0 +1,336 @@
+enabled: true
+trading_mode: live
+exchanges: &spot_exchanges
+  - gateio
+  - bitget
+# Manual live universe: only symbols explicitly started from spot_symbol_control are eligible.
+# Filename is retained for compatibility with existing run scripts.
+symbols: &spot_symbols
+  - VSNUSDT
+quote_asset: USDT
+market_data_mode: rest_polling
+max_enabled_arbitrage_symbols: 1
+initial_entry_notional_usdt: 20
+spread_duration_threshold_seconds: 1
+entry_order_timeout_seconds: 30
+entry_maker_retries: 0
+active_taker_notional_usdt: 3.6
+# Manual mode: inactivity is logged for review only; automatic exit/liquidation is disabled.
+inactivity_exit_seconds: 300
+exit_order_timeout_seconds: 60
+exit_maker_retries: 10
+
+websocket:
+  enabled: true
+  exchanges: *spot_exchanges
+  symbols: *spot_symbols
+  depth: 5
+  stale_book_ms: 20000
+  reconnect_interval_ms: 1000
+  max_reconnect_attempts: 0
+  record_books: false
+  book_recording_path: data/spot_spot_live_dry_run_books.jsonl
+  record_top_of_book_only: true
+  heartbeat_timeout_ms: 10000
+  log_raw_messages: false
+
+rest_polling:
+  enabled: true
+  interval_ms: 1000
+
+replay:
+  enabled: false
+
+live_dry_run:
+  enabled: true
+  build_order_requests: true
+  submit_orders: false
+  max_notional_per_order: 14
+  max_total_notional: 50
+  require_preflight_pass: true
+  require_fresh_books: true
+  max_book_age_ms: 20000
+  output_path: data/live_dry_run_orders.jsonl
+
+arbitrage_scanner:
+  enabled: true
+  relationships:
+    spot_spot: true
+    spot_perp: false
+    perp_perp: false
+  execution_modes:
+    taker_taker: true
+    maker_taker_analysis: false
+    maker_taker_execution: false
+  notionals_usdt:
+    - 3.6
+  minimums:
+    tt_immediate_net_bps: 0
+    lifecycle_expected_net_bps: 0
+    return_on_capital_per_hour_bps: 0
+  lifecycle:
+    expected_convergence_bps: 0
+    expected_exit_basis_bps: 0
+    expected_exit_spread_bps: 0
+    expected_funding_net_bps: 0
+    expected_exit_fee_bps: 20
+    expected_exit_slippage_bps: 5
+    expected_inventory_rebalance_cost_bps: 5
+    expected_transfer_cost_bps: 0
+    expected_inventory_risk_bps: 5
+    expected_residual_loss_bps: 5
+    margin_risk_cost_bps: 0
+    safety_buffer_bps: 5
+    expected_holding_seconds: 3600
+  maker_taker:
+    fill_probability: 0
+    expected_time_to_fill_ms: 1000
+    expected_spread_at_fill_bps: 0
+    expected_hedge_slippage_bps: 5
+    expected_adverse_selection_bps: 10
+    expected_residual_loss_bps: 5
+    expected_cancel_replace_cost_bps: 0
+    expected_inventory_risk_bps: 5
+    estimated: true
+  stale_book_ms: 20000
+  quantity_rounding_tolerance: 0.00000001
+  output_path: data/arbitrage_opportunity_analytics.jsonl
+
+inventory_rebalance:
+  enabled: true
+  # Manual live mode: initial base inventory is started explicitly from the control plane.
+  allow_auto_initial_entry: false
+  allow_auto_exit: false
+  # Market rebalance plans are allowed only when the price relation is no-loss after fees,
+  # slippage buffer, and safety buffer. Losing profit-covered/emergency recovery remains off.
+  allow_market_rebalance: true
+  allow_transfer_rebalance: false
+  allow_profit_covered_recovery: false
+  allow_emergency_recovery: false
+  allow_lossy_rebalance_when_blocked: true
+  target_total_notional_usdt: 20
+  min_cycles_buffer: 3
+  target_cycles_buffer: 5
+  no_loss_safety_bps: 8
+  slippage_buffer_bps: 5
+  profit_floor_usdt: 0.02
+  max_profit_use_ratio: 0.5
+  max_rebalance_notional_usdt: 5
+  max_blocked_rebalance_loss_usdt: 0.05
+  emergency_after_seconds: 20
+  emergency_max_exposure_usdt: 15
+  emergency_adverse_bps: 30
+
+kill_switch:
+  enabled: true
+  allow_live_orders: true
+
+small_live_gate:
+  enabled: true
+  explicit_live_confirmation: true
+  max_notional_per_order: 14
+  max_total_notional: 50
+  # Gate.io currently requires about 3U minimum quote order size on the shared spot universe.
+  # Initial entry targets 20U per symbol and keeps the existing venue allocation schedule.
+  # Keep the execution candidate set bounded; max_enabled_arbitrage_symbols still caps concurrent pairs.
+  enabled_symbols: &execution_symbols
+    - VSNUSDT
+  enabled_exchanges:
+    - gateio
+    - bitget
+
+live_preflight:
+  enabled: true
+  target_mode: live
+  exchanges:
+    - gateio
+    - bitget
+  market_type: Spot
+  symbols: *execution_symbols
+  max_live_notional_per_trade: 3.6
+  max_total_live_notional: 50
+  require_monitoring_enabled: true
+  require_recorder_enabled: true
+  require_websocket_fresh: true
+  max_book_age_ms: 60000
+  require_fee_model: true
+  require_disabled_registry: true
+  require_kill_switch: true
+  require_balances: true
+  require_symbol_rules: true
+  require_order_validation: true
+  require_private_stream: false
+  allow_rest_order_polling_fallback: true
+  require_api_key_read_permission: true
+  require_api_key_trade_permission: true
+  require_withdraw_permission_absent: true
+  minimum_quote_balance_usdt: 10
+  minimum_base_inventory_usdt: 0
+  fail_on_unmanaged_position_overlap: true
+
+monitoring:
+  enabled: true
+  http_enabled: false
+  bind_addr: "127.0.0.1:8080"
+  expose_publicly: false
+  require_token: true
+  token_env: RUSTCTA_MONITOR_TOKEN
+  max_recent_opportunities: 500
+  max_recent_trades: 500
+  max_recent_risk_events: 500
+  refresh_interval_ms: 1000
+  snapshot_path: data/control_api/dashboard_snapshot.json
+
+spot_symbol_control:
+  enabled: true
+  require_write_auth: true
+  command_store_path: data/control_commands.jsonl
+  audit_store_path: data/control_audit.jsonl
+  lifecycle_store_path: data/managed_spot_symbols.jsonl
+  require_liquidation_confirmation: true
+  default_enable_mode: FutureSmallLive
+  allow_future_small_live: true
+  enable_validation:
+    require_fresh_books: true
+    max_book_age_ms: 20000
+    require_fee_model: true
+    require_symbol_rules: true
+    require_inventory_for_future_small_live: true
+  disable_defaults:
+    cancel_active_orders: false
+    include_managed_inventory_only: true
+    maximum_slippage_bps: 30
+    maximum_liquidation_loss_usdt: 2
+  market_liquidation:
+    use_ioc_limit_only: true
+    allow_unbounded_market_order: false
+    stop_on_any_failure: true
+  passive_liquidation:
+    enabled: false
+    post_only_required: true
+    price_mode: best_ask
+    reprice_interval_ms: 5000
+    order_timeout_ms: 15000
+    maximum_duration_seconds: 3600
+    maximum_active_orders_per_exchange: 0
+    maximum_liquidation_loss_usdt: 2
+    minimum_order_notional_usdt: 1
+    stop_on_partial_fill_reconciliation_error: true
+  runtime_snapshot:
+    max_snapshot_age_ms: 2000
+    max_book_age_ms: 20000
+    max_balance_age_ms: 10000
+    max_symbol_rule_age_seconds: 86400
+    max_fee_age_seconds: 3600
+    require_exchange_health: true
+    require_balance_reconciliation_clean: true
+    fail_on_unknown_order_ownership: true
+    fail_on_unknown_inventory_ownership: true
+  runtime_publisher:
+    enabled: true
+    polling:
+      poll_balances: true
+      poll_open_orders: false
+      poll_recent_fills: false
+      poll_symbol_rules: true
+      poll_fees: false
+      balances_interval_ms: 5000
+      open_orders_interval_ms: 3000
+      recent_fills_interval_ms: 5000
+      symbol_rules_interval_seconds: 3600
+      fee_interval_seconds: 1800
+      reconciliation_interval_ms: 5000
+      snapshot_interval_ms: 1000
+    limits:
+      maximum_concurrent_requests_per_exchange: 2
+      minimum_request_spacing_ms: 100
+      jitter_ms: 100
+      exponential_backoff_initial_ms: 500
+      exponential_backoff_max_ms: 30000
+      pause_after_rate_limit_ms: 60000
+    consistency:
+      max_book_age_ms: 20000
+      max_balance_age_ms: 10000
+      max_open_orders_age_ms: 10000
+      max_fee_age_seconds: 3600
+      max_symbol_rule_age_seconds: 86400
+      max_component_time_skew_ms: 10000
+    snapshot_store:
+      enabled: true
+      backend: jsonl
+      path: data/spot_control_snapshots.jsonl
+      require_persistence_for_write_commands: true
+      maximum_retained_snapshots_per_symbol: 10000
+    refresh_timeout_ms: 2000
+
+order_reconciliation:
+  enabled: true
+  poll_interval_ms: 500
+  max_poll_attempts: 3
+  order_timeout_ms: 5000
+  allow_recent_fills_fallback: true
+  allow_open_orders_fallback: true
+  unknown_status_is_critical: true
+
+max_notional_per_trade: 3.6
+min_notional_per_trade: 1
+max_notional_per_symbol: 50
+max_total_notional: 50
+min_raw_spread_bps: 0
+min_net_spread_bps: 0
+max_raw_spread_bps: 1000
+taker_fee_bps_override: null
+fee_config_path: config/fees.yml
+disabled_registry_path: config/disabled_symbols.yml
+slippage_bps: 3
+safety_buffer_bps: 2
+stale_book_ms: 20000
+max_book_latency_ms: 20000
+min_depth_notional: 3.6
+max_active_opportunities_per_symbol: 1
+cooldown_ms_after_trade: 5000
+enable_database_recording: false
+enable_csv_recording: true
+jsonl_path: logs/spot_spot_taker_arbitrage/live_dry_run_events.jsonl
+csv_path: logs/spot_spot_taker_arbitrage/live_dry_run_events.csv
+report_interval_seconds: 30
+dry_run: false
+live_trading_enabled: true
+scan_interval_ms: 1000
+orderbook_depth: 5
+request_timeout_ms: 10000
+max_daily_loss: 5
+max_trade_loss: 2
+max_consecutive_rejections: 20
+
+initial_balances:
+  gateio:
+    USDT: 100
+    EDGE: 1000
+    VANRY: 50000
+    ARIA: 5000
+    ES: 1000
+    BTR: 5000
+  bitget:
+    USDT: 51.391593680843
+    BGB: 1.6150833
+
+mexc:
+  base_url: https://api.mexc.com
+  websocket_url: wss://wbs-api.mexc.com/ws
+
+coinex:
+  base_url: https://api.coinex.com/v2
+  websocket_url: wss://socket.coinex.com/v2/spot
+
+gateio:
+  base_url: https://api.gateio.ws/api/v4
+  websocket_url: wss://api.gateio.ws/ws/v4/
+
+bitget:
+  base_url: https://api.bitget.com
+  websocket_url: wss://ws.bitget.com/v2/ws/public
+
+kucoin:
+  base_url: https://api.kucoin.com
+  websocket_url: wss://ws-api-spot.kucoin.com

@@ -9,8 +9,9 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::{interval, sleep, Duration};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+use crate::core::ws_connect::connect_async;
 use crate::core::{
     error::ExchangeError,
     types::{MarketType, WsMessage},
@@ -85,6 +86,11 @@ pub trait WebSocketClient: Send + Sync {
 
     /// 获取连接状态
     fn get_state(&self) -> ConnectionState;
+
+    /// 重连成功后的恢复钩子；私有流可在实现里恢复 auth/listenKey/subscribe。
+    async fn recover_after_reconnect(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// WebSocket消息处理器trait
@@ -126,7 +132,7 @@ impl BinanceListenKeyManager {
 
     /// 创建ListenKey
     pub async fn create_listen_key(&self) -> Result<String> {
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let url = match self.market_type {
             MarketType::Spot => "https://api.binance.com/api/v3/userDataStream",
             MarketType::Futures => "https://fapi.binance.com/fapi/v1/listenKey",
@@ -174,7 +180,7 @@ impl BinanceListenKeyManager {
             .clone()
             .ok_or_else(|| ExchangeError::Other("ListenKey不存在".to_string()))?;
 
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let url = match self.market_type {
             MarketType::Spot => "https://api.binance.com/api/v3/userDataStream",
             MarketType::Futures => "https://fapi.binance.com/fapi/v1/listenKey",
@@ -295,6 +301,7 @@ impl HeartbeatManager {
 pub struct ReconnectManager {
     max_attempts: u32,
     delay_secs: u64,
+    max_delay_secs: u64,
     current_attempts: Arc<RwLock<u32>>,
 }
 
@@ -303,8 +310,14 @@ impl ReconnectManager {
         Self {
             max_attempts,
             delay_secs,
+            max_delay_secs: 60,
             current_attempts: Arc::new(RwLock::new(0)),
         }
+    }
+
+    pub fn with_max_delay(mut self, max_delay_secs: u64) -> Self {
+        self.max_delay_secs = max_delay_secs.max(self.delay_secs.max(1));
+        self
     }
 
     /// 尝试重连
@@ -319,12 +332,17 @@ impl ReconnectManager {
         *attempts += 1;
         info!("🔄 尝试重连 {}/{}", *attempts, self.max_attempts);
 
-        // 等待重连延迟
-        sleep(Duration::from_secs(self.delay_secs)).await;
+        let delay = reconnect_delay(
+            self.delay_secs.saturating_mul(1_000),
+            *attempts,
+            self.max_delay_secs.saturating_mul(1_000),
+        );
+        sleep(delay).await;
 
         // 尝试重新连接
         match client.connect().await {
             Ok(()) => {
+                client.recover_after_reconnect().await?;
                 info!("✅ 重连成功");
                 *attempts = 0; // 重置计数
                 Ok(())
@@ -343,6 +361,11 @@ impl ReconnectManager {
 }
 
 // ============= 工具函数 =============
+
+pub fn reconnect_delay(base_ms: u64, attempt: u32, max_ms: u64) -> Duration {
+    let factor = 2_u64.saturating_pow(attempt.saturating_sub(1).min(6));
+    Duration::from_millis(base_ms.saturating_mul(factor).min(max_ms.max(base_ms)))
+}
 
 /// 解析WebSocket URL，根据交易所和市场类型
 pub fn get_websocket_url(exchange: &str, market_type: MarketType, is_private: bool) -> String {

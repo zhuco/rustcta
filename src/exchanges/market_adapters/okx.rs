@@ -89,7 +89,7 @@ impl MarketDataAdapter for OkxMarketAdapter {
     }
 
     async fn load_instruments(&self) -> anyhow::Result<Vec<InstrumentMeta>> {
-        let value: Value = reqwest::Client::new()
+        let value: Value = crate::core::http2_fix::shared_http_client()
             .get(format!("{OKX_API_BASE}/api/v5/public/instruments"))
             .query(&[("instType", "SWAP")])
             .send()
@@ -110,7 +110,7 @@ impl MarketDataAdapter for OkxMarketAdapter {
         &self,
         symbols: &[CanonicalSymbol],
     ) -> anyhow::Result<Vec<MarketFundingSnapshot>> {
-        let client = reqwest::Client::new();
+        let client = crate::core::http2_fix::shared_http_client();
         let mut snapshots = Vec::with_capacity(symbols.len());
 
         for canonical in symbols {
@@ -188,7 +188,7 @@ impl MarketDataAdapter for OkxMarketAdapter {
         depth: u16,
     ) -> anyhow::Result<OrderBookSnapshot> {
         let sz = depth.clamp(5, 20).to_string();
-        let value: Value = reqwest::Client::new()
+        let value: Value = crate::core::http2_fix::shared_http_client()
             .get(format!("{OKX_API_BASE}/api/v5/market/books"))
             .query(&[("instId", symbol.symbol.as_str()), ("sz", sz.as_str())])
             .send()

@@ -9,26 +9,32 @@ use chrono::{DateTime, Duration, Utc};
 use clap::{Args, Parser, Subcommand};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::backtest::data::depth_capture::{
     import_binance_futures_depth_capture, DepthCaptureSession, DepthCaptureWriter,
     RawDepthDeltaRecord, RawDepthSnapshot,
 };
-use crate::backtest::data::depth_dataset::DepthDatasetReader;
 use crate::backtest::data::exchange_metadata::{ExchangeMetadataReader, ExchangeMetadataWriter};
 use crate::backtest::data::kline_dataset::{KlineDatasetOutput, KlineDatasetWriter};
 use crate::backtest::data::trade_capture::{
     import_binance_futures_trade_capture, RawTradeRecord, TradeCaptureSession, TradeCaptureWriter,
 };
-use crate::backtest::data::trade_dataset::TradeDatasetReader;
 use crate::backtest::factors::{
     expand_mtf_trend_factor_runs, expand_trend_factor_runs, MtfTrendFactorScanSpec,
     TrendFactorScanSpec,
 };
 use crate::backtest::matching::engine::{BacktestEngineState, LimitOrderProcessingResult};
+use crate::backtest::offline_runtime::{
+    BacktestRuntime as OfflineBacktestRuntime,
+    BacktestRuntimeConfig as OfflineBacktestRuntimeConfig,
+};
 use crate::backtest::replay::{
     DepthReplay, KlineReplay, MergedReplay, ReplayPartition, TradeReplay,
+};
+use crate::backtest::runtime_support::{
+    approx_equal, latency_duration_ms, market_type_from_string, opposite_side, positive_constraint,
+    quote_asset_from_symbol, round_down_to_step, round_limit_price,
 };
 use crate::backtest::schema::BacktestEvent;
 use crate::backtest::strategy::mean_reversion::{
@@ -44,12 +50,19 @@ use crate::backtest::strategy::trend_factor::{
     run_trend_factor_definition, TrendFactorRunReport, TrendFactorRunSummary,
 };
 use crate::backtest::strategy::{BacktestStrategy, StrategySignal};
+use crate::backtest::symbol::{normalize_symbol_input, to_binance_futures_symbol};
 use crate::core::config::{ApiKeys, Config};
 use crate::core::types::{Interval, Kline, MarketType, OrderSide, TradingPair};
+use crate::core::ws_connect::connect_async;
 use crate::exchanges::BinanceExchange;
 use crate::strategies::mean_reversion::MeanReversionConfig;
-use crate::utils::SymbolConverter;
 use crate::Exchange;
+
+pub mod short_ladder_mtf_grid;
+
+pub use short_ladder_mtf_grid::{
+    run_short_ladder_mtf_grid, ShortLadderMtfGridArgs, ShortLadderMtfGridManifest,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "backtest")]
@@ -72,6 +85,7 @@ pub enum BacktestCommand {
     ScanMtfTrendFactor(ScanMtfTrendFactorArgs),
     RunShortLadder(RunShortLadderArgs),
     RunShortLadderMtfExecution(RunShortLadderMtfExecutionArgs),
+    ShortLadderMtfGrid(ShortLadderMtfGridArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -573,6 +587,190 @@ pub enum BacktestCommandOutput {
     ScanMtfTrendFactor(MtfTrendFactorScanManifest),
     RunShortLadder(ShortLadderRunManifest),
     RunShortLadderMtfExecution(ShortLadderMtfExecutionRunManifest),
+    ShortLadderMtfGrid(ShortLadderMtfGridManifest),
+}
+
+pub fn render_command_output(output: BacktestCommandOutput) {
+    match output {
+        BacktestCommandOutput::FetchKlines(manifest) => {
+            println!(
+                "stored klines at {} with manifest {}",
+                manifest.dataset.data_path.display(),
+                manifest.dataset.manifest_path.display()
+            );
+        }
+        BacktestCommandOutput::CaptureDepth(manifest) => {
+            println!(
+                "captured raw depth at {}, normalized dataset at {}, manifest {}, snapshot_update_id={}, raw_delta_count={}",
+                manifest.raw_capture_path.display(),
+                manifest.normalized_data_path.display(),
+                manifest.normalized_manifest_path.display(),
+                manifest.snapshot_update_id,
+                manifest.raw_delta_count
+            );
+        }
+        BacktestCommandOutput::CaptureTrades(manifest) => {
+            println!(
+                "captured raw trades at {}, normalized dataset at {}, manifest {}, raw_trade_count={}",
+                manifest.raw_capture_path.display(),
+                manifest.normalized_data_path.display(),
+                manifest.normalized_manifest_path.display(),
+                manifest.raw_trade_count
+            );
+        }
+        BacktestCommandOutput::RunMeanReversion(manifest) => {
+            if let Some(summary_path) = manifest.summary_path {
+                println!(
+                    "mean reversion processed {} events and emitted {} signals; summary written to {}",
+                    manifest.summary.signals.processed_events,
+                    manifest.summary.execution.executed_signals,
+                    summary_path.display()
+                );
+            } else {
+                println!(
+                    "mean reversion processed {} events and emitted {} signals",
+                    manifest.summary.signals.processed_events,
+                    manifest.summary.execution.executed_signals
+                );
+            }
+        }
+        BacktestCommandOutput::ScanMeanReversion(manifest) => {
+            if let Some(best_run) = manifest.best_run {
+                println!(
+                    "mean reversion scan completed {} runs with {} workers; best run #{} final_equity={}, report written to {}",
+                    manifest.total_runs,
+                    manifest.workers_used,
+                    best_run.run_id,
+                    best_run.final_equity,
+                    manifest.report_path.display()
+                );
+            } else {
+                println!(
+                    "mean reversion scan completed 0 runs; report written to {}",
+                    manifest.report_path.display()
+                );
+            }
+        }
+        BacktestCommandOutput::WalkForwardMeanReversion(manifest) => {
+            if let Some(best_parameter_set) = manifest.best_parameter_set {
+                println!(
+                    "walk forward completed {} windows across {} parameter sets with {} workers; best oos average_final_equity={}, report written to {}",
+                    manifest.window_count,
+                    manifest.total_parameter_sets,
+                    manifest.workers_used,
+                    best_parameter_set.average_final_equity,
+                    manifest.report_path.display()
+                );
+            } else {
+                println!(
+                    "walk forward completed 0 parameter aggregations; report written to {}",
+                    manifest.report_path.display()
+                );
+            }
+        }
+        BacktestCommandOutput::AnalyzeMeanReversion(manifest) => {
+            if let Some(best_run) = manifest.best_run {
+                println!(
+                    "analysis completed with {} top runs; best scan run #{}; walk_forward_summary_present={}; report written to {}",
+                    manifest.top_runs_count,
+                    best_run.run_id,
+                    manifest.walk_forward_summary_present,
+                    manifest.report_path.display()
+                );
+            } else {
+                println!(
+                    "analysis completed without ranked runs; report written to {}",
+                    manifest.report_path.display()
+                );
+            }
+        }
+        BacktestCommandOutput::ScanTrend(manifest) => {
+            if let Some(best_run) = manifest.best_run {
+                println!(
+                    "trend scan completed {} runs; best run #{} {} roi={:.4}%, final_equity={:.4}; report written to {}",
+                    manifest.total_runs,
+                    best_run.run_id,
+                    best_run.parameter_set,
+                    best_run.roi_pct,
+                    best_run.final_equity,
+                    manifest.report_path.display()
+                );
+            } else {
+                println!(
+                    "trend scan completed 0 runs; report written to {}",
+                    manifest.report_path.display()
+                );
+            }
+        }
+        BacktestCommandOutput::ScanTrendFactor(manifest) => {
+            if let Some(best_run) = manifest.best_run {
+                println!(
+                    "trend factor scan completed {} runs; best run #{} {} score={:.4}, roi={:.4}%, final_equity={:.4}; report written to {}",
+                    manifest.total_runs,
+                    best_run.run_id,
+                    best_run.strategy_name,
+                    best_run.score.composite_score,
+                    best_run.roi_pct,
+                    best_run.final_equity,
+                    manifest.report_path.display()
+                );
+            } else {
+                println!(
+                    "trend factor scan completed 0 runs; report written to {}",
+                    manifest.report_path.display()
+                );
+            }
+        }
+        BacktestCommandOutput::ScanMtfTrendFactor(manifest) => {
+            if let Some(best_run) = manifest.best_run {
+                println!(
+                    "mtf trend factor scan completed {} runs; best run #{} {} score={:.4}, roi={:.4}%, final_equity={:.4}; report written to {}",
+                    manifest.total_runs,
+                    best_run.run_id,
+                    best_run.strategy_name,
+                    best_run.score.composite_score,
+                    best_run.roi_pct,
+                    best_run.final_equity,
+                    manifest.report_path.display()
+                );
+            } else {
+                println!(
+                    "mtf trend factor scan completed 0 runs; report written to {}",
+                    manifest.report_path.display()
+                );
+            }
+        }
+        BacktestCommandOutput::RunShortLadder(manifest) => {
+            println!(
+                "short ladder {:?} completed {} trades, roi={:.4}%, pf={:.4}; report written to {}",
+                manifest.report.mode,
+                manifest.report.summary.trades,
+                manifest.report.summary.roi_pct,
+                manifest.report.summary.profit_factor,
+                manifest.report_path.display()
+            );
+        }
+        BacktestCommandOutput::RunShortLadderMtfExecution(manifest) => {
+            println!(
+                "short ladder mtf {:?} completed {} trades, roi={:.4}%, pf={:.4}, cooldown={}s, min_l4={}m, max_layers_per_hour={}; report written to {}",
+                manifest.report.mode,
+                manifest.report.summary.trades,
+                manifest.report.summary.roi_pct,
+                manifest.report.summary.profit_factor,
+                manifest.report.execution_config.order_cooldown_secs,
+                manifest.report.execution_config.min_minutes_to_l4,
+                manifest.report.execution_config.max_layers_per_hour,
+                manifest.report_path.display()
+            );
+        }
+        BacktestCommandOutput::ShortLadderMtfGrid(manifest) => {
+            println!(
+                "completed {} runs; summary written to {}",
+                manifest.completed_runs,
+                manifest.summary_path.display()
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1003,6 +1201,9 @@ impl BacktestRuntimeConfig {
             BacktestCommand::RunShortLadderMtfExecution(args) => {
                 Self::from_run_short_ladder_mtf_execution_args(args)
             }
+            BacktestCommand::ShortLadderMtfGrid(_) => Err(anyhow!(
+                "short-ladder-mtf-grid does not map to BacktestRuntimeConfig"
+            )),
         }
     }
 
@@ -1213,26 +1414,27 @@ impl BacktestRuntime {
         Self { config }
     }
 
+    fn offline_runtime(&self) -> OfflineBacktestRuntime {
+        OfflineBacktestRuntime::new(OfflineBacktestRuntimeConfig {
+            exchange: self.config.exchange.clone(),
+            market: self.config.market.clone(),
+            symbol: self.config.symbol.clone(),
+            interval: self.config.interval.to_string(),
+            start: self.config.start,
+            end: self.config.end,
+            output: self.config.output.clone(),
+        })
+    }
+
     pub fn load_kline_replay(&self) -> Result<KlineReplay> {
-        KlineReplay::load_binance_futures(
-            &self.config.output,
-            &self.config.symbol,
-            &self.config.interval.to_string(),
-            Some(self.config.start),
-            Some(self.config.end),
-        )
+        self.offline_runtime().load_kline_replay()
     }
 
     pub fn load_kline_replay_for_interval(&self, interval: &str) -> Result<KlineReplay> {
         Interval::from_string(interval)
             .map_err(|err| anyhow!("invalid interval {}: {}", interval, err))?;
-        KlineReplay::load_binance_futures(
-            &self.config.output,
-            &self.config.symbol,
-            interval,
-            Some(self.config.start),
-            Some(self.config.end),
-        )
+        self.offline_runtime()
+            .load_kline_replay_for_interval(interval)
     }
 
     fn collect_kline_candles_for_interval(&self, interval: &str) -> Result<Vec<Kline>> {
@@ -1278,36 +1480,15 @@ impl BacktestRuntime {
     }
 
     pub fn load_depth_replay(&self) -> Result<Option<DepthReplay>> {
-        let reader = DepthDatasetReader::new(&self.config.output);
-        if !reader.has_binance_futures_depth_deltas(&self.config.symbol) {
-            return Ok(None);
-        }
-
-        Ok(Some(DepthReplay::load_binance_futures(
-            &self.config.output,
-            &self.config.symbol,
-            Some(self.config.start),
-            Some(self.config.end),
-        )?))
+        self.offline_runtime().load_depth_replay()
     }
 
     pub fn load_trade_replay(&self) -> Result<Option<TradeReplay>> {
-        let reader = TradeDatasetReader::new(&self.config.output);
-        if !reader.has_binance_futures_trades(&self.config.symbol) {
-            return Ok(None);
-        }
-
-        Ok(Some(TradeReplay::load_binance_futures(
-            &self.config.output,
-            &self.config.symbol,
-            Some(self.config.start),
-            Some(self.config.end),
-        )?))
+        self.offline_runtime().load_trade_replay()
     }
 
     pub fn plan_kline_partitions(&self, partitions: usize) -> Result<Vec<ReplayPartition>> {
-        let replay = self.load_kline_replay()?;
-        Ok(replay.plan_partitions(partitions))
+        self.offline_runtime().plan_kline_partitions(partitions)
     }
 
     pub fn run_mean_reversion(
@@ -1912,6 +2093,9 @@ pub async fn execute_cli(cli: BacktestCli) -> Result<BacktestCommandOutput> {
                 },
             ))
         }
+        BacktestCommand::ShortLadderMtfGrid(args) => Ok(BacktestCommandOutput::ShortLadderMtfGrid(
+            run_short_ladder_mtf_grid(args)?,
+        )),
     }
 }
 
@@ -2326,26 +2510,6 @@ fn market_exit_price(
     .filter(|price| price.is_finite() && *price > f64::EPSILON)
 }
 
-fn positive_constraint(value: Option<f64>) -> Option<f64> {
-    value.filter(|constraint| constraint.is_finite() && *constraint > f64::EPSILON)
-}
-
-fn round_limit_price(price: f64, tick_size: f64, side: OrderSide) -> f64 {
-    let ticks = price / tick_size;
-    match side {
-        OrderSide::Buy => ticks.floor() * tick_size,
-        OrderSide::Sell => ticks.ceil() * tick_size,
-    }
-}
-
-fn round_down_to_step(quantity: f64, step_size: f64) -> f64 {
-    (quantity / step_size).floor() * step_size
-}
-
-fn approx_equal(lhs: f64, rhs: f64) -> bool {
-    (lhs - rhs).abs() <= 1e-9
-}
-
 fn record_rejection(stats: &mut VenueExecutionStats, reason: &'static str) {
     stats.rejected_orders += 1;
     *stats
@@ -2367,10 +2531,6 @@ fn normalize_order_error_reason(err: &anyhow::Error) -> &'static str {
     } else {
         "order_rejected"
     }
-}
-
-fn latency_duration_ms(latency_ms: u64) -> Duration {
-    Duration::milliseconds(latency_ms.min(i64::MAX as u64) as i64)
 }
 
 async fn fetch_and_store_klines(config: &BacktestRuntimeConfig) -> Result<KlineDatasetOutput> {
@@ -2634,19 +2794,6 @@ fn build_public_binance_exchange() -> BinanceExchange {
     };
 
     BinanceExchange::new(config, api_keys)
-}
-
-fn to_binance_futures_symbol(symbol: &str) -> Result<String> {
-    let config = Config {
-        name: "binance".to_string(),
-        testnet: false,
-        spot_base_url: "https://api.binance.com".to_string(),
-        futures_base_url: "https://fapi.binance.com".to_string(),
-        ws_spot_url: "wss://stream.binance.com:9443".to_string(),
-        ws_futures_url: "wss://fstream.binance.com".to_string(),
-    };
-    let converter = SymbolConverter::new(config);
-    Ok(converter.to_exchange_symbol(symbol, "binance", MarketType::Futures)?)
 }
 
 fn parse_binance_depth_delta_message(
@@ -4155,21 +4302,6 @@ fn settlement_currency_from_config(config: &MeanReversionConfig) -> String {
         .unwrap_or_else(|| "USDT".to_string())
 }
 
-fn quote_asset_from_symbol(symbol: &str) -> Option<String> {
-    let trimmed = symbol.trim();
-    if let Some((_, quote)) = trimmed.rsplit_once('/') {
-        let quote = quote.trim();
-        if !quote.is_empty() {
-            return Some(quote.to_ascii_uppercase());
-        }
-    }
-
-    let upper = trimmed.to_ascii_uppercase();
-    ["USDT", "USDC", "FDUSD", "BUSD", "USD", "BTC", "ETH"]
-        .into_iter()
-        .find(|quote| upper.ends_with(quote) && upper.len() > quote.len())
-        .map(str::to_string)
-}
 fn initial_backtest_cash(config: &MeanReversionConfig) -> f64 {
     let notional_budget = config.risk.per_trade_notional * config.risk.max_positions.max(1) as f64;
     config
@@ -4192,14 +4324,6 @@ fn limit_entry_price(signal: &StrategySignal, config: &MeanReversionConfig) -> f
     match signal.side {
         OrderSide::Buy => signal.price * (1.0 - improve),
         OrderSide::Sell => signal.price * (1.0 + improve),
-    }
-}
-
-fn market_type_from_string(market: &str) -> Result<MarketType> {
-    match market {
-        "futures" => Ok(MarketType::Futures),
-        "spot" => Ok(MarketType::Spot),
-        other => Err(anyhow!("unsupported market {}", other)),
     }
 }
 
@@ -4600,28 +4724,6 @@ fn evaluate_exit_on_kline(
     }
 
     None
-}
-
-fn opposite_side(side: OrderSide) -> OrderSide {
-    match side {
-        OrderSide::Buy => OrderSide::Sell,
-        OrderSide::Sell => OrderSide::Buy,
-    }
-}
-
-fn normalize_symbol_input(symbol: &str) -> Result<String> {
-    let config = Config {
-        name: "binance".to_string(),
-        testnet: false,
-        spot_base_url: "https://api.binance.com".to_string(),
-        futures_base_url: "https://fapi.binance.com".to_string(),
-        ws_spot_url: "wss://stream.binance.com:9443".to_string(),
-        ws_futures_url: "wss://fstream.binance.com".to_string(),
-    };
-    let converter = SymbolConverter::new(config);
-    converter
-        .normalize_symbol(symbol)
-        .map_err(|err| anyhow!("invalid symbol {}: {}", symbol, err))
 }
 
 #[cfg(test)]

@@ -151,6 +151,13 @@ impl MonitoringState {
         });
     }
 
+    pub fn publish_open_orders(&self, orders: Vec<crate::exchanges::unified::OrderResponse>) {
+        self.try_update_model(|model| {
+            model.open_orders = orders;
+            model.open_orders_last_updated_at = Some(Utc::now());
+        });
+    }
+
     pub fn publish_order_reconciliation_config(
         &self,
         config: crate::execution::OrderReconciliationConfig,
@@ -239,6 +246,15 @@ impl MonitoringState {
     pub fn publish_hedge_policy(&self, hedge_policy: crate::risk::HedgePolicyReadModel) {
         self.try_update_model(|model| {
             model.hedge_policy = hedge_policy;
+        });
+    }
+
+    pub fn publish_runtime_publisher_health(
+        &self,
+        health: crate::control::spot_control::RuntimePublisherHealth,
+    ) {
+        self.try_update_model(|model| {
+            model.runtime_publisher_health = Some(health);
         });
     }
 

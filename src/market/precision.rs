@@ -37,6 +37,12 @@ pub fn round_to_step(value: f64, step: f64, mode: RoundingMode) -> f64 {
     }
 
     let scaled = value / step;
+    let nearest = scaled.round();
+    let scaled = if (scaled - nearest).abs() <= 1e-10 {
+        nearest
+    } else {
+        scaled
+    };
     let rounded = match mode {
         RoundingMode::Floor => scaled.floor(),
         RoundingMode::Ceil => scaled.ceil(),
@@ -80,7 +86,10 @@ impl InstrumentMeta {
         } else {
             1.0
         };
-        let notional = price.map(|price| price * quantity * contract_size);
+        let notional = price.map(|price| {
+            crate::utils::money::notional_with_contract_f64(price, quantity, contract_size)
+                .unwrap_or(price * quantity * contract_size)
+        });
         let mut violations = Vec::new();
 
         if !quantity.is_finite() || quantity <= 0.0 {
@@ -153,6 +162,8 @@ mod tests {
         assert_eq!(round_to_step(1.2349, 0.01, RoundingMode::Floor), 1.23);
         assert_eq!(round_to_step(1.2301, 0.01, RoundingMode::Ceil), 1.24);
         assert_eq!(round_to_step(1.235, 0.01, RoundingMode::Nearest), 1.24);
+        assert_eq!(round_to_step(2.8, 0.1, RoundingMode::Floor), 2.8);
+        assert_eq!(round_to_step(63.3, 0.1, RoundingMode::Floor), 63.3);
     }
 
     #[test]

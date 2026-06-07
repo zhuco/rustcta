@@ -23,8 +23,6 @@ pub struct SmallLiveGateConfig {
     pub enabled_symbols: Vec<String>,
     #[serde(default)]
     pub enabled_exchanges: Vec<String>,
-    #[serde(default = "default_env_var")]
-    pub env_var: String,
 }
 
 impl Default for SmallLiveGateConfig {
@@ -36,7 +34,6 @@ impl Default for SmallLiveGateConfig {
             max_total_notional: default_max_total_notional(),
             enabled_symbols: Vec::new(),
             enabled_exchanges: Vec::new(),
-            env_var: default_env_var(),
         }
     }
 }
@@ -69,6 +66,7 @@ pub struct SmallLiveGateInput<'a> {
     pub config: &'a SmallLiveGateConfig,
     pub preflight: Option<&'a LivePreflightReport>,
     pub live_dry_run_orders: &'a [LiveDryRunOrderPlan],
+    pub require_valid_live_dry_run_order: bool,
     pub kill_switch: &'a KillSwitchState,
     pub balance_reconciliation: Option<&'a BalanceReconciliationReport>,
     pub order_reconciliation: &'a OrderReconciliationConfig,
@@ -79,6 +77,9 @@ pub struct SmallLiveGateInput<'a> {
     pub disabled_symbol_overlap: bool,
     pub unmanaged_inventory_overlap: bool,
 }
+
+const SMALL_LIVE_MAX_NOTIONAL_PER_ORDER_USDT: f64 = 20.0;
+const SMALL_LIVE_MAX_TOTAL_NOTIONAL_USDT: f64 = 50.0;
 
 pub fn evaluate_small_live_gate(input: SmallLiveGateInput<'_>) -> SmallLiveGateReport {
     let mut checks = Vec::new();
@@ -93,11 +94,16 @@ pub fn evaluate_small_live_gate(input: SmallLiveGateInput<'_>) -> SmallLiveGateR
     push(
         &mut checks,
         "live_dry_run_valid_orders",
-        input
-            .live_dry_run_orders
-            .iter()
-            .any(|plan| plan.validation_result.passed && !plan.would_submit),
-        "at least one valid live dry-run plan is required",
+        !input.require_valid_live_dry_run_order
+            || input
+                .live_dry_run_orders
+                .iter()
+                .any(|plan| plan.validation_result.passed && !plan.would_submit),
+        if input.require_valid_live_dry_run_order {
+            "at least one valid live dry-run plan is required"
+        } else {
+            "live mode is armed and waits for future valid order plans"
+        },
     );
     push(
         &mut checks,
@@ -108,14 +114,22 @@ pub fn evaluate_small_live_gate(input: SmallLiveGateInput<'_>) -> SmallLiveGateR
     push(
         &mut checks,
         "notional_per_order_limit",
-        input.config.max_notional_per_order > 0.0 && input.config.max_notional_per_order <= 5.0,
-        "max_notional_per_order must be <= 5 USDT",
+        input.config.max_notional_per_order > 0.0
+            && input.config.max_notional_per_order <= SMALL_LIVE_MAX_NOTIONAL_PER_ORDER_USDT,
+        format!(
+            "max_notional_per_order must be <= {} USDT",
+            SMALL_LIVE_MAX_NOTIONAL_PER_ORDER_USDT
+        ),
     );
     push(
         &mut checks,
         "total_notional_limit",
-        input.config.max_total_notional > 0.0 && input.config.max_total_notional <= 50.0,
-        "max_total_notional must be <= 50 USDT",
+        input.config.max_total_notional > 0.0
+            && input.config.max_total_notional <= SMALL_LIVE_MAX_TOTAL_NOTIONAL_USDT,
+        format!(
+            "max_total_notional must be <= {} USDT",
+            SMALL_LIVE_MAX_TOTAL_NOTIONAL_USDT
+        ),
     );
     push(
         &mut checks,
@@ -190,15 +204,6 @@ pub fn evaluate_small_live_gate(input: SmallLiveGateInput<'_>) -> SmallLiveGateR
         input.config.explicit_live_confirmation,
         "explicit live confirmation flag must be present",
     );
-    let env_present = std::env::var(&input.config.env_var)
-        .map(|value| value == "true")
-        .unwrap_or(false);
-    push(
-        &mut checks,
-        "env_var_present",
-        env_present,
-        format!("{} must equal true", input.config.env_var),
-    );
 
     let blockers = checks
         .iter()
@@ -237,10 +242,6 @@ fn default_max_notional_per_order() -> f64 {
 
 fn default_max_total_notional() -> f64 {
     50.0
-}
-
-fn default_env_var() -> String {
-    "RUSTCTA_ENABLE_SMALL_LIVE".to_string()
 }
 
 #[cfg(test)]
@@ -311,6 +312,7 @@ mod tests {
         LiveDryRunOrderPlan {
             plan_id: "p1".to_string(),
             timestamp: Utc::now(),
+            intent: "arbitrage".to_string(),
             exchange: "mexc".to_string(),
             market_type: MarketType::Spot,
             symbol: "BTCUSDT".to_string(),
@@ -358,6 +360,7 @@ mod tests {
             config,
             preflight: Some(preflight),
             live_dry_run_orders: plan,
+            require_valid_live_dry_run_order: true,
             kill_switch,
             balance_reconciliation: Some(balance),
             order_reconciliation: order_recon,
@@ -371,8 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn blocks_if_env_var_missing() {
-        std::env::remove_var("RUSTCTA_ENABLE_SMALL_LIVE");
+    fn does_not_block_without_env_confirmation() {
         let config = SmallLiveGateConfig {
             enabled: true,
             explicit_live_confirmation: true,
@@ -406,8 +408,44 @@ mod tests {
             &balance,
             &OrderReconciliationConfig::default(),
         ));
-        assert_eq!(report.status, SmallLiveGateStatus::Blocked);
+        assert_eq!(report.status, SmallLiveGateStatus::ReadyForSmallLive);
         assert!(report.does_not_start_live_trading);
+    }
+
+    #[test]
+    fn live_mode_can_arm_without_existing_dry_run_plan() {
+        let config = SmallLiveGateConfig {
+            enabled: true,
+            explicit_live_confirmation: true,
+            enabled_symbols: vec!["BTCUSDT".to_string()],
+            enabled_exchanges: vec!["mexc".to_string()],
+            ..SmallLiveGateConfig::default()
+        };
+        let plans = Vec::new();
+        let preflight = preflight(LiveReadinessDecision::ReadyForSmallLive);
+        let kill = KillSwitchState {
+            enabled: true,
+            active: false,
+            reason: None,
+            triggered_by: None,
+            triggered_at: None,
+            allow_paper_trading: true,
+            allow_live_dry_run: true,
+            allow_live_orders: true,
+        };
+        let balance = BalanceReconciliationReport {
+            timestamp: Utc::now(),
+            statuses: Vec::new(),
+            max_severity: BalanceMismatchSeverity::Info,
+            clean: true,
+        };
+        let order_recon = OrderReconciliationConfig::default();
+        let mut input = ready_input(&config, &preflight, &plans, &kill, &balance, &order_recon);
+        input.require_valid_live_dry_run_order = false;
+        let report = evaluate_small_live_gate(input);
+
+        assert_eq!(report.status, SmallLiveGateStatus::ReadyForSmallLive);
+        assert!(report.blockers.is_empty());
     }
 
     #[test]
@@ -454,7 +492,7 @@ mod tests {
     fn blocks_if_notional_too_large() {
         let config = SmallLiveGateConfig {
             explicit_live_confirmation: true,
-            max_notional_per_order: 50.0,
+            max_notional_per_order: SMALL_LIVE_MAX_NOTIONAL_PER_ORDER_USDT + 1.0,
             enabled_symbols: vec!["BTCUSDT".to_string()],
             enabled_exchanges: vec!["mexc".to_string()],
             ..SmallLiveGateConfig::default()

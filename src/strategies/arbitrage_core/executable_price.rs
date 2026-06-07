@@ -84,25 +84,38 @@ pub fn executable_vwap(
     if requested_quantity <= 0.0 {
         return ExecutablePriceResult::rejected(request.side, "requested quantity is not positive");
     }
-    if requested_quantity + 1e-12 < rule.min_quantity {
+    let executable_quantity = if rule.step_size > 0.0 {
+        let rounded = (requested_quantity / rule.step_size).floor() * rule.step_size;
+        let precision = decimal_places(rule.step_size);
+        let factor = 10_f64.powi(precision as i32);
+        (rounded * factor).floor() / factor
+    } else {
+        requested_quantity
+    };
+    if executable_quantity <= 0.0 {
+        return ExecutablePriceResult::rejected(
+            request.side,
+            "requested quantity rounds below one step",
+        );
+    }
+    if executable_quantity + 1e-12 < rule.min_quantity {
         return ExecutablePriceResult::rejected(
             request.side,
             format!(
-                "requested quantity {} below min {}",
-                requested_quantity, rule.min_quantity
+                "executable quantity {} below min {}",
+                executable_quantity, rule.min_quantity
             ),
         );
     }
-    if rule.step_size > 0.0 {
-        let rounded = (requested_quantity / rule.step_size).floor() * rule.step_size;
-        if (requested_quantity - rounded).abs() > request.quantity_rounding_tolerance {
-            return ExecutablePriceResult::rejected(
-                request.side,
-                format!("quantity {requested_quantity} is not step-aligned"),
-            );
-        }
-    }
-    consume_levels(request.side, levels, requested_quantity, best_price)
+    consume_levels(request.side, levels, executable_quantity, best_price)
+}
+
+fn decimal_places(value: f64) -> u32 {
+    let text = format!("{value:.12}");
+    text.trim_end_matches('0')
+        .split_once('.')
+        .map(|(_, decimals)| decimals.len() as u32)
+        .unwrap_or(0)
 }
 
 pub fn consume_levels(

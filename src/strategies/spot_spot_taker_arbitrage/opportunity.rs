@@ -6,7 +6,7 @@ use super::{
     RejectionReason, RiskState, SpotSpotTakerArbitrageConfig, SpotVenue,
 };
 use crate::exchanges::unified::validate_quantity_step;
-use crate::exchanges::unified::{MarketType, OrderBookSnapshot, SymbolStatus};
+use crate::exchanges::unified::{MarketType, OrderBookSnapshot, OrderSide, SymbolStatus};
 use crate::execution::{FeeLookupKey, FeeModel, FeeRole};
 use crate::risk::{DisabledDecision, DisabledRegistry, DisabledScope};
 
@@ -124,18 +124,20 @@ pub fn build_opportunity_with_source(
     let symbol = buy_book.symbol.clone();
     let buy_price = buy_book.best_ask.unwrap_or(0.0);
     let sell_price = sell_book.best_bid.unwrap_or(0.0);
-    let buy_fee_lookup = fee_model.lookup(&FeeLookupKey {
+    let buy_fee_key = FeeLookupKey {
         exchange: buy_exchange.as_str().to_string(),
         market_type: MarketType::Spot,
         symbol: Some(symbol.clone()),
         liquidity_role: FeeRole::Taker,
-    });
-    let sell_fee_lookup = fee_model.lookup(&FeeLookupKey {
+    };
+    let sell_fee_key = FeeLookupKey {
         exchange: sell_exchange.as_str().to_string(),
         market_type: MarketType::Spot,
         symbol: Some(symbol.clone()),
         liquidity_role: FeeRole::Taker,
-    });
+    };
+    let buy_fee_lookup = fee_model.lookup_for_side(&buy_fee_key, Some(OrderSide::Buy));
+    let sell_fee_lookup = fee_model.lookup_for_side(&sell_fee_key, Some(OrderSide::Sell));
     let buy_fee_bps = buy_fee_lookup.fee_bps;
     let sell_fee_bps = sell_fee_lookup.fee_bps;
     let spread = calculate_spread(
@@ -146,30 +148,22 @@ pub fn build_opportunity_with_source(
         config.slippage_bps,
         config.safety_buffer_bps,
     );
-    let executable_notional = executable_notional(config, buy_book, sell_book);
-    let quantity = if buy_price > 0.0 {
+    let buy_rule = rules.for_exchange(buy_exchange);
+    let sell_rule = rules.for_exchange(sell_exchange);
+    let target_notional =
+        active_trade_target_notional(config, buy_rule, sell_rule, buy_price, sell_price);
+    let executable_notional = executable_notional(config, buy_book, sell_book, target_notional);
+    let raw_quantity = if buy_price > 0.0 {
         executable_notional / buy_price
     } else {
         0.0
     };
+    let quantity = round_down_to_common_step(raw_quantity, buy_rule.step_size, sell_rule.step_size);
+    let executable_notional = quantity * buy_price;
     let buy_notional = quantity * buy_price;
     let sell_notional = quantity * sell_price;
-    let fees = fee_model.calculate_buy_sell(
-        &FeeLookupKey {
-            exchange: buy_exchange.as_str().to_string(),
-            market_type: MarketType::Spot,
-            symbol: Some(symbol.clone()),
-            liquidity_role: FeeRole::Taker,
-        },
-        &FeeLookupKey {
-            exchange: sell_exchange.as_str().to_string(),
-            market_type: MarketType::Spot,
-            symbol: Some(symbol.clone()),
-            liquidity_role: FeeRole::Taker,
-        },
-        buy_notional,
-        sell_notional,
-    );
+    let fees =
+        fee_model.calculate_buy_sell(&buy_fee_key, &sell_fee_key, buy_notional, sell_notional);
     let rejection = rejection_reason(
         config,
         rules,
@@ -182,6 +176,7 @@ pub fn build_opportunity_with_source(
         sell_book,
         executable_notional,
         quantity,
+        spread.raw_spread_bps,
         spread.net_spread_bps,
         buy_fee_bps,
     );
@@ -223,6 +218,25 @@ pub fn build_opportunity_with_source(
     }
 }
 
+fn round_down_to_common_step(quantity: f64, buy_step: f64, sell_step: f64) -> f64 {
+    let step = buy_step.max(sell_step);
+    if step <= 0.0 || quantity <= 0.0 {
+        return quantity;
+    }
+    let rounded = (quantity / step).floor() * step;
+    let precision = decimal_places(step);
+    let factor = 10_f64.powi(precision as i32);
+    (rounded * factor).floor() / factor
+}
+
+fn decimal_places(value: f64) -> u32 {
+    let text = format!("{value:.12}");
+    text.trim_end_matches('0')
+        .split_once('.')
+        .map(|(_, decimals)| decimals.len() as u32)
+        .unwrap_or(0)
+}
+
 fn rejection_reason(
     config: &SpotSpotTakerArbitrageConfig,
     rules: &CommonSymbolRules,
@@ -235,6 +249,7 @@ fn rejection_reason(
     sell_book: &OrderBookSnapshot,
     executable_notional: f64,
     quantity: f64,
+    raw_spread_bps: f64,
     net_spread_bps: f64,
     buy_fee_bps: f64,
 ) -> Option<(RejectionReason, Option<String>)> {
@@ -268,9 +283,6 @@ fn rejection_reason(
     if risk.daily_loss_limit_hit(config) {
         return Some((RejectionReason::DailyLossLimit, None));
     }
-    if risk.consecutive_rejection_limit_hit(config) {
-        return Some((RejectionReason::ConsecutiveRejections, None));
-    }
     if risk.notional_limit_hit(config, &buy_book.symbol, executable_notional) {
         return Some((RejectionReason::NotionalLimit, None));
     }
@@ -279,8 +291,43 @@ fn rejection_reason(
     if buy_rule.status != SymbolStatus::Trading || sell_rule.status != SymbolStatus::Trading {
         return Some((RejectionReason::SymbolRule, None));
     }
-    if executable_notional + 1e-12 < config.min_depth_notional {
-        return Some((RejectionReason::InsufficientDepth, None));
+    let required_notional = active_trade_required_notional(
+        config,
+        buy_rule,
+        sell_rule,
+        buy_book.best_ask.unwrap_or(0.0),
+        sell_book.best_bid.unwrap_or(0.0),
+    );
+    let required_depth_notional = config.min_depth_notional.max(required_notional);
+    let target_notional = active_trade_target_notional(
+        config,
+        buy_rule,
+        sell_rule,
+        buy_book.best_ask.unwrap_or(0.0),
+        sell_book.best_bid.unwrap_or(0.0),
+    );
+    let capped_target = target_notional.min(config.max_notional_per_trade);
+    let buy_depth = buy_depth_notional(&buy_book.asks, capped_target);
+    let sell_depth = sell_depth_notional(&sell_book.bids, capped_target);
+    let depth_available = buy_depth.min(sell_depth).min(capped_target);
+    if depth_available + 1e-12 < required_depth_notional {
+        return Some((
+            RejectionReason::InsufficientDepth,
+            Some(format!(
+                "executable_notional {:.8} below required_depth_notional {:.8}; buy_depth {:.8} sell_depth {:.8} capped_target {:.8} buy_levels={} sell_levels={} buy_min_notional {:.8} sell_min_notional {:.8} buy_step {:.8} sell_step {:.8}",
+                executable_notional,
+                required_depth_notional,
+                buy_depth,
+                sell_depth,
+                capped_target,
+                buy_book.asks.len(),
+                sell_book.bids.len(),
+                buy_rule.min_notional,
+                sell_rule.min_notional,
+                buy_rule.step_size,
+                sell_rule.step_size
+            )),
+        ));
     }
     if executable_notional + 1e-12 < config.min_notional_per_trade {
         return Some((RejectionReason::MinNotional, None));
@@ -299,8 +346,32 @@ fn rejection_reason(
     {
         return Some((RejectionReason::SymbolRule, None));
     }
+    if config.max_raw_spread_bps > 0.0 && raw_spread_bps > config.max_raw_spread_bps + 1e-12 {
+        return Some((
+            RejectionReason::AbnormalSpread,
+            Some(format!(
+                "raw_spread_bps={raw_spread_bps:.4} exceeds max_raw_spread_bps={:.4}; raw spread is sell_exchange best_bid minus buy_exchange best_ask",
+                config.max_raw_spread_bps
+            )),
+        ));
+    }
+    if raw_spread_bps + 1e-12 < config.min_raw_spread_bps {
+        return Some((
+            RejectionReason::NetSpreadBelowThreshold,
+            Some(format!(
+                "raw_spread_bps={raw_spread_bps:.4} below min_raw_spread_bps={:.4}; raw spread is sell_exchange best_bid minus buy_exchange best_ask",
+                config.min_raw_spread_bps
+            )),
+        ));
+    }
     if net_spread_bps + 1e-12 < config.min_net_spread_bps {
-        return Some((RejectionReason::NetSpreadBelowThreshold, None));
+        return Some((
+            RejectionReason::NetSpreadBelowThreshold,
+            Some(format!(
+                "net_spread_bps={net_spread_bps:.4} below min_net_spread_bps={:.4}",
+                config.min_net_spread_bps
+            )),
+        ));
     }
     let quote_needed = executable_notional * (1.0 + buy_fee_bps / 10_000.0);
     if inventory
@@ -311,21 +382,28 @@ fn rejection_reason(
     {
         return Some((RejectionReason::InsufficientQuoteBalance, None));
     }
-    let base_asset = &buy_rule.base_asset;
-    let base_available = inventory
-        .balance(sell_exchange, base_asset)
-        .effective_available();
-    let managed_base = disabled_registry.effective_inventory_quantity(
-        sell_exchange.as_str(),
-        MarketType::Spot,
-        &buy_book.symbol,
-        base_asset,
-        base_available,
-    );
-    if managed_base + 1e-12 < quantity {
-        return Some((RejectionReason::InsufficientBaseBalance, None));
+    if !spot_lifecycle_order_mode(config) {
+        let base_asset = &buy_rule.base_asset;
+        let base_available = inventory
+            .balance(sell_exchange, base_asset)
+            .effective_available();
+        let managed_base = disabled_registry.effective_inventory_quantity(
+            sell_exchange.as_str(),
+            MarketType::Spot,
+            &buy_book.symbol,
+            base_asset,
+            base_available,
+        );
+        if managed_base + 1e-12 < quantity {
+            return Some((RejectionReason::InsufficientBaseBalance, None));
+        }
     }
     None
+}
+
+fn spot_lifecycle_order_mode(config: &SpotSpotTakerArbitrageConfig) -> bool {
+    config.trading_mode.eq_ignore_ascii_case("live_dry_run")
+        || config.trading_mode.eq_ignore_ascii_case("live")
 }
 
 fn disabled_rejection(decision: DisabledDecision) -> (RejectionReason, Option<String>) {
@@ -373,9 +451,64 @@ fn executable_notional(
     config: &SpotSpotTakerArbitrageConfig,
     buy_book: &OrderBookSnapshot,
     sell_book: &OrderBookSnapshot,
+    target_notional: f64,
 ) -> f64 {
-    let target = config.max_notional_per_trade;
+    let target = target_notional.min(config.max_notional_per_trade);
     buy_depth_notional(&buy_book.asks, target)
         .min(sell_depth_notional(&sell_book.bids, target))
         .min(target)
+}
+
+pub fn active_trade_target_notional(
+    config: &SpotSpotTakerArbitrageConfig,
+    buy_rule: &crate::exchanges::unified::SymbolRule,
+    sell_rule: &crate::exchanges::unified::SymbolRule,
+    buy_reference_price: f64,
+    sell_reference_price: f64,
+) -> f64 {
+    let buy_min = rule_min_executable_notional(buy_rule, buy_reference_price);
+    let sell_min = rule_min_executable_notional(sell_rule, sell_reference_price);
+    config
+        .active_taker_notional_usdt
+        .max(config.min_notional_per_trade)
+        .max(buy_min)
+        .max(sell_min)
+}
+
+pub fn active_trade_required_notional(
+    config: &SpotSpotTakerArbitrageConfig,
+    buy_rule: &crate::exchanges::unified::SymbolRule,
+    sell_rule: &crate::exchanges::unified::SymbolRule,
+    buy_reference_price: f64,
+    sell_reference_price: f64,
+) -> f64 {
+    config
+        .min_notional_per_trade
+        .max(rule_min_notional_floor(buy_rule, buy_reference_price))
+        .max(rule_min_notional_floor(sell_rule, sell_reference_price))
+}
+
+fn rule_min_executable_notional(
+    rule: &crate::exchanges::unified::SymbolRule,
+    reference_price: f64,
+) -> f64 {
+    let floor = rule_min_notional_floor(rule, reference_price);
+    let step_buffer = if reference_price > 0.0 {
+        reference_price * rule.step_size.max(0.0)
+    } else {
+        0.0
+    };
+    floor + step_buffer
+}
+
+fn rule_min_notional_floor(
+    rule: &crate::exchanges::unified::SymbolRule,
+    reference_price: f64,
+) -> f64 {
+    let quantity_floor = if reference_price > 0.0 {
+        reference_price * rule.min_quantity.max(0.0)
+    } else {
+        0.0
+    };
+    rule.min_notional.max(quantity_floor)
 }

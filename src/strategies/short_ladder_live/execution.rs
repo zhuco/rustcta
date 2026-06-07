@@ -873,7 +873,12 @@ impl ShortLadderLiveStrategy {
             markdown: MarkdownContent { content },
         };
 
-        match reqwest::Client::new().post(url).json(&payload).send().await {
+        match crate::core::http2_fix::shared_http_client()
+            .post(url)
+            .json(&payload)
+            .send()
+            .await
+        {
             Ok(response) if response.status().is_success() => {
                 logging::info(Some(symbol), format!("企业微信通知已发送: {}", title));
             }

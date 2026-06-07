@@ -1,0 +1,147 @@
+name: non-gateway-industrial
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  focused-checks:
+    name: focused non-gateway checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format migrated non-gateway files
+        run: |
+          rustfmt --edition 2021 --check \
+            apps/backtest/src/main.rs \
+            apps/cli/src/main.rs \
+            apps/cli/tests/cli_contract_smoke.rs \
+            apps/control-api/src/lib.rs \
+            apps/control-api/src/main.rs \
+            apps/supervisor/src/main.rs \
+            apps/supervisor/tests/cli_contract.rs \
+            crates/rustcta-control-api/src/lib.rs \
+            crates/rustcta-control-api/src/models.rs \
+            crates/rustcta-control-api/src/read_models.rs \
+            crates/rustcta-control-api/src/router.rs \
+            crates/rustcta-control-api/src/routes.rs \
+            crates/rustcta-control-api/src/state.rs \
+            crates/rustcta-event-ledger/src/lib.rs \
+            crates/rustcta-supervisor/src/lib.rs \
+            src/backtest/runtime/mod.rs \
+            src/backtest/runtime/short_ladder_mtf_grid.rs \
+            src/bin/backtest.rs \
+            src/bin/short_ladder_mtf_grid.rs \
+            src/bin/smart_money_binance_collector.rs \
+            src/bin/smart_money_hyperliquid_wallet_ingestion.rs \
+            src/bin/smart_money_portfolio_service.rs \
+            src/bin/ws_proxy_probe.rs \
+            tests/backtest_cli.rs \
+            tools/ops/src/lib.rs \
+            tools/ops/src/main.rs \
+            tools/ops/tests/cli_smoke.rs \
+            tools/ops/src/ws_proxy_probe.rs
+
+      - name: Test event ledger
+        run: cargo test -p rustcta-event-ledger
+
+      - name: Test control API
+        run: cargo test -p rustcta-control-api
+
+      - name: Check control API app
+        run: cargo check -p rustcta-control-api-app
+
+      - name: Test supervisor
+        run: cargo test -p rustcta-supervisor
+
+      - name: Check supervisor app
+        run: cargo check -p rustcta-supervisor-app
+
+      - name: Test supervisor app
+        run: cargo test -p rustcta-supervisor-app
+
+      - name: Validate checked-in supervisor specs
+        run: |
+          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/cross_arb_live.spec.json
+          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/funding_arb_live.spec.json
+          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/spot_spot_live_dry_run.spec.json
+          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/trend_report.spec.json
+          cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --validate-spec config/supervisor/account_position_reporter.spec.json
+
+      - name: Supervisor readonly service smoke
+        run: |
+          tmp_dir="$(mktemp -d)"
+          cat > "$tmp_dir/registry.json" <<'JSON'
+          {
+            "schema_version": 1,
+            "captured_at": "2026-06-07T12:00:02Z",
+            "processes": []
+          }
+          JSON
+          status=0
+          timeout 2s cargo run -q -p rustcta-supervisor-app --bin rustcta-supervisor -- --serve --bind 127.0.0.1:0 --registry-path "$tmp_dir/registry.json" || status=$?
+          rm -rf "$tmp_dir"
+          if [ "$status" -ne 124 ]; then
+            exit "$status"
+          fi
+
+      - name: Test tools ops
+        run: cargo test -p rustcta-tools-ops
+
+      - name: Test industrial CLI
+        run: |
+          cargo check -p rustcta-industrial-cli
+          cargo test -p rustcta-industrial-cli
+
+      - name: Verify legacy bin matrix
+        run: cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+
+      - name: Check backtest app and compatibility bins
+        run: |
+          cargo check -p rustcta-backtest-app --bin rustcta-backtest
+          cargo check --bin backtest
+          cargo check --bin short_ladder_mtf_grid
+          cargo check --bin ws_proxy_probe
+          cargo test --test backtest_cli
+
+      - name: Backtest command help smoke
+        run: |
+          cargo run -q -p rustcta-backtest-app --bin rustcta-backtest -- --help
+          cargo run -q -p rustcta-backtest-app --bin rustcta-backtest -- short-ladder-mtf-grid --help
+          cargo run -q --bin short_ladder_mtf_grid -- --help
+          cargo run -q -p rustcta-tools-ops -- ws-proxy-probe --help
+          cargo run -q -p rustcta-tools-ops -- probe ws-proxy --help
+          cargo run -q --bin ws_proxy_probe -- --help
+
+      - name: Industrial CLI safe smoke
+        run: |
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- doctor
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- ledger validate --path /tmp/rustcta-missing-events.jsonl
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- ops smart-money binance-collector --config config/smart_money.yml
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- ops reporter account-position render --help
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor validate-registry --path /tmp/rustcta-missing-registry.json
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor readiness --spec-dir config/supervisor
+
+      - name: Control API JSONL smoke
+        run: scripts/control_api_smoke_test.sh
+
+      - name: Industrial boundary checks
+        run: scripts/check_industrial_boundaries.sh

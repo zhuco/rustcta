@@ -4,7 +4,7 @@
 # 系统名称
 name = "RustCTA Trading System"
 # 版本
-version = "2.0.0"
+version = "2.0.1"
 # 环境: development, staging, production
 environment = "development"
 # 日志级别: trace, debug, info, warn, error
@@ -61,8 +61,8 @@ batch_insert_size = 100
 grafana_url = "http://localhost:3000"
 # Grafana 用户名
 grafana_user = "admin"
-# Grafana 密码
-grafana_password = "abc20155"
+# Grafana 密码；本地运行时从环境变量 RUSTCTA_GRAFANA_PASSWORD 注入
+grafana_password = ""
 # 指标收集间隔 (秒)
 metrics_interval = 60
 # 启用性能监控
@@ -79,8 +79,8 @@ heartbeat_interval = 30
 subscribe_timeout = 10
 
 [strategies]
-# 策略配置目录
-config_dir = "config/strategies"
+# 策略配置目录；当前迁移后的活跃策略配置位于 config/ 根目录
+config_dir = "config"
 # 启用策略热重载
 enable_hot_reload = true
 # 策略配置检查间隔 (秒)

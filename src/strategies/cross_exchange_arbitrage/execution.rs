@@ -1271,7 +1271,8 @@ pub fn live_close_candidate_for_bundle(
     now: DateTime<Utc>,
 ) -> Option<LiveCloseCandidate> {
     let candidate = live_close_metrics_for_bundle(runtime, bundle_id, snapshots, now)?;
-    (candidate.close_profit_pct >= runtime.state.config.thresholds.lock_profit_dual_taker_pct)
+    (candidate.close_profit_pct >= runtime.state.config.thresholds.lock_profit_dual_taker_pct
+        && candidate.close_spread_pct <= runtime.state.config.thresholds.max_close_spread_pct)
         .then_some(candidate)
 }
 
@@ -1878,6 +1879,7 @@ fn register_open_bundle(
     if runtime.state.open_bundles.len() >= runtime.state.config.risk.max_open_bundles {
         anyhow::bail!("max_open_bundles reached");
     }
+    enforce_exchange_position_capacity(runtime, opportunity)?;
     let now = signal.generated_at;
     let mut bundle = ArbitrageBundle::new(
         request.bundle_id.clone(),
@@ -1923,6 +1925,44 @@ fn register_open_bundle(
             .storage
             .record(super::CrossArbStorageEvent::Bundle(bundle.clone()), now);
     }
+    Ok(())
+}
+
+fn enforce_exchange_position_capacity(
+    runtime: &CrossArbRuntime,
+    opportunity: &Opportunity,
+) -> Result<()> {
+    let limit = runtime.state.config.sizing.max_positions_per_exchange;
+    if limit == 0 {
+        anyhow::bail!("max_positions_per_exchange must be positive");
+    }
+
+    let mut active_counts: HashMap<ExchangeId, usize> = HashMap::new();
+    for bundle in runtime.state.position_manager.bundles() {
+        if bundle.status.is_terminal() {
+            continue;
+        }
+        for leg in [&bundle.long_leg, &bundle.short_leg] {
+            if leg.filled_qty > runtime.state.config.reconciliation.quantity_tolerance
+                || leg.remaining_qty > runtime.state.config.reconciliation.quantity_tolerance
+            {
+                *active_counts.entry(leg.exchange.clone()).or_default() += 1;
+            }
+        }
+    }
+
+    for exchange in [&opportunity.long_exchange, &opportunity.short_exchange] {
+        let projected = active_counts.get(exchange).copied().unwrap_or_default() + 1;
+        if projected > limit {
+            anyhow::bail!(
+                "max_positions_per_exchange reached for {}: projected {} > limit {}",
+                exchange,
+                projected,
+                limit
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -3541,7 +3581,11 @@ mod tests {
         OrderCommandStatus, OrderQuery, OrderState, TimeInForce, TradingAdapter,
         TradingCapabilities,
     };
-    use crate::market::{BookLevel, CanonicalSymbol, ExchangeSymbol, OrderBook5, RuntimeMode};
+    use crate::market::{
+        BookLevel, CanonicalSymbol, ContractType, ExchangeSymbol, InstrumentMeta, InstrumentStatus,
+        OrderBook5, RuntimeMode,
+    };
+    use crate::strategies::cross_exchange_arbitrage::HedgeRecordStatus;
     use async_trait::async_trait;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -3636,6 +3680,32 @@ mod tests {
         )
     }
 
+    fn instrument(exchange: ExchangeId) -> InstrumentMeta {
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        InstrumentMeta::new(
+            exchange.clone(),
+            symbol.clone(),
+            exchange_symbol_for(&exchange, &symbol),
+            "BTC",
+            "USDT",
+            "USDT",
+            ContractType::LinearPerpetual,
+            1.0,
+            0.1,
+            0.001,
+            0.001,
+            5.0,
+            1,
+            3,
+            InstrumentStatus::Trading,
+        )
+    }
+
+    fn snapshot(exchange: ExchangeId, bid: f64, ask: f64) -> super::super::MarketSnapshot {
+        super::super::MarketSnapshot::healthy(book(exchange.clone(), bid, ask))
+            .with_instrument(instrument(exchange))
+    }
+
     fn runtime_with_signal(now: DateTime<Utc>) -> (CrossArbRuntime, ArbSignal) {
         let mut config = super::super::CrossExchangeArbitrageConfig::default();
         config.mode = RuntimeMode::LiveSmall;
@@ -3650,8 +3720,8 @@ mod tests {
         let signals = runtime.on_market_snapshots(
             &symbol,
             &[
-                super::super::MarketSnapshot::healthy(book(ExchangeId::Binance, 100.0, 101.0)),
-                super::super::MarketSnapshot::healthy(book(ExchangeId::Okx, 105.0, 106.0)),
+                snapshot(ExchangeId::Binance, 100.0, 101.0),
+                snapshot(ExchangeId::Okx, 105.0, 106.0),
             ],
             now,
         );
@@ -3705,6 +3775,52 @@ mod tests {
             .order_index()
             .resolve_fill(&maker_fill_from_command(&decision.plan.commands[0]))
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn cross_arb_execution_should_enforce_per_exchange_position_limit_before_open() {
+        let now = Utc::now();
+        let (mut runtime, signal) = runtime_with_signal(now);
+        runtime.state.config.sizing.max_positions_per_exchange = 1;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Okx,
+            place_calls: calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
+            last_cancel_exchange_order_id: None,
+            cancel_error: None,
+        }));
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Binance,
+            place_calls: calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
+            last_cancel_exchange_order_id: None,
+            cancel_error: None,
+        }));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let first = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("first open decision");
+        assert_eq!(first.plan.commands.len(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let second = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .expect_err("second open should exceed per-exchange position limit");
+        assert!(second
+            .to_string()
+            .contains("max_positions_per_exchange reached"));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "capacity rejection must happen before sending another order"
+        );
     }
 
     #[tokio::test]
@@ -3930,6 +4046,150 @@ mod tests {
             .any(|event| event.message.contains("treated as terminal")));
     }
 
+    #[tokio::test]
+    async fn cross_arb_execution_should_open_close_and_record_profit_from_threshold() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut config = super::super::CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.execution.dry_run = false;
+        config.execution.open_execution_style = OpenExecutionStyle::DualTaker;
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        config.thresholds.min_open_raw_spread = 0.005;
+        config.thresholds.min_open_maker_taker_net_edge = 0.005;
+        config.thresholds.lock_profit_dual_taker_pct = 0.0005;
+        config.market.min_common_exchanges = 2;
+        config.fees.default_maker_fee_rate = 0.0;
+        config.fees.default_taker_fee_rate = 0.0;
+        for fee in config.fees.per_exchange.values_mut() {
+            fee.maker = 0.0;
+            fee.taker = 0.0;
+        }
+        let mut runtime = CrossArbRuntime::new(config, now);
+        let signals = runtime.on_market_snapshots(
+            &symbol,
+            &[
+                snapshot(ExchangeId::Binance, 99.0, 100.0),
+                snapshot(ExchangeId::Okx, 102.0, 103.0),
+            ],
+            now,
+        );
+        let signal = signals
+            .into_iter()
+            .find(|signal| signal.action == ArbSignalAction::Open)
+            .expect("open signal from spread");
+
+        let place_calls = Arc::new(AtomicUsize::new(0));
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Binance,
+            place_calls: place_calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
+            last_cancel_exchange_order_id: None,
+            cancel_error: None,
+        }));
+        router.register_adapter(Arc::new(MockTradingAdapter {
+            exchange: ExchangeId::Okx,
+            place_calls: place_calls.clone(),
+            cancel_calls: Arc::new(AtomicUsize::new(0)),
+            last_cancel_exchange_order_id: None,
+            cancel_error: None,
+        }));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let open = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("open decision");
+        assert_eq!(open.plan.commands.len(), 2);
+        assert_eq!(open.submitted_orders.len(), 2);
+        let bundle_id = open.plan.commands[0].bundle_id.clone();
+
+        runtime
+            .state
+            .record_hedge_order_submitted(&open.plan.commands[1], now);
+        for command in &open.plan.commands {
+            let price = match command.position_side {
+                PositionSide::Long => 100.0,
+                PositionSide::Short => 102.0,
+                PositionSide::Net => command.price.unwrap_or_default(),
+            };
+            runtime
+                .state
+                .apply_fill_event(&bundle_id, &fill_from_command(command, price))
+                .unwrap();
+        }
+        assert_eq!(
+            runtime.state.open_bundles[&bundle_id].status,
+            SimulatedBundleStatus::OpenSimulated
+        );
+
+        let below_threshold = [
+            snapshot(ExchangeId::Binance, 100.04, 100.05),
+            snapshot(ExchangeId::Okx, 102.0, 102.01),
+        ];
+        assert!(
+            live_close_candidate_for_bundle(&runtime, &bundle_id, &below_threshold, now).is_none()
+        );
+
+        let close_time = now + chrono::Duration::seconds(1);
+        let above_threshold = [
+            snapshot(ExchangeId::Binance, 100.07, 100.08),
+            snapshot(ExchangeId::Okx, 100.11, 100.12),
+        ];
+        let candidate =
+            live_close_candidate_for_bundle(&runtime, &bundle_id, &above_threshold, close_time)
+                .expect("close candidate above threshold");
+        assert!(candidate.close_profit_pct >= 0.0005);
+        assert!(candidate.close_spread_pct <= 0.0005);
+        runtime.state.record_close_candidate_metrics(
+            &candidate.bundle_id,
+            candidate.close_spread_pct,
+            candidate.close_profit_pct,
+            close_time,
+        );
+        runtime.persist_hedge_record(&candidate.bundle_id, close_time);
+
+        let close = coordinator
+            .execute_close_bundle(&mut runtime, &candidate)
+            .await
+            .unwrap();
+        assert_eq!(close.plan.commands.len(), 2);
+        assert_eq!(close.submitted_orders.len(), 2);
+        for command in &close.plan.commands {
+            let price = match command.position_side {
+                PositionSide::Long => 100.07,
+                PositionSide::Short => 100.12,
+                PositionSide::Net => command.price.unwrap_or_default(),
+            };
+            let realized_pnl = match command.position_side {
+                PositionSide::Long => (price - 100.0) * command.quantity,
+                PositionSide::Short => (102.0 - price) * command.quantity,
+                PositionSide::Net => 0.0,
+            };
+            runtime
+                .state
+                .apply_fill_event(
+                    &bundle_id,
+                    &fill_from_command_with_realized(command, price, Some(realized_pnl)),
+                )
+                .unwrap();
+        }
+
+        let record = runtime.state.hedge_records.get(&bundle_id).unwrap();
+        assert_eq!(record.status, HedgeRecordStatus::Closed);
+        assert!(record.is_closed);
+        assert!(record.close_net_profit_pct.unwrap() >= 0.0005);
+        assert_eq!(
+            runtime.state.open_bundles[&bundle_id].status,
+            SimulatedBundleStatus::Closed
+        );
+        assert_eq!(place_calls.load(Ordering::SeqCst), 4);
+    }
+
     #[test]
     fn cross_arb_close_should_use_dual_taker_when_open_uses_maker_taker() {
         let now = Utc::now();
@@ -4046,8 +4306,8 @@ mod tests {
             &runtime,
             bundle_id,
             &[
-                super::super::MarketSnapshot::healthy(book(ExchangeId::Binance, 100.25, 100.35)),
-                super::super::MarketSnapshot::healthy(book(ExchangeId::Okx, 101.75, 101.85)),
+                snapshot(ExchangeId::Binance, 100.25, 100.35),
+                snapshot(ExchangeId::Okx, 101.75, 101.85),
             ],
             now,
         )
@@ -4057,6 +4317,184 @@ mod tests {
         assert!((candidate.open_fee_paid_usdt - 0.1).abs() < 1e-9);
         assert!((candidate.close_fee_est_usdt - 0.1).abs() < 1e-9);
         assert!((candidate.close_profit_pct - 0.002).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cross_arb_close_candidate_should_require_configured_profit_threshold() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut config = super::super::CrossExchangeArbitrageConfig::default();
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        config.thresholds.lock_profit_dual_taker_pct = 0.0005;
+        config.thresholds.max_close_spread_pct = 0.0205;
+        config.fees.default_maker_fee_rate = 0.0;
+        config.fees.default_taker_fee_rate = 0.0;
+        for fee in config.fees.per_exchange.values_mut() {
+            fee.maker = 0.0;
+            fee.taker = 0.0;
+        }
+        let mut runtime = CrossArbRuntime::new(config, now);
+        let bundle_id = "bundle-close-threshold";
+        let mut bundle = ArbitrageBundle::new(
+            bundle_id,
+            RuntimeMode::Simulation,
+            symbol,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            100.0,
+            now,
+        );
+        bundle.status = BundleStatus::OpenSimulated;
+        runtime
+            .state
+            .register_bundle_position(&bundle, 1.0, 0.01, now);
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Long, 1.0, 100.0, 0.0, now)
+            .unwrap();
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Short, 1.0, 102.0, 0.0, now)
+            .unwrap();
+        runtime.state.open_bundles.insert(
+            bundle_id.to_string(),
+            SimulatedBundleState {
+                bundle_id: bundle_id.to_string(),
+                opportunity_id: "opportunity-close-threshold".to_string(),
+                status: SimulatedBundleStatus::OpenSimulated,
+                route: super::super::state::StrategyRoute {
+                    long_exchange: ExchangeId::Binance,
+                    short_exchange: ExchangeId::Okx,
+                    maker_exchange: ExchangeId::Binance,
+                    taker_exchange: ExchangeId::Okx,
+                    maker_side: super::super::state::OrderSide::Buy,
+                    taker_side: super::super::state::OrderSide::Sell,
+                    maker_leg_kind: super::super::state::MakerLegKind::LongMakerBuy,
+                },
+                target_notional_usdt: 100.0,
+                opened_at: Some(now),
+                updated_at: now,
+            },
+        );
+
+        let below_threshold = [
+            snapshot(ExchangeId::Binance, 100.04, 100.05),
+            snapshot(ExchangeId::Okx, 102.0, 102.01),
+        ];
+        let metric =
+            live_close_metrics_for_bundle(&runtime, bundle_id, &below_threshold, now).unwrap();
+        assert!(
+            metric.close_profit_pct < runtime.state.config.thresholds.lock_profit_dual_taker_pct
+        );
+        assert!(
+            live_close_candidate_for_bundle(&runtime, bundle_id, &below_threshold, now).is_none()
+        );
+
+        let above_threshold = [
+            snapshot(ExchangeId::Binance, 100.07, 100.08),
+            snapshot(ExchangeId::Okx, 102.0, 102.01),
+        ];
+        let candidate = live_close_candidate_for_bundle(&runtime, bundle_id, &above_threshold, now)
+            .expect("close candidate above threshold");
+        assert!(
+            candidate.close_profit_pct
+                >= runtime.state.config.thresholds.lock_profit_dual_taker_pct
+        );
+        assert!((candidate.close_profit_pct - 0.0006).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cross_arb_close_candidate_should_require_configured_close_spread() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut config = super::super::CrossExchangeArbitrageConfig::default();
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        config.thresholds.lock_profit_dual_taker_pct = 0.0005;
+        config.thresholds.max_close_spread_pct = 0.0205;
+        config.fees.default_maker_fee_rate = 0.0;
+        config.fees.default_taker_fee_rate = 0.0;
+        for fee in config.fees.per_exchange.values_mut() {
+            fee.maker = 0.0;
+            fee.taker = 0.0;
+        }
+        let mut runtime = CrossArbRuntime::new(config, now);
+        let bundle_id = "bundle-close-spread-threshold";
+        let mut bundle = ArbitrageBundle::new(
+            bundle_id,
+            RuntimeMode::Simulation,
+            symbol,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            ExchangeId::Binance,
+            ExchangeId::Okx,
+            100.0,
+            now,
+        );
+        bundle.status = BundleStatus::OpenSimulated;
+        runtime
+            .state
+            .register_bundle_position(&bundle, 1.0, 0.01, now);
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Long, 1.0, 100.0, 0.0, now)
+            .unwrap();
+        runtime
+            .state
+            .position_manager
+            .record_leg_fill(bundle_id, PositionSide::Short, 1.0, 104.0, 0.0, now)
+            .unwrap();
+        runtime.state.open_bundles.insert(
+            bundle_id.to_string(),
+            SimulatedBundleState {
+                bundle_id: bundle_id.to_string(),
+                opportunity_id: "opportunity-close-spread-threshold".to_string(),
+                status: SimulatedBundleStatus::OpenSimulated,
+                route: super::super::state::StrategyRoute {
+                    long_exchange: ExchangeId::Binance,
+                    short_exchange: ExchangeId::Okx,
+                    maker_exchange: ExchangeId::Binance,
+                    taker_exchange: ExchangeId::Okx,
+                    maker_side: super::super::state::OrderSide::Buy,
+                    taker_side: super::super::state::OrderSide::Sell,
+                    maker_leg_kind: super::super::state::MakerLegKind::LongMakerBuy,
+                },
+                target_notional_usdt: 100.0,
+                opened_at: Some(now),
+                updated_at: now,
+            },
+        );
+
+        let wide_close_spread = [
+            snapshot(ExchangeId::Binance, 100.10, 100.11),
+            snapshot(ExchangeId::Okx, 103.00, 103.01),
+        ];
+        let metric =
+            live_close_metrics_for_bundle(&runtime, bundle_id, &wide_close_spread, now).unwrap();
+        assert!(
+            metric.close_profit_pct >= runtime.state.config.thresholds.lock_profit_dual_taker_pct
+        );
+        assert!(metric.close_spread_pct > runtime.state.config.thresholds.max_close_spread_pct);
+        assert!(
+            live_close_candidate_for_bundle(&runtime, bundle_id, &wide_close_spread, now).is_none()
+        );
+
+        let narrowed_close_spread = [
+            snapshot(ExchangeId::Binance, 101.00, 101.01),
+            snapshot(ExchangeId::Okx, 103.00, 103.01),
+        ];
+        let candidate =
+            live_close_candidate_for_bundle(&runtime, bundle_id, &narrowed_close_spread, now)
+                .expect("close candidate when profit and spread thresholds pass");
+        assert!(
+            candidate.close_profit_pct
+                >= runtime.state.config.thresholds.lock_profit_dual_taker_pct
+        );
+        assert!(candidate.close_spread_pct <= runtime.state.config.thresholds.max_close_spread_pct);
     }
 
     #[test]
@@ -4180,6 +4618,42 @@ mod tests {
             reduce_only: Some(false),
             filled_at: Utc::now(),
             received_at: Utc::now(),
+        }
+    }
+
+    fn fill_from_command(command: &OrderCommand, price: f64) -> FillEvent {
+        fill_from_command_with_realized(command, price, None)
+    }
+
+    fn fill_from_command_with_realized(
+        command: &OrderCommand,
+        price: f64,
+        realized_pnl: Option<f64>,
+    ) -> FillEvent {
+        FillEvent {
+            exchange: command.exchange.clone(),
+            canonical_symbol: command.canonical_symbol.clone(),
+            exchange_symbol: command.exchange_symbol.clone(),
+            trade_id: format!("trade-{}", command.client_order_id),
+            client_order_id: Some(command.client_order_id.clone()),
+            exchange_order_id: Some(format!("exchange-{}", command.client_order_id)),
+            side: command.side,
+            position_side: command.position_side,
+            liquidity: if command.post_only {
+                FillLiquidity::Maker
+            } else {
+                FillLiquidity::Taker
+            },
+            price,
+            quantity: command.quantity,
+            quote_quantity: price * command.quantity,
+            fee: Some(0.0),
+            fee_asset: Some("USDT".to_string()),
+            fee_rate: None,
+            realized_pnl,
+            reduce_only: Some(command.reduce_only),
+            filled_at: command.created_at,
+            received_at: command.created_at,
         }
     }
 }

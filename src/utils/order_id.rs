@@ -215,7 +215,7 @@ impl OrderIdGenerator {
     /// 生成策略代码
     fn generate_strategy_code(strategy_name: &str) -> String {
         match strategy_name.to_lowercase().as_str() {
-            "trend_grid" | "trend_grid_v2" => "TG2".to_string(),
+            "multi_hedged_grid" => "MHG".to_string(),
             "funding_rate_arbitrage" => "FRA".to_string(),
             "poisson_market_maker" => "PMM".to_string(),
             "cross_exchange_arbitrage" => "CEA".to_string(),
@@ -236,7 +236,7 @@ impl OrderIdGenerator {
     /// 解码策略代码
     fn decode_strategy_code(code: &str) -> String {
         match code {
-            "TG2" => "trend_grid_v2".to_string(),
+            "MHG" => "multi_hedged_grid".to_string(),
             "FRA" => "funding_rate_arbitrage".to_string(),
             "PMM" => "poisson_market_maker".to_string(),
             "CEA" => "cross_exchange_arbitrage".to_string(),
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_order_id_generation() {
-        let gen = OrderIdGenerator::new("trend_grid_v2", "binance");
+        let gen = OrderIdGenerator::new("multi_hedged_grid", "binance");
         let id1 = gen.generate();
         let id2 = gen.generate();
 
@@ -352,7 +352,7 @@ mod tests {
 
         assert_ne!(id1, id2);
         assert!(id1.len() <= 36);
-        assert!(id1.starts_with("TG2"));
+        assert!(id1.starts_with("MHG"));
     }
 
     #[test]

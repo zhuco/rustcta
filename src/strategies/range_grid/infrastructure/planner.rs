@@ -1,9 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::core::types::{OrderSide, OrderType};
-use crate::utils::generate_order_id_with_tag;
-
-use crate::strategies::range_grid::domain::config::{GridConfig, SymbolConfig};
+use crate::strategies::range_grid::domain::config::SymbolConfig;
 use crate::strategies::range_grid::domain::model::{GridOrderPlan, GridPlan, PairPrecision};
 
 /// 基于当前价格生成双向网格订单计划
@@ -12,137 +10,85 @@ pub fn build_grid_plan(
     precision: &PairPrecision,
     center_price: f64,
 ) -> Result<GridPlan> {
-    if center_price <= 0.0 {
-        return Err(anyhow!("中心价格必须大于0"));
-    }
-
-    let grid_cfg = &symbol_cfg.grid;
-    let spacing_ratio = grid_cfg.grid_spacing_pct / 100.0;
-    let levels = grid_cfg.levels_per_side.max(1);
-
-    let total_notional = grid_cfg.base_order_notional * levels as f64;
-    let adj_base = if total_notional > grid_cfg.max_position_notional && total_notional > 0.0 {
-        grid_cfg.max_position_notional / levels as f64
-    } else {
-        grid_cfg.base_order_notional
-    };
-
-    let mut orders = Vec::with_capacity(levels * 2);
-    for level in 1..=levels {
-        let step = spacing_ratio * level as f64;
-        let buy_price = center_price * (1.0 - step);
-        let sell_price = center_price * (1.0 + step);
-
-        let buy_price = round_to_precision(buy_price, precision.price_digits, precision.price_step);
-        let sell_price =
-            round_to_precision(sell_price, precision.price_digits, precision.price_step);
-
-        let buy_qty = quantize_amount(
-            adj_base / buy_price,
-            precision.amount_digits,
-            precision.amount_step,
-        );
-        let sell_qty = quantize_amount(
-            adj_base / sell_price,
-            precision.amount_digits,
-            precision.amount_step,
-        );
-
-        if let Some(min_notional) = precision.min_notional {
-            if buy_price * buy_qty < min_notional {
-                log::debug!(
-                    "买单名义金额 {:.2} 低于最小值 {:.2}，跳过 level {}",
-                    buy_price * buy_qty,
-                    min_notional,
-                    level
-                );
-            } else {
-                orders.push(GridOrderPlan {
-                    client_id: generate_order_id_with_tag(
-                        "range_grid",
-                        &symbol_cfg.account.exchange,
-                        "B",
-                    ),
-                    price: buy_price,
-                    quantity: buy_qty,
-                    side: OrderSide::Buy,
-                    order_type: OrderType::Limit,
-                });
-            }
-
-            if sell_price * sell_qty < min_notional {
-                log::debug!(
-                    "卖单名义金额 {:.2} 低于最小值 {:.2}，跳过 level {}",
-                    sell_price * sell_qty,
-                    min_notional,
-                    level
-                );
-            } else {
-                orders.push(GridOrderPlan {
-                    client_id: generate_order_id_with_tag(
-                        "range_grid",
-                        &symbol_cfg.account.exchange,
-                        "S",
-                    ),
-                    price: sell_price,
-                    quantity: sell_qty,
-                    side: OrderSide::Sell,
-                    order_type: OrderType::Limit,
-                });
-            }
-        } else {
-            orders.push(GridOrderPlan {
-                client_id: generate_order_id_with_tag(
-                    "range_grid",
-                    &symbol_cfg.account.exchange,
-                    "B",
-                ),
-                price: buy_price,
-                quantity: buy_qty,
-                side: OrderSide::Buy,
-                order_type: OrderType::Limit,
-            });
-            orders.push(GridOrderPlan {
-                client_id: generate_order_id_with_tag(
-                    "range_grid",
-                    &symbol_cfg.account.exchange,
-                    "S",
-                ),
-                price: sell_price,
-                quantity: sell_qty,
-                side: OrderSide::Sell,
-                order_type: OrderType::Limit,
-            });
-        }
-    }
-
-    Ok(GridPlan {
+    let core_plan = rustcta_strategy_range_grid::build_grid_plan(
+        &core_symbol_config(symbol_cfg),
+        &core_precision(precision),
         center_price,
-        orders,
+    )?;
+    Ok(GridPlan {
+        center_price: core_plan.center_price,
+        orders: core_plan
+            .orders
+            .into_iter()
+            .map(grid_order_from_core)
+            .collect(),
     })
 }
 
-fn round_to_precision(value: f64, digits: u32, step: f64) -> f64 {
-    let mut rounded = value;
-    if step > 0.0 {
-        let multiples = (rounded / step).round();
-        rounded = multiples * step;
+fn core_symbol_config(symbol: &SymbolConfig) -> rustcta_strategy_range_grid::SymbolConfig {
+    rustcta_strategy_range_grid::SymbolConfig {
+        config_id: symbol.config_id.clone(),
+        enabled: symbol.enabled,
+        account: rustcta_strategy_range_grid::AccountConfig {
+            id: symbol.account.id.clone(),
+            exchange: symbol.account.exchange.clone(),
+            env_prefix: symbol.account.env_prefix.clone(),
+        },
+        symbol: symbol.symbol.clone(),
+        precision: rustcta_strategy_range_grid::SymbolPrecision {
+            price_digits: symbol.precision.price_digits,
+            amount_digits: symbol.precision.amount_digits,
+        },
+        grid: rustcta_strategy_range_grid::GridConfig {
+            grid_spacing_pct: symbol.grid.grid_spacing_pct,
+            levels_per_side: symbol.grid.levels_per_side,
+            base_order_notional: symbol.grid.base_order_notional,
+            max_position_notional: symbol.grid.max_position_notional,
+        },
+        regime_filters: rustcta_strategy_range_grid::RegimeFilterConfig {
+            min_liquidity_usd: symbol.regime_filters.min_liquidity_usd,
+            require_conditions: symbol.regime_filters.require_conditions,
+            adx_max: symbol.regime_filters.adx_max,
+            bbw_quantile: symbol.regime_filters.bbw_quantile,
+            slope_threshold: symbol.regime_filters.slope_threshold,
+        },
+        order: rustcta_strategy_range_grid::OrderConfig {
+            post_only: symbol.order.post_only,
+            tif: symbol.order.tif.clone(),
+        },
+        market_exit: rustcta_strategy_range_grid::MarketExitConfig {
+            use_market_order: symbol.market_exit.use_market_order,
+        },
     }
-
-    if digits == 0 {
-        return rounded.round();
-    }
-
-    let factor = 10_f64.powi(digits as i32);
-    (rounded * factor).round() / factor
 }
 
-fn quantize_amount(value: f64, digits: u32, step: f64) -> f64 {
-    let mut amount = round_to_precision(value, digits, step);
-    if amount <= 0.0 && step > 0.0 {
-        amount = step;
+fn core_precision(precision: &PairPrecision) -> rustcta_strategy_range_grid::PairPrecision {
+    rustcta_strategy_range_grid::PairPrecision {
+        price_digits: precision.price_digits,
+        amount_digits: precision.amount_digits,
+        price_step: precision.price_step,
+        amount_step: precision.amount_step,
+        min_notional: precision.min_notional,
     }
-    amount
+}
+
+fn grid_order_from_core(order: rustcta_strategy_range_grid::GridOrderPlan) -> GridOrderPlan {
+    GridOrderPlan {
+        client_id: order.client_id,
+        price: order.price,
+        quantity: order.quantity,
+        side: match order.side {
+            rustcta_strategy_sdk::OrderSide::Buy => OrderSide::Buy,
+            rustcta_strategy_sdk::OrderSide::Sell => OrderSide::Sell,
+        },
+        order_type: match order.order_type {
+            rustcta_strategy_sdk::OrderType::Market => OrderType::Market,
+            rustcta_strategy_sdk::OrderType::Limit
+            | rustcta_strategy_sdk::OrderType::PostOnly
+            | rustcta_strategy_sdk::OrderType::ImmediateOrCancel
+            | rustcta_strategy_sdk::OrderType::Custom(_) => OrderType::Limit,
+        },
+    }
 }
 
 #[cfg(test)]

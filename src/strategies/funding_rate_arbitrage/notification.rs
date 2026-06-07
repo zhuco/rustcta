@@ -108,10 +108,7 @@ pub async fn send_markdown_notification(
     }
 
     let webhook_url = resolve_webhook_url(config)?;
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .context("build wecom webhook client")?;
+    let client = crate::core::http2_fix::shared_http_client();
     send_markdown(&client, &webhook_url, content).await
 }
 

@@ -80,7 +80,7 @@ impl WebhookNotifier {
     pub fn new(config: WebhookConfig) -> Self {
         Self {
             config,
-            client: Client::new(),
+            client: crate::core::http2_fix::shared_http_client(),
             last_send_times: Arc::new(RwLock::new(HashMap::new())),
         }
     }

@@ -459,6 +459,9 @@ pub fn build_cross_arb_execution_router_with_instruments(
 ) -> Result<ExecutionRouter> {
     let instruments = instruments.into_iter().collect::<Vec<_>>();
     let mut router = ExecutionRouter::new(config.execution.dry_run);
+    if config.execution.dry_run {
+        return Ok(router);
+    }
     for exchange in live_enabled_exchanges(config) {
         let adapter = build_trading_adapter_for_exchange_with_instruments(
             config,
@@ -481,6 +484,14 @@ pub fn build_cross_arb_live_runtime_parts(
     let mut router = ExecutionRouter::new(config.execution.dry_run);
     let mut adapters = Vec::new();
     let mut binance_private_ws_specs = Vec::new();
+    if config.execution.dry_run {
+        return Ok(CrossArbLiveRuntimeParts {
+            router,
+            adapters,
+            private_ws_specs: Vec::new(),
+            binance_private_ws_specs,
+        });
+    }
     for exchange in live_enabled_exchanges(config) {
         let adapter = build_trading_adapter_for_exchange_with_instruments(
             config,
@@ -570,6 +581,9 @@ pub fn build_private_ws_runtime_specs(
 ) -> Result<Vec<PrivateWsRuntimeSpec>> {
     let mut specs = Vec::new();
     for (exchange, symbols, instruments) in symbols_by_exchange {
+        if exchange == ExchangeId::Binance {
+            continue;
+        }
         let Some(private_exchange) = private_perp_exchange(&exchange) else {
             continue;
         };
@@ -638,6 +652,7 @@ mod tests {
     #[test]
     fn runtime_should_filter_disabled_exchanges() {
         let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Bitget];
         config
             .exchanges
             .entry(ExchangeId::Bitget)
@@ -653,6 +668,7 @@ mod tests {
     #[test]
     fn runtime_should_keep_close_only_exchanges_attached() {
         let mut config = CrossExchangeArbitrageConfig::default();
+        config.universe.enabled_exchanges = vec![ExchangeId::Bitget];
         config
             .exchanges
             .entry(ExchangeId::Bitget)
@@ -765,6 +781,7 @@ mod tests {
     #[test]
     fn runtime_should_register_private_adapter_with_symbol_rules() {
         let mut config = CrossExchangeArbitrageConfig::default();
+        config.execution.dry_run = false;
         config.universe.enabled_exchanges = vec![ExchangeId::Bitget];
         let bitget = config.exchanges.entry(ExchangeId::Bitget).or_default();
         bitget.enabled = Some(true);
@@ -805,6 +822,7 @@ mod tests {
     #[test]
     fn runtime_should_build_live_parts_with_router_adapters_and_private_ws_specs() {
         let mut config = CrossExchangeArbitrageConfig::default();
+        config.execution.dry_run = false;
         config.universe.enabled_exchanges =
             vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
         config.universe.symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
@@ -848,8 +866,72 @@ mod tests {
     }
 
     #[test]
+    fn runtime_should_build_live_dry_run_parts_without_private_credentials() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.mode = crate::market::RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(crate::market::RuntimeMode::LiveSmall);
+        config.execution.dry_run = true;
+        config.universe.enabled_exchanges =
+            vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
+        config.universe.symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+        for exchange in [ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate] {
+            let runtime = config.exchanges.entry(exchange).or_default();
+            runtime.enabled = Some(true);
+            runtime.private_rest_enabled = true;
+            runtime.private_ws_enabled = true;
+        }
+
+        let parts = build_cross_arb_live_runtime_parts(&config, Vec::new()).unwrap();
+
+        assert!(parts.router.dry_run());
+        assert!(parts.adapters.is_empty());
+        assert!(parts.private_ws_specs.is_empty());
+        assert!(parts.binance_private_ws_specs.is_empty());
+    }
+
+    #[test]
+    fn runtime_should_build_live_parts_from_selected_account_credentials() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        config.execution.dry_run = false;
+        config.universe.enabled_exchanges = vec![ExchangeId::Bitget];
+        config.universe.symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+        let bitget = config.exchanges.entry(ExchangeId::Bitget).or_default();
+        bitget.enabled = Some(true);
+        bitget.private_ws_enabled = false;
+        bitget.env_prefix = Some("BITGET".to_string());
+        bitget.account_id = Some("arb-runtime".to_string());
+        for key in [
+            "BITGET_API_KEY",
+            "BITGET_API_SECRET",
+            "BITGET_PASSPHRASE",
+            "BITGET__ARB_RUNTIME__API_KEY",
+            "BITGET__ARB_RUNTIME__API_SECRET",
+            "BITGET__ARB_RUNTIME__PASSPHRASE",
+        ] {
+            std::env::remove_var(key);
+        }
+        std::env::set_var("BITGET__ARB_RUNTIME__API_KEY", "arb-runtime-key");
+        std::env::set_var("BITGET__ARB_RUNTIME__API_SECRET", "arb-runtime-secret");
+        std::env::set_var("BITGET__ARB_RUNTIME__PASSPHRASE", "arb-runtime-pass");
+
+        let parts = build_cross_arb_live_runtime_parts(&config, Vec::new()).unwrap();
+
+        assert!(parts.router.has_adapter(&ExchangeId::Bitget));
+        assert_eq!(parts.adapters.len(), 1);
+
+        for key in [
+            "BITGET__ARB_RUNTIME__API_KEY",
+            "BITGET__ARB_RUNTIME__API_SECRET",
+            "BITGET__ARB_RUNTIME__PASSPHRASE",
+        ] {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
     fn runtime_should_filter_private_ws_symbols_to_loaded_instruments() {
         let mut config = CrossExchangeArbitrageConfig::default();
+        config.execution.dry_run = false;
         config.universe.enabled_exchanges = vec![ExchangeId::Gate];
         config.universe.symbols = vec![
             crate::market::CanonicalSymbol::new("BTC", "USDT"),

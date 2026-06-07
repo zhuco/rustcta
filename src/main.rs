@@ -1,7 +1,5 @@
 use clap::{Arg, Command};
-use rustcta::live_preflight::{
-    api_permissions_from_env, render_human_report, run_live_preflight, LiveReadinessState,
-};
+use rustcta::live_preflight::{render_human_report, run_live_preflight};
 use rustcta::strategies::common::application::strategy::{Strategy, StrategyInstance};
 use rustcta::strategies::range_grid::application::risk as range_risk;
 use rustcta::{
@@ -12,13 +10,12 @@ use rustcta::{
     strategies::*,
     utils::{
         init_global_time_sync,
-        unified_logger::{init_global_logger, LogConfig},
+        unified_logger::{init_global_logger, init_tracing_logger, trading_span, LogConfig},
     },
 };
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Child, Command as ProcessCommand};
 use std::sync::Arc;
 
 struct ProcessLock {
@@ -72,6 +69,41 @@ impl ProcessLock {
             Err(err) => Err(Box::new(err)),
         }
     }
+}
+
+fn read_config_file(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(path)?;
+    Ok(expand_env_placeholders(&content))
+}
+
+fn expand_env_placeholders(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'$' && bytes.get(index + 1) == Some(&b'{') {
+            if let Some(end) = bytes[index + 2..].iter().position(|byte| *byte == b'}') {
+                let key_start = index + 2;
+                let key_end = key_start + end;
+                let key = &input[key_start..key_end];
+                if is_env_key(key) {
+                    output.push_str(&std::env::var(key).unwrap_or_else(|_| "\"\"".to_string()));
+                    index = key_end + 1;
+                    continue;
+                }
+            }
+        }
+        output.push(bytes[index] as char);
+        index += 1;
+    }
+    output
+}
+
+fn is_env_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 impl Drop for ProcessLock {
@@ -158,7 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .short('s')
             .long("strategy")
             .value_name("STRATEGY")
-            .help("策略类型: spot_spot_taker_arbitrage, cross_exchange_arbitrage, funding_rate_arbitrage, trend_intraday, trend_grid, hedged_grid, solusdc_hedged_grid, short_ladder_live, mean_reversion, range_grid, accumulation, poisson, avellaneda_stoikov, beta_hedge_market_maker")
+            .help("策略类型: spot_spot_taker_arbitrage, cross_exchange_arbitrage, funding_rate_arbitrage, trend_intraday, multi_hedged_grid, short_ladder_live, mean_reversion, range_grid, poisson, avellaneda_stoikov")
             .required(false)
             .default_value("spot_spot_taker_arbitrage"))
         .arg(Arg::new("preflight")
@@ -171,21 +203,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .value_name("FILE")
             .help("配置文件路径")
             .required(true))
-        .arg(Arg::new("symbol")
-            .long("symbol")
-            .value_name("CONFIG_ID")
-            .help("仅运行指定的配置ID（对冲网格专用）"))
         .get_matches();
 
     let strategy_type = matches.get_one::<String>("strategy").unwrap();
     let config_file = matches.get_one::<String>("config").unwrap();
-    let single_symbol = matches.get_one::<String>("symbol").cloned();
     let preflight = matches.get_flag("preflight");
 
-    let _process_lock = if matches!(
-        strategy_type.as_str(),
-        "solusdc_hedged_grid" | "beta_hedge_market_maker"
-    ) {
+    let _process_lock = if matches!(strategy_type.as_str(), "multi_hedged_grid") {
         Some(ProcessLock::acquire(strategy_type, config_file)?)
     } else {
         None
@@ -197,7 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 读取策略配置文件获取日志级别
-    let strategy_config_content = std::fs::read_to_string(config_file)?;
+    let strategy_config_content = read_config_file(config_file)?;
     let strategy_config: serde_yaml::Value = serde_yaml::from_str(&strategy_config_content)?;
 
     // 从配置中获取日志级别，默认为INFO
@@ -210,10 +234,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 设置日志级别
     std::env::set_var("RUST_LOG", log_level);
 
-    // 重新初始化env_logger以应用新的日志级别
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level))
-        .format_timestamp_millis()
-        .init();
+    // tracing-log 会兼容现有 log::* 调用；新模块直接使用 tracing::*。
+    init_tracing_logger(log_level);
+    let _strategy_span = trading_span("multi", "multi", strategy_type);
+    let _strategy_span_guard = _strategy_span.enter();
 
     log::info!(
         "启动策略: {} with config: {}, 日志级别: {}",
@@ -242,33 +266,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 创建账户管理器
     let mut account_manager = AccountManager::new(config);
 
-    // 从accounts.yml加载所有账户配置
-    let accounts_to_add = vec![
-        // Binance账户
-        ("binance_main", "binance", "BINANCE_0", 10, 20),
-        ("binance_daidan", "binance", "BINANCE_2", 5, 10),
-        ("binance_hcr", "binance", "BINANCE_3", 5, 10),
-        // 其他交易所账户
-        ("bitmart_main", "bitmart", "BITMART", 10, 20),
-        ("hyperliquid_main", "hyperliquid", "HYPERLIQUID", 10, 20),
-        // ("htx_main", "htx", "HTX", 10, 20),
-    ];
+    if strategy_type.as_str() == "spot_spot_taker_arbitrage" {
+        log::info!("spot_spot_taker_arbitrage uses dedicated spot clients; skipping legacy account bootstrap");
+    } else {
+        // 从accounts.yml加载所有账户配置
+        let accounts_to_add = vec![
+            // Binance账户
+            ("binance_main", "binance", "BINANCE_0", 10, 20),
+            ("binance_daidan", "binance", "BINANCE_2", 5, 10),
+            ("binance_hcr", "binance", "BINANCE_3", 5, 10),
+            // 其他交易所账户
+            ("bitmart_main", "bitmart", "BITMART", 10, 20),
+            ("hyperliquid_main", "hyperliquid", "HYPERLIQUID", 10, 20),
+            // ("htx_main", "htx", "HTX", 10, 20),
+        ];
 
-    // 批量添加账户
-    for (id, exchange, env_prefix, max_positions, max_orders) in accounts_to_add {
-        let account_config = rustcta::AccountConfig {
-            id: id.to_string(),
-            exchange: exchange.to_string(),
-            api_key_env: env_prefix.to_string(),
-            position_mode: None,
-            enabled: true,
-            max_positions,
-            max_orders_per_symbol: max_orders,
-        };
+        // 批量添加账户
+        for (id, exchange, env_prefix, max_positions, max_orders) in accounts_to_add {
+            let account_config = rustcta::AccountConfig {
+                id: id.to_string(),
+                exchange: exchange.to_string(),
+                api_key_env: env_prefix.to_string(),
+                position_mode: None,
+                enabled: true,
+                max_positions,
+                max_orders_per_symbol: max_orders,
+            };
 
-        match account_manager.add_account(account_config).await {
-            Ok(_) => log::info!("✅ 成功添加账户: {}", id),
-            Err(e) => log::warn!("⚠️ 添加账户 {} 失败: {}", id, e),
+            match account_manager.add_account(account_config).await {
+                Ok(_) => log::info!("✅ 成功添加账户: {}", id),
+                Err(e) => log::warn!("⚠️ 添加账户 {} 失败: {}", id, e),
+            }
         }
     }
 
@@ -303,7 +331,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 根据策略类型启动
     match strategy_type.as_str() {
         "trend_intraday" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: TrendConfig = serde_yaml::from_str(&file_content)?;
 
             let risk_evaluator = build_unified_risk_evaluator(config.name.clone(), None, None);
@@ -323,7 +351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.stop().await?;
         }
         "cross_exchange_arbitrage" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: rustcta::strategies::cross_exchange_arbitrage::CrossExchangeArbitrageConfig =
                 serde_yaml::from_str(&file_content)?;
             log::info!("cross_exchange_arbitrage detection-only strategy is starting...");
@@ -349,10 +377,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "spot_spot_taker_arbitrage" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: SpotSpotTakerArbitrageConfig = serde_yaml::from_str(&file_content)?;
+            let trading_mode = config.trading_mode.clone();
+            let live_trading_enabled = config.live_trading_enabled;
             let strategy = SpotSpotTakerArbitrageStrategy::new(config)?;
-            log::info!("spot_spot_taker_arbitrage paper-only strategy is starting...");
+            log::info!(
+                "spot_spot_taker_arbitrage strategy is starting trading_mode={} live_trading_enabled={}",
+                trading_mode,
+                live_trading_enabled
+            );
 
             let strategy_task = tokio::spawn(strategy.start());
             tokio::select! {
@@ -369,99 +403,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        "trend_grid" => {
-            // 从文件读取配置
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: TrendGridConfigV2 = serde_yaml::from_str(&file_content)?;
-            let strategy = TrendGridStrategyV2::new(config, account_manager);
-            log::info!("趋势网格策略已创建，开始运行...");
-
-            // 运行策略
-            strategy.start().await?;
-
-            // 保持运行直到收到停止信号
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭策略...");
-            strategy.stop().await?;
-        }
-        "hedged_grid" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let mut config: HedgedGridConfig = serde_yaml::from_str(&file_content)?;
-
-            if let Some(ref filter) = single_symbol {
-                config.symbols.retain(|symbol| &symbol.config_id == filter);
-                if config.symbols.is_empty() {
-                    return Err(
-                        format!("未在配置文件中找到 config_id 为 {} 的交易对", filter).into(),
-                    );
-                }
-                log::info!("对冲网格仅运行配置: {}", filter);
-            }
-
-            if config.execution.process_per_symbol && single_symbol.is_none() {
-                let current_exe = std::env::current_exe()?;
-                let mut children: Vec<Child> = Vec::new();
-
-                for symbol in &config.symbols {
-                    let child = ProcessCommand::new(&current_exe)
-                        .arg("--strategy")
-                        .arg("hedged_grid")
-                        .arg("--config")
-                        .arg(config_file)
-                        .arg("--symbol")
-                        .arg(&symbol.config_id)
-                        .spawn()
-                        .map_err(|err| {
-                            format!("启动子进程运行 {} 失败: {}", symbol.config_id, err)
-                        })?;
-                    log::info!(
-                        "已启动对冲网格子进程: {} (PID={})",
-                        symbol.config_id,
-                        child.id()
-                    );
-                    children.push(child);
-                }
-
-                log::info!("等待 Ctrl+C 以结束所有对冲网格子进程...");
-                shutdown_signal().await?;
-                log::info!("收到停止信号，开始终止子进程...");
-
-                for mut child in children {
-                    let pid = child.id();
-                    if let Err(err) = child.kill() {
-                        log::warn!("终止子进程 {} 失败: {}", pid, err);
-                    } else {
-                        let _ = child.wait();
-                        log::info!("已终止子进程 {}", pid);
-                    }
-                }
-
-                return Ok(());
-            }
-
-            let strategy = HedgedGridStrategy::new(config, account_manager.clone());
-            log::info!("对冲网格策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭策略...");
-            strategy.stop().await?;
-        }
-        "solusdc_hedged_grid" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: SolusdcHedgedGridRuntimeConfig = serde_yaml::from_str(&file_content)?;
-            let strategy = SolusdcHedgedGridStrategy::new(config, account_manager.clone());
-            log::info!("SOLUSDC 对冲滚动网格策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭策略...");
-            strategy.stop().await?;
-        }
         "multi_hedged_grid" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: MultiHedgedGridRuntimeConfig = serde_yaml::from_str(&file_content)?;
             let strategy = MultiHedgedGridStrategy::new(config, account_manager.clone());
             log::info!("多交易对对冲滚动网格策略已创建，开始运行...");
@@ -473,7 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.stop().await?;
         }
         "short_ladder_live" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: ShortLadderLiveConfig = serde_yaml::from_str(&file_content)?;
 
             let risk_evaluator =
@@ -494,7 +437,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.stop().await?;
         }
         "range_grid" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: RangeGridConfig = serde_yaml::from_str(&file_content)?;
 
             let risk_evaluator = build_unified_risk_evaluator(
@@ -518,7 +461,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             strategy.stop().await?;
         }
         "mean_reversion" => {
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: MeanReversionConfig = serde_yaml::from_str(&file_content)?;
 
             let risk_evaluator =
@@ -538,30 +481,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("收到停止信号，正在关闭策略...");
             strategy.stop().await?;
         }
-        "accumulation" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: AccumulationConfig = serde_yaml::from_str(&file_content)?;
-
-            let risk_evaluator =
-                build_unified_risk_evaluator(config.strategy.name.clone(), None, None);
-
-            let deps = StrategyDepsBuilder::new()
-                .with_account_manager(account_manager.clone())
-                .with_risk_evaluator(risk_evaluator)
-                .build()?;
-
-            let strategy = AccumulationStrategy::create(config, deps)?;
-            log::info!("吸筹策略已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭吸筹策略...");
-            strategy.stop().await?;
-        }
         "poisson" => {
             // 从文件读取配置
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: PoissonMMConfig = serde_yaml::from_str(&file_content)?;
             let strategy = PoissonMarketMaker::new(config, account_manager);
             log::info!("泊松做市策略已创建，开始运行...");
@@ -576,7 +498,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         "avellaneda_stoikov" => {
             // 从文件读取配置
-            let file_content = std::fs::read_to_string(config_file)?;
+            let file_content = read_config_file(config_file)?;
             let config: AVSConfig = serde_yaml::from_str(&file_content)?;
 
             let mut strategy = AvellanedaStoikovStrategy::new(config, account_manager).await?;
@@ -585,34 +507,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 运行策略
             strategy.run_until_shutdown().await?;
             log::info!("A-S策略已停止");
-        }
-        "beta_hedge_market_maker" => {
-            let file_content = std::fs::read_to_string(config_file)?;
-            let config: BetaHedgeMarketMakerConfig = serde_yaml::from_str(&file_content)?;
-
-            let risk_evaluator = build_unified_risk_evaluator(
-                config.strategy.name.clone(),
-                None,
-                Some(
-                    rustcta::strategies::beta_hedge_market_maker::risk::build_strategy_limits(
-                        &config,
-                    ),
-                ),
-            );
-
-            let deps = StrategyDepsBuilder::new()
-                .with_account_manager(account_manager.clone())
-                .with_risk_evaluator(risk_evaluator)
-                .build()?;
-
-            let strategy = BetaHedgeMarketMaker::create(config, deps)?;
-            log::info!("Beta hedge market maker 已创建，开始运行...");
-
-            strategy.start().await?;
-
-            shutdown_signal().await?;
-            log::info!("收到停止信号，正在关闭 beta hedge market maker...");
-            strategy.stop().await?;
         }
         _ => {
             log::error!("未知策略类型: {}", strategy_type);
@@ -633,96 +527,23 @@ async fn run_cli_preflight(
         )
         .into());
     }
-    let file_content = std::fs::read_to_string(config_file)?;
+    let file_content = read_config_file(config_file)?;
     let config: SpotSpotTakerArbitrageConfig = serde_yaml::from_str(&file_content)?;
+    config.validate_safe_mode()?;
     let preflight_config = config.live_preflight.clone();
     let inventory =
         rustcta::strategies::spot_spot_taker_arbitrage::PaperInventory::from_config(&config)?;
     let fee_model = rustcta::execution::FeeModel::load_or_default(&config.fee_config_path);
     let disabled_registry =
         rustcta::risk::DisabledRegistry::load_or_empty(&config.disabled_registry_path);
-    let state = LiveReadinessState {
-        trading_mode: config.trading_mode.clone(),
-        live_trading_enabled: config.live_trading_enabled,
-        dry_run: config.dry_run,
-        monitoring_enabled: config.monitoring.enabled,
-        recorder_enabled: config.enable_csv_recording || config.enable_database_recording,
-        kill_switch_available: true,
-        kill_switch_active: false,
-        emergency_stop_configured: config.max_daily_loss > 0.0,
-        max_daily_loss: Some(config.max_daily_loss),
-        max_order_latency_ms: Some(config.max_book_latency_ms),
-        symbol_rules: Vec::new(),
-        inventory: inventory
-            .balances_snapshot()
-            .into_iter()
-            .map(|(exchange, asset, balance)| rustcta::web::InventoryView {
-                exchange: exchange.as_str().to_string(),
-                market_type: rustcta::exchanges::unified::MarketType::Spot,
-                asset,
-                total: balance.total,
-                available: balance.available,
-                locked_by_exchange: balance.locked_by_exchange,
-                locally_reserved: balance.locally_reserved,
-                effective_available: balance.effective_available(),
-                unmanaged_quantity: 0.0,
-                valuation_usdt: None,
-            })
-            .collect(),
-        fees: fee_model
-            .summary_rates()
-            .into_iter()
-            .map(|rate| rustcta::web::FeeView {
-                exchange: rate.exchange,
-                market_type: rate.market_type,
-                symbol: rate.symbol,
-                maker_fee_bps: rate.maker_fee_bps,
-                taker_fee_bps: rate.taker_fee_bps,
-                source: rate.source,
-                platform_discount_enabled: rate.platform_discount_enabled,
-                platform_token: rate.platform_token,
-                updated_at: rate.updated_at,
-            })
-            .collect(),
-        books: Vec::new(),
-        exchanges: Vec::new(),
-        disabled_symbols: disabled_registry
-            .disabled_symbols()
-            .into_iter()
-            .map(|item| item.symbol)
-            .collect(),
-        disabled_exchanges: disabled_registry
-            .disabled_exchanges()
-            .into_iter()
-            .map(|item| item.exchange)
-            .collect(),
-        disabled_exchange_symbols: disabled_registry
-            .disabled_exchange_symbols()
-            .into_iter()
-            .map(|item| (item.exchange, item.market_type, item.symbol))
-            .collect(),
-        unmanaged_positions: disabled_registry
-            .unmanaged_positions()
-            .iter()
-            .map(|position| {
-                (
-                    position.exchange.clone(),
-                    position.market_type,
-                    position.symbol.clone(),
-                    position.asset.clone(),
-                    position.quantity,
-                )
-            })
-            .collect(),
-        api_permissions: api_permissions_from_env(&preflight_config.exchanges),
-        recorder: rustcta::web::RecorderHealthView {
-            book_recording_enabled: config.websocket.record_books,
-            opportunity_recording_enabled: true,
-            trade_recording_enabled: true,
-            output_paths: vec![config.jsonl_path, config.csv_path],
-            ..rustcta::web::RecorderHealthView::default()
-        },
-    };
+    let state =
+        rustcta::strategies::spot_spot_taker_arbitrage::build_live_preflight_state_from_config(
+            &config,
+            &inventory,
+            &disabled_registry,
+            &fee_model,
+        )
+        .await?;
     let report = run_live_preflight(preflight_config, &state);
     println!("{}", render_human_report(&report));
     Ok(if report.has_failures() { 1 } else { 0 })

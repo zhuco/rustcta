@@ -11,7 +11,11 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout, Duration as TokioDuration};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
+
+use rustcta::core::ws_connect::connect_async;
+
+const PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS: u64 = 50;
 
 #[derive(Debug, Clone, Copy)]
 pub struct PublicWsConfig {
@@ -116,7 +120,7 @@ fn build_public_ws_endpoint(
                 url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
                 subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
                 symbol_count: symbols.len(),
-                send_interval_ms: 0,
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
         ExchangeId::Bitget => {
@@ -135,7 +139,7 @@ fn build_public_ws_endpoint(
                 url: "wss://ws.bitget.com/v2/ws/public".to_string(),
                 subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
                 symbol_count: symbols.len(),
-                send_interval_ms: 0,
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
         ExchangeId::Gate => {
@@ -156,7 +160,7 @@ fn build_public_ws_endpoint(
                 url: "wss://fx-ws.gateio.ws/v4/ws/usdt".to_string(),
                 subscribe_messages,
                 symbol_count: symbols.len(),
-                send_interval_ms: 50,
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
         ExchangeId::Bybit => {
@@ -169,7 +173,7 @@ fn build_public_ws_endpoint(
                 url: "wss://stream.bybit.com/v5/public/linear".to_string(),
                 subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
                 symbol_count: symbols.len(),
-                send_interval_ms: 0,
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
         ExchangeId::Mexc => {
@@ -191,7 +195,7 @@ fn build_public_ws_endpoint(
                 url: "wss://contract.mexc.com/edge".to_string(),
                 subscribe_messages,
                 symbol_count: symbols.len(),
-                send_interval_ms: 20,
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
         ExchangeId::Htx => {
@@ -210,7 +214,7 @@ fn build_public_ws_endpoint(
                 url: "wss://api.hbdm.com/linear-swap-ws".to_string(),
                 subscribe_messages,
                 symbol_count: symbols.len(),
-                send_interval_ms: 20,
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
         ExchangeId::CoinEx | ExchangeId::KuCoin => {
@@ -496,6 +500,10 @@ mod tests {
         assert!(payload.contains("\"op\":\"subscribe\""));
         assert!(payload.contains("ARB-USDT-SWAP"));
         assert!(payload.contains("OP-USDT-SWAP"));
+        assert_eq!(
+            endpoint.send_interval_ms,
+            PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS
+        );
     }
 
     #[test]
@@ -526,7 +534,10 @@ mod tests {
         assert!(endpoint.subscribe_messages[0].contains("futures.order_book"));
         assert!(endpoint.subscribe_messages[0].contains("ARB_USDT"));
         assert!(endpoint.subscribe_messages[0].contains("\"0\""));
-        assert_eq!(endpoint.send_interval_ms, 50);
+        assert_eq!(
+            endpoint.send_interval_ms,
+            PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS
+        );
     }
 
     #[test]
@@ -541,6 +552,10 @@ mod tests {
         assert_eq!(endpoint.subscribe_messages.len(), 1);
         assert!(endpoint.subscribe_messages[0].contains("\"op\":\"subscribe\""));
         assert!(endpoint.subscribe_messages[0].contains("orderbook.1.BTCUSDT"));
+        assert_eq!(
+            endpoint.send_interval_ms,
+            PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS
+        );
     }
 
     #[test]
@@ -555,6 +570,10 @@ mod tests {
         assert_eq!(endpoint.subscribe_messages.len(), 1);
         assert!(endpoint.subscribe_messages[0].contains("sub.depth.full"));
         assert!(endpoint.subscribe_messages[0].contains("BTC_USDT"));
+        assert_eq!(
+            endpoint.send_interval_ms,
+            PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS
+        );
     }
 
     #[test]
@@ -568,6 +587,9 @@ mod tests {
         assert_eq!(endpoint.url, "wss://api.hbdm.com/linear-swap-ws");
         assert_eq!(endpoint.subscribe_messages.len(), 1);
         assert!(endpoint.subscribe_messages[0].contains("market.BTC-USDT.depth.step0"));
-        assert_eq!(endpoint.send_interval_ms, 20);
+        assert_eq!(
+            endpoint.send_interval_ms,
+            PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS
+        );
     }
 }

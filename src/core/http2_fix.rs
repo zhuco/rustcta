@@ -1,29 +1,36 @@
 /// HTTP/2 连接管理优化
+use once_cell::sync::Lazy;
 use reqwest::{Client, ClientBuilder};
 use std::time::Duration;
+
+static SHARED_HTTP_CLIENT: Lazy<Client> = Lazy::new(create_optimized_client);
 
 /// 创建优化的 HTTP 客户端，避免 HTTP/2 流耗尽问题
 pub fn create_optimized_client() -> Client {
     ClientBuilder::new()
+        .user_agent("RustCTA/0.3")
         // 连接池配置
-        .pool_idle_timeout(Duration::from_secs(90))  // 空闲连接90秒后关闭
-        .pool_max_idle_per_host(10)                  // 每个主机最多10个空闲连接
-        
+        .pool_idle_timeout(Duration::from_secs(90)) // 空闲连接90秒后关闭
+        .pool_max_idle_per_host(10) // 每个主机最多10个空闲连接
         // HTTP/2 配置
-        .http2_keep_alive_interval(Duration::from_secs(30))  // HTTP/2 心跳
-        .http2_keep_alive_timeout(Duration::from_secs(10))   // 心跳超时
-        .http2_keep_alive_while_idle(true)                   // 空闲时保持心跳
-        
+        .http2_keep_alive_interval(Duration::from_secs(30)) // HTTP/2 心跳
+        .http2_keep_alive_timeout(Duration::from_secs(10)) // 心跳超时
+        .http2_keep_alive_while_idle(true) // 空闲时保持心跳
         // 超时配置
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(30))
-        
         // 重试配置
-        .tcp_nodelay(true)  // 禁用 Nagle 算法，减少延迟
-        .tcp_keepalive(Some(Duration::from_secs(60)))  // TCP 层心跳
-        
+        .tcp_nodelay(true) // 禁用 Nagle 算法，减少延迟
+        .tcp_keepalive(Some(Duration::from_secs(60))) // TCP 层心跳
         .build()
         .expect("创建 HTTP 客户端失败")
+}
+
+/// 获取全系统共享 HTTP 客户端。
+///
+/// `reqwest::Client` 内部已是廉价 clone 的连接池句柄；交易所 REST API 默认应复用它。
+pub fn shared_http_client() -> Client {
+    SHARED_HTTP_CLIENT.clone()
 }
 
 /// 连接池管理器
@@ -41,7 +48,7 @@ impl ConnectionPoolManager {
             reset_interval: Duration::from_secs(300), // 5分钟重置一次连接池
         }
     }
-    
+
     /// 获取客户端，必要时重置
     pub fn get_client(&mut self) -> &Client {
         // 定期重建客户端以避免连接积累
@@ -68,17 +75,17 @@ impl RequestThrottler {
             min_interval,
         }
     }
-    
+
     /// 等待直到可以发送下一个请求
     pub async fn wait_if_needed(&self) {
         let mut last = self.last_request.lock().await;
         let elapsed = last.elapsed();
-        
+
         if elapsed < self.min_interval {
             let wait_time = self.min_interval - elapsed;
             tokio::time::sleep(wait_time).await;
         }
-        
+
         *last = std::time::Instant::now();
     }
 }

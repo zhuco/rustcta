@@ -481,11 +481,7 @@ pub struct BaseExchange {
 impl BaseExchange {
     /// 创建新的交易所实例
     pub fn new(name: String, config: Config, api_keys: ApiKeys) -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent("RustCTA/0.1.0")
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .expect("创建HTTP客户端失败");
+        let client = crate::core::http2_fix::shared_http_client();
 
         Self {
             name,

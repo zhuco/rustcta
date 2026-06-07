@@ -311,6 +311,16 @@ fn default_price_mode() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimePublisherPollingConfig {
+    #[serde(default = "default_true")]
+    pub poll_balances: bool,
+    #[serde(default = "default_true")]
+    pub poll_open_orders: bool,
+    #[serde(default = "default_true")]
+    pub poll_recent_fills: bool,
+    #[serde(default = "default_true")]
+    pub poll_symbol_rules: bool,
+    #[serde(default = "default_true")]
+    pub poll_fees: bool,
     #[serde(default = "default_balances_interval_ms")]
     pub balances_interval_ms: u64,
     #[serde(default = "default_open_orders_interval_ms")]
@@ -330,6 +340,11 @@ pub struct RuntimePublisherPollingConfig {
 impl Default for RuntimePublisherPollingConfig {
     fn default() -> Self {
         Self {
+            poll_balances: true,
+            poll_open_orders: true,
+            poll_recent_fills: true,
+            poll_symbol_rules: true,
+            poll_fees: true,
             balances_interval_ms: default_balances_interval_ms(),
             open_orders_interval_ms: default_open_orders_interval_ms(),
             recent_fills_interval_ms: default_recent_fills_interval_ms(),

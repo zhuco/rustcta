@@ -1,16 +1,25 @@
 # Rust build artifacts
 target/
 Cargo.lock
+!web-ui/dioxus/Cargo.lock
+.cargo/config.toml
+
+# Dioxus build artifacts
+web-ui/dioxus/dist/
 
 # Logs
 logs/
+run/
 *.log
 *.har
+help/*.log*
 data/
 !src/data/
 !src/data/**
 !src/backtest/data/
 !src/backtest/data/*.rs
+!crates/rustcta-backtest/src/data/
+!crates/rustcta-backtest/src/data/**
 
 # Environment files
 .env
@@ -32,6 +41,9 @@ Robot_files/
 # Backup files
 *.bak
 backup/
+
+# Local document exports
+docs/*.docx
 
 # Sensitive information
 *.key

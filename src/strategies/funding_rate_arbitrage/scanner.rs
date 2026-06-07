@@ -187,6 +187,14 @@ fn candidate_from_snapshot(
     config: &FundingRateArbitrageConfig,
     now: DateTime<Utc>,
 ) -> Option<FundingCandidate> {
+    if snapshot
+        .exchange_symbol
+        .as_ref()
+        .is_some_and(|symbol| !exchange_symbol_supported(&symbol.symbol))
+    {
+        return None;
+    }
+
     let snapshot_age_ms = now
         .signed_duration_since(snapshot.recv_ts)
         .num_milliseconds()
@@ -237,6 +245,9 @@ fn symbol_allowed(symbol: &CanonicalSymbol, config: &FundingRateArbitrageConfig)
     {
         return false;
     }
+    if !canonical_symbol_supported(symbol) {
+        return false;
+    }
 
     let allowlist = normalized_symbol_set(&config.universe.symbol_allowlist);
     let blocklist = normalized_symbol_set(&config.universe.symbol_blocklist);
@@ -246,6 +257,23 @@ fn symbol_allowed(symbol: &CanonicalSymbol, config: &FundingRateArbitrageConfig)
         return false;
     }
     allowlist.is_empty() || allowlist.contains(&normalized)
+}
+
+fn canonical_symbol_supported(symbol: &CanonicalSymbol) -> bool {
+    ascii_asset_token(symbol.base()) && ascii_asset_token(symbol.quote())
+}
+
+fn exchange_symbol_supported(symbol: &str) -> bool {
+    let value = symbol.trim();
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '/'))
+}
+
+fn ascii_asset_token(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && value.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
 fn candidate_orderable(
@@ -399,6 +427,32 @@ mod tests {
             &CanonicalSymbol::new("eth", "usdt"),
             &config
         ));
+    }
+
+    #[test]
+    fn symbol_filter_should_reject_chinese_canonical_symbol() {
+        let config = FundingRateArbitrageConfig::default();
+
+        assert!(!symbol_allowed(
+            &CanonicalSymbol::new("草根文化", "USDT"),
+            &config
+        ));
+    }
+
+    #[test]
+    fn candidate_should_reject_chinese_exchange_symbol() {
+        let config = FundingRateArbitrageConfig::default();
+        let now = Utc::now();
+        let snapshot = MarketFundingSnapshot::new(
+            ExchangeId::Gate,
+            CanonicalSymbol::new("CGWH", "USDT"),
+            Some(ExchangeSymbol::new(ExchangeId::Gate, "草根文化_USDT")),
+            -0.01,
+            Some(now + Duration::minutes(5)),
+            now,
+        );
+
+        assert!(candidate_from_snapshot(snapshot, &config, now).is_none());
     }
 
     #[test]

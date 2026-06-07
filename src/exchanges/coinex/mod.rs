@@ -3,23 +3,29 @@ use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use flate2::read::GzDecoder;
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::io::Read;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::core::error::ExchangeError as CoreExchangeError;
+use crate::core::ws_connect::connect_async;
 use crate::exchanges::client_order_id::{generate_client_order_id, validate_client_order_id};
 use crate::exchanges::spot_reservation::{BalanceReservation, BalanceReservationManager};
 use crate::exchanges::unified::{
-    validate_order_against_symbol_rule, AssetBalance, BalanceSnapshot, CancelOrderRequest,
-    CancelOrderResponse, ExchangeClient, ExchangeClientError, ExchangeClientResult, ExchangeError,
+    validate_order_against_symbol_rule, validate_order_lookup_id, validate_orderbook_depth,
+    AmendOrderRequest, AssetBalance, BalanceSnapshot, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, ExchangeClient,
+    ExchangeClientCapabilities, ExchangeClientError, ExchangeClientResult, ExchangeError,
     ExchangeErrorClass, ExchangeHealthStatus, FeeRate, FeeRateSource, MarketType, OrderBookLevel,
     OrderBookSnapshot, OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType,
-    PositionSide, SymbolRule, SymbolStatus, TimeInForce, TradeFill, UserStreamEvent,
+    PositionSide, QuoteMarketOrderRequest, SymbolRule, SymbolStatus, TimeInForce, TradeFill,
+    UserStreamEvent,
 };
 use crate::utils::SignatureHelper;
 
@@ -105,7 +111,7 @@ impl CoinExSpotClient {
     pub fn new(config: CoinExSpotConfig) -> Self {
         Self {
             config,
-            http: reqwest::Client::new(),
+            http: crate::core::http2_fix::shared_http_client(),
             reservations: BalanceReservationManager::default(),
         }
     }
@@ -237,6 +243,26 @@ impl CoinExSpotClient {
         }
     }
 
+    async fn reserve_for_quote_market_order(
+        &self,
+        request: &QuoteMarketOrderRequest,
+        rule: &SymbolRule,
+    ) -> ExchangeClientResult<Option<BalanceReservation>> {
+        if self.config.dry_run {
+            return Ok(None);
+        }
+        let snapshot = self.get_balances().await?;
+        self.reservations
+            .update_balances(self.exchange_name(), &snapshot.balances)?;
+        self.reservations
+            .reserve(
+                self.exchange_name(),
+                &rule.quote_asset,
+                request.quote_quantity,
+            )
+            .map(Some)
+    }
+
     fn dry_run_order_response(&self, request: &OrderRequest, symbol: &str) -> OrderResponse {
         OrderResponse {
             exchange: "coinex".to_string(),
@@ -256,6 +282,57 @@ impl CoinExSpotClient {
             updated_at: None,
         }
     }
+
+    fn dry_run_quote_market_order_response(
+        &self,
+        request: &QuoteMarketOrderRequest,
+        symbol: &str,
+    ) -> OrderResponse {
+        OrderResponse {
+            exchange: "coinex".to_string(),
+            market_type: MarketType::Spot,
+            symbol: symbol.to_string(),
+            order_id: format!("dry-coinex-{}", Utc::now().timestamp_millis()),
+            client_order_id: request.client_order_id.clone(),
+            side: request.side,
+            position_side: PositionSide::None,
+            order_type: OrderType::Market,
+            status: OrderStatus::New,
+            price: None,
+            quantity: request.quote_quantity,
+            filled_quantity: 0.0,
+            average_price: None,
+            created_at: Utc::now(),
+            updated_at: None,
+        }
+    }
+
+    fn dry_run_amend_order_response(
+        &self,
+        request: &AmendOrderRequest,
+        symbol: &str,
+    ) -> OrderResponse {
+        OrderResponse {
+            exchange: "coinex".to_string(),
+            market_type: MarketType::Spot,
+            symbol: symbol.to_string(),
+            order_id: request
+                .order_id()
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("dry-coinex-{}", Utc::now().timestamp_millis())),
+            client_order_id: request.client_order_id().map(str::to_string),
+            side: OrderSide::Buy,
+            position_side: PositionSide::None,
+            order_type: OrderType::Limit,
+            status: OrderStatus::New,
+            price: None,
+            quantity: request.new_quantity,
+            filled_quantity: 0.0,
+            average_price: None,
+            created_at: Utc::now(),
+            updated_at: Some(Utc::now()),
+        }
+    }
 }
 
 #[async_trait]
@@ -266,6 +343,14 @@ impl ExchangeClient for CoinExSpotClient {
 
     fn exchange_name(&self) -> &str {
         "coinex"
+    }
+
+    fn capabilities(&self) -> ExchangeClientCapabilities {
+        let mut capabilities = ExchangeClientCapabilities::spot(self.exchange_name());
+        capabilities.supports_cancel_all_orders = true;
+        capabilities.supports_quote_market_order = true;
+        capabilities.supports_amend_order = true;
+        capabilities
     }
 
     fn normalize_symbol(&self, symbol: &str) -> ExchangeClientResult<String> {
@@ -309,6 +394,7 @@ impl ExchangeClient for CoinExSpotClient {
         depth: u16,
     ) -> ExchangeClientResult<OrderBookSnapshot> {
         let symbol = self.normalize_symbol(symbol)?;
+        validate_orderbook_depth(depth)?;
         let mut params = HashMap::new();
         params.insert("market".to_string(), symbol.clone());
         params.insert("limit".to_string(), normalize_depth(depth).to_string());
@@ -338,17 +424,17 @@ impl ExchangeClient for CoinExSpotClient {
                 },
             )?;
         }
+        let body = coinex_order_body(&request, &symbol)?;
+        if self.config.dry_run {
+            return Ok(self.dry_run_order_response(&request, &symbol));
+        }
         let rule = self
             .get_symbol_rule(&symbol)
             .await?
             .unwrap_or_else(|| fallback_rule(&symbol));
         validate_order_against_symbol_rule(&request, &rule)?;
         let mut reservation = self.reserve_for_order(&request, &rule).await?;
-        if self.config.dry_run {
-            return Ok(self.dry_run_order_response(&request, &symbol));
-        }
 
-        let body = coinex_order_body(&request, &symbol)?;
         let response = self
             .send_signed_request(Method::POST, "/spot/order", HashMap::new(), Some(body))
             .await;
@@ -363,32 +449,124 @@ impl ExchangeClient for CoinExSpotClient {
         }
     }
 
+    async fn place_quote_market_order(
+        &self,
+        mut request: QuoteMarketOrderRequest,
+    ) -> ExchangeClientResult<OrderResponse> {
+        request.validate()?;
+        if request.side != OrderSide::Buy {
+            return Err(ExchangeClientError::Unsupported(
+                "CoinEx Spot quote-sized market orders are only supported for market buys"
+                    .to_string(),
+            ));
+        }
+        let symbol = self.normalize_symbol(&request.symbol)?;
+        request.symbol = symbol.clone();
+        ensure_quote_market_client_order_id(&mut request)?;
+        if self.config.dry_run {
+            return Ok(self.dry_run_quote_market_order_response(&request, &symbol));
+        }
+        let rule = self
+            .get_symbol_rule(&symbol)
+            .await?
+            .unwrap_or_else(|| fallback_rule(&symbol));
+        if request.quote_quantity < rule.min_notional {
+            return Err(ExchangeClientError::Validation {
+                field: "quote_quantity",
+                reason: format!(
+                    "quote quantity {} below min notional {} for {}",
+                    request.quote_quantity, rule.min_notional, symbol
+                ),
+            });
+        }
+        let mut reservation = self.reserve_for_quote_market_order(&request, &rule).await?;
+        let body = coinex_quote_market_order_body(&request, &symbol, &rule.quote_asset)?;
+        let response = self
+            .send_signed_request(Method::POST, "/spot/order", HashMap::new(), Some(body))
+            .await;
+        match response {
+            Ok(value) => parse_order_response(value.get("data").unwrap_or(&value), "coinex"),
+            Err(error) => {
+                if let Some(reservation) = reservation.as_mut() {
+                    let _ = self.reservations.release(reservation);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn amend_order(
+        &self,
+        mut request: AmendOrderRequest,
+    ) -> ExchangeClientResult<OrderResponse> {
+        request.validate()?;
+        if request.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "CoinExSpotClient only supports MarketType::Spot".to_string(),
+            });
+        }
+        validate_amend_client_order_id(&request)?;
+        if request.order_id().is_none() {
+            return Err(ExchangeClientError::Unsupported(
+                "CoinEx Spot modify-order requires exchange order_id; client_id lookup is not supported by the endpoint".to_string(),
+            ));
+        }
+        if request.new_client_order_id().is_some() {
+            return Err(ExchangeClientError::Unsupported(
+                "CoinEx Spot modify-order does not support assigning a new client_id".to_string(),
+            ));
+        }
+        let symbol = self.normalize_symbol(&request.symbol)?;
+        request.symbol = symbol.clone();
+        let body = coinex_amend_order_body(&request, &symbol)?;
+        if self.config.dry_run {
+            return Ok(self.dry_run_amend_order_response(&request, &symbol));
+        }
+        let value = self
+            .send_signed_request(
+                Method::POST,
+                "/spot/modify-order",
+                HashMap::new(),
+                Some(body),
+            )
+            .await?;
+        parse_order_response(value.get("data").unwrap_or(&value), "coinex")
+    }
+
     async fn cancel_order(
         &self,
         request: CancelOrderRequest,
     ) -> ExchangeClientResult<CancelOrderResponse> {
         request.validate()?;
+        if request.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "CoinExSpotClient only supports MarketType::Spot".to_string(),
+            });
+        }
+        validate_cancel_client_order_id(&request)?;
         let symbol = self.normalize_symbol(&request.symbol)?;
         if self.config.dry_run {
             return Ok(CancelOrderResponse {
                 exchange: "coinex".to_string(),
                 market_type: MarketType::Spot,
                 symbol,
-                order_id: request.order_id,
-                client_order_id: request.client_order_id,
+                order_id: request.order_id().map(str::to_string),
+                client_order_id: request.client_order_id().map(str::to_string),
                 status: OrderStatus::Cancelled,
                 cancelled_at: Utc::now(),
             });
         }
         let mut body = serde_json::Map::new();
         body.insert("market".to_string(), Value::String(symbol.clone()));
-        if let Some(order_id) = &request.order_id {
-            body.insert("order_id".to_string(), Value::String(order_id.clone()));
+        if let Some(order_id) = request.order_id() {
+            body.insert("order_id".to_string(), Value::String(order_id.to_string()));
         }
-        if let Some(client_order_id) = &request.client_order_id {
+        if let Some(client_order_id) = request.client_order_id() {
             body.insert(
                 "client_id".to_string(),
-                Value::String(client_order_id.clone()),
+                Value::String(client_order_id.to_string()),
             );
         }
         let value = self
@@ -404,8 +582,10 @@ impl ExchangeClient for CoinExSpotClient {
             exchange: "coinex".to_string(),
             market_type: MarketType::Spot,
             symbol,
-            order_id: value_as_string(data.get("order_id")).or(request.order_id),
-            client_order_id: value_as_string(data.get("client_id")).or(request.client_order_id),
+            order_id: value_as_string(data.get("order_id"))
+                .or_else(|| request.order_id().map(str::to_string)),
+            client_order_id: value_as_string(data.get("client_id"))
+                .or_else(|| request.client_order_id().map(str::to_string)),
             status: data
                 .get("status")
                 .and_then(Value::as_str)
@@ -415,7 +595,46 @@ impl ExchangeClient for CoinExSpotClient {
         })
     }
 
+    async fn cancel_all_orders(
+        &self,
+        request: CancelAllOrdersRequest,
+    ) -> ExchangeClientResult<CancelAllOrdersResponse> {
+        if request.market_type != MarketType::Spot {
+            return Err(ExchangeClientError::Validation {
+                field: "market_type",
+                reason: "CoinExSpotClient only supports MarketType::Spot".to_string(),
+            });
+        }
+        let symbol = self.normalize_symbol(request.validate_symbol_required()?)?;
+        if self.config.dry_run {
+            return Ok(CancelAllOrdersResponse {
+                exchange: "coinex".to_string(),
+                market_type: MarketType::Spot,
+                symbol: Some(symbol),
+                cancelled_orders: 0,
+                cancelled_at: Utc::now(),
+            });
+        }
+        let value = self
+            .send_signed_request(
+                Method::POST,
+                "/spot/cancel-all-order",
+                HashMap::new(),
+                Some(coinex_cancel_all_body(&symbol)),
+            )
+            .await?;
+        let data = value.get("data").unwrap_or(&value);
+        Ok(CancelAllOrdersResponse {
+            exchange: "coinex".to_string(),
+            market_type: MarketType::Spot,
+            symbol: Some(symbol),
+            cancelled_orders: coinex_cancel_all_cancelled_count(data),
+            cancelled_at: Utc::now(),
+        })
+    }
+
     async fn get_order(&self, symbol: &str, order_id: &str) -> ExchangeClientResult<OrderResponse> {
+        let order_id = validate_order_lookup_id(order_id)?;
         let mut params = HashMap::new();
         params.insert("market".to_string(), self.normalize_symbol(symbol)?);
         params.insert("order_id".to_string(), order_id.to_string());
@@ -531,9 +750,11 @@ impl CoinExSpotClient {
         let reconnect_delay = StdDuration::from_millis(self.config.reconnect_interval_ms);
         let subscribe = serde_json::json!({
             "method": "depth.subscribe",
-            "params": symbols.iter().map(|symbol| {
-                serde_json::json!([symbol, normalize_depth(self.config.orderbook_depth), "0", true])
-            }).collect::<Vec<_>>(),
+            "params": {
+                "market_list": symbols.iter().map(|symbol| {
+                    serde_json::json!([symbol, normalize_depth(self.config.orderbook_depth), "0", true])
+                }).collect::<Vec<_>>()
+            },
             "id": Utc::now().timestamp_millis()
         })
         .to_string();
@@ -567,6 +788,24 @@ impl CoinExSpotClient {
                                     Ok(None) => {}
                                     Err(error) => {
                                         log::warn!("CoinEx Spot WS parse error: {}", error)
+                                    }
+                                }
+                            }
+                            Ok(Some(Ok(Message::Binary(raw)))) => {
+                                match decode_coinex_binary_message(&raw).and_then(|text| {
+                                    if self.config.log_raw_messages {
+                                        log::debug!("CoinEx Spot WS raw={}", text);
+                                    }
+                                    parse_ws_orderbook_message(&text, self.config.stale_book_ms)
+                                }) {
+                                    Ok(Some(snapshot)) => {
+                                        if tx.send(snapshot).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        log::warn!("CoinEx Spot WS binary parse error: {}", error)
                                     }
                                 }
                             }
@@ -714,10 +953,16 @@ pub fn parse_symbol_rule(value: &Value) -> ExchangeClientResult<SymbolRule> {
         supported_order_types: vec![
             OrderType::Market,
             OrderType::Limit,
+            OrderType::PostOnly,
             OrderType::IOC,
             OrderType::FOK,
         ],
-        supported_time_in_force: vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK],
+        supported_time_in_force: vec![
+            TimeInForce::GTC,
+            TimeInForce::IOC,
+            TimeInForce::FOK,
+            TimeInForce::GTX,
+        ],
         status: if value
             .get("is_trading_available")
             .or_else(|| value.get("trading_enabled"))
@@ -768,19 +1013,22 @@ pub fn parse_orderbook_snapshot(
     stale_book_ms: u64,
 ) -> ExchangeClientResult<OrderBookSnapshot> {
     let data = value.get("data").unwrap_or(value);
-    let bids = data
+    let book = data.get("depth").unwrap_or(data);
+    let bids = book
         .get("bids")
         .and_then(Value::as_array)
         .ok_or_else(|| parser_error("orderbook missing bids", value))?;
-    let asks = data
+    let asks = book
         .get("asks")
         .and_then(Value::as_array)
         .ok_or_else(|| parser_error("orderbook missing asks", value))?;
     let bids = parse_levels(bids)?;
     let asks = parse_levels(asks)?;
-    let exchange_timestamp = data
+    let exchange_timestamp = book
         .get("updated_at")
+        .or_else(|| data.get("updated_at"))
         .or_else(|| data.get("timestamp"))
+        .or_else(|| value.get("timestamp"))
         .and_then(value_as_i64)
         .and_then(DateTime::<Utc>::from_timestamp_millis);
     let received_at = Utc::now();
@@ -799,7 +1047,9 @@ pub fn parse_orderbook_snapshot(
         latency_ms,
         sequence: data
             .get("last")
+            .or_else(|| book.get("last"))
             .or_else(|| data.get("sequence"))
+            .or_else(|| book.get("sequence"))
             .and_then(Value::as_u64),
         is_stale: latency_ms.is_some_and(|latency| latency > stale_book_ms as i64),
     })
@@ -817,13 +1067,79 @@ pub fn parse_ws_orderbook_message(
     {
         return Ok(None);
     }
-    let params = value.get("params").unwrap_or(&value);
-    let symbol = params
+    if value.get("code").and_then(Value::as_i64) == Some(0) && value.get("data").is_none() {
+        return Ok(None);
+    }
+    let payload = value
+        .get("data")
+        .or_else(|| value.get("params"))
+        .unwrap_or(&value);
+    let symbol = payload
         .get("market")
         .and_then(Value::as_str)
         .or_else(|| value.get("market").and_then(Value::as_str))
         .unwrap_or("UNKNOWN");
-    parse_orderbook_snapshot(params, symbol, stale_book_ms).map(Some)
+    parse_orderbook_snapshot(payload, symbol, stale_book_ms).map(Some)
+}
+
+pub fn parse_private_stream_message(text: &str) -> ExchangeClientResult<Vec<UserStreamEvent>> {
+    let value: Value = serde_json::from_str(text).map_err(CoreExchangeError::from)?;
+    if value
+        .get("method")
+        .and_then(Value::as_str)
+        .is_some_and(|method| method.contains("subscribe") || method.contains("login"))
+        || value.get("code").and_then(Value::as_i64) == Some(0) && value.get("data").is_none()
+    {
+        return Ok(Vec::new());
+    }
+    let channel = value
+        .get("method")
+        .or_else(|| value.get("channel"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let payload = value
+        .get("data")
+        .or_else(|| value.get("params"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let items = match payload {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![payload],
+        _ => Vec::new(),
+    };
+    let mut events = Vec::new();
+    for item in items {
+        if channel.contains("order") {
+            events.push(UserStreamEvent::Order(parse_order_response(
+                &item, "coinex",
+            )?));
+        } else if channel.contains("deal") || channel.contains("fill") || channel.contains("trade")
+        {
+            events.push(UserStreamEvent::Fill(parse_fill(&item)?));
+        } else if channel.contains("balance")
+            || channel.contains("account")
+            || channel.contains("asset")
+        {
+            events.push(UserStreamEvent::Balance(parse_balance_snapshot(
+                &Value::Array(vec![item]),
+            )?));
+        }
+    }
+    Ok(events)
+}
+
+pub fn decode_coinex_binary_message(raw: &[u8]) -> ExchangeClientResult<String> {
+    if let Ok(text) = std::str::from_utf8(raw) {
+        return Ok(text.to_string());
+    }
+
+    let mut decoder = GzDecoder::new(raw);
+    let mut text = String::new();
+    decoder
+        .read_to_string(&mut text)
+        .map_err(|error| CoreExchangeError::ParseError(error.to_string()))?;
+    Ok(text)
 }
 
 pub fn parse_order_response(value: &Value, exchange: &str) -> ExchangeClientResult<OrderResponse> {
@@ -930,25 +1246,150 @@ fn coinex_order_body(request: &OrderRequest, symbol: &str) -> ExchangeClientResu
     Ok(Value::Object(body))
 }
 
+fn coinex_quote_market_order_body(
+    request: &QuoteMarketOrderRequest,
+    symbol: &str,
+    quote_asset: &str,
+) -> ExchangeClientResult<Value> {
+    if request.side != OrderSide::Buy {
+        return Err(ExchangeClientError::Unsupported(
+            "CoinEx Spot quote-sized market orders are only supported for market buys".to_string(),
+        ));
+    }
+    let mut body = serde_json::Map::new();
+    body.insert("market".to_string(), Value::String(symbol.to_string()));
+    body.insert("market_type".to_string(), Value::String("SPOT".to_string()));
+    body.insert("side".to_string(), Value::String("buy".to_string()));
+    body.insert("type".to_string(), Value::String("market".to_string()));
+    body.insert(
+        "amount".to_string(),
+        Value::String(request.quote_quantity.to_string()),
+    );
+    body.insert("ccy".to_string(), Value::String(quote_asset.to_string()));
+    if let Some(client_order_id) = &request.client_order_id {
+        body.insert(
+            "client_id".to_string(),
+            Value::String(client_order_id.clone()),
+        );
+    }
+    Ok(Value::Object(body))
+}
+
+fn coinex_amend_order_body(
+    request: &AmendOrderRequest,
+    symbol: &str,
+) -> ExchangeClientResult<Value> {
+    let order_id = request.order_id().ok_or_else(|| {
+        ExchangeClientError::Unsupported(
+            "CoinEx Spot modify-order requires exchange order_id; client_id lookup is not supported by the endpoint".to_string(),
+        )
+    })?;
+    if request.new_client_order_id().is_some() {
+        return Err(ExchangeClientError::Unsupported(
+            "CoinEx Spot modify-order does not support assigning a new client_id".to_string(),
+        ));
+    }
+    let mut body = serde_json::Map::new();
+    body.insert("market".to_string(), Value::String(symbol.to_string()));
+    body.insert("market_type".to_string(), Value::String("SPOT".to_string()));
+    body.insert(
+        "order_id".to_string(),
+        coinex_numeric_order_id_value(order_id)?,
+    );
+    body.insert(
+        "amount".to_string(),
+        Value::String(request.new_quantity.to_string()),
+    );
+    Ok(Value::Object(body))
+}
+
+fn ensure_quote_market_client_order_id(
+    request: &mut QuoteMarketOrderRequest,
+) -> ExchangeClientResult<()> {
+    if request.client_order_id.is_none() {
+        request.client_order_id = Some(CoinExSpotClient::generate_client_order_id());
+    }
+    if let Some(client_order_id) = &request.client_order_id {
+        validate_client_order_id("coinex", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_amend_client_order_id(request: &AmendOrderRequest) -> ExchangeClientResult<()> {
+    for client_order_id in [request.client_order_id(), request.new_client_order_id()]
+        .into_iter()
+        .flatten()
+    {
+        validate_client_order_id("coinex", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_cancel_client_order_id(request: &CancelOrderRequest) -> ExchangeClientResult<()> {
+    if let Some(client_order_id) = request.client_order_id() {
+        validate_client_order_id("coinex", request.market_type, client_order_id).map_err(
+            |error| ExchangeClientError::Validation {
+                field: "client_order_id",
+                reason: error.to_string(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn coinex_numeric_order_id_value(order_id: &str) -> ExchangeClientResult<Value> {
+    let order_id = order_id.trim();
+    let numeric_id = order_id
+        .parse::<u64>()
+        .map_err(|_| ExchangeClientError::Validation {
+            field: "order_id",
+            reason: "CoinEx Spot modify-order requires numeric exchange order_id".to_string(),
+        })?;
+    Ok(Value::Number(numeric_id.into()))
+}
+
+fn coinex_cancel_all_body(symbol: &str) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("market".to_string(), Value::String(symbol.to_string()));
+    body.insert("market_type".to_string(), Value::String("SPOT".to_string()));
+    Value::Object(body)
+}
+
+fn coinex_cancel_all_cancelled_count(value: &Value) -> usize {
+    value
+        .as_array()
+        .map(Vec::len)
+        .or_else(|| value.get("items").and_then(Value::as_array).map(Vec::len))
+        .unwrap_or(0)
+}
+
 fn coinex_order_type(
     request: &OrderRequest,
 ) -> ExchangeClientResult<(&'static str, Option<&'static str>)> {
     match request.order_type {
         OrderType::Market => Ok(("market", None)),
         OrderType::Limit => Ok((
-            "limit",
-            request.time_in_force.and_then(|tif| match tif {
-                TimeInForce::GTC => None,
-                TimeInForce::IOC => Some("IOC"),
-                TimeInForce::FOK => Some("FOK"),
-                TimeInForce::GTX => None,
-            }),
+            match request.time_in_force {
+                Some(TimeInForce::IOC) => "ioc",
+                Some(TimeInForce::FOK) => "fok",
+                Some(TimeInForce::GTX) => "maker_only",
+                Some(TimeInForce::GTC) | None => "limit",
+            },
+            None,
         )),
-        OrderType::IOC => Ok(("limit", Some("IOC"))),
-        OrderType::FOK => Ok(("limit", Some("FOK"))),
-        OrderType::PostOnly => Err(ExchangeClientError::Unsupported(
-            "CoinEx Spot post-only is not enabled in this adapter".to_string(),
-        )),
+        OrderType::IOC => Ok(("ioc", None)),
+        OrderType::FOK => Ok(("fok", None)),
+        OrderType::PostOnly => Ok(("maker_only", None)),
     }
 }
 
@@ -1031,8 +1472,12 @@ fn parse_order_type(order_type: &str, tif: Option<&str>) -> OrderType {
         tif.map(str::to_ascii_uppercase),
     ) {
         ("market", _) => OrderType::Market,
+        ("maker_only", _) => OrderType::PostOnly,
+        ("ioc", _) => OrderType::IOC,
+        ("fok", _) => OrderType::FOK,
         ("limit", Some(tif)) if tif == "IOC" => OrderType::IOC,
         ("limit", Some(tif)) if tif == "FOK" => OrderType::FOK,
+        ("limit", Some(tif)) if tif == "MAKER_ONLY" || tif == "GTX" => OrderType::PostOnly,
         _ => OrderType::Limit,
     }
 }
@@ -1122,10 +1567,16 @@ fn fallback_rule(symbol: &str) -> SymbolRule {
         supported_order_types: vec![
             OrderType::Market,
             OrderType::Limit,
+            OrderType::PostOnly,
             OrderType::IOC,
             OrderType::FOK,
         ],
-        supported_time_in_force: vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK],
+        supported_time_in_force: vec![
+            TimeInForce::GTC,
+            TimeInForce::IOC,
+            TimeInForce::FOK,
+            TimeInForce::GTX,
+        ],
         status: SymbolStatus::Trading,
         raw_metadata: None,
     }
@@ -1176,7 +1627,116 @@ fn default_depth() -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
     use super::*;
+
+    #[derive(Debug, Clone)]
+    struct SeenCoinExRequest {
+        method: String,
+        path: String,
+        query: HashMap<String, String>,
+        headers: HashMap<String, String>,
+        body: Option<Value>,
+    }
+
+    async fn spawn_coinex_rest_server(
+        responses: Vec<Value>,
+    ) -> (String, Arc<Mutex<Vec<SeenCoinExRequest>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_requests = Arc::clone(&seen);
+        let responses = Arc::new(Mutex::new(responses.into_iter()));
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buffer = vec![0_u8; 8192];
+                let bytes_read = stream.read(&mut buffer).await.unwrap();
+                let request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+                let request = parse_seen_coinex_request(&request_text);
+                seen_requests.lock().unwrap().push(request);
+                let body = responses
+                    .lock()
+                    .unwrap()
+                    .next()
+                    .unwrap_or_else(|| serde_json::json!({"code": 0, "data": []}));
+                let body_text = body.to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body_text.len(),
+                    body_text
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+
+        (format!("http://{address}"), seen)
+    }
+
+    fn parse_seen_coinex_request(request_text: &str) -> SeenCoinExRequest {
+        let mut lines = request_text.lines();
+        let request_line = lines.next().unwrap_or_default();
+        let mut request_parts = request_line.split_whitespace();
+        let method = request_parts.next().unwrap_or_default().to_string();
+        let target = request_parts.next().unwrap_or_default();
+        let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+        let query = query_text
+            .split('&')
+            .filter(|pair| !pair.is_empty())
+            .filter_map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                Some((key.to_string(), value.to_string()))
+            })
+            .collect();
+        let headers = lines
+            .take_while(|line| !line.trim().is_empty())
+            .filter_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                Some((key.to_ascii_lowercase(), value.trim().to_string()))
+            })
+            .collect();
+        let body = request_text
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body.trim())
+            .filter(|body| !body.is_empty())
+            .and_then(|body| serde_json::from_str(body).ok());
+
+        SeenCoinExRequest {
+            method,
+            path: path.to_string(),
+            query,
+            headers,
+            body,
+        }
+    }
+
+    fn assert_signed_coinex_request(request: &SeenCoinExRequest, method: &str, path: &str) {
+        assert_eq!(request.method, method);
+        assert_eq!(request.path, path);
+        assert_eq!(
+            request.headers.get("x-coinex-key").map(String::as_str),
+            Some("key")
+        );
+        assert!(request
+            .headers
+            .get("x-coinex-sign")
+            .is_some_and(|value| !value.is_empty()));
+        assert!(request
+            .headers
+            .get("x-coinex-timestamp")
+            .is_some_and(|value| !value.is_empty()));
+        assert_eq!(
+            request.headers.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
+    }
 
     #[test]
     fn coinex_request_signing_should_match_known_hmac() {
@@ -1189,12 +1749,39 @@ mod tests {
     }
 
     #[test]
+    fn coinex_capabilities_should_advertise_cancel_all() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig::default());
+        let capabilities = client.capabilities();
+        assert_eq!(capabilities.market_type, MarketType::Spot);
+        assert!(capabilities.supports_cancel_all_orders);
+        assert!(capabilities.supports_quote_market_order);
+        assert!(capabilities.supports_amend_order);
+        assert!(!capabilities.supports_order_list);
+        assert!(capabilities.supports_open_orders);
+        assert!(capabilities.supports_fee_api);
+    }
+
+    #[test]
     fn coinex_symbol_rule_parsing_should_extract_precision_and_limits() {
         let value = serde_json::json!({"code":0,"data":[{"market":"CUDISUSDT","base_ccy":"CUDIS","quote_ccy":"USDT","price_precision":4,"amount_precision":2,"min_amount":"1","min_notional":"5","is_trading_available":true}]});
         let rules = parse_symbol_rules(&value).unwrap();
         assert_eq!(rules[0].internal_symbol, "CUDISUSDT");
         assert_eq!(rules[0].tick_size, 0.0001);
         assert_eq!(rules[0].step_size, 0.01);
+        assert!(rules[0]
+            .supported_order_types
+            .contains(&OrderType::PostOnly));
+        assert!(rules[0].supported_time_in_force.contains(&TimeInForce::GTX));
+    }
+
+    #[test]
+    fn coinex_fallback_rule_should_advertise_v2_order_type_parity() {
+        let rule = fallback_rule("CUDISUSDT");
+
+        assert!(rule.supported_order_types.contains(&OrderType::PostOnly));
+        assert!(rule.supported_order_types.contains(&OrderType::IOC));
+        assert!(rule.supported_order_types.contains(&OrderType::FOK));
+        assert!(rule.supported_time_in_force.contains(&TimeInForce::GTX));
     }
 
     #[test]
@@ -1215,6 +1802,419 @@ mod tests {
         assert_eq!(book.sequence, Some(7));
     }
 
+    #[tokio::test]
+    async fn coinex_orderbook_should_validate_depth_before_request() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig::default());
+
+        let err = client.get_orderbook("BTCUSDT", 0).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation { field: "depth", .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn coinex_get_order_should_validate_order_id_before_request() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig::default());
+
+        let err = client.get_order("BTCUSDT", "   ").await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn coinex_spot_client_should_route_common_private_rest_readbacks() {
+        let (base_url, seen) = spawn_coinex_rest_server(vec![
+            serde_json::json!({
+                "code": 0,
+                "data": [
+                    {"ccy": "BTC", "available": "0.5", "frozen": "0.1"},
+                    {"ccy": "USDT", "available": "123.45", "frozen": "1.55"}
+                ]
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": {
+                    "order_id": "1001",
+                    "market": "BTCUSDT",
+                    "client_id": "CID1001",
+                    "side": "buy",
+                    "type": "limit",
+                    "status": "part_deal",
+                    "price": "65000",
+                    "amount": "0.01",
+                    "deal_amount": "0.006",
+                    "avg_price": "65010",
+                    "created_at": 1743054548123i64,
+                    "updated_at": 1743054550000i64
+                }
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": [{
+                    "order_id": "1002",
+                    "market": "BTCUSDT",
+                    "client_id": "CID1002",
+                    "side": "sell",
+                    "type": "limit",
+                    "status": "open",
+                    "price": "70000",
+                    "amount": "0.02",
+                    "deal_amount": "0"
+                }]
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": {
+                    "market": "BTCUSDT",
+                    "maker_fee_rate": "0.001",
+                    "taker_fee_rate": "0.0015"
+                }
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": [{
+                    "deal_id": "9001",
+                    "order_id": "1001",
+                    "client_id": "CID1001",
+                    "market": "BTCUSDT",
+                    "side": "buy",
+                    "price": "65010",
+                    "amount": "0.006",
+                    "fee": "0.39",
+                    "fee_ccy": "USDT",
+                    "created_at": 1743054550000i64
+                }]
+            }),
+        ])
+        .await;
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url: format!("{base_url}/v2"),
+            dry_run: false,
+            ..CoinExSpotConfig::default()
+        });
+
+        let balances = client.get_balances().await.unwrap();
+        assert_eq!(balances.exchange, "coinex");
+        assert_eq!(balances.market_type, MarketType::Spot);
+        assert_eq!(balances.balances.len(), 2);
+        assert_eq!(balances.balances[0].asset, "BTC");
+        assert_eq!(balances.balances[0].available, 0.5);
+        assert_eq!(balances.balances[0].locked_by_exchange, 0.1);
+
+        let order = client.get_order("BTCUSDT", "1001").await.unwrap();
+        assert_eq!(order.exchange, "coinex");
+        assert_eq!(order.market_type, MarketType::Spot);
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.order_id, "1001");
+        assert_eq!(order.client_order_id.as_deref(), Some("CID1001"));
+        assert_eq!(order.side, OrderSide::Buy);
+        assert_eq!(order.status, OrderStatus::PartiallyFilled);
+        assert_eq!(order.price, Some(65_000.0));
+        assert_eq!(order.quantity, 0.01);
+        assert_eq!(order.filled_quantity, 0.006);
+        assert_eq!(order.average_price, Some(65_010.0));
+
+        let open_orders = client.get_open_orders(Some("BTCUSDT")).await.unwrap();
+        assert_eq!(open_orders.len(), 1);
+        assert_eq!(open_orders[0].symbol, "BTCUSDT");
+        assert_eq!(open_orders[0].order_id, "1002");
+        assert_eq!(open_orders[0].client_order_id.as_deref(), Some("CID1002"));
+        assert_eq!(open_orders[0].side, OrderSide::Sell);
+        assert_eq!(open_orders[0].status, OrderStatus::New);
+        assert_eq!(open_orders[0].price, Some(70_000.0));
+        assert_eq!(open_orders[0].quantity, 0.02);
+        assert_eq!(open_orders[0].filled_quantity, 0.0);
+        assert_eq!(open_orders[0].average_price, None);
+
+        let fee_rate = client.get_fee_rate("BTCUSDT").await.unwrap();
+        assert_eq!(fee_rate.maker, 0.001);
+        assert_eq!(fee_rate.taker, 0.0015);
+
+        let fills = client.get_recent_fills("BTCUSDT").await.unwrap();
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.exchange, "coinex");
+        assert_eq!(fill.market_type, MarketType::Spot);
+        assert_eq!(fill.symbol, "BTCUSDT");
+        assert_eq!(fill.trade_id.as_deref(), Some("9001"));
+        assert_eq!(fill.order_id.as_deref(), Some("1001"));
+        assert_eq!(fill.client_order_id.as_deref(), Some("CID1001"));
+        assert_eq!(fill.side, OrderSide::Buy);
+        assert_eq!(fill.price, 65_010.0);
+        assert_eq!(fill.quantity, 0.006);
+        assert_eq!(fill.fee_asset.as_deref(), Some("USDT"));
+        assert_eq!(fill.fee_amount, Some(0.39));
+
+        let requests = seen.lock().unwrap().clone();
+        assert_eq!(requests.len(), 5);
+        assert_signed_coinex_request(&requests[0], "GET", "/v2/assets/spot/balance");
+        assert!(requests[0].query.is_empty());
+
+        assert_signed_coinex_request(&requests[1], "GET", "/v2/spot/order-status");
+        assert_eq!(
+            requests[1].query.get("market").map(String::as_str),
+            Some("BTCUSDT")
+        );
+        assert_eq!(
+            requests[1].query.get("order_id").map(String::as_str),
+            Some("1001")
+        );
+
+        assert_signed_coinex_request(&requests[2], "GET", "/v2/spot/pending-order");
+        assert_eq!(
+            requests[2].query.get("market").map(String::as_str),
+            Some("BTCUSDT")
+        );
+
+        assert_signed_coinex_request(&requests[3], "GET", "/v2/spot/market");
+        assert_eq!(
+            requests[3].query.get("market").map(String::as_str),
+            Some("BTCUSDT")
+        );
+
+        assert_signed_coinex_request(&requests[4], "GET", "/v2/spot/finished-order");
+        assert_eq!(
+            requests[4].query.get("market").map(String::as_str),
+            Some("BTCUSDT")
+        );
+    }
+
+    #[tokio::test]
+    async fn coinex_spot_client_should_route_order_mutations() {
+        let symbol_rule = serde_json::json!({
+            "code": 0,
+            "data": [{
+                "market": "CUDISUSDT",
+                "base_ccy": "CUDIS",
+                "quote_ccy": "USDT",
+                "price_precision": 4,
+                "amount_precision": 2,
+                "min_amount": "1",
+                "min_notional": "5",
+                "is_trading_available": true
+            }]
+        });
+        let balances = serde_json::json!({
+            "code": 0,
+            "data": [
+                {"ccy": "CUDIS", "available": "100", "frozen": "0"},
+                {"ccy": "USDT", "available": "1000", "frozen": "0"}
+            ]
+        });
+        let fee = serde_json::json!({
+            "code": 0,
+            "data": {
+                "market": "CUDISUSDT",
+                "maker_fee_rate": "0.001",
+                "taker_fee_rate": "0.0015"
+            }
+        });
+        let (base_url, seen) = spawn_coinex_rest_server(vec![
+            symbol_rule.clone(),
+            balances.clone(),
+            fee.clone(),
+            serde_json::json!({
+                "code": 0,
+                "data": {
+                    "order_id": "2001",
+                    "market": "CUDISUSDT",
+                    "client_id": "CLIENTLIMIT1",
+                    "side": "buy",
+                    "type": "limit",
+                    "status": "open",
+                    "price": "1.23",
+                    "amount": "10",
+                    "deal_amount": "0",
+                    "created_at": 1743054548123i64
+                }
+            }),
+            symbol_rule.clone(),
+            balances,
+            serde_json::json!({
+                "code": 0,
+                "data": {
+                    "order_id": "2002",
+                    "market": "CUDISUSDT",
+                    "client_id": "CLIENTQUOTE1",
+                    "side": "buy",
+                    "type": "market",
+                    "status": "open",
+                    "amount": "25.5",
+                    "deal_amount": "0",
+                    "created_at": 1743054549000i64
+                }
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": {
+                    "order_id": "2001",
+                    "market": "CUDISUSDT",
+                    "client_id": "CLIENTLIMIT1",
+                    "status": "cancel"
+                }
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": [{"order_id": "2003"}, {"order_id": "2004"}]
+            }),
+            serde_json::json!({
+                "code": 0,
+                "data": {
+                    "order_id": "2005",
+                    "market": "CUDISUSDT",
+                    "side": "buy",
+                    "type": "limit",
+                    "status": "open",
+                    "amount": "5.5",
+                    "deal_amount": "0",
+                    "created_at": 1743054550000i64,
+                    "updated_at": 1743054551000i64
+                }
+            }),
+        ])
+        .await;
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url: format!("{base_url}/v2"),
+            dry_run: false,
+            ..CoinExSpotConfig::default()
+        });
+
+        let limit_order = client
+            .place_order(OrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                side: OrderSide::Buy,
+                position_side: PositionSide::None,
+                order_type: OrderType::Limit,
+                time_in_force: Some(TimeInForce::GTC),
+                quantity: 10.0,
+                price: Some(1.23),
+                client_order_id: Some("CLIENTLIMIT1".to_string()),
+                reduce_only: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(limit_order.order_id, "2001");
+        assert_eq!(limit_order.client_order_id.as_deref(), Some("CLIENTLIMIT1"));
+
+        let mut quote_request = QuoteMarketOrderRequest::spot_buy("CUDISUSDT", 25.5);
+        quote_request.client_order_id = Some("CLIENTQUOTE1".to_string());
+        let quote_order = client
+            .place_quote_market_order(quote_request)
+            .await
+            .unwrap();
+        assert_eq!(quote_order.order_id, "2002");
+        assert_eq!(quote_order.client_order_id.as_deref(), Some("CLIENTQUOTE1"));
+
+        let cancel = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("2001".to_string()),
+                client_order_id: Some("CLIENTLIMIT1".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(cancel.order_id.as_deref(), Some("2001"));
+        assert_eq!(cancel.client_order_id.as_deref(), Some("CLIENTLIMIT1"));
+        assert_eq!(cancel.status, OrderStatus::Cancelled);
+
+        let cancel_all = client
+            .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                MarketType::Spot,
+                "CUDISUSDT",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(cancel_all.symbol.as_deref(), Some("CUDISUSDT"));
+        assert_eq!(cancel_all.cancelled_orders, 2);
+
+        let amend = client
+            .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                MarketType::Spot,
+                "CUDISUSDT",
+                "2005",
+                5.5,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(amend.order_id, "2005");
+        assert_eq!(amend.quantity, 5.5);
+
+        let capabilities = client.capabilities();
+        assert!(capabilities.supports_quote_market_order);
+        assert!(capabilities.supports_cancel_all_orders);
+        assert!(capabilities.supports_amend_order);
+        assert!(!capabilities.supports_order_list);
+
+        let requests = seen.lock().unwrap().clone();
+        assert_eq!(requests.len(), 10);
+        assert_eq!(requests[0].method, "GET");
+        assert_eq!(requests[0].path, "/v2/spot/market");
+        assert!(requests[0].query.is_empty());
+
+        assert_signed_coinex_request(&requests[1], "GET", "/v2/assets/spot/balance");
+        assert_signed_coinex_request(&requests[2], "GET", "/v2/spot/market");
+        assert_eq!(
+            requests[2].query.get("market").map(String::as_str),
+            Some("CUDISUSDT")
+        );
+
+        assert_signed_coinex_request(&requests[3], "POST", "/v2/spot/order");
+        let body = requests[3].body.as_ref().unwrap();
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+        assert_eq!(body["side"], "buy");
+        assert_eq!(body["type"], "limit");
+        assert_eq!(body["amount"], "10");
+        assert_eq!(body["price"], "1.23");
+        assert_eq!(body["client_id"], "CLIENTLIMIT1");
+
+        assert_eq!(requests[4].method, "GET");
+        assert_eq!(requests[4].path, "/v2/spot/market");
+        assert_signed_coinex_request(&requests[5], "GET", "/v2/assets/spot/balance");
+
+        assert_signed_coinex_request(&requests[6], "POST", "/v2/spot/order");
+        let body = requests[6].body.as_ref().unwrap();
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+        assert_eq!(body["side"], "buy");
+        assert_eq!(body["type"], "market");
+        assert_eq!(body["amount"], "25.5");
+        assert_eq!(body["ccy"], "USDT");
+        assert_eq!(body["client_id"], "CLIENTQUOTE1");
+
+        assert_signed_coinex_request(&requests[7], "DELETE", "/v2/spot/order");
+        let body = requests[7].body.as_ref().unwrap();
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["order_id"], "2001");
+        assert_eq!(body["client_id"], "CLIENTLIMIT1");
+
+        assert_signed_coinex_request(&requests[8], "POST", "/v2/spot/cancel-all-order");
+        let body = requests[8].body.as_ref().unwrap();
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+
+        assert_signed_coinex_request(&requests[9], "POST", "/v2/spot/modify-order");
+        let body = requests[9].body.as_ref().unwrap();
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+        assert_eq!(body["order_id"], 2005);
+        assert_eq!(body["amount"], "5.5");
+    }
+
     #[test]
     fn coinex_order_status_mapping_should_cover_common_states() {
         assert_eq!(map_coinex_order_status("open"), OrderStatus::New);
@@ -1232,6 +2232,616 @@ mod tests {
         let fill = parse_fill(&value).unwrap();
         assert_eq!(fill.side, OrderSide::Buy);
         assert_eq!(fill.symbol, "PIPEUSDT");
+    }
+
+    #[test]
+    fn coinex_order_body_should_map_v2_order_types() {
+        let mut order = OrderRequest {
+            market_type: MarketType::Spot,
+            symbol: "CUDISUSDT".to_string(),
+            side: OrderSide::Buy,
+            position_side: PositionSide::None,
+            order_type: OrderType::PostOnly,
+            time_in_force: None,
+            quantity: 10.0,
+            price: Some(1.23),
+            client_order_id: Some("client-1".to_string()),
+            reduce_only: false,
+        };
+
+        let post_only = coinex_order_body(&order, "CUDISUSDT").unwrap();
+        assert_eq!(post_only["type"], "maker_only");
+        assert!(post_only.get("option").is_none());
+
+        order.order_type = OrderType::Limit;
+        order.time_in_force = Some(TimeInForce::GTX);
+        let gtx = coinex_order_body(&order, "CUDISUSDT").unwrap();
+        assert_eq!(gtx["type"], "maker_only");
+
+        order.time_in_force = Some(TimeInForce::IOC);
+        let ioc = coinex_order_body(&order, "CUDISUSDT").unwrap();
+        assert_eq!(ioc["type"], "ioc");
+
+        order.time_in_force = Some(TimeInForce::FOK);
+        let fok = coinex_order_body(&order, "CUDISUSDT").unwrap();
+        assert_eq!(fok["type"], "fok");
+
+        assert_eq!(parse_order_type("maker_only", None), OrderType::PostOnly);
+        assert_eq!(parse_order_type("ioc", None), OrderType::IOC);
+        assert_eq!(parse_order_type("fok", None), OrderType::FOK);
+    }
+
+    #[tokio::test]
+    async fn coinex_place_order_should_ack_in_dry_run_without_symbol_rule_readback() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: true,
+            ..CoinExSpotConfig::default()
+        });
+
+        let response = client
+            .place_order(OrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                side: OrderSide::Buy,
+                position_side: PositionSide::None,
+                order_type: OrderType::Limit,
+                time_in_force: Some(TimeInForce::GTC),
+                quantity: 10.0,
+                price: Some(1.23),
+                client_order_id: None,
+                reduce_only: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.exchange, "coinex");
+        assert_eq!(response.market_type, MarketType::Spot);
+        assert_eq!(response.symbol, "CUDISUSDT");
+        assert_eq!(response.side, OrderSide::Buy);
+        assert_eq!(response.order_type, OrderType::Limit);
+        assert_eq!(response.price, Some(1.23));
+        assert_eq!(response.quantity, 10.0);
+        assert_eq!(response.status, OrderStatus::New);
+        assert!(response.client_order_id.is_some());
+        assert!(response.order_id.starts_with("dry-coinex-"));
+    }
+
+    #[test]
+    fn coinex_quote_market_order_body_should_use_quote_currency_for_buy() {
+        let mut request = QuoteMarketOrderRequest::spot_buy("CUDISUSDT", 25.5);
+        request.client_order_id = Some("ldry-coinex-quote-1".to_string());
+
+        let body = coinex_quote_market_order_body(&request, "CUDISUSDT", "USDT").unwrap();
+
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+        assert_eq!(body["side"], "buy");
+        assert_eq!(body["type"], "market");
+        assert_eq!(body["amount"], "25.5");
+        assert_eq!(body["ccy"], "USDT");
+        assert_eq!(body["client_id"], "ldry-coinex-quote-1");
+
+        let sell = QuoteMarketOrderRequest {
+            side: OrderSide::Sell,
+            ..request
+        };
+        assert!(coinex_quote_market_order_body(&sell, "CUDISUSDT", "USDT").is_err());
+    }
+
+    #[tokio::test]
+    async fn coinex_quote_market_order_should_ack_in_dry_run() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: true,
+            ..CoinExSpotConfig::default()
+        });
+
+        let response = client
+            .place_quote_market_order(QuoteMarketOrderRequest::spot_buy("CUDISUSDT", 25.5))
+            .await
+            .unwrap();
+
+        assert_eq!(response.exchange, "coinex");
+        assert_eq!(response.symbol, "CUDISUSDT");
+        assert_eq!(response.side, OrderSide::Buy);
+        assert_eq!(response.order_type, OrderType::Market);
+        assert_eq!(response.quantity, 25.5);
+        assert!(response.client_order_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn coinex_cancel_order_should_validate_market_type_in_dry_run() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: true,
+            ..CoinExSpotConfig::default()
+        });
+
+        let response = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.exchange, "coinex");
+        assert_eq!(response.market_type, MarketType::Spot);
+        assert_eq!(response.symbol, "CUDISUSDT");
+        assert_eq!(response.order_id.as_deref(), Some("1001"));
+
+        let response = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("   ".to_string()),
+                client_order_id: Some("CANCELCLIENT1".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.order_id, None);
+        assert_eq!(response.client_order_id.as_deref(), Some("CANCELCLIENT1"));
+
+        let error = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Perpetual,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("only supports MarketType::Spot"));
+
+        let error = client
+            .cancel_order(CancelOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: None,
+                client_order_id: Some("bad/id".to_string()),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn coinex_amend_order_body_should_use_modify_order_contract() {
+        let request = AmendOrderRequest::reduce_quantity_by_order_id(
+            MarketType::Spot,
+            "CUDISUSDT",
+            "1001",
+            5.5,
+        );
+
+        let body = coinex_amend_order_body(&request, "CUDISUSDT").unwrap();
+
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+        assert_eq!(body["order_id"], 1001);
+        assert_eq!(body["amount"], "5.5");
+        assert!(body.get("price").is_none());
+        assert!(body.get("client_id").is_none());
+
+        let client_id_only = AmendOrderRequest {
+            order_id: None,
+            client_order_id: Some("ldry-coinex-client-1".to_string()),
+            ..request.clone()
+        };
+        assert!(coinex_amend_order_body(&client_id_only, "CUDISUSDT").is_err());
+
+        let blank_order_id = AmendOrderRequest {
+            order_id: Some("   ".to_string()),
+            client_order_id: Some("ldry-coinex-client-1".to_string()),
+            ..request.clone()
+        };
+        assert!(coinex_amend_order_body(&blank_order_id, "CUDISUSDT").is_err());
+
+        let non_numeric_order_id = AmendOrderRequest {
+            order_id: Some("not-numeric".to_string()),
+            ..request
+        };
+        assert!(matches!(
+            coinex_amend_order_body(&non_numeric_order_id, "CUDISUSDT"),
+            Err(ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn coinex_amend_order_should_ack_in_dry_run() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: true,
+            ..CoinExSpotConfig::default()
+        });
+
+        let response = client
+            .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                MarketType::Spot,
+                "CUDISUSDT",
+                "1001",
+                5.5,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.exchange, "coinex");
+        assert_eq!(response.symbol, "CUDISUSDT");
+        assert_eq!(response.order_id, "1001");
+        assert_eq!(response.quantity, 5.5);
+
+        let response = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: Some("   ".to_string()),
+                new_client_order_id: Some("   ".to_string()),
+                new_quantity: 5.0,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.order_id, "1001");
+        assert_eq!(response.client_order_id, None);
+
+        let unsupported_new_client_id = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+                new_client_order_id: Some("LDRYCOINEXNEW".to_string()),
+                new_quantity: 5.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            unsupported_new_client_id,
+            ExchangeClientError::Unsupported(_)
+        ));
+
+        let invalid_client_id_only = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: None,
+                client_order_id: Some("bad/id".to_string()),
+                new_client_order_id: None,
+                new_quantity: 5.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            invalid_client_id_only,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+
+        let invalid_new_client_id = client
+            .amend_order(AmendOrderRequest {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                order_id: Some("1001".to_string()),
+                client_order_id: None,
+                new_client_order_id: Some("bad/id".to_string()),
+                new_quantity: 5.0,
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            invalid_new_client_id,
+            ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn coinex_amend_order_should_validate_numeric_order_id_in_dry_run() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: true,
+            ..CoinExSpotConfig::default()
+        });
+
+        let error = client
+            .amend_order(AmendOrderRequest::reduce_quantity_by_order_id(
+                MarketType::Spot,
+                "CUDISUSDT",
+                "not-numeric",
+                5.5,
+            ))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExchangeClientError::Validation {
+                field: "order_id",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn coinex_cancel_all_body_should_use_v2_spot_contract() {
+        let body = coinex_cancel_all_body("CUDISUSDT");
+        assert_eq!(body["market"], "CUDISUSDT");
+        assert_eq!(body["market_type"], "SPOT");
+        assert_eq!(coinex_cancel_all_cancelled_count(&serde_json::json!({})), 0);
+        assert_eq!(
+            coinex_cancel_all_cancelled_count(
+                &serde_json::json!({"items":[{"order_id":"1"},{"order_id":"2"}]})
+            ),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn coinex_cancel_all_orders_should_ack_and_validate_market_type_in_dry_run() {
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: true,
+            ..CoinExSpotConfig::default()
+        });
+
+        let response = client
+            .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                MarketType::Spot,
+                "CUDISUSDT",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.exchange, "coinex");
+        assert_eq!(response.market_type, MarketType::Spot);
+        assert_eq!(response.symbol.as_deref(), Some("CUDISUSDT"));
+        assert_eq!(response.cancelled_orders, 0);
+
+        let error = client
+            .cancel_all_orders(CancelAllOrdersRequest::for_symbol(
+                MarketType::Perpetual,
+                "CUDISUSDT",
+            ))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("only supports MarketType::Spot"));
+    }
+
+    #[tokio::test]
+    async fn coinex_order_list_should_validate_before_unsupported() {
+        use crate::exchanges::unified::{
+            OrderListConditionalLeg, OrderListLegType, OrderListRequest,
+        };
+
+        fn oco_request() -> OrderListRequest {
+            OrderListRequest::Oco {
+                market_type: MarketType::Spot,
+                symbol: "CUDISUSDT".to_string(),
+                list_client_order_id: Some("COINEXOCOLIST1".to_string()),
+                side: OrderSide::Sell,
+                quantity: 5.0,
+                above: OrderListConditionalLeg {
+                    order_type: OrderListLegType::LimitMaker,
+                    price: Some(2.0),
+                    stop_price: None,
+                    time_in_force: None,
+                    client_order_id: Some("COINEXABOVE1".to_string()),
+                },
+                below: OrderListConditionalLeg {
+                    order_type: OrderListLegType::StopLossLimit,
+                    price: Some(0.8),
+                    stop_price: Some(0.9),
+                    time_in_force: Some(TimeInForce::GTC),
+                    client_order_id: Some("COINEXBELOW1".to_string()),
+                },
+            }
+        }
+
+        let client = CoinExSpotClient::new(CoinExSpotConfig {
+            dry_run: false,
+            base_url: "http://127.0.0.1:9".to_string(),
+            ..CoinExSpotConfig::default()
+        });
+        assert!(!client.capabilities().supports_order_list);
+
+        assert!(matches!(
+            client.place_order_list(oco_request()).await,
+            Err(ExchangeClientError::Unsupported(message))
+                if message.contains("order lists are not implemented")
+        ));
+
+        let mut invalid_market_type = oco_request();
+        if let OrderListRequest::Oco { market_type, .. } = &mut invalid_market_type {
+            *market_type = MarketType::Perpetual;
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_market_type).await,
+            Err(ExchangeClientError::Validation {
+                field: "market_type",
+                ..
+            })
+        ));
+
+        let mut empty_symbol = oco_request();
+        if let OrderListRequest::Oco { symbol, .. } = &mut empty_symbol {
+            symbol.clear();
+        }
+        assert!(matches!(
+            client.place_order_list(empty_symbol).await,
+            Err(ExchangeClientError::Validation {
+                field: "symbol",
+                ..
+            })
+        ));
+
+        let mut missing_limit_price = oco_request();
+        if let OrderListRequest::Oco { above, .. } = &mut missing_limit_price {
+            above.price = None;
+        }
+        assert!(matches!(
+            client.place_order_list(missing_limit_price).await,
+            Err(ExchangeClientError::Validation { field: "price", .. })
+        ));
+
+        let mut missing_stop_price = oco_request();
+        if let OrderListRequest::Oco { below, .. } = &mut missing_stop_price {
+            below.stop_price = None;
+        }
+        assert!(matches!(
+            client.place_order_list(missing_stop_price).await,
+            Err(ExchangeClientError::Validation {
+                field: "stop_price",
+                ..
+            })
+        ));
+
+        let mut invalid_list_client_id = oco_request();
+        if let OrderListRequest::Oco {
+            list_client_order_id,
+            ..
+        } = &mut invalid_list_client_id
+        {
+            *list_client_order_id = Some("bad/id".to_string());
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_list_client_id).await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+
+        let mut invalid_leg_client_id = oco_request();
+        if let OrderListRequest::Oco { below, .. } = &mut invalid_leg_client_id {
+            below.client_order_id = Some("bad/id".to_string());
+        }
+        assert!(matches!(
+            client.place_order_list(invalid_leg_client_id).await,
+            Err(ExchangeClientError::Validation {
+                field: "client_order_id",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn coinex_spot_private_stream_parser_should_parse_order_fill_balance_and_ignore_control() {
+        let order_events = parse_private_stream_message(
+            r#"{
+                "method":"order.update",
+                "data":[{
+                    "market":"BTCUSDT",
+                    "order_id":"order-1",
+                    "client_id":"client-1",
+                    "side":"buy",
+                    "type":"limit",
+                    "option":"maker_only",
+                    "status":"part_deal",
+                    "price":"65000",
+                    "amount":"0.02",
+                    "filled_amount":"0.01",
+                    "avg_price":"65010",
+                    "created_at":"1700000000000",
+                    "updated_at":"1700000000100"
+                }]
+            }"#,
+        )
+        .unwrap();
+        match &order_events[0] {
+            UserStreamEvent::Order(order) => {
+                assert_eq!(order.exchange, "coinex");
+                assert_eq!(order.market_type, MarketType::Spot);
+                assert_eq!(order.symbol, "BTCUSDT");
+                assert_eq!(order.order_id, "order-1");
+                assert_eq!(order.client_order_id.as_deref(), Some("client-1"));
+                assert_eq!(order.side, OrderSide::Buy);
+                assert_eq!(order.order_type, OrderType::PostOnly);
+                assert_eq!(order.status, OrderStatus::PartiallyFilled);
+                assert_eq!(order.price, Some(65_000.0));
+                assert_eq!(order.quantity, 0.02);
+                assert_eq!(order.filled_quantity, 0.01);
+                assert_eq!(order.average_price, Some(65_010.0));
+            }
+            other => panic!("expected CoinEx order event, got {other:?}"),
+        }
+
+        let fill_events = parse_private_stream_message(
+            r#"{
+                "channel":"deal.update",
+                "data":{
+                    "market":"BTCUSDT",
+                    "deal_id":"trade-1",
+                    "order_id":"order-1",
+                    "client_id":"client-1",
+                    "side":"sell",
+                    "price":"66000",
+                    "amount":"0.03",
+                    "fee_ccy":"BTC",
+                    "fee":"0.00003",
+                    "created_at":"1700000000200"
+                }
+            }"#,
+        )
+        .unwrap();
+        match &fill_events[0] {
+            UserStreamEvent::Fill(fill) => {
+                assert_eq!(fill.exchange, "coinex");
+                assert_eq!(fill.market_type, MarketType::Spot);
+                assert_eq!(fill.symbol, "BTCUSDT");
+                assert_eq!(fill.trade_id.as_deref(), Some("trade-1"));
+                assert_eq!(fill.order_id.as_deref(), Some("order-1"));
+                assert_eq!(fill.client_order_id.as_deref(), Some("client-1"));
+                assert_eq!(fill.side, OrderSide::Sell);
+                assert_eq!(fill.price, 66_000.0);
+                assert_eq!(fill.quantity, 0.03);
+                assert_eq!(fill.fee_asset.as_deref(), Some("BTC"));
+                assert_eq!(fill.fee_amount, Some(0.00003));
+            }
+            other => panic!("expected CoinEx fill event, got {other:?}"),
+        }
+
+        let balance_events = parse_private_stream_message(
+            r#"{
+                "method":"balance.update",
+                "data":[{
+                    "ccy":"USDT",
+                    "available":"80",
+                    "frozen":"20",
+                    "total":"100"
+                }]
+            }"#,
+        )
+        .unwrap();
+        match &balance_events[0] {
+            UserStreamEvent::Balance(snapshot) => {
+                assert_eq!(snapshot.exchange, "coinex");
+                assert_eq!(snapshot.market_type, MarketType::Spot);
+                assert_eq!(snapshot.balances.len(), 1);
+                let balance = &snapshot.balances[0];
+                assert_eq!(balance.asset, "USDT");
+                assert_eq!(balance.total, 100.0);
+                assert_eq!(balance.available, 80.0);
+                assert_eq!(balance.locked_by_exchange, 20.0);
+            }
+            other => panic!("expected CoinEx balance event, got {other:?}"),
+        }
+
+        assert!(
+            parse_private_stream_message(r#"{"method":"order.subscribe","code":0}"#)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(parse_private_stream_message(r#"{"code":0,"message":"OK"}"#)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
