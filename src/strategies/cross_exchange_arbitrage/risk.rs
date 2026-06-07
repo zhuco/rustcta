@@ -28,6 +28,8 @@ pub enum RejectReason {
     ExchangeCapacityExceeded,
     ExchangePositionLimitExceeded,
     UnpairedExchangePosition,
+    ReservationConflict,
+    RiskLocked,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -533,6 +535,9 @@ pub enum RiskTriggerKind {
     PrivateStreamDisconnected,
     ReconciliationDrift,
     OrphanExposure,
+    ReservationConflict,
+    OneSidedExposure,
+    UnknownOrderState,
     RouteDegraded,
     ManualPause,
     ManualCloseOnly,
@@ -607,10 +612,16 @@ pub struct StrategyRiskState {
     pub mode: RiskOperatingMode,
     pub paused_new_entries: bool,
     pub close_only: bool,
+    #[serde(default)]
+    pub reservation_close_only: bool,
     pub kill_switch: bool,
     #[serde(default = "default_true")]
     pub private_resync_blocks_new_entries: bool,
     pub private_stream_health: HashMap<ExchangeId, PrivateStreamHealth>,
+    #[serde(default)]
+    pub symbol_close_only: HashSet<CanonicalSymbol>,
+    #[serde(default)]
+    pub reservations: RiskReservationManager,
     pub triggers: Vec<RiskTriggerRecord>,
     pub updated_at: DateTime<Utc>,
 }
@@ -629,15 +640,259 @@ pub struct RiskDecision {
     pub trigger_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskReservationStatus {
+    Reserved,
+    Released,
+    RiskLocked,
+    Repaired,
+}
+
+impl RiskReservationStatus {
+    fn is_active(self) -> bool {
+        matches!(self, Self::Reserved | Self::RiskLocked)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RiskReservationRecord {
+    pub reservation_id: String,
+    pub bundle_id: String,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchanges: Vec<ExchangeId>,
+    pub notional_usdt: f64,
+    pub status: RiskReservationStatus,
+    pub reason: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl RiskReservationRecord {
+    fn same_bundle_key(
+        &self,
+        canonical_symbol: &CanonicalSymbol,
+        long_exchange: &ExchangeId,
+        short_exchange: &ExchangeId,
+    ) -> bool {
+        self.canonical_symbol == *canonical_symbol
+            && self.exchanges.len() == 2
+            && self.exchanges[0] == *long_exchange
+            && self.exchanges[1] == *short_exchange
+    }
+
+    fn active(&self) -> bool {
+        self.status.is_active()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum RiskReservationError {
+    #[error("invalid risk reservation notional {0}")]
+    InvalidNotional(f64),
+    #[error(
+        "risk reservation conflict for {canonical_symbol}: existing reservation {existing_reservation_id} bundle {existing_bundle_id} is {status:?}"
+    )]
+    Conflict {
+        canonical_symbol: CanonicalSymbol,
+        existing_reservation_id: String,
+        existing_bundle_id: String,
+        status: RiskReservationStatus,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RiskReservationManager {
+    records: HashMap<String, RiskReservationRecord>,
+}
+
+impl RiskReservationManager {
+    pub fn reserve_open(
+        &mut self,
+        bundle_id: impl Into<String>,
+        canonical_symbol: CanonicalSymbol,
+        long_exchange: ExchangeId,
+        short_exchange: ExchangeId,
+        notional_usdt: f64,
+        now: DateTime<Utc>,
+    ) -> Result<RiskReservationRecord, RiskReservationError> {
+        if notional_usdt <= 0.0 || !notional_usdt.is_finite() {
+            return Err(RiskReservationError::InvalidNotional(notional_usdt));
+        }
+
+        let bundle_id = bundle_id.into();
+        if let Some(existing) = self.active_conflict(
+            &bundle_id,
+            &canonical_symbol,
+            &long_exchange,
+            &short_exchange,
+        ) {
+            return Err(RiskReservationError::Conflict {
+                canonical_symbol,
+                existing_reservation_id: existing.reservation_id.clone(),
+                existing_bundle_id: existing.bundle_id.clone(),
+                status: existing.status,
+            });
+        }
+
+        let reservation_id = format!(
+            "reservation-{}-{}-{}-{}",
+            bundle_id,
+            canonical_symbol.to_string().replace('/', ""),
+            long_exchange.as_str(),
+            short_exchange.as_str()
+        );
+        let record = RiskReservationRecord {
+            reservation_id: reservation_id.clone(),
+            bundle_id,
+            canonical_symbol,
+            exchanges: vec![long_exchange, short_exchange],
+            notional_usdt,
+            status: RiskReservationStatus::Reserved,
+            reason: "open candidate reserved before dual-taker submit".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+        self.records.insert(reservation_id, record.clone());
+        self.prune_inactive();
+        Ok(record)
+    }
+
+    pub fn release_bundle(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        self.update_bundle_status(bundle_id, RiskReservationStatus::Released, reason, now)
+    }
+
+    pub fn risk_lock_bundle(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        self.update_bundle_status(bundle_id, RiskReservationStatus::RiskLocked, reason, now)
+    }
+
+    pub fn mark_bundle_repaired(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        self.update_bundle_status(bundle_id, RiskReservationStatus::Repaired, reason, now)
+    }
+
+    pub fn settle_bundle(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        let target_status = match self.by_bundle(bundle_id).map(|record| record.status) {
+            Some(RiskReservationStatus::RiskLocked) => RiskReservationStatus::Repaired,
+            Some(RiskReservationStatus::Reserved) => RiskReservationStatus::Released,
+            _ => return None,
+        };
+        self.update_bundle_status(bundle_id, target_status, reason, now)
+    }
+
+    pub fn has_active_symbol(&self, canonical_symbol: &CanonicalSymbol) -> bool {
+        self.records
+            .values()
+            .any(|record| record.active() && record.canonical_symbol == *canonical_symbol)
+    }
+
+    pub fn has_risk_locks(&self) -> bool {
+        self.records
+            .values()
+            .any(|record| record.status == RiskReservationStatus::RiskLocked)
+    }
+
+    pub fn has_active_risk_locks_for_symbol(&self, canonical_symbol: &CanonicalSymbol) -> bool {
+        self.records.values().any(|record| {
+            record.status == RiskReservationStatus::RiskLocked
+                && record.canonical_symbol == *canonical_symbol
+        })
+    }
+
+    pub fn by_bundle(&self, bundle_id: &str) -> Option<&RiskReservationRecord> {
+        self.records
+            .values()
+            .find(|record| record.bundle_id == bundle_id)
+    }
+
+    pub fn records(&self) -> impl Iterator<Item = &RiskReservationRecord> {
+        self.records.values()
+    }
+
+    fn active_conflict(
+        &self,
+        bundle_id: &str,
+        canonical_symbol: &CanonicalSymbol,
+        long_exchange: &ExchangeId,
+        short_exchange: &ExchangeId,
+    ) -> Option<&RiskReservationRecord> {
+        self.records.values().find(|record| {
+            record.active()
+                && (record.bundle_id == bundle_id
+                    || record.canonical_symbol == *canonical_symbol
+                    || record.same_bundle_key(canonical_symbol, long_exchange, short_exchange))
+        })
+    }
+
+    fn update_bundle_status(
+        &mut self,
+        bundle_id: &str,
+        status: RiskReservationStatus,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        let reservation_id = self
+            .records
+            .values()
+            .find(|record| record.bundle_id == bundle_id)
+            .map(|record| record.reservation_id.clone())?;
+        let record = self.records.get_mut(&reservation_id)?;
+        record.status = status;
+        record.reason = reason.into();
+        record.updated_at = now;
+        Some(record.clone())
+    }
+
+    fn prune_inactive(&mut self) {
+        const MAX_RECORDS: usize = 1024;
+        if self.records.len() <= MAX_RECORDS {
+            return;
+        }
+        let mut inactive = self
+            .records
+            .values()
+            .filter(|record| !record.active())
+            .map(|record| (record.updated_at, record.reservation_id.clone()))
+            .collect::<Vec<_>>();
+        inactive.sort_by_key(|(updated_at, _)| *updated_at);
+        let drain_count = self.records.len().saturating_sub(MAX_RECORDS);
+        for (_, reservation_id) in inactive.into_iter().take(drain_count) {
+            self.records.remove(&reservation_id);
+        }
+    }
+}
+
 impl StrategyRiskState {
     pub fn new(now: DateTime<Utc>) -> Self {
         Self {
             mode: RiskOperatingMode::Normal,
             paused_new_entries: false,
             close_only: false,
+            reservation_close_only: false,
             kill_switch: false,
             private_resync_blocks_new_entries: true,
             private_stream_health: HashMap::new(),
+            symbol_close_only: HashSet::new(),
+            reservations: RiskReservationManager::default(),
             triggers: Vec::new(),
             updated_at: now,
         }
@@ -786,6 +1041,114 @@ impl StrategyRiskState {
         self.recompute_mode(now);
     }
 
+    pub fn reserve_open(
+        &mut self,
+        bundle_id: impl Into<String>,
+        canonical_symbol: CanonicalSymbol,
+        long_exchange: ExchangeId,
+        short_exchange: ExchangeId,
+        notional_usdt: f64,
+        now: DateTime<Utc>,
+    ) -> Result<RiskReservationRecord, RiskReservationError> {
+        let bundle_id = bundle_id.into();
+        match self.reservations.reserve_open(
+            bundle_id,
+            canonical_symbol.clone(),
+            long_exchange,
+            short_exchange,
+            notional_usdt,
+            now,
+        ) {
+            Ok(record) => {
+                self.updated_at = now;
+                self.recompute_mode(now);
+                Ok(record)
+            }
+            Err(error) => {
+                self.raise_trigger(
+                    RiskTriggerKind::ReservationConflict,
+                    None,
+                    Some(canonical_symbol.to_string()),
+                    error.to_string(),
+                    now,
+                );
+                self.updated_at = now;
+                self.recompute_mode(now);
+                Err(error)
+            }
+        }
+    }
+
+    pub fn release_reservation(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        let record = self.reservations.release_bundle(bundle_id, reason, now)?;
+        self.refresh_reservation_controls(now);
+        Some(record)
+    }
+
+    pub fn risk_lock_reservation(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        let reason = reason.into();
+        let record = self
+            .reservations
+            .risk_lock_bundle(bundle_id, reason.clone(), now)?;
+        self.symbol_close_only
+            .insert(record.canonical_symbol.clone());
+        self.reservation_close_only = true;
+        self.raise_trigger(
+            RiskTriggerKind::OneSidedExposure,
+            None,
+            Some(record.canonical_symbol.to_string()),
+            reason,
+            now,
+        );
+        self.updated_at = now;
+        self.recompute_mode(now);
+        Some(record)
+    }
+
+    pub fn mark_reservation_repaired(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        let record = self
+            .reservations
+            .mark_bundle_repaired(bundle_id, reason, now)?;
+        self.refresh_reservation_controls(now);
+        Some(record)
+    }
+
+    pub fn settle_reservation(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> Option<RiskReservationRecord> {
+        let record = self.reservations.settle_bundle(bundle_id, reason, now)?;
+        self.refresh_reservation_controls(now);
+        Some(record)
+    }
+
+    pub fn allows_new_entry_for_symbol(&self, canonical_symbol: &CanonicalSymbol) -> bool {
+        self.decision().allow_new_entries
+            && !self.symbol_close_only.contains(canonical_symbol)
+            && !self.reservations.has_active_symbol(canonical_symbol)
+    }
+
+    pub fn has_active_risk_locks(&self) -> bool {
+        self.reservations.has_risk_locks()
+    }
+
     pub fn record_route_status(
         &mut self,
         exchange: ExchangeId,
@@ -861,15 +1224,20 @@ impl StrategyRiskState {
             .private_stream_health
             .values()
             .any(|health| health.needs_resync);
+        let has_risk_locks = self.reservations.has_risk_locks();
         RiskDecision {
             mode: self.mode.clone(),
             allow_new_entries: !self.paused_new_entries
                 && !self.close_only
+                && !self.reservation_close_only
                 && !self.kill_switch
+                && !has_risk_locks
                 && (!needs_private_resync || !self.private_resync_blocks_new_entries),
             allow_closes: !self.kill_switch,
             needs_reconciliation: self.close_only
+                || self.reservation_close_only
                 || self.paused_new_entries
+                || has_risk_locks
                 || (needs_private_resync && self.private_resync_blocks_new_entries),
             needs_private_resync,
             trigger_count: self.triggers.len(),
@@ -883,7 +1251,11 @@ impl StrategyRiskState {
             .any(|health| health.needs_resync);
         self.mode = if self.kill_switch {
             RiskOperatingMode::Halted
-        } else if self.close_only || (any_resync && self.private_resync_blocks_new_entries) {
+        } else if self.close_only
+            || self.reservation_close_only
+            || self.reservations.has_risk_locks()
+            || (any_resync && self.private_resync_blocks_new_entries)
+        {
             RiskOperatingMode::CloseOnly
         } else if self.paused_new_entries {
             RiskOperatingMode::Degraded
@@ -918,6 +1290,21 @@ impl StrategyRiskState {
             let drain = self.triggers.len() - 1000;
             self.triggers.drain(0..drain);
         }
+    }
+
+    fn refresh_reservation_controls(&mut self, now: DateTime<Utc>) {
+        self.reservation_close_only = self.reservations.has_risk_locks();
+        let symbols_to_clear = self
+            .symbol_close_only
+            .iter()
+            .filter(|symbol| !self.reservations.has_active_risk_locks_for_symbol(symbol))
+            .cloned()
+            .collect::<Vec<_>>();
+        for symbol in symbols_to_clear {
+            self.symbol_close_only.remove(&symbol);
+        }
+        self.updated_at = now;
+        self.recompute_mode(now);
     }
 }
 
@@ -1056,6 +1443,76 @@ mod tests {
         assert_eq!(decision.mode, RiskOperatingMode::Normal);
         assert!(!decision.needs_private_resync);
         assert!(decision.allow_new_entries);
+    }
+
+    #[test]
+    fn risk_reservation_should_block_concurrent_same_symbol_candidates() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut state = StrategyRiskState::new(now);
+
+        let first = state
+            .reserve_open(
+                "bundle-1",
+                symbol.clone(),
+                ExchangeId::Binance,
+                ExchangeId::Okx,
+                100.0,
+                now,
+            )
+            .unwrap();
+        let conflict = state
+            .reserve_open(
+                "bundle-2",
+                symbol.clone(),
+                ExchangeId::Bitget,
+                ExchangeId::Gate,
+                100.0,
+                now,
+            )
+            .unwrap_err();
+
+        assert_eq!(first.status, RiskReservationStatus::Reserved);
+        assert!(matches!(
+            conflict,
+            RiskReservationError::Conflict {
+                existing_bundle_id,
+                ..
+            } if existing_bundle_id == "bundle-1"
+        ));
+        assert!(!state.allows_new_entry_for_symbol(&symbol));
+        assert!(state.decision().allow_new_entries);
+    }
+
+    #[test]
+    fn risk_reservation_should_enter_close_only_until_repaired() {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut state = StrategyRiskState::new(now);
+        state
+            .reserve_open(
+                "bundle-1",
+                symbol.clone(),
+                ExchangeId::Binance,
+                ExchangeId::Okx,
+                100.0,
+                now,
+            )
+            .unwrap();
+
+        state.risk_lock_reservation("bundle-1", "one-sided reject", now);
+        assert_eq!(state.decision().mode, RiskOperatingMode::CloseOnly);
+        assert!(!state.allows_new_entry_for_symbol(&symbol));
+        assert!(state.has_active_risk_locks());
+
+        state.mark_reservation_repaired(
+            "bundle-1",
+            "repair filled",
+            now + chrono::Duration::milliseconds(1),
+        );
+        assert_eq!(state.decision().mode, RiskOperatingMode::Normal);
+        assert!(state.allows_new_entry_for_symbol(&symbol));
+        assert!(!state.has_active_risk_locks());
     }
 
     #[test]

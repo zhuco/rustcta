@@ -37,6 +37,8 @@ pub fn exchange_symbol(exchange: ExchangeId, canonical: &CanonicalSymbol) -> Exc
         ExchangeId::Htx | ExchangeId::KuCoin => {
             format!("{}-{}", canonical.base(), canonical.quote())
         }
+        ExchangeId::Kraken => format!("PF_{}{}", canonical.base(), canonical.quote()),
+        ExchangeId::Toobit => format!("{}-SWAP-{}", canonical.base(), canonical.quote()),
         ExchangeId::Other(_) => canonical.as_pair(),
     };
     ExchangeSymbol::new(exchange, symbol)

@@ -1,0 +1,72 @@
+{
+  "timezone": "UTC",
+  "serverTime": "1668407511495",
+  "symbols": [
+    {
+      "filters": [
+        {
+          "minPrice": "0.01",
+          "maxPrice": "100000.00000000",
+          "tickSize": "0.01",
+          "filterType": "PRICE_FILTER"
+        },
+        {
+          "minQty": "0.0001",
+          "maxQty": "4000",
+          "stepSize": "0.0001",
+          "filterType": "LOT_SIZE"
+        },
+        {
+          "minNotional": "10",
+          "filterType": "MIN_NOTIONAL"
+        }
+      ],
+      "symbol": "ETHUSDT",
+      "symbolName": "ETHUSDT",
+      "status": "TRADING",
+      "baseAsset": "ETH",
+      "quoteAsset": "USDT"
+    }
+  ],
+  "contracts": [
+    {
+      "filters": [
+        {
+          "minPrice": "0.01",
+          "maxPrice": "100000.00000000",
+          "tickSize": "0.01",
+          "filterType": "PRICE_FILTER"
+        },
+        {
+          "minQty": "0.0001",
+          "maxQty": "4000",
+          "stepSize": "0.0001",
+          "filterType": "LOT_SIZE"
+        },
+        {
+          "minNotional": "10",
+          "filterType": "MIN_NOTIONAL"
+        }
+      ],
+      "symbol": "BTC-SWAP-USDT",
+      "symbolName": "BTC-SWAP-USDTUSDT",
+      "status": "TRADING",
+      "baseAsset": "BTC-SWAP-USDT",
+      "quoteAsset": "USDT",
+      "inverse": false,
+      "marginToken": "USDT",
+      "contractMultiplier": "0.0001",
+      "underlying": "BTC"
+    },
+    {
+      "filters": [],
+      "symbol": "BTC-SWAP",
+      "status": "TRADING",
+      "baseAsset": "BTC-SWAP",
+      "quoteAsset": "USDT",
+      "inverse": true,
+      "marginToken": "BTC",
+      "underlying": "BTC"
+    }
+  ]
+}

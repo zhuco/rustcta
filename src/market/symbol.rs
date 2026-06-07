@@ -24,6 +24,12 @@ pub fn exchange_symbol_for(
         ExchangeId::Htx | ExchangeId::KuCoin => {
             format!("{}-{}", canonical_symbol.base(), canonical_symbol.quote())
         }
+        ExchangeId::Kraken => format!("PF_{}{}", canonical_symbol.base(), canonical_symbol.quote()),
+        ExchangeId::Toobit => format!(
+            "{}-SWAP-{}",
+            canonical_symbol.base(),
+            canonical_symbol.quote()
+        ),
         ExchangeId::Other(_) => canonical_symbol.as_pair(),
     };
     ExchangeSymbol::new(exchange.clone(), symbol)
@@ -38,6 +44,8 @@ pub fn canonical_from_exchange_symbol(
         ExchangeId::Okx => parse_delimited_symbol(&value, '-'),
         ExchangeId::Gate | ExchangeId::Mexc => parse_delimited_symbol(&value, '_'),
         ExchangeId::Htx | ExchangeId::KuCoin => parse_delimited_symbol(&value, '-'),
+        ExchangeId::Kraken => parse_kraken_usdt_symbol(&value),
+        ExchangeId::Toobit => parse_toobit_usdt_symbol(&value),
         ExchangeId::Binance
         | ExchangeId::Bitget
         | ExchangeId::Bybit
@@ -46,6 +54,19 @@ pub fn canonical_from_exchange_symbol(
             .or_else(|| parse_delimited_symbol(&value, '_'))
             .or_else(|| parse_delimited_symbol(&value, '-')),
     }
+}
+
+fn parse_toobit_usdt_symbol(value: &str) -> Option<CanonicalSymbol> {
+    let compact = value.replace("-SWAP-", "").replace("SWAP", "");
+    parse_compact_usdt_symbol(&compact).or_else(|| parse_delimited_symbol(value, '-'))
+}
+
+fn parse_kraken_usdt_symbol(value: &str) -> Option<CanonicalSymbol> {
+    let compact = value
+        .trim_start_matches("PF_")
+        .replace(['/', '-', '_'], "")
+        .replace("XBT", "BTC");
+    parse_compact_usdt_symbol(&compact)
 }
 
 pub fn parse_compact_usdt_symbol(value: &str) -> Option<CanonicalSymbol> {

@@ -188,6 +188,8 @@ pub fn policy_for(exchange: &str, market_type: MarketType) -> ClientOrderIdPolic
             policy("gateio", market_type, "GT", "SPT", 32)
         }
         ("kucoin", MarketType::Spot) => policy("kucoin", market_type, "KC", "SPT", 32),
+        ("toobit", MarketType::Spot) => policy("toobit", market_type, "TB", "SPT", 32),
+        ("toobit", MarketType::Perpetual) => policy("toobit", market_type, "TB", "PERP", 32),
         ("bybit", MarketType::Perpetual) => policy("bybit", market_type, "BB", "PERP", 32),
         ("htx" | "huobi", MarketType::Perpetual) => policy("htx", market_type, "HTX", "PERP", 32),
         _ => policy("other", market_type, "EX", market_prefix(market_type), 32),

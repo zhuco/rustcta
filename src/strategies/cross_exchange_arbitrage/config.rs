@@ -108,6 +108,16 @@ pub struct MarketConfig {
     pub depth_levels: u16,
     pub stale_quote_ms: i64,
     pub min_common_exchanges: usize,
+    #[serde(default = "default_public_book_speed")]
+    pub public_book_speed: String,
+    #[serde(default = "default_public_book_trigger_profile")]
+    pub public_book_trigger_profile: String,
+    #[serde(default = "default_public_book_validation_profile")]
+    pub public_book_validation_profile: String,
+    #[serde(default = "default_public_book_depth")]
+    pub public_book_depth: u16,
+    #[serde(default = "default_allow_top_of_book_only")]
+    pub allow_top_of_book_only: bool,
 }
 
 impl Default for MarketConfig {
@@ -118,8 +128,33 @@ impl Default for MarketConfig {
             depth_levels: 5,
             stale_quote_ms: 1_000,
             min_common_exchanges: 2,
+            public_book_speed: default_public_book_speed(),
+            public_book_trigger_profile: default_public_book_trigger_profile(),
+            public_book_validation_profile: default_public_book_validation_profile(),
+            public_book_depth: default_public_book_depth(),
+            allow_top_of_book_only: default_allow_top_of_book_only(),
         }
     }
+}
+
+fn default_public_book_speed() -> String {
+    "fastest".to_string()
+}
+
+fn default_public_book_trigger_profile() -> String {
+    "fastest_l1".to_string()
+}
+
+fn default_public_book_validation_profile() -> String {
+    "fastest_depth".to_string()
+}
+
+fn default_public_book_depth() -> u16 {
+    5
+}
+
+fn default_allow_top_of_book_only() -> bool {
+    true
 }
 
 impl CrossExchangeArbitrageConfig {
@@ -166,6 +201,16 @@ impl CrossExchangeArbitrageConfig {
                 });
             }
         }
+        if self.market.depth_levels == 0
+            || self.market.stale_quote_ms <= 0
+            || self.market.min_common_exchanges == 0
+            || self.market.public_book_depth == 0
+            || self.market.public_book_speed.trim().is_empty()
+            || self.market.public_book_trigger_profile.trim().is_empty()
+            || self.market.public_book_validation_profile.trim().is_empty()
+        {
+            return Err(ConfigValidationError::InvalidMarket);
+        }
         if self.trading_mode == TradingMode::Live {
             if !self.mode.allows_live_orders() {
                 return Err(ConfigValidationError::LiveTradingRequiresLiveRuntimeMode);
@@ -185,6 +230,19 @@ impl CrossExchangeArbitrageConfig {
             }
             if self.enabled_exchanges.is_empty() {
                 return Err(ConfigValidationError::MissingLiveEnabledExchanges);
+            }
+            if self.execution.taker_ioc_slippage_limit_pct <= 0.0
+                || !self.execution.taker_ioc_slippage_limit_pct.is_finite()
+            {
+                return Err(ConfigValidationError::LiveTradingRequiresSlippageLimit);
+            }
+        }
+        if self.mode.allows_live_orders() && !self.execution.dry_run {
+            if self.execution.open_execution_style != OpenExecutionStyle::DualTaker {
+                return Err(ConfigValidationError::LiveTradingRequiresDualTakerOpen);
+            }
+            if self.execution.close_execution_style != OpenExecutionStyle::DualTaker {
+                return Err(ConfigValidationError::LiveTradingRequiresDualTakerClose);
             }
             if self.execution.taker_ioc_slippage_limit_pct <= 0.0
                 || !self.execution.taker_ioc_slippage_limit_pct.is_finite()
@@ -301,6 +359,8 @@ pub enum ConfigValidationError {
     InvalidThreshold,
     #[error("sizing values must be positive and max >= min")]
     InvalidSizing,
+    #[error("market values must be positive and public book profiles must be configured")]
+    InvalidMarket,
     #[error("live trading requires a live runtime mode")]
     LiveTradingRequiresLiveRuntimeMode,
     #[error("live trading requires enable_live_trading=true")]
@@ -313,6 +373,10 @@ pub enum ConfigValidationError {
     MissingLiveEnabledExchanges,
     #[error("live trading requires positive taker IOC slippage limit")]
     LiveTradingRequiresSlippageLimit,
+    #[error("live trading requires execution.open_execution_style=dual_taker")]
+    LiveTradingRequiresDualTakerOpen,
+    #[error("live trading requires execution.close_execution_style=dual_taker")]
+    LiveTradingRequiresDualTakerClose,
     #[error("live mode requires an explicit symbol whitelist")]
     LiveModeRequiresWhitelist,
     #[error("missing fee config for exchange {0}")]
@@ -1323,6 +1387,26 @@ mod tests {
         }
     }
 
+    fn enable_live_order_test_config(config: &mut CrossExchangeArbitrageConfig) {
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.trading_mode = TradingMode::Live;
+        config.enable_live_trading = true;
+        config.max_live_notional_per_trade = Some(10.0);
+        config.enabled_symbols = vec![CanonicalSymbol::new("BTC", "USDT")];
+        config.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate];
+        enable_live_test_universe(config);
+        config.execution.dry_run = false;
+        config.execution.open_execution_style = OpenExecutionStyle::DualTaker;
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        config.execution.taker_ioc_slippage_limit_pct = 0.003;
+        for exchange in config.universe.enabled_exchanges.clone() {
+            let runtime = config.exchanges.entry(exchange).or_default();
+            runtime.private_rest_enabled = true;
+            runtime.private_ws_enabled = true;
+        }
+    }
+
     #[test]
     fn config_validate_should_accept_default_simulation() {
         CrossExchangeArbitrageConfig::default().validate().unwrap();
@@ -1429,18 +1513,7 @@ mod tests {
     #[test]
     fn config_validate_should_reject_live_trading_without_private_rest() {
         let mut config = CrossExchangeArbitrageConfig::default();
-        config.mode = RuntimeMode::LiveSmall;
-        config.strategy.mode = Some(RuntimeMode::LiveSmall);
-        enable_live_test_universe(&mut config);
-        enable_private_ws_for_live_universe(&mut config);
-        config.execution.dry_run = false;
-        for exchange in config.universe.enabled_exchanges.clone() {
-            config
-                .exchanges
-                .entry(exchange)
-                .or_default()
-                .private_rest_enabled = true;
-        }
+        enable_live_order_test_config(&mut config);
         config
             .exchanges
             .entry(ExchangeId::Bitget)
@@ -1453,6 +1526,50 @@ mod tests {
                 exchange: ExchangeId::Bitget
             }
         );
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_config_should_reject_live_non_dual_taker_open() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        enable_live_order_test_config(&mut config);
+        config.execution.open_execution_style = OpenExecutionStyle::MakerTaker;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LiveTradingRequiresDualTakerOpen
+        );
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_config_should_reject_live_non_dual_taker_close() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        enable_live_order_test_config(&mut config);
+        config.execution.close_execution_style = OpenExecutionStyle::MakerTaker;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LiveTradingRequiresDualTakerClose
+        );
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_config_should_reject_live_dual_taker_without_slippage_limit() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        enable_live_order_test_config(&mut config);
+        config.execution.taker_ioc_slippage_limit_pct = 0.0;
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            ConfigValidationError::LiveTradingRequiresSlippageLimit
+        );
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_config_should_accept_live_dual_taker_admission() {
+        let mut config = CrossExchangeArbitrageConfig::default();
+        enable_live_order_test_config(&mut config);
+
+        config.validate().unwrap();
     }
 
     #[test]
@@ -1520,6 +1637,22 @@ mod tests {
         assert_eq!(config.sizing.max_notional_usdt, 10.0);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.execution.dry_run);
+        assert_eq!(config.market.public_book_speed, "fastest");
+        assert_eq!(config.market.public_book_trigger_profile, "fastest_l1");
+        assert_eq!(
+            config.market.public_book_validation_profile,
+            "fastest_depth"
+        );
+        assert_eq!(config.market.public_book_depth, 5);
+        assert!(config.market.allow_top_of_book_only);
+        assert_eq!(
+            config.execution.open_execution_style,
+            OpenExecutionStyle::DualTaker
+        );
+        assert_eq!(
+            config.execution.close_execution_style,
+            OpenExecutionStyle::DualTaker
+        );
         assert_eq!(config.execution.max_concurrent_maker_orders, 1);
         for exchange in [ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate] {
             let runtime = config.exchanges.get(&exchange).unwrap();
@@ -1628,7 +1761,7 @@ mod tests {
     }
 
     #[test]
-    fn hcr_live_small_config_should_use_single_maker_debug_limits() {
+    fn hcr_live_small_config_should_use_dual_taker_debug_limits() {
         let raw = include_str!(
             "../../../config/cross_exchange_arbitrage_three_venues_hcr_10u_405symbols.live-small.yml"
         );
@@ -1640,11 +1773,16 @@ mod tests {
             .expect("hcr live-small config should validate");
         assert_eq!(
             config.execution.open_execution_style,
-            OpenExecutionStyle::MakerTaker
+            OpenExecutionStyle::DualTaker
         );
         assert_eq!(
             config.execution.close_execution_style,
             OpenExecutionStyle::DualTaker
+        );
+        assert_eq!(config.market.public_book_trigger_profile, "fastest_l1");
+        assert_eq!(
+            config.market.public_book_validation_profile,
+            "fastest_depth"
         );
         assert_eq!(config.thresholds.lock_profit_dual_taker_pct, 0.001);
         assert_eq!(config.execution.maker_order_ttl_ms, 20_000);

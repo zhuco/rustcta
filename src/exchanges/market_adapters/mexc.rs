@@ -5,7 +5,8 @@ use super::{
 use crate::market::{
     BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
     InstrumentStatus, MarketCapabilities as DataMarketCapabilities, MarketDataAdapter, MarketEvent,
-    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, WsSubscription,
+    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, PublicBookProfile, PublicBookProfileKind,
+    WsSubscription,
 };
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
@@ -109,14 +110,67 @@ impl MarketDataAdapter for MexcMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(PublicBookProfileKind::FastestL1, "sub.depth.full", 5, None)
+                .with_sequence(true)
+                .with_primary_fast_leg(false)
+                .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestDepth,
+                "sub.depth.full",
+                5,
+                None,
+            )
+            .with_sequence(true)
+            .with_primary_fast_leg(false)
+            .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "sub.depth.full",
+                20,
+                None,
+            )
+            .with_sequence(true)
+            .with_primary_fast_leg(false)
+            .with_max_symbols_per_connection(50),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
         if symbols.is_empty() {
             return Vec::new();
         }
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(
+                    PublicBookProfileKind::FastestDepth,
+                    "sub.depth.full",
+                    5,
+                    None,
+                )
+                .with_sequence(true)
+                .with_primary_fast_leg(false)
+            });
         vec![
-            WsSubscription::new(ExchangeId::Mexc, "sub.depth.full", symbols.to_vec())
-                .with_route(MEXC_PUBLIC_WS),
+            WsSubscription::new(ExchangeId::Mexc, selected.channel, symbols.to_vec())
+                .with_route(format!(
+                    "{MEXC_PUBLIC_WS}:{}:{}",
+                    selected.channel, selected.depth
+                ))
+                .with_profile(selected),
         ]
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -239,6 +293,11 @@ fn parse_orderbook(
         .or_else(|| payload.get("r"))
         .or_else(|| payload.get("id"))
         .and_then(parse_json_u64);
+    let source_route = value
+        .get("channel")
+        .and_then(Value::as_str)
+        .map(|channel| format!("mexc.{channel}"))
+        .unwrap_or_else(|| route.to_string());
 
     Ok(Some(OrderBook5::new(
         ExchangeId::Mexc,
@@ -249,7 +308,7 @@ fn parse_orderbook(
         exchange_ts,
         recv_ts,
         sequence,
-        Some(route.to_string()),
+        Some(source_route),
     )))
 }
 
@@ -404,8 +463,16 @@ mod tests {
 
         assert_eq!(subscriptions.len(), 1);
         assert_eq!(subscriptions[0].channel, "sub.depth.full");
-        assert_eq!(subscriptions[0].route.as_deref(), Some(MEXC_PUBLIC_WS));
+        assert_eq!(
+            subscriptions[0].route.as_deref(),
+            Some("wss://contract.mexc.com/edge:sub.depth.full:5")
+        );
         assert_eq!(subscriptions[0].symbols, symbols);
+        assert_eq!(
+            subscriptions[0].profile,
+            PublicBookProfileKind::FastestDepth
+        );
+        assert_eq!(subscriptions[0].depth, 5);
     }
 
     #[test]

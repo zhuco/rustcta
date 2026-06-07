@@ -255,7 +255,26 @@ impl CrossArbExecutionCoordinator {
             self.aggressive_ticks_for_opportunity(&runtime.state.config, &opportunity),
             &mut request,
         )?;
-        register_open_bundle(runtime, signal, &opportunity, &request)?;
+        if request.open_with_dual_taker {
+            runtime.state.risk_state.reserve_open(
+                request.bundle_id.clone(),
+                request.canonical_symbol.clone(),
+                opportunity.long_exchange.clone(),
+                opportunity.short_exchange.clone(),
+                opportunity.executable_notional_usdt,
+                signal.generated_at,
+            )?;
+        }
+        if let Err(error) = register_open_bundle(runtime, signal, &opportunity, &request) {
+            if request.open_with_dual_taker {
+                runtime.state.release_open_reservation(
+                    &request.bundle_id,
+                    format!("open preparation failed before submit: {error}"),
+                    signal.generated_at,
+                );
+            }
+            return Err(error);
+        }
         Ok(Some(request))
     }
 
@@ -271,8 +290,137 @@ impl CrossArbExecutionCoordinator {
         self.record_decision_with(&decision, |command| {
             tracked_order_for_request(command, &request)
         });
-        update_runtime_after_open_decision(runtime, &decision);
+        update_runtime_after_open_decision(runtime, &decision, &request);
+        self.verify_dual_taker_open_after_submit(runtime, &request, &decision)
+            .await;
         Ok(Some(decision))
+    }
+
+    async fn verify_dual_taker_open_after_submit(
+        &mut self,
+        runtime: &mut CrossArbRuntime,
+        request: &ExecutionRequest,
+        decision: &EngineDecision,
+    ) {
+        if !request.open_with_dual_taker
+            || !decision.plan.mode.allows_live_orders()
+            || runtime.state.config.execution.dry_run
+            || decision.submitted_orders.is_empty()
+        {
+            return;
+        }
+        if dual_taker_orders_all_filled(decision)
+            && !decision.requires_reconcile
+            && !decision.plan.requires_reconcile
+        {
+            return;
+        }
+
+        let now = Utc::now();
+        let mut readbacks = Vec::new();
+        let mut readback_errors = Vec::new();
+        for command in &decision.plan.commands {
+            let ack = decision
+                .submitted_orders
+                .iter()
+                .find(|ack| ack.client_order_id == command.client_order_id);
+            let query = OrderQuery {
+                exchange: command.exchange.clone(),
+                exchange_symbol: command.exchange_symbol.clone(),
+                client_order_id: Some(command.client_order_id.clone()),
+                exchange_order_id: ack.and_then(|ack| ack.exchange_order_id.clone()),
+            };
+            match self.engine.router().route_get_order(query).await {
+                Ok(order) => {
+                    runtime.state.ingest_order_state(order.clone());
+                    let event = PrivateEvent::order(order.clone(), now);
+                    self.apply_tracked_private_order_state_event(runtime, &event);
+                    readbacks.push(order);
+                }
+                Err(error) => {
+                    readback_errors.push(format!(
+                        "{} {} readback failed or timed out: {error}",
+                        command.exchange, command.client_order_id
+                    ));
+                }
+            }
+        }
+
+        if !readback_errors.is_empty() {
+            let reason = format!(
+                "dual-taker open requires reconciliation after REST readback failure: {}",
+                readback_errors.join("; ")
+            );
+            runtime
+                .state
+                .risk_lock_open_reservation(&request.bundle_id, reason.clone(), now);
+            runtime.state.refresh_open_hedge_repair_tasks(now);
+            runtime.state.risk_events.push(super::RiskEventReadModel {
+                event_id: format!(
+                    "dual-taker-readback-failed-{}-{}",
+                    request.bundle_id,
+                    now.timestamp_millis()
+                ),
+                canonical_symbol: Some(request.canonical_symbol.clone()),
+                exchange: None,
+                reason: super::RejectReason::RiskLocked,
+                message: reason,
+                created_at: now,
+            });
+            return;
+        }
+
+        if readbacks.len() != decision.plan.commands.len() {
+            return;
+        }
+
+        if order_states_all_terminal_without_fill(&readbacks) {
+            runtime.state.release_open_reservation(
+                &request.bundle_id,
+                "dual-taker REST readback confirmed no filled exposure",
+                now,
+            );
+            if should_drop_unfilled_open_bundle(runtime, &request.bundle_id) {
+                runtime.state.open_bundles.remove(&request.bundle_id);
+                runtime
+                    .state
+                    .position_manager
+                    .remove_bundle(&request.bundle_id);
+            }
+            return;
+        }
+
+        if order_states_all_filled(
+            &readbacks,
+            runtime.state.config.reconciliation.quantity_tolerance,
+        ) {
+            settle_open_reservation_if_bundle_balanced(
+                runtime,
+                &request.bundle_id,
+                now,
+                "dual-taker REST readback confirmed both legs filled",
+            );
+            return;
+        }
+
+        let reason = "dual-taker REST readback returned partial, rejected, or unknown open state"
+            .to_string();
+        runtime
+            .state
+            .risk_lock_open_reservation(&request.bundle_id, reason.clone(), now);
+        runtime.state.refresh_open_hedge_repair_tasks(now);
+        runtime.state.risk_events.push(super::RiskEventReadModel {
+            event_id: format!(
+                "dual-taker-readback-risk-{}-{}",
+                request.bundle_id,
+                now.timestamp_millis()
+            ),
+            canonical_symbol: Some(request.canonical_symbol.clone()),
+            exchange: None,
+            reason: super::RejectReason::RiskLocked,
+            message: reason,
+            created_at: now,
+        });
     }
 
     pub fn hedge_candidate_from_private_event(
@@ -1532,6 +1680,12 @@ pub fn maker_fill_from_tracked_private_event(
         });
         return None;
     }
+    settle_open_reservation_if_bundle_balanced(
+        runtime,
+        &tracked.bundle_id,
+        normalized_fill.filled_at,
+        "tracked private fill balanced open bundle",
+    );
 
     if !tracked.trigger_hedge_on_fill || !is_hedge_trigger_leg(tracked.leg) {
         runtime.persist_hedge_record(&tracked.bundle_id, normalized_fill.filled_at);
@@ -1652,7 +1806,29 @@ fn apply_tracked_private_fill_to_runtime(
         });
         return;
     }
+    settle_open_reservation_if_bundle_balanced(
+        runtime,
+        &tracked.bundle_id,
+        normalized_fill.filled_at,
+        "tracked private fill balanced open bundle",
+    );
     runtime.persist_hedge_record(&tracked.bundle_id, normalized_fill.filled_at);
+}
+
+fn settle_open_reservation_if_bundle_balanced(
+    runtime: &mut CrossArbRuntime,
+    bundle_id: &str,
+    now: DateTime<Utc>,
+    reason: &str,
+) {
+    let Some(position) = runtime.state.position_manager.bundle(bundle_id) else {
+        return;
+    };
+    if position.is_fully_open(runtime.state.config.reconciliation.quantity_tolerance) {
+        runtime
+            .state
+            .settle_open_reservation(bundle_id, reason.to_string(), now);
+    }
 }
 
 fn should_ignore_restored_bundle_fill_mismatch(
@@ -1967,7 +2143,14 @@ fn enforce_exchange_position_capacity(
     Ok(())
 }
 
-fn update_runtime_after_open_decision(runtime: &mut CrossArbRuntime, decision: &EngineDecision) {
+fn update_runtime_after_open_decision(
+    runtime: &mut CrossArbRuntime,
+    decision: &EngineDecision,
+    request: &ExecutionRequest,
+) {
+    if request.open_with_dual_taker {
+        update_dual_taker_reservation_after_open_decision(runtime, decision, request);
+    }
     if let Some(reason) = &decision.blocked_reason {
         runtime.state.risk_events.push(super::RiskEventReadModel {
             event_id: format!(
@@ -2007,6 +2190,157 @@ fn update_runtime_after_open_decision(runtime: &mut CrossArbRuntime, decision: &
             }
         }
     }
+}
+
+fn update_dual_taker_reservation_after_open_decision(
+    runtime: &mut CrossArbRuntime,
+    decision: &EngineDecision,
+    request: &ExecutionRequest,
+) {
+    let now = decision.plan.created_at;
+    if !decision.plan.mode.allows_live_orders() || runtime.state.config.execution.dry_run {
+        runtime.state.release_open_reservation(
+            &request.bundle_id,
+            "dual-taker dry-run or non-live request completed without live exposure",
+            now,
+        );
+        return;
+    }
+
+    if decision.submitted_orders.is_empty() {
+        runtime.state.release_open_reservation(
+            &request.bundle_id,
+            decision
+                .blocked_reason
+                .clone()
+                .unwrap_or_else(|| "dual-taker request blocked before live submit".to_string()),
+            now,
+        );
+        if should_drop_unfilled_open_bundle(runtime, &request.bundle_id) {
+            runtime.state.open_bundles.remove(&request.bundle_id);
+            runtime
+                .state
+                .position_manager
+                .remove_bundle(&request.bundle_id);
+        }
+        return;
+    }
+
+    let failure_reason = dual_taker_submission_risk_reason(decision);
+    if let Some(reason) = failure_reason {
+        runtime
+            .state
+            .risk_lock_open_reservation(&request.bundle_id, reason.clone(), now);
+        runtime.state.refresh_open_hedge_repair_tasks(now);
+        if let Some(bundle) = runtime.state.open_bundles.get_mut(&request.bundle_id) {
+            bundle.status = SimulatedBundleStatus::OrphanLeg;
+            bundle.updated_at = now;
+        }
+        let _ = runtime.state.position_manager.mark_bundle_status(
+            &request.bundle_id,
+            BundleStatus::ReconcileRequired,
+            now,
+        );
+        runtime.state.risk_events.push(super::RiskEventReadModel {
+            event_id: format!(
+                "dual-taker-risk-lock-{}-{}",
+                request.bundle_id,
+                now.timestamp_millis()
+            ),
+            canonical_symbol: Some(request.canonical_symbol.clone()),
+            exchange: None,
+            reason: super::RejectReason::RiskLocked,
+            message: reason,
+            created_at: now,
+        });
+        return;
+    }
+
+    if dual_taker_orders_all_filled(decision) {
+        runtime.state.release_open_reservation(
+            &request.bundle_id,
+            "dual-taker bundle both legs filled from submit acknowledgements",
+            now,
+        );
+    }
+}
+
+fn dual_taker_submission_risk_reason(decision: &EngineDecision) -> Option<String> {
+    if let Some(exposure) = decision.one_sided_exposures.first() {
+        return Some(format!(
+            "dual-taker one-sided exposure bundle={} leg={} exchange={} qty={} kind={:?}",
+            exposure.bundle_id,
+            exposure.leg_id,
+            exposure.exchange,
+            exposure.quantity,
+            exposure.kind
+        ));
+    }
+    if decision.requires_reconcile || decision.plan.requires_reconcile {
+        return Some(
+            decision
+                .blocked_reason
+                .clone()
+                .unwrap_or_else(|| "dual-taker bundle requires reconciliation".to_string()),
+        );
+    }
+    if decision.submitted_orders.iter().any(|ack| {
+        !ack.accepted
+            || matches!(
+                ack.status,
+                OrderCommandStatus::Rejected
+                    | OrderCommandStatus::Failed
+                    | OrderCommandStatus::Cancelled
+                    | OrderCommandStatus::PartiallyFilled
+            )
+    }) {
+        return Some(
+            "dual-taker bundle returned reject/cancel/partial acknowledgement".to_string(),
+        );
+    }
+    if decision.submitted_orders.len() != 2 {
+        return Some(format!(
+            "dual-taker bundle expected 2 acknowledgements but got {}",
+            decision.submitted_orders.len()
+        ));
+    }
+    if !dual_taker_orders_all_filled(decision) {
+        return Some(
+            "dual-taker acknowledgement did not confirm both legs filled; private stream/REST readback required"
+                .to_string(),
+        );
+    }
+    None
+}
+
+fn dual_taker_orders_all_filled(decision: &EngineDecision) -> bool {
+    decision.submitted_orders.len() == 2
+        && decision
+            .submitted_orders
+            .iter()
+            .all(|ack| ack.accepted && ack.status == OrderCommandStatus::Filled)
+}
+
+fn order_states_all_terminal_without_fill(orders: &[OrderState]) -> bool {
+    !orders.is_empty()
+        && orders.iter().all(|order| {
+            order.filled_quantity <= 0.0
+                && matches!(
+                    order.status,
+                    OrderCommandStatus::Rejected
+                        | OrderCommandStatus::Failed
+                        | OrderCommandStatus::Cancelled
+                )
+        })
+}
+
+fn order_states_all_filled(orders: &[OrderState], tolerance: f64) -> bool {
+    orders.len() == 2
+        && orders.iter().all(|order| {
+            matches!(order.status, OrderCommandStatus::Filled)
+                && order.filled_quantity + tolerance >= order.quantity
+                && order.quantity > tolerance
+        })
 }
 
 fn update_runtime_after_hedge_decision(runtime: &mut CrossArbRuntime, decision: &EngineDecision) {
@@ -3586,7 +3920,7 @@ mod tests {
         BookLevel, CanonicalSymbol, ContractType, ExchangeSymbol, InstrumentMeta, InstrumentStatus,
         OrderBook5, RuntimeMode,
     };
-    use crate::strategies::cross_exchange_arbitrage::HedgeRecordStatus;
+    use crate::strategies::cross_exchange_arbitrage::{HedgeRecordStatus, RiskReservationStatus};
     use async_trait::async_trait;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -3597,8 +3931,32 @@ mod tests {
         exchange: ExchangeId,
         place_calls: Arc<AtomicUsize>,
         cancel_calls: Arc<AtomicUsize>,
+        last_order: Arc<std::sync::Mutex<Option<OrderCommand>>>,
+        last_symbol: Arc<std::sync::Mutex<Option<CanonicalSymbol>>>,
         last_cancel_exchange_order_id: Option<Arc<std::sync::Mutex<Option<String>>>>,
         cancel_error: Option<String>,
+        place_status: OrderCommandStatus,
+        place_accepted: bool,
+        readback_status: Option<OrderCommandStatus>,
+        readback_error: Option<String>,
+    }
+
+    impl MockTradingAdapter {
+        fn new(exchange: ExchangeId, place_calls: Arc<AtomicUsize>) -> Self {
+            Self {
+                exchange,
+                place_calls,
+                cancel_calls: Arc::new(AtomicUsize::new(0)),
+                last_order: Arc::new(std::sync::Mutex::new(None)),
+                last_symbol: Arc::new(std::sync::Mutex::new(None)),
+                last_cancel_exchange_order_id: None,
+                cancel_error: None,
+                place_status: OrderCommandStatus::Accepted,
+                place_accepted: true,
+                readback_status: None,
+                readback_error: None,
+            }
+        }
     }
 
     #[async_trait]
@@ -3613,12 +3971,14 @@ mod tests {
 
         async fn place_order(&self, command: OrderCommand) -> anyhow::Result<OrderAck> {
             self.place_calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_symbol.lock().expect("lock") = Some(command.canonical_symbol.clone());
+            *self.last_order.lock().expect("lock") = Some(command.clone());
             Ok(OrderAck {
                 exchange: command.exchange,
                 client_order_id: command.client_order_id,
                 exchange_order_id: Some("exchange-order-1".to_string()),
-                accepted: true,
-                status: OrderCommandStatus::Accepted,
+                accepted: self.place_accepted,
+                status: self.place_status,
                 message: None,
                 acknowledged_at: Utc::now(),
             })
@@ -3644,8 +4004,68 @@ mod tests {
             })
         }
 
-        async fn get_order(&self, _query: OrderQuery) -> anyhow::Result<OrderState> {
-            anyhow::bail!("not used")
+        async fn get_order(&self, query: OrderQuery) -> anyhow::Result<OrderState> {
+            if let Some(error) = &self.readback_error {
+                anyhow::bail!("{}", error);
+            }
+            let Some(status) = self.readback_status else {
+                anyhow::bail!("not used")
+            };
+            let command = self.last_order.lock().expect("lock").clone();
+            let side = command
+                .as_ref()
+                .map(|command| command.side)
+                .unwrap_or(OrderSide::Buy);
+            let position_side = command
+                .as_ref()
+                .map(|command| command.position_side)
+                .unwrap_or(PositionSide::Long);
+            let quantity = command
+                .as_ref()
+                .map(|command| command.quantity)
+                .unwrap_or(1.0);
+            let price = command
+                .as_ref()
+                .and_then(|command| command.price)
+                .unwrap_or(100.0);
+            let canonical_symbol = self
+                .last_symbol
+                .lock()
+                .expect("lock")
+                .clone()
+                .unwrap_or_else(|| CanonicalSymbol::new("BTC", "USDT"));
+            let filled_quantity = match status {
+                OrderCommandStatus::Filled => quantity,
+                OrderCommandStatus::PartiallyFilled => quantity / 2.0,
+                _ => 0.0,
+            };
+            Ok(OrderState {
+                exchange: self.exchange.clone(),
+                canonical_symbol,
+                exchange_symbol: query.exchange_symbol,
+                client_order_id: query.client_order_id,
+                exchange_order_id: query.exchange_order_id,
+                side,
+                position_side,
+                order_type: command
+                    .as_ref()
+                    .map(|command| command.order_type)
+                    .unwrap_or(OrderType::Limit),
+                quantity,
+                price: Some(price),
+                filled_quantity,
+                average_fill_price: (filled_quantity > 0.0).then_some(price),
+                time_in_force: command
+                    .as_ref()
+                    .map(|command| command.time_in_force)
+                    .unwrap_or(TimeInForce::Ioc),
+                reduce_only: command
+                    .as_ref()
+                    .map(|command| command.reduce_only)
+                    .unwrap_or(false),
+                status,
+                updated_at: Utc::now(),
+            })
         }
 
         async fn get_open_orders(
@@ -3733,26 +4153,53 @@ mod tests {
         (runtime, signal)
     }
 
+    fn dual_taker_runtime_with_signal(now: DateTime<Utc>) -> (CrossArbRuntime, ArbSignal) {
+        let mut config = super::super::CrossExchangeArbitrageConfig::default();
+        config.mode = RuntimeMode::LiveSmall;
+        config.strategy.mode = Some(RuntimeMode::LiveSmall);
+        config.execution.dry_run = false;
+        config.execution.open_execution_style = OpenExecutionStyle::DualTaker;
+        config.execution.close_execution_style = OpenExecutionStyle::DualTaker;
+        config.thresholds.min_open_raw_spread = 0.005;
+        config.thresholds.min_open_maker_taker_net_edge = 0.005;
+        config.market.min_common_exchanges = 2;
+        config.fees.default_maker_fee_rate = 0.0;
+        config.fees.default_taker_fee_rate = 0.0;
+        for fee in config.fees.per_exchange.values_mut() {
+            fee.maker = 0.0;
+            fee.taker = 0.0;
+        }
+        let mut runtime = CrossArbRuntime::new(config, now);
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let signals = runtime.on_market_snapshots(
+            &symbol,
+            &[
+                snapshot(ExchangeId::Binance, 99.0, 100.0),
+                snapshot(ExchangeId::Okx, 102.0, 103.0),
+            ],
+            now,
+        );
+        let signal = signals
+            .into_iter()
+            .find(|signal| signal.action == ArbSignalAction::Open)
+            .expect("dual-taker open signal");
+        (runtime, signal)
+    }
+
     #[tokio::test]
     async fn cross_arb_execution_should_submit_open_maker_order_and_index_it() {
         let now = Utc::now();
         let (mut runtime, signal) = runtime_with_signal(now);
         let calls = Arc::new(AtomicUsize::new(0));
         let mut router = crate::execution::ExecutionRouter::new(false);
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Okx,
-            place_calls: calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Binance,
-            place_calls: calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Okx,
+            calls.clone(),
+        )));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Binance,
+            calls.clone(),
+        )));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
 
@@ -3786,20 +4233,14 @@ mod tests {
         runtime.state.risk_state.private_stream_health.clear();
         let calls = Arc::new(AtomicUsize::new(0));
         let mut router = crate::execution::ExecutionRouter::new(false);
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Okx,
-            place_calls: calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Binance,
-            place_calls: calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Okx,
+            calls.clone(),
+        )));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Binance,
+            calls.clone(),
+        )));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
 
@@ -3822,20 +4263,14 @@ mod tests {
         runtime.state.config.sizing.max_positions_per_exchange = 1;
         let calls = Arc::new(AtomicUsize::new(0));
         let mut router = crate::execution::ExecutionRouter::new(false);
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Okx,
-            place_calls: calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Binance,
-            place_calls: calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Okx,
+            calls.clone(),
+        )));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Binance,
+            calls.clone(),
+        )));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
 
@@ -3867,20 +4302,14 @@ mod tests {
         let (mut runtime, signal) = runtime_with_signal(now);
         let place_calls = Arc::new(AtomicUsize::new(0));
         let mut router = crate::execution::ExecutionRouter::new(false);
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Okx,
-            place_calls: place_calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Binance,
-            place_calls: place_calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Okx,
+            place_calls.clone(),
+        )));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Binance,
+            place_calls.clone(),
+        )));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
         let open = coordinator
@@ -3916,20 +4345,14 @@ mod tests {
         let (mut runtime, signal) = runtime_with_signal(now);
         let place_calls = Arc::new(AtomicUsize::new(0));
         let mut router = crate::execution::ExecutionRouter::new(false);
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Okx,
-            place_calls: place_calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Binance,
-            place_calls: place_calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Okx,
+            place_calls.clone(),
+        )));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Binance,
+            place_calls.clone(),
+        )));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
         let open = coordinator
@@ -3990,15 +4413,27 @@ mod tests {
             exchange: ExchangeId::Okx,
             place_calls: place_calls.clone(),
             cancel_calls: cancel_calls.clone(),
+            last_order: Arc::new(std::sync::Mutex::new(None)),
+            last_symbol: Arc::new(std::sync::Mutex::new(None)),
             last_cancel_exchange_order_id: Some(last_cancel_exchange_order_id.clone()),
             cancel_error: None,
+            place_status: OrderCommandStatus::Accepted,
+            place_accepted: true,
+            readback_status: None,
+            readback_error: None,
         }));
         router.register_adapter(Arc::new(MockTradingAdapter {
             exchange: ExchangeId::Binance,
             place_calls,
             cancel_calls: cancel_calls.clone(),
+            last_order: Arc::new(std::sync::Mutex::new(None)),
+            last_symbol: Arc::new(std::sync::Mutex::new(None)),
             last_cancel_exchange_order_id: Some(last_cancel_exchange_order_id.clone()),
             cancel_error: None,
+            place_status: OrderCommandStatus::Accepted,
+            place_accepted: true,
+            readback_status: None,
+            readback_error: None,
         }));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
@@ -4044,19 +4479,31 @@ mod tests {
             exchange: ExchangeId::Okx,
             place_calls: place_calls.clone(),
             cancel_calls: cancel_calls.clone(),
+            last_order: Arc::new(std::sync::Mutex::new(None)),
+            last_symbol: Arc::new(std::sync::Mutex::new(None)),
             last_cancel_exchange_order_id: None,
             cancel_error: Some(
                 "API错误: 400 - {\"code\":-2011,\"msg\":\"Unknown order sent.\"}".to_string(),
             ),
+            place_status: OrderCommandStatus::Accepted,
+            place_accepted: true,
+            readback_status: None,
+            readback_error: None,
         }));
         router.register_adapter(Arc::new(MockTradingAdapter {
             exchange: ExchangeId::Binance,
             place_calls,
             cancel_calls: cancel_calls.clone(),
+            last_order: Arc::new(std::sync::Mutex::new(None)),
+            last_symbol: Arc::new(std::sync::Mutex::new(None)),
             last_cancel_exchange_order_id: None,
             cancel_error: Some(
                 "API错误: 400 - {\"code\":-2011,\"msg\":\"Unknown order sent.\"}".to_string(),
             ),
+            place_status: OrderCommandStatus::Accepted,
+            place_accepted: true,
+            readback_status: None,
+            readback_error: None,
         }));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
@@ -4082,6 +4529,241 @@ mod tests {
             .risk_events
             .iter()
             .any(|event| event.message.contains("treated as terminal")));
+    }
+
+    #[tokio::test]
+    async fn cross_arb_dual_taker_should_release_reservation_when_both_legs_fill() {
+        let now = Utc::now();
+        let (mut runtime, signal) = dual_taker_runtime_with_signal(now);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut binance = MockTradingAdapter::new(ExchangeId::Binance, calls.clone());
+        binance.place_status = OrderCommandStatus::Filled;
+        let mut okx = MockTradingAdapter::new(ExchangeId::Okx, calls.clone());
+        okx.place_status = OrderCommandStatus::Filled;
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(binance));
+        router.register_adapter(Arc::new(okx));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let decision = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("dual-taker decision");
+
+        let bundle_id = decision.plan.commands[0].bundle_id.clone();
+        assert_eq!(decision.submitted_orders.len(), 2);
+        assert_eq!(
+            runtime
+                .state
+                .risk_state
+                .reservations
+                .by_bundle(&bundle_id)
+                .unwrap()
+                .status,
+            RiskReservationStatus::Released
+        );
+        assert!(runtime.state.risk_state.decision().allow_new_entries);
+    }
+
+    #[tokio::test]
+    async fn cross_arb_dual_taker_should_risk_lock_one_leg_reject() {
+        let now = Utc::now();
+        let (mut runtime, signal) = dual_taker_runtime_with_signal(now);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut binance = MockTradingAdapter::new(ExchangeId::Binance, calls.clone());
+        binance.place_status = OrderCommandStatus::Filled;
+        let mut okx = MockTradingAdapter::new(ExchangeId::Okx, calls.clone());
+        okx.place_status = OrderCommandStatus::Rejected;
+        okx.place_accepted = false;
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(binance));
+        router.register_adapter(Arc::new(okx));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let decision = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("dual-taker decision");
+
+        let bundle_id = decision.plan.commands[0].bundle_id.clone();
+        assert_eq!(
+            runtime
+                .state
+                .risk_state
+                .reservations
+                .by_bundle(&bundle_id)
+                .unwrap()
+                .status,
+            RiskReservationStatus::RiskLocked
+        );
+        assert!(!runtime.state.risk_state.decision().allow_new_entries);
+        assert_eq!(
+            runtime.state.open_bundles[&bundle_id].status,
+            SimulatedBundleStatus::OrphanLeg
+        );
+    }
+
+    #[tokio::test]
+    async fn cross_arb_dual_taker_should_risk_lock_partial_fill() {
+        let now = Utc::now();
+        let (mut runtime, signal) = dual_taker_runtime_with_signal(now);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut binance = MockTradingAdapter::new(ExchangeId::Binance, calls.clone());
+        binance.place_status = OrderCommandStatus::PartiallyFilled;
+        binance.readback_status = Some(OrderCommandStatus::PartiallyFilled);
+        let mut okx = MockTradingAdapter::new(ExchangeId::Okx, calls.clone());
+        okx.place_status = OrderCommandStatus::Filled;
+        okx.readback_status = Some(OrderCommandStatus::Filled);
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(binance));
+        router.register_adapter(Arc::new(okx));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let decision = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("dual-taker decision");
+
+        let bundle_id = decision.plan.commands[0].bundle_id.clone();
+        assert_eq!(
+            runtime
+                .state
+                .risk_state
+                .reservations
+                .by_bundle(&bundle_id)
+                .unwrap()
+                .status,
+            RiskReservationStatus::RiskLocked
+        );
+        assert!(runtime
+            .state
+            .hedge_repair_tasks
+            .values()
+            .any(|task| task.bundle_id == bundle_id && !task.reduce_only));
+    }
+
+    #[tokio::test]
+    async fn cross_arb_dual_taker_should_risk_lock_unknown_readback_timeout() {
+        let now = Utc::now();
+        let (mut runtime, signal) = dual_taker_runtime_with_signal(now);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut binance = MockTradingAdapter::new(ExchangeId::Binance, calls.clone());
+        binance.readback_error = Some("mock readback timeout".to_string());
+        let mut okx = MockTradingAdapter::new(ExchangeId::Okx, calls.clone());
+        okx.readback_error = Some("mock readback timeout".to_string());
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(binance));
+        router.register_adapter(Arc::new(okx));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let decision = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("dual-taker decision");
+
+        let bundle_id = decision.plan.commands[0].bundle_id.clone();
+        assert_eq!(
+            runtime
+                .state
+                .risk_state
+                .reservations
+                .by_bundle(&bundle_id)
+                .unwrap()
+                .status,
+            RiskReservationStatus::RiskLocked
+        );
+        assert!(runtime
+            .state
+            .risk_events
+            .iter()
+            .any(|event| event.message.contains("REST readback failure")));
+    }
+
+    #[tokio::test]
+    async fn cross_arb_dual_taker_should_release_risk_lock_after_repair_fills() {
+        let now = Utc::now();
+        let (mut runtime, signal) = dual_taker_runtime_with_signal(now);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut binance = MockTradingAdapter::new(ExchangeId::Binance, calls.clone());
+        binance.place_status = OrderCommandStatus::PartiallyFilled;
+        let mut okx = MockTradingAdapter::new(ExchangeId::Okx, calls.clone());
+        okx.place_status = OrderCommandStatus::Filled;
+        let mut router = crate::execution::ExecutionRouter::new(false);
+        router.register_adapter(Arc::new(binance));
+        router.register_adapter(Arc::new(okx));
+        let mut coordinator =
+            CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
+
+        let decision = coordinator
+            .execute_open_signal(&mut runtime, &signal)
+            .await
+            .unwrap()
+            .expect("dual-taker decision");
+        let bundle_id = decision.plan.commands[0].bundle_id.clone();
+        assert_eq!(
+            runtime
+                .state
+                .risk_state
+                .reservations
+                .by_bundle(&bundle_id)
+                .unwrap()
+                .status,
+            RiskReservationStatus::RiskLocked
+        );
+
+        let long_command = decision
+            .plan
+            .commands
+            .iter()
+            .find(|command| command.position_side == PositionSide::Long)
+            .unwrap();
+        let short_command = decision
+            .plan
+            .commands
+            .iter()
+            .find(|command| command.position_side == PositionSide::Short)
+            .unwrap();
+        runtime
+            .state
+            .apply_fill_event(
+                &bundle_id,
+                &fill_from_command_with_quantity(long_command, 100.0, long_command.quantity / 2.0),
+            )
+            .unwrap();
+        runtime
+            .state
+            .apply_fill_event(&bundle_id, &fill_from_command(short_command, 102.0))
+            .unwrap();
+        runtime
+            .state
+            .apply_fill_event(
+                &bundle_id,
+                &fill_from_command_with_quantity(long_command, 100.0, long_command.quantity / 2.0),
+            )
+            .unwrap();
+        runtime
+            .state
+            .settle_open_reservation(&bundle_id, "manual repair fills balanced", now);
+
+        assert_eq!(
+            runtime
+                .state
+                .risk_state
+                .reservations
+                .by_bundle(&bundle_id)
+                .unwrap()
+                .status,
+            RiskReservationStatus::Repaired
+        );
+        assert!(runtime.state.risk_state.decision().allow_new_entries);
     }
 
     #[tokio::test]
@@ -4120,20 +4802,14 @@ mod tests {
 
         let place_calls = Arc::new(AtomicUsize::new(0));
         let mut router = crate::execution::ExecutionRouter::new(false);
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Binance,
-            place_calls: place_calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
-        router.register_adapter(Arc::new(MockTradingAdapter {
-            exchange: ExchangeId::Okx,
-            place_calls: place_calls.clone(),
-            cancel_calls: Arc::new(AtomicUsize::new(0)),
-            last_cancel_exchange_order_id: None,
-            cancel_error: None,
-        }));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Binance,
+            place_calls.clone(),
+        )));
+        router.register_adapter(Arc::new(MockTradingAdapter::new(
+            ExchangeId::Okx,
+            place_calls.clone(),
+        )));
         let mut coordinator =
             CrossArbExecutionCoordinator::new(crate::execution::ExecutionEngine::new(router));
 
@@ -4661,6 +5337,18 @@ mod tests {
 
     fn fill_from_command(command: &OrderCommand, price: f64) -> FillEvent {
         fill_from_command_with_realized(command, price, None)
+    }
+
+    fn fill_from_command_with_quantity(
+        command: &OrderCommand,
+        price: f64,
+        quantity: f64,
+    ) -> FillEvent {
+        let mut fill = fill_from_command(command, price);
+        fill.trade_id = format!("trade-{}-{quantity}", command.client_order_id);
+        fill.quantity = quantity;
+        fill.quote_quantity = price * quantity;
+        fill
     }
 
     fn fill_from_command_with_realized(

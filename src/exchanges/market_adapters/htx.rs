@@ -5,7 +5,8 @@ use super::{
 use crate::market::{
     BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
     InstrumentStatus, MarketCapabilities as DataMarketCapabilities, MarketDataAdapter, MarketEvent,
-    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, WsSubscription,
+    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, PublicBookProfile, PublicBookProfileKind,
+    WsSubscription,
 };
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
@@ -102,17 +103,71 @@ impl MarketDataAdapter for HtxMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestL1,
+                "depth.size_20.high_freq",
+                20,
+                Some(30),
+            )
+            .with_sequence(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestDepth,
+                "depth.size_20.high_freq",
+                20,
+                Some(30),
+            )
+            .with_sequence(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "depth.step6",
+                20,
+                Some(100),
+            )
+            .with_sequence(true)
+            .with_max_symbols_per_connection(50),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(
+                    PublicBookProfileKind::FastestDepth,
+                    "depth.size_20.high_freq",
+                    20,
+                    Some(30),
+                )
+                .with_sequence(true)
+                .with_local_merge(true)
+            });
         symbols
             .iter()
             .map(|symbol| {
-                WsSubscription::new(ExchangeId::Htx, "market.depth.step0", vec![symbol.clone()])
+                WsSubscription::new(ExchangeId::Htx, selected.channel, vec![symbol.clone()])
                     .with_route(format!(
-                        "{HTX_PUBLIC_WS}:market.{}.depth.step0",
-                        symbol.symbol
+                        "{HTX_PUBLIC_WS}:market.{}.{}",
+                        symbol.symbol, selected.channel
                     ))
+                    .with_profile(selected)
             })
             .collect()
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -222,6 +277,11 @@ fn parse_orderbook(
         .or_else(|| payload.get("mrid"))
         .or_else(|| value.get("rep"))
         .and_then(parse_json_u64);
+    let source_route = value
+        .get("ch")
+        .and_then(Value::as_str)
+        .map(|channel| format!("htx.{channel}"))
+        .unwrap_or_else(|| route.to_string());
 
     Ok(Some(OrderBook5::new(
         ExchangeId::Htx,
@@ -232,7 +292,7 @@ fn parse_orderbook(
         exchange_ts,
         recv_ts,
         sequence,
-        Some(route.to_string()),
+        Some(source_route),
     )))
 }
 
@@ -375,11 +435,16 @@ mod tests {
         let subscriptions = HtxMarketAdapter.build_public_ws_subscriptions(&symbols);
 
         assert_eq!(subscriptions.len(), 1);
-        assert_eq!(subscriptions[0].channel, "market.depth.step0");
+        assert_eq!(subscriptions[0].channel, "depth.size_20.high_freq");
         assert_eq!(
             subscriptions[0].route.as_deref(),
-            Some("wss://api.hbdm.com/linear-swap-ws:market.BTC-USDT.depth.step0")
+            Some("wss://api.hbdm.com/linear-swap-ws:market.BTC-USDT.depth.size_20.high_freq")
         );
+        assert_eq!(
+            subscriptions[0].profile,
+            PublicBookProfileKind::FastestDepth
+        );
+        assert_eq!(subscriptions[0].depth, 20);
     }
 
     #[test]

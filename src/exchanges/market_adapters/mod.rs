@@ -4,7 +4,9 @@
 //! naming conventions, and small parsing helpers without opening sockets,
 //! calling REST APIs, or placing orders.
 
-use crate::market::{CanonicalSymbol, ExchangeId, ExchangeSymbol};
+use crate::market::{
+    CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketDataAdapter, PublicBookProfileKind,
+};
 use serde::{Deserialize, Serialize};
 
 pub mod binance;
@@ -12,16 +14,20 @@ pub mod bitget;
 pub mod bybit;
 pub mod gate;
 pub mod htx;
+pub mod kraken;
 pub mod mexc;
 pub mod okx;
+pub mod toobit;
 
 pub use binance::BinanceMarketAdapter;
 pub use bitget::BitgetMarketAdapter;
 pub use bybit::BybitMarketAdapter;
 pub use gate::GateMarketAdapter;
 pub use htx::HtxMarketAdapter;
+pub use kraken::KrakenMarketAdapter;
 pub use mexc::MexcMarketAdapter;
 pub use okx::OkxMarketAdapter;
+pub use toobit::ToobitMarketAdapter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketCapabilities {
@@ -197,6 +203,14 @@ mod tests {
             HtxMarketAdapter.to_exchange_symbol(&symbol).symbol,
             "BTC-USDT"
         );
+        assert_eq!(
+            KrakenMarketAdapter.to_exchange_symbol(&symbol).symbol,
+            "PF_XBTUSDT"
+        );
+        assert_eq!(
+            ToobitMarketAdapter.to_exchange_symbol(&symbol).symbol,
+            "BTC-SWAP-USDT"
+        );
     }
 
     #[test]
@@ -212,5 +226,149 @@ mod tests {
         assert!(BybitMarketAdapter.supports_sequence());
         assert!(MexcMarketAdapter.supports_orderbook5());
         assert!(HtxMarketAdapter.supports_funding());
+        assert!(KrakenMarketAdapter.supports_funding());
+        assert!(ToobitMarketAdapter.supports_mark_price());
+        assert!(!ToobitMarketAdapter.supports_sequence());
+        assert!(ToobitMarketAdapter.supports_funding());
+    }
+
+    #[test]
+    fn public_book_profile_should_select_expected_fastest_channels() {
+        let compact = vec![ExchangeSymbol::new(ExchangeId::Binance, "BTCUSDT")];
+        let dashed_swap = vec![ExchangeSymbol::new(ExchangeId::Okx, "BTC-USDT-SWAP")];
+        let underscored = vec![ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT")];
+        let htx = vec![ExchangeSymbol::new(ExchangeId::Htx, "BTC-USDT")];
+        let kraken = vec![ExchangeSymbol::new(ExchangeId::Kraken, "PF_XBTUSDT")];
+        let toobit = vec![ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT")];
+
+        assert_profile(
+            BinanceMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &compact,
+                PublicBookProfileKind::FastestL1,
+            ),
+            PublicBookProfileKind::FastestL1,
+            "bookTicker",
+            1,
+        );
+        assert_profile(
+            BinanceMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &compact,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "depth5@100ms",
+            5,
+        );
+        assert_profile(
+            ToobitMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &toobit,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "depth",
+            20,
+        );
+        assert_profile(
+            OkxMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &dashed_swap,
+                PublicBookProfileKind::FastestL1,
+            ),
+            PublicBookProfileKind::FastestL1,
+            "bbo-tbt",
+            1,
+        );
+        assert_profile(
+            OkxMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &dashed_swap,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "books5",
+            5,
+        );
+        assert_profile(
+            BitgetMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &compact,
+                PublicBookProfileKind::FastestL1,
+            ),
+            PublicBookProfileKind::FastestL1,
+            "books1",
+            1,
+        );
+        assert_profile(
+            BitgetMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &compact,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "books5",
+            5,
+        );
+        assert_profile(
+            BybitMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &compact,
+                PublicBookProfileKind::FastestL1,
+            ),
+            PublicBookProfileKind::FastestL1,
+            "orderbook.1",
+            1,
+        );
+        assert_profile(
+            BybitMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &compact,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "orderbook.50",
+            50,
+        );
+        assert_profile(
+            GateMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &underscored,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "futures.order_book_update",
+            20,
+        );
+        assert_profile(
+            MexcMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &underscored,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "sub.depth.full",
+            5,
+        );
+        assert_profile(
+            HtxMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &htx,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "depth.size_20.high_freq",
+            20,
+        );
+        assert_profile(
+            KrakenMarketAdapter.build_public_ws_subscriptions_for_profile(
+                &kraken,
+                PublicBookProfileKind::FastestDepth,
+            ),
+            PublicBookProfileKind::FastestDepth,
+            "book",
+            10,
+        );
+    }
+
+    fn assert_profile(
+        subscriptions: Vec<crate::market::WsSubscription>,
+        profile: PublicBookProfileKind,
+        channel: &str,
+        depth: u16,
+    ) {
+        assert!(!subscriptions.is_empty());
+        assert_eq!(subscriptions[0].profile, profile);
+        assert_eq!(subscriptions[0].channel, channel);
+        assert_eq!(subscriptions[0].depth, depth);
     }
 }

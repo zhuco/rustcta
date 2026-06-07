@@ -227,6 +227,66 @@ pub fn size_hedge_pair_for_notional(
     sized_pair_from_legs(maker, taker)
 }
 
+pub fn size_dual_taker_pair_for_notional(
+    long_instrument: &InstrumentMeta,
+    long_reference_price: f64,
+    long_limit_price: Option<f64>,
+    short_instrument: &InstrumentMeta,
+    short_reference_price: f64,
+    short_limit_price: Option<f64>,
+    target_notional_usdt: f64,
+) -> SizedHedgePair {
+    let long = size_exchange_leg_for_notional(
+        long_instrument,
+        target_notional_usdt,
+        long_reference_price,
+        long_limit_price,
+    );
+    let short = size_exchange_leg_for_notional(
+        short_instrument,
+        target_notional_usdt,
+        short_reference_price,
+        short_limit_price,
+    );
+    if long.valid && short.valid {
+        let common_base_quantity = long
+            .normalized_base_quantity
+            .min(short.normalized_base_quantity)
+            .max(min_valid_base_quantity(
+                long_instrument,
+                long_reference_price,
+                long_limit_price,
+            ))
+            .max(min_valid_base_quantity(
+                short_instrument,
+                short_reference_price,
+                short_limit_price,
+            ));
+        let common_base_quantity = common_base_quantity_on_both_quantity_grids(
+            long_instrument,
+            short_instrument,
+            common_base_quantity,
+        );
+        let long = size_exchange_leg_for_base_quantity(
+            long_instrument,
+            target_notional_usdt,
+            long_reference_price,
+            common_base_quantity,
+            long_limit_price,
+        );
+        let short = size_exchange_leg_for_base_quantity(
+            short_instrument,
+            target_notional_usdt,
+            short_reference_price,
+            common_base_quantity,
+            short_limit_price,
+        );
+        return sized_pair_from_legs(long, short);
+    }
+
+    sized_pair_from_legs(long, short)
+}
+
 fn sized_pair_from_legs(maker: ExchangeLegSize, taker: ExchangeLegSize) -> SizedHedgePair {
     let mut reject_reasons = Vec::new();
 

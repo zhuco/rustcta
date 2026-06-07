@@ -63,6 +63,17 @@ impl MarketStateCache {
         book
     }
 
+    pub fn upsert_orderbook_and_snapshots_at(
+        &mut self,
+        book: OrderBook5,
+        checked_at: DateTime<Utc>,
+    ) -> (OrderBook5, Vec<MarketSymbolSnapshot>) {
+        let canonical_symbol = book.canonical_symbol.clone();
+        let updated = self.upsert_orderbook_at(book, checked_at);
+        let snapshots = self.snapshots_for_symbol(&canonical_symbol);
+        (updated, snapshots)
+    }
+
     pub fn orderbook(
         &self,
         exchange: &ExchangeId,
@@ -270,5 +281,32 @@ mod tests {
         assert!(snapshots[0].funding.is_some());
         assert!(snapshots[0].instrument.is_some());
         assert!(snapshots[0].usable_for_entries);
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_event_cache_should_return_only_updated_symbol_snapshots() {
+        let now = Utc::now();
+        let mut cache = MarketStateCache::new(500);
+        let btc = CanonicalSymbol::new("btc", "usdt");
+        let eth = CanonicalSymbol::new("eth", "usdt");
+
+        cache.upsert_orderbook_at(book(Some(1), now), now);
+        let mut eth_book = book(Some(1), now);
+        eth_book.canonical_symbol = eth.clone();
+        eth_book.exchange_symbol = ExchangeSymbol::new(ExchangeId::Binance, "ETHUSDT");
+        cache.upsert_orderbook_at(eth_book, now);
+
+        let mut btc_update = book(Some(2), now);
+        btc_update.canonical_symbol = btc.clone();
+        let (_updated, snapshots) = cache.upsert_orderbook_and_snapshots_at(btc_update, now);
+
+        assert_eq!(snapshots.len(), 1);
+        assert!(snapshots
+            .iter()
+            .all(|snapshot| snapshot.canonical_symbol == btc));
+        assert!(cache
+            .snapshots_for_symbol(&eth)
+            .iter()
+            .all(|snapshot| { snapshot.canonical_symbol == eth }));
     }
 }

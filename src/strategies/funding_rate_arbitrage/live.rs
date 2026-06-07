@@ -1230,6 +1230,8 @@ fn compact_exchange_code(exchange: &ExchangeId) -> &str {
         ExchangeId::CoinEx => "cx",
         ExchangeId::KuCoin => "kc",
         ExchangeId::Htx => "hx",
+        ExchangeId::Kraken => "kr",
+        ExchangeId::Toobit => "tb",
         ExchangeId::Other(_) => "ot",
     }
 }

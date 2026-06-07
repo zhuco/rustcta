@@ -15,7 +15,8 @@ use crate::exchanges::config::{
 use crate::exchanges::gateway::{ExchangeGateway, ExchangeGatewayCapabilities, GatewayKind};
 use crate::exchanges::market_adapters::{
     BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
-    HtxMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
+    HtxMarketAdapter, KrakenMarketAdapter, MexcMarketAdapter, OkxMarketAdapter,
+    ToobitMarketAdapter,
 };
 use crate::exchanges::private_perp::{
     private_perp_trading_capabilities, PrivatePerpExchange, PrivateRestAuth, PrivateWsAuth,
@@ -60,6 +61,14 @@ pub fn gateway_for_exchange(exchange: &ExchangeId) -> Option<Box<dyn ExchangeGat
         ExchangeId::Htx => Some(Box::new(PrivatePerpExchangeGateway::new(
             PrivatePerpExchange::Htx,
             private_perp_market_adapter,
+        ))),
+        ExchangeId::Toobit => Some(Box::new(PrivatePerpExchangeGateway::new(
+            PrivatePerpExchange::Toobit,
+            private_perp_market_adapter,
+        ))),
+        ExchangeId::Kraken => Some(Box::new(MarketDataOnlyExchangeGateway::new(
+            ExchangeId::Kraken,
+            market_data_only_adapter,
         ))),
         ExchangeId::CoinEx | ExchangeId::KuCoin => None,
         ExchangeId::Other(_) => None,
@@ -199,6 +208,7 @@ pub fn private_perp_exchange(exchange: &ExchangeId) -> Option<PrivatePerpExchang
         ExchangeId::Bybit => Some(PrivatePerpExchange::Bybit),
         ExchangeId::Mexc => Some(PrivatePerpExchange::Mexc),
         ExchangeId::Htx => Some(PrivatePerpExchange::Htx),
+        ExchangeId::Toobit => Some(PrivatePerpExchange::Toobit),
         _ => None,
     }
 }
@@ -300,6 +310,50 @@ struct PrivatePerpExchangeGateway {
     market_adapter: fn(&ExchangeId) -> Option<Box<dyn MarketDataAdapter + Send + Sync>>,
 }
 
+struct MarketDataOnlyExchangeGateway {
+    exchange: ExchangeId,
+    market_adapter: fn(&ExchangeId) -> Option<Box<dyn MarketDataAdapter + Send + Sync>>,
+}
+
+impl MarketDataOnlyExchangeGateway {
+    fn new(
+        exchange: ExchangeId,
+        market_adapter: fn(&ExchangeId) -> Option<Box<dyn MarketDataAdapter + Send + Sync>>,
+    ) -> Self {
+        Self {
+            exchange,
+            market_adapter,
+        }
+    }
+}
+
+impl ExchangeGateway for MarketDataOnlyExchangeGateway {
+    fn exchange(&self) -> ExchangeId {
+        self.exchange.clone()
+    }
+
+    fn capabilities(&self) -> ExchangeGatewayCapabilities {
+        let market = (self.market_adapter)(&self.exchange).map(|adapter| adapter.capabilities());
+        market
+            .map(|market| {
+                ExchangeGatewayCapabilities::market_data_only(self.exchange.clone(), market)
+            })
+            .unwrap_or(ExchangeGatewayCapabilities {
+                exchange: self.exchange.clone(),
+                kind: GatewayKind::MarketDataOnly,
+                market: None,
+                trading: None,
+                supports_private_rest: false,
+                supports_private_ws: false,
+                supports_dual_side_position: false,
+            })
+    }
+
+    fn market_data(&self) -> Option<Box<dyn MarketDataAdapter + Send + Sync>> {
+        (self.market_adapter)(&self.exchange)
+    }
+}
+
 impl PrivatePerpExchangeGateway {
     fn new(
         exchange: PrivatePerpExchange,
@@ -376,6 +430,16 @@ fn private_perp_market_adapter(
         ExchangeId::Bybit => Some(Box::new(BybitMarketAdapter)),
         ExchangeId::Mexc => Some(Box::new(MexcMarketAdapter)),
         ExchangeId::Htx => Some(Box::new(HtxMarketAdapter)),
+        ExchangeId::Toobit => Some(Box::new(ToobitMarketAdapter)),
+        _ => None,
+    }
+}
+
+fn market_data_only_adapter(
+    exchange: &ExchangeId,
+) -> Option<Box<dyn MarketDataAdapter + Send + Sync>> {
+    match exchange {
+        ExchangeId::Kraken => Some(Box::new(KrakenMarketAdapter)),
         _ => None,
     }
 }
@@ -602,6 +666,8 @@ mod tests {
             ExchangeId::Bybit,
             ExchangeId::Mexc,
             ExchangeId::Htx,
+            ExchangeId::Toobit,
+            ExchangeId::Kraken,
         ] {
             let adapter = market_adapter(&exchange)
                 .unwrap_or_else(|| panic!("{exchange} should have a market adapter"));
@@ -611,15 +677,29 @@ mod tests {
     }
 
     #[test]
+    fn gateway_registry_should_expose_kraken_as_market_data_only() {
+        let gateway = gateway_for_exchange(&ExchangeId::Kraken).expect("kraken gateway");
+        let capabilities = gateway.capabilities();
+
+        assert_eq!(capabilities.exchange, ExchangeId::Kraken);
+        assert_eq!(capabilities.kind, GatewayKind::MarketDataOnly);
+        assert!(capabilities.market.is_some());
+        assert!(capabilities.trading.is_none());
+        assert!(!capabilities.supports_private_rest);
+        assert_eq!(gateway.private_perp_exchange(), None);
+    }
+
+    #[test]
     fn gateway_registry_should_expose_private_perp_capabilities() {
-        for (exchange, private_exchange) in [
-            (ExchangeId::Binance, PrivatePerpExchange::Binance),
-            (ExchangeId::Okx, PrivatePerpExchange::Okx),
-            (ExchangeId::Bitget, PrivatePerpExchange::Bitget),
-            (ExchangeId::Gate, PrivatePerpExchange::Gate),
-            (ExchangeId::Bybit, PrivatePerpExchange::Bybit),
-            (ExchangeId::Mexc, PrivatePerpExchange::Mexc),
-            (ExchangeId::Htx, PrivatePerpExchange::Htx),
+        for (exchange, private_exchange, supports_private_ws) in [
+            (ExchangeId::Binance, PrivatePerpExchange::Binance, true),
+            (ExchangeId::Okx, PrivatePerpExchange::Okx, true),
+            (ExchangeId::Bitget, PrivatePerpExchange::Bitget, true),
+            (ExchangeId::Gate, PrivatePerpExchange::Gate, true),
+            (ExchangeId::Bybit, PrivatePerpExchange::Bybit, true),
+            (ExchangeId::Mexc, PrivatePerpExchange::Mexc, true),
+            (ExchangeId::Htx, PrivatePerpExchange::Htx, true),
+            (ExchangeId::Toobit, PrivatePerpExchange::Toobit, true),
         ] {
             let gateway = gateway_for_exchange(&exchange)
                 .unwrap_or_else(|| panic!("{exchange} should have a gateway"));
@@ -628,7 +708,7 @@ mod tests {
             assert_eq!(gateway.private_perp_exchange(), Some(private_exchange));
             assert_eq!(capabilities.kind, GatewayKind::PrivatePerp);
             assert!(capabilities.supports_private_rest);
-            assert!(capabilities.supports_private_ws);
+            assert_eq!(capabilities.supports_private_ws, supports_private_ws);
             assert!(capabilities.trading.is_some());
         }
     }

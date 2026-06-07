@@ -6,7 +6,7 @@ use super::{
 use crate::market::{
     CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta, InstrumentStatus,
     MarketDataAdapter, MarketEvent, MarketFundingSnapshot, OrderBook5, OrderBookSnapshot,
-    WsSubscription,
+    PublicBookProfile, PublicBookProfileKind, WsSubscription,
 };
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
@@ -160,14 +160,53 @@ impl MarketDataAdapter for OkxMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(PublicBookProfileKind::FastestL1, "bbo-tbt", 1, Some(10))
+                .with_sequence(true)
+                .with_max_symbols_per_connection(100),
+            PublicBookProfile::new(PublicBookProfileKind::FastestDepth, "books5", 5, Some(100))
+                .with_sequence(true)
+                .with_checksum(true)
+                .with_max_symbols_per_connection(100),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "books",
+                400,
+                Some(100),
+            )
+            .with_sequence(true)
+            .with_checksum(true)
+            .with_max_symbols_per_connection(100),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(PublicBookProfileKind::FastestDepth, "books5", 5, Some(100))
+                    .with_sequence(true)
+                    .with_checksum(true)
+            });
         symbols
             .iter()
             .map(|symbol| {
-                WsSubscription::new(ExchangeId::Okx, "books5", vec![symbol.clone()])
-                    .with_route(format!("books5:{}", symbol.symbol))
+                WsSubscription::new(ExchangeId::Okx, selected.channel, vec![symbol.clone()])
+                    .with_route(format!("{}:{}", selected.channel, symbol.symbol))
+                    .with_profile(selected)
             })
             .collect()
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -176,7 +215,13 @@ impl MarketDataAdapter for OkxMarketAdapter {
         recv_ts: DateTime<Utc>,
     ) -> anyhow::Result<Vec<MarketEvent>> {
         let value: Value = serde_json::from_str(raw)?;
-        let Some(events) = parse_okx_books(&value, recv_ts, "okx.books5", None) else {
+        let route = value
+            .get("arg")
+            .and_then(|arg| arg.get("channel"))
+            .and_then(Value::as_str)
+            .map(|channel| format!("okx.{channel}"))
+            .unwrap_or_else(|| "okx.books5".to_string());
+        let Some(events) = parse_okx_books(&value, recv_ts, &route, None) else {
             return Ok(Vec::new());
         };
         Ok(events.into_iter().map(MarketEvent::OrderBook).collect())
@@ -238,6 +283,10 @@ fn parse_okx_books(
                 let asks = parse_levels(item.get("asks")?);
                 let exchange_ts =
                     datetime_from_millis(item.get("ts").and_then(parse_json_u64), recv_ts);
+                let sequence = item
+                    .get("seqId")
+                    .or_else(|| item.get("seq_id"))
+                    .and_then(parse_json_u64);
                 Some(OrderBook5::new(
                     ExchangeId::Okx,
                     canonical.clone(),
@@ -246,7 +295,7 @@ fn parse_okx_books(
                     asks,
                     exchange_ts,
                     recv_ts,
-                    None,
+                    sequence,
                     Some(route.to_string()),
                 ))
             })

@@ -11,7 +11,8 @@ use std::collections::HashSet;
 use crate::market::{
     BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
     InstrumentStatus, MarketCapabilities as DataMarketCapabilities, MarketDataAdapter, MarketEvent,
-    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, WsSubscription,
+    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, PublicBookProfile, PublicBookProfileKind,
+    WsSubscription,
 };
 
 const BITGET_REST_BASE: &str = "https://api.bitget.com";
@@ -103,15 +104,52 @@ impl MarketDataAdapter for BitgetMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(PublicBookProfileKind::FastestL1, "books1", 1, Some(10))
+                .with_sequence(true)
+                .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(PublicBookProfileKind::FastestDepth, "books5", 5, Some(150))
+                .with_sequence(true)
+                .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "books15",
+                15,
+                Some(150),
+            )
+            .with_sequence(true)
+            .with_max_symbols_per_connection(50),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
         if symbols.is_empty() {
             return Vec::new();
         }
 
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(PublicBookProfileKind::FastestDepth, "books5", 5, Some(150))
+                    .with_sequence(true)
+            });
+
         vec![
-            WsSubscription::new(ExchangeId::Bitget, "books5", symbols.to_vec())
-                .with_route(BITGET_PUBLIC_WS),
+            WsSubscription::new(ExchangeId::Bitget, selected.channel, symbols.to_vec())
+                .with_route(format!("{BITGET_PUBLIC_WS}:{}", selected.channel))
+                .with_profile(selected),
         ]
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -245,9 +283,16 @@ fn parse_orderbook_payload(
     let sequence = payload
         .get("sequence")
         .or_else(|| payload.get("seq"))
+        .or_else(|| payload.get("pseq"))
         .or_else(|| payload.get("id"))
         .or_else(|| payload.get("u"))
         .and_then(parse_json_u64);
+    let source_route = root
+        .get("arg")
+        .and_then(|arg| arg.get("channel").or_else(|| arg.get("topic")))
+        .and_then(Value::as_str)
+        .map(|channel| format!("bitget.{channel}"))
+        .unwrap_or_else(|| "bitget-public".to_string());
 
     Ok(Some(OrderBook5::new(
         ExchangeId::Bitget,
@@ -258,7 +303,7 @@ fn parse_orderbook_payload(
         exchange_ts,
         recv_ts,
         sequence,
-        Some("bitget-public".to_string()),
+        Some(source_route),
     )))
 }
 
@@ -459,7 +504,15 @@ mod tests {
         assert_eq!(subscriptions[0].exchange, ExchangeId::Bitget);
         assert_eq!(subscriptions[0].channel, "books5");
         assert_eq!(subscriptions[0].symbols, symbols);
-        assert_eq!(subscriptions[0].route.as_deref(), Some(BITGET_PUBLIC_WS));
+        assert_eq!(
+            subscriptions[0].route.as_deref(),
+            Some("wss://ws.bitget.com/v2/ws/public:books5")
+        );
+        assert_eq!(
+            subscriptions[0].profile,
+            PublicBookProfileKind::FastestDepth
+        );
+        assert_eq!(subscriptions[0].depth, 5);
     }
 
     #[test]

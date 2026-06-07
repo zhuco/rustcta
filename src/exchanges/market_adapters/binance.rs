@@ -6,7 +6,7 @@ use super::{
 use crate::market::{
     CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta, InstrumentStatus,
     MarketDataAdapter, MarketEvent, MarketFundingSnapshot, OrderBook5, OrderBookSnapshot,
-    WsSubscription,
+    PublicBookProfile, PublicBookProfileKind, WsSubscription,
 };
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
@@ -169,17 +169,61 @@ impl MarketDataAdapter for BinanceMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(PublicBookProfileKind::FastestL1, "bookTicker", 1, None)
+                .with_sequence(true)
+                .with_max_symbols_per_connection(200),
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestDepth,
+                "depth5@100ms",
+                5,
+                Some(100),
+            )
+            .with_sequence(true)
+            .with_max_symbols_per_connection(200),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "depth10@100ms",
+                10,
+                Some(100),
+            )
+            .with_sequence(true)
+            .with_max_symbols_per_connection(200),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(
+                    PublicBookProfileKind::FastestDepth,
+                    "depth5@100ms",
+                    5,
+                    Some(100),
+                )
+                .with_sequence(true)
+            });
         symbols
             .iter()
             .map(|symbol| {
-                WsSubscription::new(ExchangeId::Binance, "depth5@100ms", vec![symbol.clone()])
-                    .with_route(format!(
-                        "{}@depth5@100ms",
-                        symbol.symbol.to_ascii_lowercase()
-                    ))
+                let stream = binance_stream_name(symbol, selected.channel);
+                WsSubscription::new(ExchangeId::Binance, selected.channel, vec![symbol.clone()])
+                    .with_route(stream)
+                    .with_profile(selected)
             })
             .collect()
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -188,11 +232,16 @@ impl MarketDataAdapter for BinanceMarketAdapter {
         recv_ts: DateTime<Utc>,
     ) -> anyhow::Result<Vec<MarketEvent>> {
         let value: Value = serde_json::from_str(raw)?;
+        let route = value
+            .get("stream")
+            .and_then(Value::as_str)
+            .map(|stream| format!("binance.{stream}"))
+            .unwrap_or_else(|| "binance.depth5".to_string());
         let data = value
             .get("data")
             .filter(|data| data.is_object())
             .unwrap_or(&value);
-        let Some(book) = parse_binance_book(data, recv_ts, "binance.depth5", None) else {
+        let Some(book) = parse_binance_book(data, recv_ts, &route, None) else {
             return Ok(Vec::new());
         };
         Ok(vec![MarketEvent::OrderBook(book)])
@@ -222,6 +271,14 @@ impl MarketDataAdapter for BinanceMarketAdapter {
             Some(symbol.symbol.as_str()),
         )
         .ok_or_else(|| anyhow!("binance depth response could not be converted to OrderBook5"))
+    }
+}
+
+fn binance_stream_name(symbol: &ExchangeSymbol, channel: &str) -> String {
+    let symbol = symbol.symbol.to_ascii_lowercase();
+    match channel {
+        "bookTicker" => format!("{symbol}@bookTicker"),
+        channel => format!("{symbol}@{channel}"),
     }
 }
 

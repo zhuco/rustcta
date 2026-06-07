@@ -9,6 +9,11 @@ market:
   depth_levels: 5
   stale_quote_ms: 5000
   min_common_exchanges: 2
+  public_book_speed: fastest
+  public_book_trigger_profile: fastest_l1
+  public_book_validation_profile: fastest_depth
+  public_book_depth: 5
+  allow_top_of_book_only: true
 thresholds:
   min_display_raw_spread: 0.001
   min_open_raw_spread: 0.005
@@ -156,7 +161,7 @@ routing:
   degraded_mode_blocks_new_entries: true
 execution:
   dry_run: false
-  open_execution_style: maker_taker
+  open_execution_style: dual_taker
   close_execution_style: dual_taker
   max_hedge_retries: 1
   maker_order_ttl_ms: 20000

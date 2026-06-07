@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use rustcta::exchanges::market_adapters::{
     BinanceMarketAdapter, BitgetMarketAdapter, BybitMarketAdapter, GateMarketAdapter,
-    HtxMarketAdapter, MarketAdapterInfo, MexcMarketAdapter, OkxMarketAdapter,
+    HtxMarketAdapter, KrakenMarketAdapter, MarketAdapterInfo, MexcMarketAdapter, OkxMarketAdapter,
 };
 use rustcta::exchanges::registry::market_adapter;
 use rustcta::market::{
@@ -240,6 +240,8 @@ async fn observe_once(
                         .map(|funding| funding.funding_rate)
                         .unwrap_or(0.0),
                     next_funding_time: funding.and_then(|funding| funding.next_funding_time),
+                    trigger_book_profile: None,
+                    validation_book_profile: None,
                 })
             })
             .collect::<Vec<_>>();
@@ -295,6 +297,8 @@ fn exchange_symbol_for(exchange: &ExchangeId, canonical: &CanonicalSymbol) -> Ex
         ExchangeId::Bybit => BybitMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Mexc => MexcMarketAdapter.to_exchange_symbol(canonical),
         ExchangeId::Htx => HtxMarketAdapter.to_exchange_symbol(canonical),
+        ExchangeId::Kraken => KrakenMarketAdapter.to_exchange_symbol(canonical),
+        ExchangeId::Toobit => ExchangeSymbol::new(ExchangeId::Toobit, canonical.to_string()),
         ExchangeId::CoinEx => ExchangeSymbol::new(ExchangeId::CoinEx, canonical.as_pair()),
         ExchangeId::KuCoin => ExchangeSymbol::new(
             ExchangeId::KuCoin,

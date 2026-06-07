@@ -641,6 +641,8 @@ fn build_private_exchange(
         | ExchangeId::CoinEx
         | ExchangeId::KuCoin
         | ExchangeId::Htx
+        | ExchangeId::Kraken
+        | ExchangeId::Toobit
         | ExchangeId::Other(_) => Ok(None),
     }
 }

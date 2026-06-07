@@ -99,6 +99,23 @@ impl CrossArbRuntimeState {
             .map(|position| position.canonical_symbol)
             .collect::<HashSet<_>>();
         for opportunity in &mut scanned {
+            if self
+                .risk_state
+                .symbol_close_only
+                .contains(&opportunity.canonical_symbol)
+            {
+                opportunity.reject_reasons.push(RejectReason::RiskLocked);
+                opportunity.can_open = false;
+            } else if self
+                .risk_state
+                .reservations
+                .has_active_symbol(&opportunity.canonical_symbol)
+            {
+                opportunity
+                    .reject_reasons
+                    .push(RejectReason::ReservationConflict);
+                opportunity.can_open = false;
+            }
             if symbols_with_unmanaged_positions.contains(&opportunity.canonical_symbol) {
                 opportunity
                     .reject_reasons
@@ -143,7 +160,10 @@ impl CrossArbRuntimeState {
             .iter()
             .filter(|opportunity| opportunity.canonical_symbol == *canonical_symbol)
             .map(|opportunity| {
-                if !self.risk_state.decision().allow_new_entries {
+                if !self
+                    .risk_state
+                    .allows_new_entry_for_symbol(&opportunity.canonical_symbol)
+                {
                     ArbSignal::noop(self.config.mode, now)
                 } else {
                     ArbSignal::from_opportunity(opportunity, self.config.mode, now)
@@ -1482,6 +1502,57 @@ impl CrossArbRuntimeState {
         self.sync_local_controls();
     }
 
+    pub fn release_open_reservation(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> bool {
+        let released = self
+            .risk_state
+            .release_reservation(bundle_id, reason, now)
+            .is_some();
+        if released {
+            self.updated_at = now;
+            self.sync_local_controls();
+        }
+        released
+    }
+
+    pub fn risk_lock_open_reservation(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> bool {
+        let locked = self
+            .risk_state
+            .risk_lock_reservation(bundle_id, reason, now)
+            .is_some();
+        if locked {
+            self.updated_at = now;
+            self.sync_local_controls();
+        }
+        locked
+    }
+
+    pub fn settle_open_reservation(
+        &mut self,
+        bundle_id: &str,
+        reason: impl Into<String>,
+        now: DateTime<Utc>,
+    ) -> bool {
+        let settled = self
+            .risk_state
+            .settle_reservation(bundle_id, reason, now)
+            .is_some();
+        if settled {
+            self.updated_at = now;
+            self.sync_local_controls();
+        }
+        settled
+    }
+
     pub fn kill_switch(&mut self) {
         self.kill_switch = true;
         self.paused_new_entries = true;
@@ -1587,6 +1658,12 @@ impl CrossArbRuntimeState {
         if self.risk_state.decision().mode == super::risk::RiskOperatingMode::Halted {
             self.mark_open_bundles_risk_stopped(now);
         }
+    }
+
+    pub fn refresh_open_hedge_repair_tasks(&mut self, now: DateTime<Utc>) {
+        self.ensure_open_hedge_repair_tasks(now);
+        self.updated_at = now;
+        self.sync_local_controls();
     }
 
     fn ensure_open_hedge_repair_tasks(&mut self, now: DateTime<Utc>) {
@@ -1795,24 +1872,33 @@ impl CrossArbRuntimeState {
             return;
         };
         let quantity_tolerance = self.config.reconciliation.quantity_tolerance;
+        let canonical_symbol = position.canonical_symbol.clone();
+        let long_exchange = position.long_leg.exchange.clone();
+        let short_exchange = position.short_leg.exchange.clone();
+        let entry_edge_pct = position.entry_edge_pct;
+        let fully_closed =
+            position.is_fully_closed(quantity_tolerance) || position.status == BundleStatus::Closed;
+        let fully_open = position.is_fully_open(quantity_tolerance);
+        let unhedged_qty = position.unhedged_qty();
+        let close_profit = fully_closed.then(|| bundle_close_net_profit_pct(position));
+        let realized_close_spread = fully_closed.then(|| position.realized_close_spread_pct());
         let Some(record) = self.hedge_records.get_mut(bundle_id) else {
             return;
         };
 
-        record.canonical_symbol = position.canonical_symbol.clone();
-        record.long_exchange = position.long_leg.exchange.clone();
-        record.short_exchange = position.short_leg.exchange.clone();
-        record.entry_net_edge_pct = Some(position.entry_edge_pct);
-        if position.is_fully_closed(quantity_tolerance) || position.status == BundleStatus::Closed {
+        record.canonical_symbol = canonical_symbol;
+        record.long_exchange = long_exchange;
+        record.short_exchange = short_exchange;
+        record.entry_net_edge_pct = Some(entry_edge_pct);
+        let settle_reason = if fully_closed {
             record.status = HedgeRecordStatus::Closed;
             record.is_closed = true;
             record.closed_at.get_or_insert(now);
             record.updated_at = now;
-            let close_profit = bundle_close_net_profit_pct(position);
-            if close_profit.is_finite() {
+            if let Some(close_profit) = close_profit.filter(|value| value.is_finite()) {
                 record.close_net_profit_pct = Some(close_profit);
             }
-            record.close_spread_pct = position.realized_close_spread_pct();
+            record.close_spread_pct = realized_close_spread.flatten();
             for task in self
                 .hedge_repair_tasks
                 .values_mut()
@@ -1821,7 +1907,8 @@ impl CrossArbRuntimeState {
                 task.status = HedgeRepairTaskStatus::Completed;
                 task.updated_at = now;
             }
-        } else if position.is_fully_open(quantity_tolerance) {
+            Some("bundle fully closed after repair/close")
+        } else if fully_open {
             record.status = HedgeRecordStatus::Hedged;
             record.is_closed = false;
             record.closed_at = None;
@@ -1836,7 +1923,8 @@ impl CrossArbRuntimeState {
                 task.status = HedgeRepairTaskStatus::Completed;
                 task.updated_at = now;
             }
-        } else if position.unhedged_qty() > quantity_tolerance
+            Some("open hedge repair completed")
+        } else if unhedged_qty > quantity_tolerance
             && !matches!(
                 record.status,
                 HedgeRecordStatus::RepairPending
@@ -1846,6 +1934,12 @@ impl CrossArbRuntimeState {
         {
             record.status = HedgeRecordStatus::Hedging;
             record.updated_at = now;
+            None
+        } else {
+            None
+        };
+        if let Some(reason) = settle_reason {
+            self.settle_open_reservation(bundle_id, reason, now);
         }
     }
 
@@ -1948,6 +2042,16 @@ impl CrossArbRuntime {
             }
         }
         signals
+    }
+
+    pub fn on_market_snapshots_event(
+        &mut self,
+        canonical_symbol: &CanonicalSymbol,
+        snapshots: &[MarketSnapshot],
+        now: DateTime<Utc>,
+    ) -> Vec<ArbSignal> {
+        self.state
+            .update_from_market_snapshots(canonical_symbol, snapshots, now)
     }
 
     pub fn record_instrument(
@@ -2354,6 +2458,32 @@ mod tests {
         assert!(!signals.is_empty());
         assert!(!runtime.state.opportunities.is_empty());
         assert!(!runtime.storage.events().is_empty());
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_event_runtime_should_evaluate_symbol_without_hot_path_storage() {
+        let now = Utc::now();
+        let btc = CanonicalSymbol::new("BTC", "USDT");
+        let eth = CanonicalSymbol::new("ETH", "USDT");
+        let config = config_with_universe(
+            vec![btc.clone(), eth.clone()],
+            vec![ExchangeId::Binance, ExchangeId::Okx],
+        );
+        let mut runtime = CrossArbRuntime::new(config, now);
+        let snapshots = vec![
+            MarketSnapshot::healthy(book(ExchangeId::Binance, 100.0, 101.0)),
+            MarketSnapshot::healthy(book(ExchangeId::Okx, 104.0, 105.0)),
+        ];
+
+        let signals = runtime.on_market_snapshots_event(&btc, &snapshots, now);
+
+        assert!(!signals.is_empty());
+        assert!(runtime
+            .state
+            .opportunities
+            .iter()
+            .all(|opportunity| opportunity.canonical_symbol == btc));
+        assert!(runtime.storage.events().is_empty());
     }
 
     #[test]

@@ -44,6 +44,27 @@ pub fn calculate_taker_vwap(
     }
 }
 
+pub fn best_level_base_quantity(book: &OrderBook5, side: OrderSide) -> Option<f64> {
+    match side {
+        OrderSide::Buy => book.best_ask(),
+        OrderSide::Sell => book.best_bid(),
+    }
+    .map(|level| level.quantity)
+}
+
+pub fn best_level_covers_base_quantity(
+    book: &OrderBook5,
+    side: OrderSide,
+    base_quantity: f64,
+) -> bool {
+    if base_quantity <= 0.0 || !base_quantity.is_finite() {
+        return false;
+    }
+    best_level_base_quantity(book, side)
+        .map(|quantity| quantity.is_finite() && quantity >= base_quantity)
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MakerFillInput {
     pub side: OrderSide,
@@ -256,6 +277,17 @@ mod tests {
 
         assert!(!result.depth_enough);
         assert!(result.filled_notional_usdt < 1_000.0);
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_vwap_l1_quantity_check_should_use_execution_side() {
+        let book = book(ExchangeId::Binance, 100.0, 101.0, 1.0);
+
+        assert!(best_level_covers_base_quantity(&book, OrderSide::Buy, 1.0));
+        assert!(best_level_covers_base_quantity(&book, OrderSide::Sell, 1.0));
+        assert!(!best_level_covers_base_quantity(&book, OrderSide::Buy, 1.1));
+        assert_eq!(best_level_base_quantity(&book, OrderSide::Buy), Some(1.0));
+        assert_eq!(best_level_base_quantity(&book, OrderSide::Sell), Some(1.0));
     }
 
     #[test]

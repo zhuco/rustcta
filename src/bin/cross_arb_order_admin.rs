@@ -327,6 +327,7 @@ fn parse_exchange(value: &str) -> Result<ExchangeId> {
         "bybit" => Ok(ExchangeId::Bybit),
         "mexc" => Ok(ExchangeId::Mexc),
         "htx" | "huobi" => Ok(ExchangeId::Htx),
+        "kraken" => Ok(ExchangeId::Kraken),
         "okx" => Ok(ExchangeId::Okx),
         other => bail!("unsupported exchange {other}"),
     }
@@ -343,6 +344,8 @@ fn compact_exchange_code(exchange: &ExchangeId) -> String {
         ExchangeId::CoinEx => "cx".to_string(),
         ExchangeId::KuCoin => "kc".to_string(),
         ExchangeId::Htx => "htx".to_string(),
+        ExchangeId::Kraken => "krk".to_string(),
+        ExchangeId::Toobit => "tbt".to_string(),
         ExchangeId::Other(value) => {
             let compact = value
                 .chars()

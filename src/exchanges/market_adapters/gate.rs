@@ -10,7 +10,8 @@ use serde_json::Value;
 use crate::market::{
     BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
     InstrumentStatus, MarketCapabilities as DataMarketCapabilities, MarketDataAdapter, MarketEvent,
-    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, WsSubscription,
+    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, PublicBookProfile, PublicBookProfileKind,
+    WsSubscription,
 };
 
 const GATE_REST_BASE: &str = "https://api.gateio.ws/api/v4";
@@ -99,15 +100,80 @@ impl MarketDataAdapter for GateMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestL1,
+                "futures.order_book_update",
+                20,
+                Some(20),
+            )
+            .with_sequence(true)
+            .with_rest_snapshot(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestDepth,
+                "futures.order_book_update",
+                20,
+                Some(20),
+            )
+            .with_sequence(true)
+            .with_rest_snapshot(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "futures.order_book_update",
+                50,
+                Some(100),
+            )
+            .with_sequence(true)
+            .with_rest_snapshot(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
         if symbols.is_empty() {
             return Vec::new();
         }
 
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(
+                    PublicBookProfileKind::FastestDepth,
+                    "futures.order_book_update",
+                    20,
+                    Some(20),
+                )
+                .with_sequence(true)
+                .with_rest_snapshot(true)
+                .with_local_merge(true)
+            });
+
         vec![
-            WsSubscription::new(ExchangeId::Gate, "futures.order_book", symbols.to_vec())
-                .with_route(GATE_PUBLIC_WS),
+            WsSubscription::new(ExchangeId::Gate, selected.channel, symbols.to_vec())
+                .with_route(format!(
+                    "{GATE_PUBLIC_WS}:{}:{}ms:{}",
+                    selected.channel,
+                    selected.expected_push_interval_ms.unwrap_or(100),
+                    selected.depth
+                ))
+                .with_profile(selected),
         ]
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -223,6 +289,11 @@ fn parse_orderbook_payload(
         .or_else(|| payload.get("sequence"))
         .or_else(|| root.get("id"))
         .and_then(parse_json_u64);
+    let source_route = root
+        .get("channel")
+        .and_then(Value::as_str)
+        .map(|channel| format!("gate.{channel}"))
+        .unwrap_or_else(|| "gate-public".to_string());
 
     Ok(Some(OrderBook5::new(
         ExchangeId::Gate,
@@ -233,7 +304,7 @@ fn parse_orderbook_payload(
         exchange_ts,
         recv_ts,
         sequence,
-        Some("gate-public".to_string()),
+        Some(source_route),
     )))
 }
 
@@ -424,9 +495,17 @@ mod tests {
 
         assert_eq!(subscriptions.len(), 1);
         assert_eq!(subscriptions[0].exchange, ExchangeId::Gate);
-        assert_eq!(subscriptions[0].channel, "futures.order_book");
+        assert_eq!(subscriptions[0].channel, "futures.order_book_update");
         assert_eq!(subscriptions[0].symbols, symbols);
-        assert_eq!(subscriptions[0].route.as_deref(), Some(GATE_PUBLIC_WS));
+        assert_eq!(
+            subscriptions[0].route.as_deref(),
+            Some("wss://fx-ws.gateio.ws/v4/ws/usdt:futures.order_book_update:20ms:20")
+        );
+        assert_eq!(
+            subscriptions[0].profile,
+            PublicBookProfileKind::FastestDepth
+        );
+        assert_eq!(subscriptions[0].depth, 20);
     }
 
     #[test]

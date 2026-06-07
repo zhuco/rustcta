@@ -118,9 +118,34 @@ pub enum OrderListRequest {
 }
 
 impl OrderListRequest {
+    pub fn schema_version(&self) -> u16 {
+        match self {
+            Self::Oco { schema_version, .. } | Self::Oto { schema_version, .. } => *schema_version,
+        }
+    }
+
+    pub fn context_request_id(&self) -> Option<String> {
+        match self {
+            Self::Oco { context, .. } | Self::Oto { context, .. } => context.request_id.clone(),
+        }
+    }
+
     pub fn symbol(&self) -> &SymbolScope {
         match self {
             Self::Oco { symbol, .. } | Self::Oto { symbol, .. } => symbol,
+        }
+    }
+
+    pub fn list_client_order_id(&self) -> Option<String> {
+        match self {
+            Self::Oco {
+                list_client_order_id,
+                ..
+            }
+            | Self::Oto {
+                list_client_order_id,
+                ..
+            } => list_client_order_id.clone(),
         }
     }
 

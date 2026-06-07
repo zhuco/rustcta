@@ -1,0 +1,19 @@
+[
+  {
+    "id": "1291291745779199489",
+    "symbol": "BTCUSDT",
+    "symbolName": "BTCUSDT",
+    "orderId": "1290805676579237376",
+    "matchOrderId": "1291291745191996928",
+    "price": "314",
+    "qty": "0.71433122",
+    "commission": "0.22430000308",
+    "commissionAsset": "USDT",
+    "time": "1668669971575",
+    "isBuyer": false,
+    "isMaker": true,
+    "feeCoinId": "USDT",
+    "feeAmount": "0.22430000308",
+    "ticketId": "1185465136943458745"
+  }
+]

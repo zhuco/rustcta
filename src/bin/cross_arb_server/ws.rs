@@ -217,7 +217,7 @@ fn build_public_ws_endpoint(
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
             }
         }
-        ExchangeId::CoinEx | ExchangeId::KuCoin => {
+        ExchangeId::CoinEx | ExchangeId::KuCoin | ExchangeId::Kraken | ExchangeId::Toobit => {
             return Err(anyhow!(
                 "unsupported public ws exchange in legacy perp ws server: {}",
                 exchange.as_str()

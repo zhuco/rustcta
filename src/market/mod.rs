@@ -50,6 +50,8 @@ pub enum ExchangeId {
     CoinEx,
     KuCoin,
     Htx,
+    Kraken,
+    Toobit,
     Other(String),
 }
 
@@ -84,6 +86,8 @@ impl ExchangeId {
             Self::CoinEx => "coinex",
             Self::KuCoin => "kucoin",
             Self::Htx => "htx",
+            Self::Kraken => "kraken",
+            Self::Toobit => "toobit",
             Self::Other(exchange) => exchange.as_str(),
         }
     }
@@ -101,6 +105,8 @@ impl From<&str> for ExchangeId {
             "coinex" | "coin_ex" => Self::CoinEx,
             "kucoin" | "ku_coin" => Self::KuCoin,
             "htx" | "huobi" => Self::Htx,
+            "kraken" => Self::Kraken,
+            "toobit" => Self::Toobit,
             other => Self::Other(other.to_string()),
         }
     }

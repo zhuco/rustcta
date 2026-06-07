@@ -15,6 +15,7 @@ pub enum ExchangeName {
     Okx,
     Mexc,
     CoinEx,
+    Kraken,
     Paper,
     Other,
 }

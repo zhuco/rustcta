@@ -64,6 +64,7 @@ pub enum PrivatePerpExchange {
     Bybit,
     Mexc,
     Htx,
+    Toobit,
 }
 
 impl PrivatePerpExchange {
@@ -77,6 +78,7 @@ impl PrivatePerpExchange {
             Self::Bybit => ExchangeId::Bybit,
             Self::Mexc => ExchangeId::Mexc,
             Self::Htx => ExchangeId::Htx,
+            Self::Toobit => ExchangeId::Toobit,
         }
     }
 
@@ -90,6 +92,7 @@ impl PrivatePerpExchange {
             Self::Bybit => "https://api.bybit.com",
             Self::Mexc => "https://contract.mexc.com",
             Self::Htx => "https://api.hbdm.com",
+            Self::Toobit => "https://api.toobit.com",
         }
     }
 
@@ -103,6 +106,7 @@ impl PrivatePerpExchange {
             Self::Bybit => "wss://stream.bybit.com/v5/private",
             Self::Mexc => "wss://contract.mexc.com/edge",
             Self::Htx => "wss://api.hbdm.com/linear-swap-notification",
+            Self::Toobit => "wss://stream.toobit.com",
         }
     }
 }
@@ -452,6 +456,7 @@ impl ReqwestPrivateRestTransport {
             PrivatePerpExchange::Bybit => bybit_rest_headers(&self.auth, request, timestamp),
             PrivatePerpExchange::Mexc => mexc_rest_headers(&self.auth, request, timestamp),
             PrivatePerpExchange::Htx => htx_rest_headers(&self.auth, request, timestamp),
+            PrivatePerpExchange::Toobit => toobit_rest_headers(&self.auth, request, timestamp),
         }
     }
 
@@ -462,6 +467,7 @@ impl ReqwestPrivateRestTransport {
     ) -> Result<PrivateRestRequestSpec> {
         match self.exchange {
             PrivatePerpExchange::Binance => binance_signed_request(&self.auth, request, timestamp),
+            PrivatePerpExchange::Toobit => toobit_signed_request(&self.auth, request, timestamp),
             _ => Ok(request),
         }
     }
@@ -493,7 +499,8 @@ impl PrivateRestTransport for ReqwestPrivateRestTransport {
             | PrivatePerpExchange::CoinEx
             | PrivatePerpExchange::Bitget
             | PrivatePerpExchange::Bybit
-            | PrivatePerpExchange::Mexc => Utc::now().timestamp_millis(),
+            | PrivatePerpExchange::Mexc
+            | PrivatePerpExchange::Toobit => Utc::now().timestamp_millis(),
             PrivatePerpExchange::Gate | PrivatePerpExchange::Htx => Utc::now().timestamp(),
         };
         let request = if request.requires_auth {
@@ -1035,7 +1042,7 @@ where
                         return None;
                     }
                     Some(CancelCommand {
-                        exchange: ExchangeId::Okx,
+                        exchange: self.exchange(),
                         canonical_symbol: order.canonical_symbol,
                         exchange_symbol: order.exchange_symbol,
                         client_order_id: order.client_order_id,
@@ -1058,12 +1065,12 @@ where
             }
 
             let batch =
-                CancelBatchCommand::new(ExchangeId::Okx, cancel_commands, command.requested_at);
+                CancelBatchCommand::new(self.exchange(), cancel_commands, command.requested_at);
             let value = self
                 .transport
                 .execute(self.protocol.cancel_batch_orders(&batch)?)
                 .await?;
-            let order_acks = parse_cancel_batch_acks(ExchangeId::Okx, &value, Utc::now());
+            let order_acks = parse_cancel_batch_acks(self.exchange(), &value, Utc::now());
             let cancelled_orders = if order_acks.is_empty() {
                 cancelled_count(&value)
             } else {
@@ -1289,6 +1296,9 @@ where
                 }
                 ExchangeId::Mexc => parse_mexc_position(&item, Utc::now()).and_then(event_position),
                 ExchangeId::Htx => parse_htx_position(&item, Utc::now()).and_then(event_position),
+                ExchangeId::Toobit => {
+                    parse_toobit_position(&item, Utc::now()).and_then(event_position)
+                }
                 ExchangeId::Gate => {
                     let contract_size = self
                         .gate_contract_size_for_item(&item, symbol)
@@ -1320,6 +1330,9 @@ where
                 ExchangeId::Bybit => parse_bybit_balance(&item, Utc::now()).and_then(event_balance),
                 ExchangeId::Mexc => parse_mexc_balance(&item, Utc::now()).and_then(event_balance),
                 ExchangeId::Htx => parse_htx_balance(&item, Utc::now()).and_then(event_balance),
+                ExchangeId::Toobit => {
+                    parse_toobit_balance(&item, Utc::now()).and_then(event_balance)
+                }
                 ExchangeId::Gate => parse_gate_balance(&item, Utc::now()).and_then(event_balance),
                 _ => None,
             })
@@ -1418,6 +1431,7 @@ where
                 ExchangeId::Bybit => parse_bybit_fill(&item, Utc::now()).and_then(event_fill),
                 ExchangeId::Mexc => parse_mexc_fill(&item, Utc::now()).and_then(event_fill),
                 ExchangeId::Htx => parse_htx_fill(&item, Utc::now()).and_then(event_fill),
+                ExchangeId::Toobit => parse_toobit_fill(&item, Utc::now()).and_then(event_fill),
                 ExchangeId::Gate => {
                     let contract_size = self
                         .gate_contract_size_for_item(&item, query.exchange_symbol.as_ref())
@@ -1617,6 +1631,7 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
                 | ExchangeId::Bybit
                 | ExchangeId::Mexc
                 | ExchangeId::Htx
+                | ExchangeId::Toobit
         ),
         supports_client_order_id: true,
         supports_leverage: true,
@@ -1647,6 +1662,7 @@ pub fn private_perp_trading_capabilities(exchange: ExchangeId) -> TradingCapabil
                 | ExchangeId::Bybit
                 | ExchangeId::Mexc
                 | ExchangeId::Htx
+                | ExchangeId::Toobit
         ),
     }
 }
@@ -1824,6 +1840,14 @@ pub fn private_perp_trading_adapter_for_with_instruments(
             .with_position_mode(position_mode)
             .with_instruments(instruments),
         )),
+        PrivatePerpExchange::Toobit => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                ToobitPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::new(exchange, auth)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
     }
 }
 
@@ -1897,6 +1921,14 @@ pub fn private_perp_trading_adapter_for_with_base_url_and_instruments(
         PrivatePerpExchange::Htx => Ok(Arc::new(
             PrivatePerpTradingAdapter::new(
                 HtxPrivatePerpProtocol,
+                ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
+            )
+            .with_position_mode(position_mode)
+            .with_instruments(instruments),
+        )),
+        PrivatePerpExchange::Toobit => Ok(Arc::new(
+            PrivatePerpTradingAdapter::new(
+                ToobitPrivatePerpProtocol,
                 ReqwestPrivateRestTransport::with_base_url(exchange, auth, base_url)?,
             )
             .with_position_mode(position_mode)
@@ -1985,6 +2017,7 @@ pub fn build_private_ws_endpoint_with_url(
             timestamp,
             url.trim(),
         ),
+        PrivatePerpExchange::Toobit => build_toobit_private_ws_endpoint(auth, url.trim()),
     }
 }
 
@@ -2130,6 +2163,7 @@ where
                     .map(|request| request.message)
             })
             .collect::<Result<Vec<_>>>()?,
+        PrivatePerpExchange::Toobit => Vec::new(),
     };
 
     let login_message = match exchange {
@@ -2141,6 +2175,7 @@ where
         | PrivatePerpExchange::Bybit
         | PrivatePerpExchange::Mexc
         | PrivatePerpExchange::Htx => Some(protocol.ws_login(&auth, timestamp)?.message),
+        PrivatePerpExchange::Toobit => None,
         PrivatePerpExchange::Gate => None,
     };
 
@@ -2171,6 +2206,28 @@ fn build_binance_private_ws_endpoint(
     Ok(PrivateWsEndpoint {
         exchange: ExchangeId::Binance,
         url,
+        login_message: None,
+        subscribe_messages: Vec::new(),
+        send_interval_ms: PrivateWsRunConfig::default().subscribe_interval_ms,
+    })
+}
+
+fn build_toobit_private_ws_endpoint(
+    auth: PrivateWsAuth,
+    base_url: &str,
+) -> Result<PrivateWsEndpoint> {
+    let listen_key = auth.account_id.as_deref().ok_or_else(|| {
+        anyhow!(
+            "toobit private websocket endpoint builder requires a listenKey in PrivateWsAuth.account_id"
+        )
+    })?;
+    let base_url = base_url
+        .trim_end_matches('/')
+        .strip_suffix("/quote/ws/v1")
+        .unwrap_or_else(|| base_url.trim_end_matches('/'));
+    Ok(PrivateWsEndpoint {
+        exchange: ExchangeId::Toobit,
+        url: format!("{base_url}/api/v1/ws/{listen_key}"),
         login_message: None,
         subscribe_messages: Vec::new(),
         send_interval_ms: PrivateWsRunConfig::default().subscribe_interval_ms,
@@ -2358,6 +2415,18 @@ async fn run_private_ws_with_url_and_gate_contract_sizes(
                 )
                 .await
             }
+            PrivatePerpExchange::Toobit => {
+                run_private_ws_protocol_with_url(
+                    ToobitPrivatePerpProtocol,
+                    auth.clone(),
+                    symbols.clone(),
+                    config,
+                    url.clone(),
+                    tx.clone(),
+                    HashMap::new(),
+                )
+                .await
+            }
         };
 
         if tx.is_closed() {
@@ -2479,7 +2548,7 @@ where
                 match exchange {
                     PrivatePerpExchange::Binance => write.send(Message::Ping(Vec::new())).await?,
                     PrivatePerpExchange::Bitget => write.send(Message::Text("ping".to_string())).await?,
-                    PrivatePerpExchange::Okx | PrivatePerpExchange::CoinEx | PrivatePerpExchange::Gate | PrivatePerpExchange::Bybit | PrivatePerpExchange::Mexc => write.send(Message::Ping(Vec::new())).await?,
+                    PrivatePerpExchange::Okx | PrivatePerpExchange::CoinEx | PrivatePerpExchange::Gate | PrivatePerpExchange::Bybit | PrivatePerpExchange::Mexc | PrivatePerpExchange::Toobit => write.send(Message::Ping(Vec::new())).await?,
                     PrivatePerpExchange::Htx => write.send(Message::Text(json!({"ping": Utc::now().timestamp_millis()}).to_string())).await?,
                 }
                 if !publish_private_event(
@@ -2766,6 +2835,9 @@ pub struct MexcPrivatePerpProtocol;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HtxPrivatePerpProtocol;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ToobitPrivatePerpProtocol;
 
 impl PrivatePerpProtocol for OkxPrivatePerpProtocol {
     fn exchange(&self) -> PrivatePerpExchange {
@@ -6131,6 +6203,381 @@ impl PrivatePerpProtocol for HtxPrivatePerpProtocol {
     }
 }
 
+impl PrivatePerpProtocol for ToobitPrivatePerpProtocol {
+    fn exchange(&self) -> PrivatePerpExchange {
+        PrivatePerpExchange::Toobit
+    }
+
+    fn place_order(
+        &self,
+        command: &OrderCommand,
+        position_mode: PositionMode,
+    ) -> Result<PrivateRestRequestSpec> {
+        ensure_toobit_command_symbol(&command.exchange, &command.exchange_symbol, "place order")?;
+        let mut body = json!({
+            "symbol": command.exchange_symbol.symbol,
+            "side": toobit_side(command.side),
+            "positionSide": toobit_position_side(position_mode, command.position_side, command.side),
+            "type": toobit_order_type(command.order_type, command.post_only, command.time_in_force),
+            "quantity": number_string(command.quantity),
+            "newClientOrderId": command.client_order_id,
+        });
+        if let Some(price) = command.price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        if let Some(tif) = toobit_time_in_force(command.time_in_force, command.post_only) {
+            set_str(&mut body, "timeInForce", tif);
+        }
+        if command.reduce_only {
+            set_bool(&mut body, "reduceOnly", true);
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Post,
+            "/api/v2/futures/order",
+        )
+        .with_body(body))
+    }
+
+    fn place_batch_orders(
+        &self,
+        command: &BatchPlaceCommand,
+        position_mode: PositionMode,
+    ) -> Result<PrivateRestRequestSpec> {
+        if command.exchange != ExchangeId::Toobit {
+            anyhow::bail!("toobit batch-place requires toobit exchange symbols");
+        }
+        if command.orders.is_empty() {
+            anyhow::bail!("toobit batch-place requires at least one order");
+        }
+        let orders = command
+            .orders
+            .iter()
+            .map(|order| {
+                ensure_toobit_command_symbol(
+                    &order.exchange,
+                    &order.exchange_symbol,
+                    "batch-place",
+                )?;
+                let mut body = json!({
+                    "symbol": order.exchange_symbol.symbol,
+                    "side": toobit_side(order.side),
+                    "positionSide": toobit_position_side(position_mode, order.position_side, order.side),
+                    "type": toobit_order_type(order.order_type, order.post_only, order.time_in_force),
+                    "quantity": number_string(order.quantity),
+                    "newClientOrderId": order.client_order_id,
+                });
+                if let Some(price) = order.price {
+                    set_str(&mut body, "price", number_string(price));
+                }
+                if let Some(tif) = toobit_time_in_force(order.time_in_force, order.post_only) {
+                    set_str(&mut body, "timeInForce", tif);
+                }
+                if order.reduce_only {
+                    set_bool(&mut body, "reduceOnly", true);
+                }
+                Ok(body)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Post,
+            "/api/v2/futures/batch-orders",
+        )
+        .with_body(Value::Array(orders)))
+    }
+
+    fn cancel_order(&self, command: &CancelCommand) -> Result<PrivateRestRequestSpec> {
+        if command.exchange != ExchangeId::Toobit
+            || command.exchange_symbol.exchange != ExchangeId::Toobit
+        {
+            anyhow::bail!("toobit cancel requires toobit exchange symbols");
+        }
+        if command.exchange_order_id.is_none() && command.client_order_id.is_none() {
+            anyhow::bail!("toobit cancel requires orderId or origClientOrderId");
+        }
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Delete,
+            "/api/v2/futures/order",
+        )
+        .with_query("symbol", &command.exchange_symbol.symbol);
+        if let Some(order_id) = &command.exchange_order_id {
+            spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(client_order_id) = &command.client_order_id {
+            spec = spec.with_query("origClientOrderId", client_order_id);
+        }
+        Ok(spec)
+    }
+
+    fn cancel_all_orders(&self, command: &CancelAllCommand) -> Result<PrivateRestRequestSpec> {
+        if command.exchange != ExchangeId::Toobit
+            || command
+                .exchange_symbol
+                .as_ref()
+                .is_some_and(|symbol| symbol.exchange != ExchangeId::Toobit)
+        {
+            anyhow::bail!("toobit cancel-all requires toobit exchange symbols");
+        }
+        let symbol = command
+            .exchange_symbol
+            .as_ref()
+            .ok_or_else(|| anyhow!("toobit cancel-all requires a symbol"))?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Delete,
+            "/api/v2/futures/batch-orders",
+        )
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn cancel_batch_orders(&self, command: &CancelBatchCommand) -> Result<PrivateRestRequestSpec> {
+        if command.exchange != ExchangeId::Toobit {
+            anyhow::bail!("toobit batch cancel requires toobit exchange symbols");
+        }
+        for order in &command.orders {
+            if order.exchange != ExchangeId::Toobit
+                || order.exchange_symbol.exchange != ExchangeId::Toobit
+            {
+                anyhow::bail!("toobit batch cancel requires toobit exchange symbols");
+            }
+            if order.exchange_order_id.is_none() {
+                anyhow::bail!("toobit batch cancel by ids requires orderId for every order");
+            }
+        }
+        let ids = command
+            .orders
+            .iter()
+            .filter_map(|order| order.exchange_order_id.as_deref())
+            .collect::<Vec<_>>();
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Delete,
+            "/api/v1/futures/cancelOrderByIds",
+        )
+        .with_query("ids", ids.join(",")))
+    }
+
+    fn get_order(&self, query: &OrderQuery) -> Result<PrivateRestRequestSpec> {
+        if query.exchange != ExchangeId::Toobit
+            || query.exchange_symbol.exchange != ExchangeId::Toobit
+        {
+            anyhow::bail!("toobit query order requires toobit exchange symbols");
+        }
+        if query.exchange_order_id.is_none() && query.client_order_id.is_none() {
+            anyhow::bail!("toobit query order requires orderId or origClientOrderId");
+        }
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v2/futures/order",
+        )
+        .with_query("symbol", &query.exchange_symbol.symbol);
+        if let Some(order_id) = &query.exchange_order_id {
+            spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(client_order_id) = &query.client_order_id {
+            spec = spec.with_query("origClientOrderId", client_order_id);
+        }
+        Ok(spec)
+    }
+
+    fn get_open_orders(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v2/futures/open-orders",
+        );
+        if let Some(symbol) = symbol {
+            ensure_toobit_symbol(symbol, "open orders")?;
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn get_all_orders(&self, query: &OrderHistoryQuery) -> Result<PrivateRestRequestSpec> {
+        if query.exchange != ExchangeId::Toobit
+            || query.exchange_symbol.exchange != ExchangeId::Toobit
+        {
+            anyhow::bail!("toobit all-orders history requires toobit exchange symbols");
+        }
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v2/futures/history-orders",
+        )
+        .with_query("symbol", &query.exchange_symbol.symbol);
+        if let Some(order_id) = &query.exchange_order_id {
+            spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(start_time) = query.start_time {
+            spec = spec.with_query("startTime", start_time.timestamp_millis());
+        }
+        if let Some(end_time) = query.end_time {
+            spec = spec.with_query("endTime", end_time.timestamp_millis());
+        }
+        if let Some(limit) = query.limit {
+            spec = spec.with_query("limit", limit);
+        }
+        Ok(spec)
+    }
+
+    fn get_fills(&self, query: &FillQuery) -> Result<PrivateRestRequestSpec> {
+        if query.exchange != ExchangeId::Toobit {
+            anyhow::bail!("toobit fills require toobit exchange symbols");
+        }
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v2/futures/user-trades",
+        );
+        if let Some(symbol) = &query.exchange_symbol {
+            ensure_toobit_symbol(symbol, "fills")?;
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        if let Some(order_id) = &query.exchange_order_id {
+            spec = spec.with_query("orderId", order_id);
+        }
+        if let Some(client_order_id) = &query.client_order_id {
+            spec = spec.with_query("clientOrderId", client_order_id);
+        }
+        if let Some(start_time) = query.start_time {
+            spec = spec.with_query("startTime", start_time.timestamp_millis());
+        }
+        if let Some(end_time) = query.end_time {
+            spec = spec.with_query("endTime", end_time.timestamp_millis());
+        }
+        if let Some(limit) = query.limit {
+            spec = spec.with_query("limit", limit);
+        }
+        Ok(spec)
+    }
+
+    fn get_positions(&self, symbol: Option<&ExchangeSymbol>) -> Result<PrivateRestRequestSpec> {
+        let mut spec = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v1/futures/positions",
+        );
+        if let Some(symbol) = symbol {
+            ensure_toobit_symbol(symbol, "positions")?;
+            spec = spec.with_query("symbol", &symbol.symbol);
+        }
+        Ok(spec)
+    }
+
+    fn get_balances(&self) -> Result<PrivateRestRequestSpec> {
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v1/futures/balance",
+        ))
+    }
+
+    fn get_trade_fee(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        ensure_toobit_symbol(symbol, "trade fee")?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v1/futures/commissionRate",
+        )
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn get_symbol_account_config(&self, symbol: &ExchangeSymbol) -> Result<PrivateRestRequestSpec> {
+        ensure_toobit_symbol(symbol, "symbol account config")?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Get,
+            "/api/v1/futures/accountLeverage",
+        )
+        .with_query("symbol", &symbol.symbol))
+    }
+
+    fn amend_order(&self, command: &AmendOrderCommand) -> Result<PrivateRestRequestSpec> {
+        ensure_toobit_command_symbol(&command.exchange, &command.exchange_symbol, "amend")?;
+        if command.exchange_order_id.is_none() && command.client_order_id.is_none() {
+            anyhow::bail!("toobit amend requires orderId or origClientOrderId");
+        }
+        if command.new_client_order_id.is_some() {
+            anyhow::bail!("toobit amend does not replace client order id");
+        }
+        if command.new_quantity.is_none() && command.new_price.is_none() {
+            anyhow::bail!("toobit amend requires new quantity or new price");
+        }
+        let mut body = json!({"symbol": command.exchange_symbol.symbol});
+        if let Some(order_id) = &command.exchange_order_id {
+            set_str(&mut body, "orderId", order_id);
+        }
+        if let Some(client_order_id) = &command.client_order_id {
+            set_str(&mut body, "origClientOrderId", client_order_id);
+        }
+        if let Some(quantity) = command.new_quantity {
+            set_str(&mut body, "quantity", number_string(quantity));
+        }
+        if let Some(price) = command.new_price {
+            set_str(&mut body, "price", number_string(price));
+        }
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Post,
+            "/api/v2/futures/order/update",
+        )
+        .with_body(body))
+    }
+
+    fn set_leverage(&self, command: &LeverageCommand) -> Result<PrivateRestRequestSpec> {
+        ensure_toobit_command_symbol(&command.exchange, &command.exchange_symbol, "set leverage")?;
+        Ok(PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Post,
+            "/api/v2/futures/leverage",
+        )
+        .with_body(json!({
+            "symbol": command.exchange_symbol.symbol,
+            "leverage": command.leverage,
+        })))
+    }
+
+    fn set_position_mode(&self, command: &PositionModeCommand) -> Result<PrivateRestRequestSpec> {
+        if command.exchange != ExchangeId::Toobit {
+            anyhow::bail!("toobit position mode requires toobit exchange");
+        }
+        anyhow::bail!("toobit position mode switching is not exposed as a verified REST endpoint")
+    }
+
+    fn set_countdown_cancel_all(
+        &self,
+        command: &CountdownCancelAllCommand,
+    ) -> Result<PrivateRestRequestSpec> {
+        if command.exchange != ExchangeId::Toobit {
+            anyhow::bail!("toobit countdown cancel-all requires toobit exchange");
+        }
+        anyhow::bail!("toobit countdown cancel-all is not supported by this adapter")
+    }
+
+    fn ws_login(&self, _auth: &PrivateWsAuth, _timestamp: i64) -> Result<PrivateWsRequest> {
+        anyhow::bail!("toobit private websocket uses listenKey URL authentication")
+    }
+
+    fn ws_subscribe(
+        &self,
+        _subscription: &PrivateWsSubscription,
+        _timestamp: i64,
+    ) -> Result<PrivateWsRequest> {
+        anyhow::bail!("toobit private websocket is not supported by this adapter")
+    }
+
+    fn parse_private_ws_message(
+        &self,
+        _raw: &str,
+        _received_at: DateTime<Utc>,
+    ) -> Result<Vec<PrivateEvent>> {
+        anyhow::bail!("toobit private websocket is not supported by this adapter")
+    }
+}
+
 pub fn binance_signature(secret: &str, query: &str) -> String {
     hmac_sha256_hex(secret, query)
 }
@@ -6363,6 +6810,40 @@ fn bybit_rest_headers(
         ("X-BAPI-SIGN-TYPE".to_string(), "2".to_string()),
         ("X-BAPI-TIMESTAMP".to_string(), timestamp_ms.to_string()),
         ("X-BAPI-RECV-WINDOW".to_string(), recv_window.to_string()),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ]))
+}
+
+pub fn toobit_signature(secret: &str, payload: &str) -> String {
+    hmac_sha256_hex(secret, payload)
+}
+
+fn toobit_signed_request(
+    auth: &PrivateRestAuth,
+    mut request: PrivateRestRequestSpec,
+    timestamp_ms: i64,
+) -> Result<PrivateRestRequestSpec> {
+    request
+        .query
+        .entry("recvWindow".to_string())
+        .or_insert_with(|| "5000".to_string());
+    request
+        .query
+        .insert("timestamp".to_string(), timestamp_ms.to_string());
+    request.query.remove("signature");
+    let payload = format!("{}{}", request.raw_query_string(), request.body_string());
+    let signature = toobit_signature(&auth.api_secret, &payload);
+    request.query.insert("signature".to_string(), signature);
+    Ok(request)
+}
+
+fn toobit_rest_headers(
+    auth: &PrivateRestAuth,
+    _request: &PrivateRestRequestSpec,
+    _timestamp_ms: i64,
+) -> Result<BTreeMap<String, String>> {
+    Ok(BTreeMap::from([
+        ("X-BB-APIKEY".to_string(), auth.api_key.clone()),
         ("Content-Type".to_string(), "application/json".to_string()),
     ]))
 }
@@ -6659,6 +7140,22 @@ fn normalize_private_rest_response(exchange: ExchangeId, value: Value) -> Result
             }
             Ok(value)
         }
+        ExchangeId::Toobit => {
+            let code = str_field(&value, &["code"]).unwrap_or_else(|| "0".to_string());
+            if code != "0" && code != "200" {
+                let message = str_field(&value, &["msg", "message"])
+                    .unwrap_or_else(|| "toobit private REST error".to_string());
+                return Err(PrivateRestError {
+                    exchange,
+                    class: classify_generic_rest_error(&code, &message),
+                    endpoint: None,
+                    code: Some(code),
+                    message,
+                }
+                .into());
+            }
+            Ok(value)
+        }
         _ => Ok(value),
     }
 }
@@ -6688,7 +7185,11 @@ fn private_rest_http_error(
             ExchangeId::Gate => {
                 classify_gate_rest_error(code.as_deref().unwrap_or_default(), &message)
             }
-            ExchangeId::Okx | ExchangeId::Bybit | ExchangeId::Mexc | ExchangeId::Htx => {
+            ExchangeId::Okx
+            | ExchangeId::Bybit
+            | ExchangeId::Mexc
+            | ExchangeId::Htx
+            | ExchangeId::Toobit => {
                 classify_generic_rest_error(code.as_deref().unwrap_or_default(), &message)
             }
             _ => ExchangeErrorClass::Unknown,
@@ -7051,6 +7552,29 @@ fn close_position_spec(
             },
             position_mode,
         ),
+        ExchangeId::Toobit => ToobitPrivatePerpProtocol.place_order(
+            &OrderCommand {
+                command_id: command.client_order_id.clone(),
+                bundle_id: command.client_order_id.clone(),
+                exchange: ExchangeId::Toobit,
+                canonical_symbol: command.canonical_symbol.clone(),
+                exchange_symbol: command.exchange_symbol.clone(),
+                intent: crate::execution::OrderIntent::CloseLongTaker,
+                side: command.order_side(),
+                position_side: command.position_side,
+                order_type: command.order_type,
+                quantity: command.quantity,
+                price: command.price,
+                time_in_force: command.time_in_force,
+                post_only: false,
+                reduce_only: true,
+                client_order_id: command.client_order_id.clone(),
+                max_slippage_pct: command.max_slippage_pct,
+                status: OrderCommandStatus::Planned,
+                created_at: command.requested_at,
+            },
+            position_mode,
+        ),
         other => anyhow::bail!("{other} private perp close_position is not supported"),
     }
 }
@@ -7096,6 +7620,8 @@ fn response_items(value: &Value) -> Vec<Value> {
                 .or_else(|| map.get("orders"))
                 .or_else(|| map.get("positions"))
                 .or_else(|| map.get("assets"))
+                .or_else(|| map.get("balances"))
+                .or_else(|| map.get("trades"))
                 .or_else(|| map.get("ticks"))
             {
                 items.clone()
@@ -7745,6 +8271,7 @@ fn parse_rest_order_with_gate_contract_size(
         ExchangeId::Bybit => parse_bybit_order_or_fill(&item, received_at),
         ExchangeId::Mexc => parse_mexc_order_or_fill(&item, received_at),
         ExchangeId::Htx => parse_htx_order_or_fill(&item, received_at),
+        ExchangeId::Toobit => parse_toobit_order_or_fill(&item, received_at),
         ExchangeId::Gate => parse_gate_order_or_fill_with_contract_size(
             &item,
             received_at,
@@ -9004,6 +9531,155 @@ fn parse_htx_balance(item: &Value, received_at: DateTime<Utc>) -> Option<Private
     ))
 }
 
+fn parse_toobit_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    if item
+        .get("tradeId")
+        .or_else(|| item.get("ticketId"))
+        .or_else(|| item.get("id"))
+        .is_some()
+        && item.get("orderId").is_some()
+        && item
+            .get("status")
+            .or_else(|| item.get("type"))
+            .or_else(|| item.get("origQty"))
+            .is_none()
+    {
+        return parse_toobit_fill(item, received_at);
+    }
+    let symbol = str_field(item, &["symbol", "symbolName"])?;
+    let side = parse_order_side(str_field(item, &["side"]).as_deref());
+    Some(PrivateEvent::order(
+        OrderState {
+            exchange: ExchangeId::Toobit,
+            canonical_symbol: canonical(&ExchangeId::Toobit, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, symbol),
+            client_order_id: str_field(item, &["clientOrderId", "newClientOrderId"]),
+            exchange_order_id: str_field(item, &["orderId", "id"]),
+            side,
+            position_side: str_field(item, &["positionSide"])
+                .as_deref()
+                .map(parse_position_side)
+                .unwrap_or(PositionSide::Net),
+            order_type: parse_order_type(str_field(item, &["type", "orderType"]).as_deref()),
+            quantity: f64_field(item, &["origQty", "quantity", "qty"]).unwrap_or_default(),
+            price: f64_field(item, &["price"]),
+            filled_quantity: f64_field(item, &["executedQty", "filledQty", "cumQty"])
+                .unwrap_or_default(),
+            average_fill_price: f64_field(item, &["avgPrice", "priceAvg"]),
+            time_in_force: parse_time_in_force(str_field(item, &["timeInForce"]).as_deref()),
+            reduce_only: bool_field(item, &["reduceOnly"]),
+            status: binance_status(str_field(item, &["status", "state"]).as_deref()),
+            updated_at: millis_field(
+                item,
+                &["updateTime", "updatedTime", "time", "transactTime"],
+                received_at,
+            ),
+        },
+        received_at,
+    ))
+}
+
+fn parse_toobit_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["symbol", "symbolName"])?;
+    let side = str_field(item, &["side"])
+        .as_deref()
+        .map(|side| parse_order_side(Some(side)))
+        .unwrap_or_else(|| {
+            if bool_field(item, &["isBuyer"]) {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            }
+        });
+    let price = f64_field(item, &["price"]).unwrap_or_default();
+    let quantity = f64_field(item, &["qty", "quantity", "executedQty"]).unwrap_or_default();
+    Some(PrivateEvent::fill(
+        FillEvent {
+            exchange: ExchangeId::Toobit,
+            canonical_symbol: canonical(&ExchangeId::Toobit, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, symbol),
+            trade_id: str_field(item, &["tradeId", "ticketId", "id"])
+                .unwrap_or_else(|| format!("toobit-fill-{}", received_at.timestamp_millis())),
+            client_order_id: str_field(item, &["clientOrderId", "newClientOrderId"]),
+            exchange_order_id: str_field(item, &["orderId"]),
+            side,
+            position_side: str_field(item, &["positionSide"])
+                .as_deref()
+                .map(parse_position_side)
+                .unwrap_or(PositionSide::Net),
+            liquidity: if bool_field(item, &["isMaker"]) {
+                FillLiquidity::Maker
+            } else {
+                liquidity(str_field(item, &["role", "liquidity"]).as_deref())
+            },
+            price,
+            quantity,
+            quote_quantity: f64_field(item, &["quoteQty", "quoteQuantity"])
+                .unwrap_or(price * quantity),
+            fee: f64_field(item, &["commission", "fee", "feeAmount"]),
+            fee_asset: str_field(
+                item,
+                &["commissionAsset", "feeAsset", "feeCoinId", "feeCoin"],
+            ),
+            fee_rate: f64_field(item, &["feeRate"]),
+            realized_pnl: f64_field(item, &["realizedPnl", "realizedProfit"]),
+            reduce_only: Some(bool_field(item, &["reduceOnly"])),
+            filled_at: millis_field(item, &["time", "tradeTime", "createdTime"], received_at),
+            received_at,
+        },
+        received_at,
+    ))
+}
+
+fn parse_toobit_position(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let symbol = str_field(item, &["symbol", "symbolName"])?;
+    Some(PrivateEvent::position(
+        ExchangePosition {
+            exchange: ExchangeId::Toobit,
+            canonical_symbol: canonical(&ExchangeId::Toobit, &symbol),
+            exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, symbol),
+            position_side: str_field(item, &["positionSide", "side"])
+                .as_deref()
+                .map(parse_position_side)
+                .unwrap_or(PositionSide::Net),
+            quantity: f64_field(item, &["positionAmt", "positionQty", "quantity", "size"])
+                .unwrap_or_default()
+                .abs(),
+            entry_price: f64_field(item, &["entryPrice", "avgPrice", "openPrice"]),
+            mark_price: f64_field(item, &["markPrice", "lastPrice"]),
+            unrealized_pnl: f64_field(item, &["unRealizedProfit", "unrealizedPnl", "pnl"]),
+            updated_at: millis_field(item, &["updateTime", "updatedTime"], received_at),
+        },
+        received_at,
+    ))
+}
+
+fn parse_toobit_balance(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
+    let asset = str_field(item, &["asset", "coin", "marginCoin", "currency"])
+        .unwrap_or_else(|| "USDT".to_string());
+    let total = f64_field(item, &["balance", "walletBalance", "equity", "total"])
+        .or_else(|| {
+            f64_field(item, &["availableBalance", "available", "free"]).map(|available| {
+                available + f64_field(item, &["locked", "frozen"]).unwrap_or_default()
+            })
+        })
+        .unwrap_or_default();
+    let available = f64_field(item, &["availableBalance", "available", "free"]).unwrap_or(total);
+    let locked =
+        f64_field(item, &["locked", "frozen"]).unwrap_or_else(|| (total - available).max(0.0));
+    Some(PrivateEvent::balance(
+        ExchangeBalance {
+            exchange: ExchangeId::Toobit,
+            asset,
+            total,
+            available,
+            locked,
+            updated_at: received_at,
+        },
+        received_at,
+    ))
+}
+
 fn parse_gate_order_or_fill(item: &Value, received_at: DateTime<Utc>) -> Option<PrivateEvent> {
     parse_gate_order_or_fill_with_contract_size(
         item,
@@ -9169,6 +9845,74 @@ fn number_string(value: f64) -> String {
         .trim_end_matches('0')
         .trim_end_matches('.')
         .to_string()
+}
+
+fn ensure_toobit_symbol(symbol: &ExchangeSymbol, action: &str) -> Result<()> {
+    if symbol.exchange != ExchangeId::Toobit {
+        anyhow::bail!("toobit {action} requires toobit exchange symbols");
+    }
+    if symbol.symbol.trim().is_empty() {
+        anyhow::bail!("toobit {action} requires non-empty symbol");
+    }
+    Ok(())
+}
+
+fn ensure_toobit_command_symbol(
+    exchange: &ExchangeId,
+    symbol: &ExchangeSymbol,
+    action: &str,
+) -> Result<()> {
+    if exchange != &ExchangeId::Toobit || symbol.exchange != ExchangeId::Toobit {
+        anyhow::bail!("toobit {action} requires toobit exchange symbols");
+    }
+    ensure_toobit_symbol(symbol, action)
+}
+
+fn toobit_side(side: OrderSide) -> &'static str {
+    match side {
+        OrderSide::Buy => "BUY",
+        OrderSide::Sell => "SELL",
+    }
+}
+
+fn toobit_position_side(
+    position_mode: PositionMode,
+    position_side: PositionSide,
+    fallback_side: OrderSide,
+) -> &'static str {
+    match (position_mode, position_side) {
+        (PositionMode::Hedge, PositionSide::Long) => "LONG",
+        (PositionMode::Hedge, PositionSide::Short) => "SHORT",
+        _ => match fallback_side {
+            OrderSide::Buy => "LONG",
+            OrderSide::Sell => "SHORT",
+        },
+    }
+}
+
+fn toobit_order_type(
+    order_type: OrderType,
+    post_only: bool,
+    time_in_force: TimeInForce,
+) -> &'static str {
+    match order_type {
+        OrderType::Market => "MARKET",
+        OrderType::Limit if post_only || matches!(time_in_force, TimeInForce::PostOnly) => {
+            "LIMIT_MAKER"
+        }
+        OrderType::Limit => "LIMIT",
+    }
+}
+
+fn toobit_time_in_force(tif: TimeInForce, post_only: bool) -> Option<&'static str> {
+    if post_only || matches!(tif, TimeInForce::PostOnly) {
+        return None;
+    }
+    Some(match tif {
+        TimeInForce::Ioc => "IOC",
+        TimeInForce::Fok => "FOK",
+        TimeInForce::Gtc | TimeInForce::PostOnly => "GTC",
+    })
 }
 
 fn ensure_coinex_symbol(symbol: &ExchangeSymbol, action: &str) -> Result<()> {
@@ -17088,6 +17832,400 @@ mod tests {
         let mode_body = mode.body.unwrap();
         assert_eq!(mode_body["margin_account"], "USDT");
         assert_eq!(mode_body["position_mode"], "dual_side");
+    }
+
+    #[test]
+    fn toobit_should_build_private_perp_rest_specs() {
+        let cmd = command(ExchangeId::Toobit, "BTC-SWAP-USDT");
+        let place = ToobitPrivatePerpProtocol
+            .place_order(&cmd, PositionMode::Hedge)
+            .unwrap();
+        assert_eq!(place.exchange, ExchangeId::Toobit);
+        assert_eq!(place.method, PrivateRestMethod::Post);
+        assert_eq!(place.path, "/api/v2/futures/order");
+        let body = place.body.unwrap();
+        assert_eq!(body["symbol"], "BTC-SWAP-USDT");
+        assert_eq!(body["side"], "BUY");
+        assert_eq!(body["positionSide"], "LONG");
+        assert_eq!(body["type"], "LIMIT_MAKER");
+        assert_eq!(body["quantity"], "0.01");
+        assert_eq!(body["price"], "65000");
+        assert_eq!(body["newClientOrderId"], cmd.client_order_id);
+        assert!(body.get("timeInForce").is_none());
+
+        let batch_place = ToobitPrivatePerpProtocol
+            .place_batch_orders(
+                &BatchPlaceCommand::new(ExchangeId::Toobit, [cmd.clone()], Utc::now()),
+                PositionMode::Hedge,
+            )
+            .unwrap();
+        assert_eq!(batch_place.method, PrivateRestMethod::Post);
+        assert_eq!(batch_place.path, "/api/v2/futures/batch-orders");
+        let batch_place_orders = batch_place.body.as_ref().and_then(Value::as_array).unwrap();
+        assert_eq!(batch_place_orders[0]["symbol"], "BTC-SWAP-USDT");
+        assert_eq!(
+            batch_place_orders[0]["newClientOrderId"],
+            cmd.client_order_id
+        );
+
+        let cancel = ToobitPrivatePerpProtocol
+            .cancel_order(&CancelCommand {
+                exchange: ExchangeId::Toobit,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                client_order_id: Some("client-1".to_string()),
+                exchange_order_id: Some("order-1".to_string()),
+                reason: None,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(cancel.method, PrivateRestMethod::Delete);
+        assert_eq!(cancel.path, "/api/v2/futures/order");
+        assert_eq!(cancel.query["symbol"], "BTC-SWAP-USDT");
+        assert_eq!(cancel.query["orderId"], "order-1");
+        assert_eq!(cancel.query["origClientOrderId"], "client-1");
+
+        let batch = ToobitPrivatePerpProtocol
+            .cancel_batch_orders(&CancelBatchCommand::new(
+                ExchangeId::Toobit,
+                [
+                    CancelCommand {
+                        exchange: ExchangeId::Toobit,
+                        canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                        exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                        client_order_id: None,
+                        exchange_order_id: Some("order-1".to_string()),
+                        reason: None,
+                        requested_at: Utc::now(),
+                    },
+                    CancelCommand {
+                        exchange: ExchangeId::Toobit,
+                        canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                        exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                        client_order_id: Some("client-2".to_string()),
+                        exchange_order_id: Some("order-2".to_string()),
+                        reason: None,
+                        requested_at: Utc::now(),
+                    },
+                ],
+                Utc::now(),
+            ))
+            .unwrap();
+        assert_eq!(batch.method, PrivateRestMethod::Delete);
+        assert_eq!(batch.path, "/api/v1/futures/cancelOrderByIds");
+        assert_eq!(batch.query["ids"], "order-1,order-2");
+
+        let cancel_all = ToobitPrivatePerpProtocol
+            .cancel_all_orders(&CancelAllCommand::for_symbol(
+                ExchangeId::Toobit,
+                CanonicalSymbol::new("BTC", "USDT"),
+                ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                Utc::now(),
+            ))
+            .unwrap();
+        assert_eq!(cancel_all.path, "/api/v2/futures/batch-orders");
+        assert_eq!(cancel_all.query["symbol"], "BTC-SWAP-USDT");
+
+        let order = ToobitPrivatePerpProtocol
+            .get_order(&OrderQuery {
+                exchange: ExchangeId::Toobit,
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                client_order_id: None,
+                exchange_order_id: Some("order-1".to_string()),
+            })
+            .unwrap();
+        assert_eq!(order.path, "/api/v2/futures/order");
+        assert_eq!(order.query["orderId"], "order-1");
+
+        let open = ToobitPrivatePerpProtocol
+            .get_open_orders(Some(&ExchangeSymbol::new(
+                ExchangeId::Toobit,
+                "BTC-SWAP-USDT",
+            )))
+            .unwrap();
+        assert_eq!(open.path, "/api/v2/futures/open-orders");
+        assert_eq!(open.query["symbol"], "BTC-SWAP-USDT");
+
+        let mut history = OrderHistoryQuery::for_symbol(
+            ExchangeId::Toobit,
+            ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+        );
+        history.limit = Some(100);
+        history.start_time = DateTime::<Utc>::from_timestamp_millis(1_700_000_000_000);
+        let history_spec = ToobitPrivatePerpProtocol.get_all_orders(&history).unwrap();
+        assert_eq!(history_spec.path, "/api/v2/futures/history-orders");
+        assert_eq!(history_spec.query["limit"], "100");
+        assert_eq!(history_spec.query["startTime"], "1700000000000");
+
+        let fills = ToobitPrivatePerpProtocol
+            .get_fills(&FillQuery::for_symbol(
+                ExchangeId::Toobit,
+                CanonicalSymbol::new("BTC", "USDT"),
+                ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+            ))
+            .unwrap();
+        assert_eq!(fills.path, "/api/v2/futures/user-trades");
+        assert_eq!(fills.query["symbol"], "BTC-SWAP-USDT");
+
+        let positions = ToobitPrivatePerpProtocol
+            .get_positions(Some(&ExchangeSymbol::new(
+                ExchangeId::Toobit,
+                "BTC-SWAP-USDT",
+            )))
+            .unwrap();
+        assert_eq!(positions.path, "/api/v1/futures/positions");
+        assert_eq!(positions.query["symbol"], "BTC-SWAP-USDT");
+
+        assert_eq!(
+            ToobitPrivatePerpProtocol.get_balances().unwrap().path,
+            "/api/v1/futures/balance"
+        );
+        assert_eq!(
+            ToobitPrivatePerpProtocol
+                .get_trade_fee(&ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"))
+                .unwrap()
+                .path,
+            "/api/v1/futures/commissionRate"
+        );
+        assert_eq!(
+            ToobitPrivatePerpProtocol
+                .get_symbol_account_config(&ExchangeSymbol::new(
+                    ExchangeId::Toobit,
+                    "BTC-SWAP-USDT"
+                ))
+                .unwrap()
+                .path,
+            "/api/v1/futures/accountLeverage"
+        );
+
+        let amend = ToobitPrivatePerpProtocol
+            .amend_order(&AmendOrderCommand {
+                exchange: ExchangeId::Toobit,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                client_order_id: Some("client-1".to_string()),
+                exchange_order_id: None,
+                original_side: Some(OrderSide::Buy),
+                new_client_order_id: None,
+                new_quantity: Some(0.02),
+                new_price: Some(64_900.0),
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(amend.path, "/api/v2/futures/order/update");
+        let amend_body = amend.body.unwrap();
+        assert_eq!(amend_body["origClientOrderId"], "client-1");
+        assert_eq!(amend_body["quantity"], "0.02");
+        assert_eq!(amend_body["price"], "64900");
+
+        let leverage = ToobitPrivatePerpProtocol
+            .set_leverage(&LeverageCommand {
+                exchange: ExchangeId::Toobit,
+                canonical_symbol: CanonicalSymbol::new("BTC", "USDT"),
+                exchange_symbol: ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                leverage: 5,
+                requested_at: Utc::now(),
+            })
+            .unwrap();
+        assert_eq!(leverage.path, "/api/v2/futures/leverage");
+        assert_eq!(leverage.body.unwrap()["leverage"], 5);
+    }
+
+    #[test]
+    fn toobit_private_perp_should_sign_and_parse_readbacks() {
+        let auth = PrivateRestAuth {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            passphrase: None,
+            demo_trading: false,
+        };
+        let request = PrivateRestRequestSpec::new(
+            ExchangeId::Toobit,
+            PrivateRestMethod::Post,
+            "/api/v2/futures/order",
+        )
+        .with_query("symbol", "BTC-SWAP-USDT")
+        .with_body(json!({"symbol":"BTC-SWAP-USDT","side":"BUY"}));
+        let signed = toobit_signed_request(&auth, request, 1_700_000_000_000).unwrap();
+        assert_eq!(signed.query["recvWindow"], "5000");
+        assert_eq!(signed.query["timestamp"], "1700000000000");
+        let mut signed_without_sig = signed.clone();
+        signed_without_sig.query.remove("signature");
+        let expected_payload = format!(
+            "{}{}",
+            signed_without_sig.raw_query_string(),
+            signed_without_sig.body_string()
+        );
+        assert_eq!(
+            signed.query["signature"],
+            toobit_signature("secret", &expected_payload)
+        );
+        let headers = toobit_rest_headers(&auth, &signed, 1_700_000_000_000).unwrap();
+        assert_eq!(headers["X-BB-APIKEY"], "key");
+
+        let now = Utc::now();
+        let order = parse_rest_order_with_gate_contract_size(
+            ExchangeId::Toobit,
+            &ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+            &json!({
+                "code": 0,
+                "data": {
+                    "symbol": "BTC-SWAP-USDT",
+                    "orderId": "order-1",
+                    "clientOrderId": "client-1",
+                    "side": "BUY",
+                    "positionSide": "LONG",
+                    "type": "LIMIT",
+                    "origQty": "0.02",
+                    "price": "65000",
+                    "executedQty": "0.01",
+                    "avgPrice": "65010",
+                    "timeInForce": "GTC",
+                    "reduceOnly": false,
+                    "status": "PARTIALLY_FILLED",
+                    "updateTime": 1700000000000_i64
+                }
+            }),
+            now,
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.exchange, ExchangeId::Toobit);
+        assert_eq!(order.exchange_order_id.as_deref(), Some("order-1"));
+        assert_eq!(order.position_side, PositionSide::Long);
+        assert_eq!(order.status, OrderCommandStatus::PartiallyFilled);
+        assert_eq!(order.filled_quantity, 0.01);
+
+        let fill = parse_toobit_fill(
+            &json!({
+                "symbol": "BTC-SWAP-USDT",
+                "id": "trade-1",
+                "orderId": "order-1",
+                "clientOrderId": "client-1",
+                "isBuyer": true,
+                "positionSide": "LONG",
+                "price": "65000",
+                "qty": "0.02",
+                "quoteQty": "1300",
+                "commission": "0.65",
+                "commissionAsset": "USDT",
+                "isMaker": true,
+                "realizedPnl": "1.2",
+                "time": 1700000001000_i64
+            }),
+            now,
+        )
+        .and_then(event_fill)
+        .unwrap();
+        assert_eq!(fill.exchange, ExchangeId::Toobit);
+        assert_eq!(fill.liquidity, FillLiquidity::Maker);
+        assert_eq!(fill.fee, Some(0.65));
+
+        let position = parse_toobit_position(
+            &json!({
+                "symbol": "BTC-SWAP-USDT",
+                "positionSide": "SHORT",
+                "positionAmt": "-0.5",
+                "entryPrice": "64000",
+                "markPrice": "65000",
+                "unrealizedPnl": "-5"
+            }),
+            now,
+        )
+        .and_then(event_position)
+        .unwrap();
+        assert_eq!(position.position_side, PositionSide::Short);
+        assert_eq!(position.quantity, 0.5);
+
+        let balance = parse_toobit_balance(
+            &json!({
+                "asset": "USDT",
+                "balance": "1000",
+                "availableBalance": "850",
+                "locked": "150"
+            }),
+            now,
+        )
+        .and_then(event_balance)
+        .unwrap();
+        assert_eq!(balance.asset, "USDT");
+        assert_eq!(balance.total, 1000.0);
+        assert_eq!(balance.available, 850.0);
+        assert_eq!(balance.locked, 150.0);
+    }
+
+    #[tokio::test]
+    async fn toobit_adapter_cancel_all_should_route_native_symbol_cancel_all() {
+        let transport = SequentialMockTransport::new([json!({
+            "code": 0,
+            "data": [
+                {"orderId": "order-1", "clientOrderId": "client-1"},
+                {"orderId": "order-2", "clientOrderId": "client-2"}
+            ]
+        })]);
+        let seen = transport.seen.clone();
+        let adapter = PrivatePerpTradingAdapter::new(ToobitPrivatePerpProtocol, transport);
+
+        let ack = adapter
+            .cancel_all_orders(CancelAllCommand::for_symbol(
+                ExchangeId::Toobit,
+                CanonicalSymbol::new("BTC", "USDT"),
+                ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT"),
+                Utc::now(),
+            ))
+            .await
+            .unwrap();
+
+        assert!(ack.accepted);
+        assert_eq!(ack.exchange, ExchangeId::Toobit);
+        assert_eq!(ack.cancelled_orders, 2);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].path, "/api/v2/futures/batch-orders");
+        assert_eq!(seen[0].method, PrivateRestMethod::Delete);
+        assert_eq!(seen[0].query["symbol"], "BTC-SWAP-USDT");
+    }
+
+    #[test]
+    fn toobit_private_perp_capabilities_should_match_supported_surface() {
+        let capabilities = private_perp_trading_capabilities(ExchangeId::Toobit);
+        assert!(capabilities.supports_market_orders);
+        assert!(capabilities.supports_limit_orders);
+        assert!(capabilities.supports_post_only);
+        assert!(capabilities.supports_reduce_only);
+        assert!(capabilities.supports_hedge_mode);
+        assert!(capabilities.supports_leverage);
+        assert!(capabilities.supports_close_position);
+        assert!(!capabilities.supports_position_mode_change);
+        assert!(!capabilities.supports_countdown_cancel_all);
+        assert!(capabilities.supports_batch_place_orders);
+
+        assert!(ToobitPrivatePerpProtocol
+            .set_position_mode(&PositionModeCommand {
+                exchange: ExchangeId::Toobit,
+                mode: PositionMode::Hedge,
+                requested_at: Utc::now(),
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("position mode switching"));
+        let endpoint = build_private_ws_endpoint(
+            PrivatePerpExchange::Toobit,
+            PrivateWsAuth {
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                passphrase: None,
+                account_id: Some("listen-key-1".to_string()),
+                demo_trading: false,
+            },
+            &[ExchangeSymbol::new(ExchangeId::Toobit, "BTC-SWAP-USDT")],
+            1_700_000_000,
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint.url,
+            "wss://stream.toobit.com/api/v1/ws/listen-key-1"
+        );
     }
 
     #[test]

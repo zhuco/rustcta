@@ -14,6 +14,11 @@ market:
   depth_levels: 5
   stale_quote_ms: 30000
   min_common_exchanges: 2
+  public_book_speed: fastest
+  public_book_trigger_profile: fastest_l1
+  public_book_validation_profile: fastest_depth
+  public_book_depth: 5
+  allow_top_of_book_only: true
 thresholds:
   min_display_raw_spread: 0.001
   min_open_raw_spread: 0.005
@@ -243,6 +248,7 @@ alerts:
   reconcile_critical_alert: true
 universe:
   enabled_exchanges:
+  - binance
   - bitget
   - gate
   symbols:

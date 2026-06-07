@@ -6,7 +6,8 @@ use super::{
 use crate::market::{
     BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
     InstrumentStatus, MarketCapabilities as DataMarketCapabilities, MarketDataAdapter, MarketEvent,
-    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, WsSubscription,
+    MarketFundingSnapshot, OrderBook5, OrderBookSnapshot, PublicBookProfile, PublicBookProfileKind,
+    WsSubscription,
 };
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
@@ -135,14 +136,67 @@ impl MarketDataAdapter for BybitMarketAdapter {
         Ok(snapshots)
     }
 
-    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+    fn public_book_profiles(&self) -> Vec<PublicBookProfile> {
+        vec![
+            PublicBookProfile::new(PublicBookProfileKind::FastestL1, "orderbook.1", 1, Some(10))
+                .with_sequence(true)
+                .with_local_merge(true)
+                .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::FastestDepth,
+                "orderbook.50",
+                50,
+                Some(20),
+            )
+            .with_sequence(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+            PublicBookProfile::new(
+                PublicBookProfileKind::ConservativeDepth,
+                "orderbook.200",
+                200,
+                Some(100),
+            )
+            .with_sequence(true)
+            .with_local_merge(true)
+            .with_max_symbols_per_connection(50),
+        ]
+    }
+
+    fn build_public_ws_subscriptions_for_profile(
+        &self,
+        symbols: &[ExchangeSymbol],
+        profile: PublicBookProfileKind,
+    ) -> Vec<WsSubscription> {
+        let selected = self
+            .public_book_profiles()
+            .into_iter()
+            .find(|candidate| candidate.kind == profile)
+            .unwrap_or_else(|| {
+                PublicBookProfile::new(
+                    PublicBookProfileKind::FastestDepth,
+                    "orderbook.50",
+                    50,
+                    Some(20),
+                )
+                .with_sequence(true)
+                .with_local_merge(true)
+            });
         symbols
             .iter()
             .map(|symbol| {
-                WsSubscription::new(ExchangeId::Bybit, "orderbook.1", vec![symbol.clone()])
-                    .with_route(format!("{BYBIT_PUBLIC_WS}:orderbook.1.{}", symbol.symbol))
+                WsSubscription::new(ExchangeId::Bybit, selected.channel, vec![symbol.clone()])
+                    .with_route(format!(
+                        "{BYBIT_PUBLIC_WS}:{}.{}",
+                        selected.channel, symbol.symbol
+                    ))
+                    .with_profile(selected)
             })
             .collect()
+    }
+
+    fn build_public_ws_subscriptions(&self, symbols: &[ExchangeSymbol]) -> Vec<WsSubscription> {
+        self.build_public_ws_subscriptions_for_profile(symbols, PublicBookProfileKind::FastestDepth)
     }
 
     fn parse_public_ws_message(
@@ -151,7 +205,12 @@ impl MarketDataAdapter for BybitMarketAdapter {
         recv_ts: DateTime<Utc>,
     ) -> anyhow::Result<Vec<MarketEvent>> {
         let value: Value = serde_json::from_str(raw).context("parse bybit public ws json")?;
-        let Some(book) = parse_orderbook(&value, recv_ts, "bybit.orderbook.1", None)? else {
+        let route = value
+            .get("topic")
+            .and_then(Value::as_str)
+            .map(|topic| format!("bybit.{topic}"))
+            .unwrap_or_else(|| "bybit.orderbook".to_string());
+        let Some(book) = parse_orderbook(&value, recv_ts, &route, None)? else {
             return Ok(Vec::new());
         };
         Ok(vec![MarketEvent::OrderBook(book)])
@@ -398,11 +457,16 @@ mod tests {
         let subscriptions = BybitMarketAdapter.build_public_ws_subscriptions(&symbols);
 
         assert_eq!(subscriptions.len(), 2);
-        assert_eq!(subscriptions[0].channel, "orderbook.1");
+        assert_eq!(subscriptions[0].channel, "orderbook.50");
         assert_eq!(
             subscriptions[0].route.as_deref(),
-            Some("wss://stream.bybit.com/v5/public/linear:orderbook.1.BTCUSDT")
+            Some("wss://stream.bybit.com/v5/public/linear:orderbook.50.BTCUSDT")
         );
+        assert_eq!(
+            subscriptions[0].profile,
+            PublicBookProfileKind::FastestDepth
+        );
+        assert_eq!(subscriptions[0].depth, 50);
     }
 
     #[test]
