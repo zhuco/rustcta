@@ -1,0 +1,13 @@
+{
+  "exchange": "okx",
+  "name": "query_order",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "timestamp": "2024-01-02T03:04:05.678Z",
+  "method": "GET",
+  "request_path": "/api/v5/trade/order?instId=BTC-USDT&ordId=1001",
+  "body": "",
+  "payload": "2024-01-02T03:04:05.678ZGET/api/v5/trade/order?instId=BTC-USDT&ordId=1001",
+  "expected_signature": "YM8/P2ZwAnjw8Z9KgX1fNkx16CSehrbSAwBTb2KgYCY=",
+  "payload_format": "timestamp_method_path_body"
+}

@@ -1,0 +1,11 @@
+{
+  "exchange": "bigone",
+  "name": "jwt-openapi-fixed-nonce",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "test-secret",
+  "payload": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IjE3MDAwMDAwMDAwMDAiLCJzdWIiOiJ0ZXN0LWtleSIsInR5cGUiOiJPcGVuQVBJIn0",
+  "expected_signature": "7otFXLKItrdnxfMExk12BDLEf6qsSrZhQZVRytBrdqA=",
+  "timestamp": "1700000000000",
+  "method": "GET",
+  "request_path": "/api/v3/viewer/accounts"
+}

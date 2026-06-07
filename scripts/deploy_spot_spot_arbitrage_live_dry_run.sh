@@ -242,7 +242,7 @@ require_bool("spot_symbol_control.market_liquidation.allow_unbounded_market_orde
 require_bool("spot_symbol_control.passive_liquidation.enabled", False)
 require_bool("spot_symbol_control.runtime_publisher.enabled", True)
 
-bind_addr = scalar("monitoring.bind_addr", "127.0.0.1:8080")
+bind_addr = scalar("monitoring.bind_addr", "127.0.0.1:8091")
 expose_publicly = normalized_bool(scalar("monitoring.expose_publicly"))
 require_token = normalized_bool(scalar("monitoring.require_token"))
 if str(bind_addr).startswith("0.0.0.0:") or str(bind_addr).startswith("[::]:"):

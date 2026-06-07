@@ -7,6 +7,9 @@ use rustcta_exchange_api::{
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
+use crate::request_spec::RequestSpec;
+use crate::signing_spec::SigningVector;
+
 use super::signing::sign_raw_query;
 use super::test_support::{
     assert_signed_request, assert_signed_request_method, context, exchange_id, private_config,
@@ -26,6 +29,12 @@ fn binance_signing_should_match_documented_example() {
         signature,
         "1df63f2e1799dde74ddff3876c338dce38b1cd5da51483e1beffe9c87a8550ba"
     );
+}
+
+#[test]
+fn binance_signing_vector_fixture_should_verify() {
+    let vector = load_signing_vector("binance/signing_vectors/place_order_limit.json");
+    vector.verify().expect("fixture signature");
 }
 
 #[tokio::test]
@@ -74,6 +83,9 @@ async fn binance_adapter_should_load_balances_from_signed_account_rest() {
     assert_eq!(response.balances[0].balances[0].available, 0.1);
     assert_eq!(response.balances[0].balances[0].locked, 0.02);
     let request = seen.lock().unwrap()[0].clone();
+    load_request_spec("binance/request_specs/get_balances.json")
+        .assert_matches(&request.actual_http_request())
+        .expect("request spec");
     assert_eq!(request.path, "/api/v3/account");
     assert_signed_request(&request);
 }
@@ -117,6 +129,9 @@ async fn binance_adapter_should_query_order_from_signed_rest() {
     assert_eq!(order.quantity, "0.00847000");
     assert_eq!(order.filled_quantity, "0.00400000");
     let request = seen.lock().unwrap()[0].clone();
+    load_request_spec("binance/request_specs/query_order.json")
+        .assert_matches(&request.actual_http_request())
+        .expect("request spec");
     assert_eq!(request.path, "/api/v3/order");
     assert_eq!(
         request.query.get("symbol").map(String::as_str),
@@ -348,6 +363,9 @@ async fn binance_adapter_should_route_private_order_mutations() {
 
     let seen = seen.lock().unwrap().clone();
     assert_eq!(seen[0].path, "/api/v3/order");
+    load_request_spec("binance/request_specs/place_order.json")
+        .assert_matches(&seen[0].actual_http_request())
+        .expect("request spec");
     assert_signed_request_method(&seen[0], "POST");
     assert_eq!(seen[0].query.get("type").map(String::as_str), Some("LIMIT"));
     assert_eq!(
@@ -360,6 +378,9 @@ async fn binance_adapter_should_route_private_order_mutations() {
     );
 
     assert_eq!(seen[1].path, "/api/v3/order");
+    load_request_spec("binance/request_specs/place_quote_market_order.json")
+        .assert_matches(&seen[1].actual_http_request())
+        .expect("request spec");
     assert_signed_request_method(&seen[1], "POST");
     assert_eq!(
         seen[1].query.get("quoteOrderQty").map(String::as_str),
@@ -367,6 +388,9 @@ async fn binance_adapter_should_route_private_order_mutations() {
     );
 
     assert_eq!(seen[2].path, "/api/v3/order");
+    load_request_spec("binance/request_specs/cancel_order.json")
+        .assert_matches(&seen[2].actual_http_request())
+        .expect("request spec");
     assert_signed_request_method(&seen[2], "DELETE");
     assert_eq!(seen[2].query.get("orderId").map(String::as_str), Some("30"));
     assert_eq!(
@@ -375,9 +399,15 @@ async fn binance_adapter_should_route_private_order_mutations() {
     );
 
     assert_eq!(seen[3].path, "/api/v3/openOrders");
+    load_request_spec("binance/request_specs/cancel_all_orders.json")
+        .assert_matches(&seen[3].actual_http_request())
+        .expect("request spec");
     assert_signed_request_method(&seen[3], "DELETE");
 
     assert_eq!(seen[4].path, "/api/v3/order/amend/keepPriority");
+    load_request_spec("binance/request_specs/amend_order.json")
+        .assert_matches(&seen[4].actual_http_request())
+        .expect("request spec");
     assert_signed_request_method(&seen[4], "PUT");
     assert_eq!(
         seen[4].query.get("quantity").map(String::as_str),
@@ -389,6 +419,9 @@ async fn binance_adapter_should_route_private_order_mutations() {
     );
 
     assert_eq!(seen[5].path, "/api/v3/orderList/oco");
+    load_request_spec("binance/request_specs/place_order_list.json")
+        .assert_matches(&seen[5].actual_http_request())
+        .expect("request spec");
     assert_signed_request_method(&seen[5], "POST");
     assert_eq!(
         seen[5].query.get("aboveType").map(String::as_str),
@@ -398,6 +431,24 @@ async fn binance_adapter_should_route_private_order_mutations() {
         seen[5].query.get("belowStopPrice").map(String::as_str),
         Some("24500.00000000")
     );
+}
+
+fn load_request_spec(path: &str) -> RequestSpec {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("request spec fixture");
+    serde_json::from_str(&text).expect("request spec fixture")
+}
+
+fn load_signing_vector(path: &str) -> SigningVector {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("signing vector fixture");
+    serde_json::from_str(&text).expect("signing vector fixture")
 }
 
 #[tokio::test]
@@ -426,6 +477,7 @@ async fn binance_adapter_should_load_open_orders_from_signed_rest() {
             exchange: exchange_id(),
             market_type: Some(MarketType::Spot),
             symbol: Some(symbol_scope("BTC-USDT")),
+            page: None,
         })
         .await
         .expect("open orders");
@@ -434,6 +486,9 @@ async fn binance_adapter_should_load_open_orders_from_signed_rest() {
     assert_eq!(response.orders[0].exchange_order_id.as_deref(), Some("29"));
     assert_eq!(response.orders[0].status, OrderStatus::New);
     let request = seen.lock().unwrap()[0].clone();
+    load_request_spec("binance/request_specs/get_open_orders.json")
+        .assert_matches(&request.actual_http_request())
+        .expect("request spec");
     assert_eq!(request.path, "/api/v3/openOrders");
     assert_eq!(
         request.query.get("symbol").map(String::as_str),
@@ -467,6 +522,9 @@ async fn binance_adapter_should_load_fees_from_account_commission_rest() {
     assert_eq!(response.fees[0].maker_rate, "0.00000040");
     assert_eq!(response.fees[0].taker_rate, "0.00000050");
     let request = seen.lock().unwrap()[0].clone();
+    load_request_spec("binance/request_specs/get_fees.json")
+        .assert_matches(&request.actual_http_request())
+        .expect("request spec");
     assert_eq!(request.path, "/api/v3/account/commission");
     assert_eq!(
         request.query.get("symbol").map(String::as_str),
@@ -507,6 +565,7 @@ async fn binance_adapter_should_load_recent_fills_from_signed_rest() {
             start_time: None,
             end_time: None,
             limit: Some(50),
+            page: None,
         })
         .await
         .expect("fills");
@@ -520,6 +579,9 @@ async fn binance_adapter_should_load_recent_fills_from_signed_rest() {
     );
     assert_eq!(response.fills[0].side, OrderSide::Buy);
     let request = seen.lock().unwrap()[0].clone();
+    load_request_spec("binance/request_specs/get_recent_fills.json")
+        .assert_matches(&request.actual_http_request())
+        .expect("request spec");
     assert_eq!(request.path, "/api/v3/myTrades");
     assert_eq!(
         request.query.get("symbol").map(String::as_str),

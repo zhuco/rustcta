@@ -1,0 +1,9 @@
+{
+  "exchange": "toobit",
+  "name": "rest_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "payload": "recvWindow=5000&symbol=BTCUSDT&timestamp=1700000000000",
+  "expected_signature": "5e1ff144a940ffd87f51175de5ebe2f76d4e8fe1951e3c81b001375485bf3430",
+  "payload_format": "raw_payload"
+}

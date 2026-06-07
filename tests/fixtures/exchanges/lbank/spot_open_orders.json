@@ -1,0 +1,16 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": [
+    {
+      "symbol": "btc_usdt",
+      "orderId": "2001",
+      "clientOrderId": "LIMIT1",
+      "type": "buy",
+      "status": 0,
+      "price": "65000",
+      "origQty": "0.02",
+      "executedQty": "0"
+    }
+  ]
+}

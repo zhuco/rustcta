@@ -1,0 +1,9 @@
+{
+  "exchange": "poloniex",
+  "name": "rest_get_orders",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "payload": "GET\n/orders\nsignTimestamp=1631018760000",
+  "expected_signature": "f8hx9HnL/j46wehFGyhnBuJxjx+z+9zOtYPsohoXjNk=",
+  "payload_format": "raw_payload"
+}

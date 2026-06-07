@@ -1,0 +1,30 @@
+{
+  "exchange": "phemex",
+  "operation": "open_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/g-orders/activeList",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSDT"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

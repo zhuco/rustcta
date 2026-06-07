@@ -1,0 +1,1 @@
+{"operation":"backpack.get_positions","method":"GET","path":"/api/v1/position","query":{"marketType":"PERP","symbol":"SOL_USDC_PERP"},"body":null,"signed":true}

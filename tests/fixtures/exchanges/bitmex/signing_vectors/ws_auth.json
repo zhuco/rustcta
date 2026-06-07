@@ -1,0 +1,12 @@
+{
+  "exchange": "bitmex",
+  "name": "ws_auth",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1518064237",
+  "method": "GET",
+  "request_path": "/realtime",
+  "payload": "GET/realtime1518064237",
+  "expected_signature": "279341f2f2bb58a0582ebdebe10bebccee6cd9c55e6f875adc5c20babe97555e",
+  "payload_format": "raw_payload"
+}

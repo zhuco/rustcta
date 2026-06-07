@@ -1,0 +1,58 @@
+# WOO X industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# WOO_API_KEY and WOO_API_SECRET.
+
+exchange: woo
+market_types:
+  - spot
+  - perpetual
+adapter: woo
+enabled: true
+
+api_key: ${WOO_API_KEY}
+api_secret: ${WOO_API_SECRET}
+
+rest_base_url: https://api.woox.io
+rest_staging_base_url: https://api.staging.woox.io
+public_websocket_url: wss://wss.woox.io/v3/public
+private_websocket_url: wss://wss.woox.io/v3/private
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until preflight, permissions, notional limits, and
+# logs are verified with read-only keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - SPOT_BTC_USDT
+    - SPOT_ETH_USDT
+  perpetual:
+    - PERP_BTC_USDT
+    - PERP_ETH_USDT
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 8
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - WOO X native symbols include the product prefix, for example SPOT_BTC_USDT and PERP_BTC_USDT.
+  - Public and private WebSocket subscription/session helpers are implemented; private streams require a signed listen key.
+  - Batch place/cancel is composed from single-order endpoints and is not an atomic native batch.
+  - Confirm numeric clientOrderId behavior with a live-dry-run key before enabling real orders.

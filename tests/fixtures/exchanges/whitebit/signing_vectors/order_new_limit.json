@@ -1,0 +1,9 @@
+{
+  "exchange": "whitebit",
+  "name": "order_new_limit",
+  "algorithm": "hmac_sha512_hex",
+  "secret": "secret",
+  "payload": "eyJyZXF1ZXN0IjoiL2FwaS92NC9vcmRlci9uZXciLCJub25jZSI6IjE3MDAwMDAwMDAwMDAiLCJtYXJrZXQiOiJCVENfVVNEVCIsInNpZGUiOiJidXkiLCJhbW91bnQiOiIwLjAyIiwicHJpY2UiOiI2NTAwMCIsImNsaWVudE9yZGVySWQiOiJDTElFTlRMSU1JVDEifQ==",
+  "expected_signature": "c097605bbd33d3238fab165881312764399a411ecbdc7c0e840bece43f671a554c3d9de4a4a9f991757428b57aab5dc001a1f70693b4da024b6817376df90041",
+  "payload_format": "raw_payload"
+}

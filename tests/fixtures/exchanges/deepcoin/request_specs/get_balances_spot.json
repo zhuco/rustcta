@@ -1,0 +1,17 @@
+{
+  "exchange": "deepcoin",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/deepcoin/account/all-balances",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "rest-get-verify"
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "weex",
+  "operation": "weex_get_balances_spot",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v2/account/assets",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-passphrase": {"match": "exact", "value": "passphrase"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

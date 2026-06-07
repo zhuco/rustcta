@@ -1,0 +1,9 @@
+{
+  "exchange": "bitkan",
+  "operation": "private_rest",
+  "status": "unsupported",
+  "unsupported_reason": "BitKan private REST signing and endpoints are unverified",
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "scan_only": false
+}

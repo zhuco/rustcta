@@ -3,22 +3,41 @@ use rustcta_exchange_api::{
 };
 use serde_json::json;
 
+use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::test_support::{context, spawn_rest_server, symbol_scope};
 use super::{GateIoGatewayAdapter, GateIoGatewayConfig};
 
+fn fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/gateio/toolchain/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("fixture");
+    serde_json::from_str(&text).expect("fixture json")
+}
+
+#[test]
+fn gateio_parser_fixtures_should_cover_success_empty_and_error_shapes() {
+    let exchange = super::test_support::exchange_id();
+    let rules =
+        parse_symbol_rules(&exchange, &fixture("symbol_rules_success.json")).expect("symbol rules");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].quote_asset, "USDT");
+
+    let empty = parse_symbol_rules(&exchange, &fixture("symbol_rules_empty.json")).expect("empty");
+    assert!(empty.is_empty());
+    assert!(parse_symbol_rules(&exchange, &fixture("symbol_rules_missing_field.json")).is_err());
+    assert!(parse_orderbook_snapshot(
+        &exchange,
+        symbol_scope("BTC_USDT"),
+        &fixture("orderbook_error.json")
+    )
+    .is_err());
+}
+
 #[tokio::test]
 async fn gateio_adapter_should_load_symbol_rules_from_public_rest() {
-    let (base_url, seen) = spawn_rest_server(vec![json!([{
-        "id": "BTC_USDT",
-        "base": "BTC",
-        "quote": "USDT",
-        "precision": 2,
-        "amount_precision": 5,
-        "min_base_amount": "0.00001",
-        "min_quote_amount": "5",
-        "trade_status": "tradable"
-    }])])
-    .await;
+    let (base_url, seen) = spawn_rest_server(vec![fixture("symbol_rules_success.json")]).await;
     let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
         rest_base_url: base_url,
         ..GateIoGatewayConfig::default()

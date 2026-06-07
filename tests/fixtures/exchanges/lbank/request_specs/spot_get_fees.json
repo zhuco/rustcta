@@ -1,0 +1,13 @@
+{
+  "exchange": "lbank",
+  "operation": "get_fees",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/customer_trade_fee.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "category": "btc_usdt"
+  }
+}

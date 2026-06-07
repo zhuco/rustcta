@@ -40,6 +40,7 @@ const API_EXCHANGE_API_KEYS: &str = "/api/exchange-api-keys";
 const API_STRATEGY_LOGS: &str = "/api/strategy-logs";
 const API_STRATEGY_CONFIG: &str = "/api/strategy-config";
 const API_CROSS_ARB_SETTINGS: &str = "/api/cross-arb/settings";
+const API_FUNDING_ARB_SETTINGS: &str = "/api/funding-arb/settings";
 const API_CROSS_ARB_INSTRUMENTS: &str = "/api/cross-arb/instruments";
 const API_CROSS_ARB_MARKET_SNAPSHOTS: &str = "/api/cross-arb/market-snapshots";
 
@@ -454,6 +455,10 @@ pub(crate) async fn fetch_credential_status(token: &str) -> Result<Value, String
     }
 }
 
+pub(crate) async fn save_exchange_api_keys(token: &str, body: &Value) -> Result<Value, String> {
+    api_post_json(API_EXCHANGE_API_KEYS, token, body).await
+}
+
 pub(crate) async fn fetch_strategy_config_draft(
     token: &str,
     lang: crate::types::Language,
@@ -536,6 +541,14 @@ pub(crate) async fn fetch_cross_arb_settings(token: &str) -> Result<Value, Strin
 
 pub(crate) async fn save_cross_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
     api_post_json(API_CROSS_ARB_SETTINGS, token, body).await
+}
+
+pub(crate) async fn fetch_funding_arb_settings(token: &str) -> Result<Value, String> {
+    api_get(API_FUNDING_ARB_SETTINGS, token).await
+}
+
+pub(crate) async fn save_funding_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
+    api_post_json(API_FUNDING_ARB_SETTINGS, token, body).await
 }
 
 pub(crate) async fn fetch_cross_arb_instrument_data(
@@ -702,7 +715,7 @@ async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, S
 async fn api_error_message(path: &str, response: gloo_net::http::Response) -> String {
     let status = response.status();
     if status == 401 {
-        return format!("{path} 返回 HTTP 401：认证 token 缺失、错误或已过期；请把 run/local_control_api_token.txt 里的当前 token 重新粘贴到页面左侧 Auth token 输入框");
+        return format!("{path} 返回 HTTP 401：AUTH_TOKEN_ERROR：认证 Token 缺失、错误或已过期；请使用当前 control-api Token 重新填写左侧 Auth token。");
     }
     match response.json::<Value>().await {
         Ok(value) => {

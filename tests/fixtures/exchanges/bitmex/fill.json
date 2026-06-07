@@ -1,0 +1,17 @@
+[
+  {
+    "execID": "fill-1",
+    "orderID": "order-1",
+    "clOrdID": "client-1",
+    "symbol": "XBTUSD",
+    "side": "Buy",
+    "execType": "Trade",
+    "lastLiquidityInd": "RemovedLiquidity",
+    "lastPx": 99.5,
+    "lastQty": 5,
+    "commission": 0.00075,
+    "execComm": 3731,
+    "settlCurrency": "XBt",
+    "timestamp": "2026-06-07T00:00:00.000Z"
+  }
+]

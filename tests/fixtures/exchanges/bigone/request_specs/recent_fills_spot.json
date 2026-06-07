@@ -1,0 +1,16 @@
+{
+  "exchange": "bigone",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/viewer/trades",
+  "auth": "signed",
+  "query": {
+    "asset_pair_name": { "match": "exact", "value": "BTC-USDT" },
+    "limit": { "match": "exact", "value": "50" }
+  },
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  }
+}

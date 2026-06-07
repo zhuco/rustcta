@@ -1,0 +1,13 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": [
+    {
+      "symbol": "btc_usdt",
+      "priceAccuracy": 2,
+      "quantityAccuracy": 6,
+      "minTranQua": "0.0001",
+      "minOrderAmount": "5"
+    }
+  ]
+}

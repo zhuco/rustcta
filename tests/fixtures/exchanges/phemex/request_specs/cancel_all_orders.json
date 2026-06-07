@@ -1,0 +1,34 @@
+{
+  "exchange": "phemex",
+  "operation": "cancel_all_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/g-orders/all",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSDT"
+    },
+    "untriggered": {
+      "match": "exact",
+      "value": "false"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

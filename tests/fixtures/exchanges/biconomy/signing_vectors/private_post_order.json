@@ -1,0 +1,12 @@
+{
+  "exchange": "biconomy",
+  "name": "private-post-order",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": 1700000000000,
+  "method": "POST",
+  "request_path": "/api/v2/private/order",
+  "body": "{\"symbol\":\"BTCUSDT\"}",
+  "payload": "1700000000000POST/api/v2/private/order{\"symbol\":\"BTCUSDT\"}",
+  "expected_signature": "e0bea241248cbeec36a176a7767415655b8c8248ca3626fdd787ec9d80b0444c"
+}

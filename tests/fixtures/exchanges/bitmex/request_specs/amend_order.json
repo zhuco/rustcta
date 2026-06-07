@@ -1,0 +1,29 @@
+{
+  "exchange": "bitmex",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/api/v1/order",
+  "auth": "signed",
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "api-expires": {
+      "match": "non_empty"
+    },
+    "api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "body_contains": {
+    "orderID": "order-1",
+    "price": 101.5
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": false,
+  "signing_vector": "bitmex/rest_place_order"
+}

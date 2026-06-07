@@ -1,0 +1,59 @@
+# Coinstore industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# COINSTORE_API_KEY and COINSTORE_API_SECRET.
+
+exchange: coinstore
+market_types:
+  - spot
+  - perpetual
+adapter: coinstore
+enabled: true
+
+api_key: ${COINSTORE_API_KEY}
+api_secret: ${COINSTORE_API_SECRET}
+
+spot_rest_base_url: https://api.coinstore.com/api
+futures_rest_base_url: https://futures.coinstore.com/api
+spot_public_ws_url: wss://ws.coinstore.com/s/ws
+futures_public_ws_url: wss://ws-futures.coinstore.com/socket.io/?EIO=3&transport=websocket
+futures_private_ws_url: wss://ws-futures.coinstore.com/socket.io/?EIO=3&transport=websocket
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT
+    - ETH-USDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - Coinstore REST signing uses X-CS-APIKEY, X-CS-EXPIRES, and two-stage HMAC-SHA256 X-CS-SIGN.
+  - Spot and futures REST base URLs are independent and can be overridden independently.
+  - Spot and futures native batch place/cancel endpoints are wired; Spot cancel-all is not advertised because no native official endpoint was confirmed.
+  - Spot private WebSocket is disabled until the official LOGIN contract is fully documented; Futures private WebSocket auth and match topic specs are implemented.

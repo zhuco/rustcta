@@ -1,0 +1,183 @@
+schema_version: 1
+exchange: okx
+adapter: rustcta_exchange_gateway::adapters::okx
+market_types:
+  - spot
+rest:
+  base_url: https://www.okx.com
+  testnet_base_url: https://www.okx.com
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1s
+      limit: 20
+    private_uid:
+      scope: uid
+      interval: 2s
+      limit: 60
+pagination:
+  get_recent_fills:
+    style: time_window
+    since_param: begin
+    until_param: end
+    limit_param: limit
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_balances
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  unknown_order_policy: query_order_then_orders_pending
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: unsupported
+    reason: batch place order is not implemented
+  cancel_orders:
+    support: unsupported
+    reason: batch cancel is only used internally by cancel_all_orders
+  cancel_all_orders:
+    support: composed
+    composed_from:
+      - get_open_orders
+      - native_cancel_batch_orders
+    atomicity: partial
+    max_items: 20
+    partial_failure: true
+websocket:
+  public:
+    support: unsupported
+    heartbeat:
+      required: true
+      direction: server_ping
+      interval_ms: 25000
+      timeout_ms: 30000
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    auth: login_message
+    renewal_ms: null
+    relogin_on_reconnect: true
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/public/instruments
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/market/books
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/account/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/account/trade-fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v5/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: place_quote_market_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v5/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v5/trade/cancel-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v5/trade/cancel-batch-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: amend_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v5/trade/amend-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/trade/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/trade/orders-pending
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v5/trade/fills-history
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true

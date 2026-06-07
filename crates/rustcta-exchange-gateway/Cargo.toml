@@ -12,11 +12,17 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 reqwest.workspace = true
+tokio.workspace = true
 tokio-tungstenite.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
 base64.workspace = true
+md5.workspace = true
+url.workspace = true
+uuid.workspace = true
+urlencoding = "2.1"
+ed25519-dalek = { version = "2.1", features = ["std"] }
 rustcta-exchange-api.workspace = true
 rustcta-types.workspace = true
 

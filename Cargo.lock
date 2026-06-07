@@ -261,6 +261,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
+name = "base64ct"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -513,6 +519,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
+name = "const-oid"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -613,6 +625,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "curve25519-dalek"
+version = "4.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "curve25519-dalek-derive",
+ "digest",
+ "fiat-crypto",
+ "rustc_version",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
 name = "dashmap"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -631,6 +670,16 @@ name = "data-encoding"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
+
+[[package]]
+name = "der"
+version = "0.7.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
+dependencies = [
+ "const-oid",
+ "zeroize",
+]
 
 [[package]]
 name = "deranged"
@@ -668,6 +717,30 @@ name = "dotenv"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
+
+[[package]]
+name = "ed25519"
+version = "2.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
+dependencies = [
+ "pkcs8",
+ "signature",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
+dependencies = [
+ "curve25519-dalek",
+ "ed25519",
+ "serde",
+ "sha2",
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "either"
@@ -740,6 +813,12 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "fiat-crypto"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "flate2"
@@ -1485,6 +1564,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
+name = "md5"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
+
+[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1678,6 +1763,16 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pkcs8"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
+dependencies = [
+ "der",
+ "spki",
+]
 
 [[package]]
 name = "pkg-config"
@@ -2039,8 +2134,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
 
 [[package]]
+name = "rustc_version"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+dependencies = [
+ "semver",
+]
+
+[[package]]
 name = "rustcta"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2098,7 +2202,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-backtest"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2111,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-backtest-app"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "clap",
  "rustcta-backtest",
@@ -2120,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-control-api"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "axum",
  "chrono",
@@ -2135,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-control-api-app"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "axum",
@@ -2150,7 +2254,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-core-compat"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "rustcta-exchange-api",
  "rustcta-execution-api",
@@ -2174,7 +2278,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-exchange-api"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2187,14 +2291,16 @@ dependencies = [
 
 [[package]]
 name = "rustcta-exchange-gateway"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "async-trait",
  "axum",
  "base64",
  "chrono",
+ "ed25519-dalek",
  "hex",
  "hmac",
+ "md5",
  "reqwest",
  "rustcta-exchange-api",
  "rustcta-types",
@@ -2205,6 +2311,9 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower",
+ "url",
+ "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -2221,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-execution-router"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2238,7 +2347,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-gateway"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "axum",
@@ -2252,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-industrial-cli"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "clap",
@@ -2266,7 +2375,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-reporting"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2282,7 +2391,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-avellaneda-stoikov"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2296,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-cross-exchange-arbitrage"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2309,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-funding-arbitrage"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2322,7 +2431,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-hedged-grid"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2335,7 +2444,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-mean-reversion"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2348,7 +2457,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-poisson-market-maker"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2362,7 +2471,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-range-grid"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2390,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-short-ladder-live"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2404,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-spot-spot-arbitrage"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2417,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-strategy-trend"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2431,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-supervisor"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "chrono",
  "serde",
@@ -2442,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-supervisor-app"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "axum",
@@ -2455,7 +2564,7 @@ dependencies = [
 
 [[package]]
 name = "rustcta-tools-ops"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "base64",
@@ -2628,6 +2737,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "semver"
+version = "1.0.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+
+[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2773,6 +2888,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "signature"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+dependencies = [
+ "rand_core",
+]
+
+[[package]]
 name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2808,6 +2932,16 @@ checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "spki"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
+dependencies = [
+ "base64ct",
+ "der",
 ]
 
 [[package]]
@@ -3856,6 +3990,12 @@ dependencies = [
  "syn 2.0.106",
  "synstructure",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 
 [[package]]
 name = "zerotrie"

@@ -1,0 +1,20 @@
+{
+  "XXBTZUSD": {
+    "altname": "XBTUSD",
+    "wsname": "XBT/USD",
+    "pair_decimals": 1,
+    "lot_decimals": 8,
+    "ordermin": "0.00005",
+    "costmin": "0.5",
+    "tick_size": "0.1"
+  },
+  "XETHZUSD": {
+    "altname": "ETHUSD",
+    "wsname": "ETH/USD",
+    "pair_decimals": 2,
+    "lot_decimals": 8,
+    "ordermin": "0.002",
+    "costmin": "0.5",
+    "tick_size": "0.01"
+  }
+}

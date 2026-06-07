@@ -1,0 +1,16 @@
+{
+  "exchange": "xt",
+  "operation": "futures_listen_key",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/future/user/v1/user/listen-key",
+  "auth": "signed",
+  "headers": {
+    "validate-appkey": {"match": "exact", "value": "key"},
+    "validate-timestamp": {"match": "non_empty"},
+    "validate-signature": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

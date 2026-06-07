@@ -1,0 +1,23 @@
+{
+  "exchange": "bigone",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/viewer/orders",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "asset_pair_name": "BTC-USDT",
+    "side": "BUY",
+    "amount": "0.1",
+    "type": "LIMIT",
+    "price": "65000",
+    "client_id": "client-1"
+  },
+  "forbid_header_values_containing": ["test-secret"],
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "tests/fixtures/exchanges/bigone/signing_vectors/jwt_openapi.json"
+}

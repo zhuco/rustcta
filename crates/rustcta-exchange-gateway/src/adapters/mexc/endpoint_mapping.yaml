@@ -1,0 +1,183 @@
+schema_version: 1
+exchange: mexc
+adapter: rustcta_exchange_gateway::adapters::mexc
+market_types:
+  - spot
+rest:
+  base_url: https://api.mexc.com
+  testnet_base_url: ""
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: null
+    private_uid:
+      scope: uid
+      interval: 1m
+      limit: null
+    order_count:
+      scope: account
+      interval: 1m
+      limit: null
+pagination:
+  get_recent_fills:
+    style: from_id_or_time_window
+    since_param: startTime
+    until_param: endTime
+    cursor_param: fromId
+    limit_param: limit
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_balances
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  unknown_order_policy: query_order_then_open_orders_then_fills
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: composed
+    composed_from:
+      - place_order
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: true
+  cancel_orders:
+    support: native
+    atomicity: partial
+    max_items: null
+    same_symbol_required: true
+    partial_failure: true
+  cancel_all_orders:
+    support: native
+    atomicity: partial
+    max_items: null
+    same_symbol_required: true
+    partial_failure: true
+websocket:
+  public:
+    support: unsupported
+    heartbeat:
+      required: false
+      direction: none
+      interval_ms: null
+      timeout_ms: null
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    auth: listen_key
+    renewal_ms: null
+    relogin_on_reconnect: true
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/exchangeInfo
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 10
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 5
+    request_spec_required: false
+  - operation: get_balances
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/account
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 10
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/tradeFee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: place_quote_market_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /api/v3/openOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 2
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 3
+    request_spec_required: true
+  - operation: get_recent_fills
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/myTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 10
+    request_spec_required: true

@@ -1,0 +1,12 @@
+{
+  "exchange": "lbank",
+  "operation": "private_stream_key_create",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/subscribe/get_key.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>"
+  }
+}

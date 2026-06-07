@@ -1,0 +1,125 @@
+[
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.get_balances.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/spot/accountList",
+    "auth": "signed",
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret", "token"],
+    "signing_vector": "coinstore/two-stage-hmac-query-plus-body"
+  },
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.place_order.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/trade/order/place",
+    "auth": "signed",
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "symbol": "BTCUSDT",
+      "quantity": "0.01",
+      "price": "100"
+    },
+    "forbid_header_values_containing": ["secret", "token"],
+    "signing_vector": "coinstore/two-stage-hmac-query-plus-body"
+  },
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.cancel_order.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/trade/order/cancel",
+    "auth": "signed",
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret", "token"]
+  },
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.batch_place_orders.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/trade/order/placeBatch",
+    "auth": "signed",
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret", "token"]
+  },
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.batch_cancel_orders.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/trade/order/cancelBatch",
+    "auth": "signed",
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret", "token"]
+  },
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.get_open_orders.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/api/v2/trade/order/active",
+    "auth": "signed",
+    "query": {
+      "symbol": { "match": "exact", "value": "BTCUSDT" }
+    },
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret", "token"],
+    "forbid_header_values_containing": ["secret", "token"]
+  },
+  {
+    "exchange": "coinstore",
+    "operation": "coinstore.get_recent_fills.spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/trade/match/accountMatches",
+    "auth": "signed",
+    "query": {
+      "symbol": { "match": "exact", "value": "BTCUSDT" },
+      "orderId": { "match": "exact", "value": "fixture-order-1" },
+      "clientOrderId": { "match": "exact", "value": "fixture-client-1" },
+      "limit": { "match": "exact", "value": "100" }
+    },
+    "headers": {
+      "X-CS-APIKEY": { "match": "exact", "value": "key" },
+      "X-CS-EXPIRES": { "match": "non_empty" },
+      "X-CS-SIGN": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret", "token"],
+    "forbid_header_values_containing": ["secret", "token"]
+  }
+]

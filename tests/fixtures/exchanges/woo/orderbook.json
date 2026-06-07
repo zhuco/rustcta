@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "timestamp": 1743054548123,
+  "data": {
+    "bids": [
+      { "price": "99.5", "quantity": "1.25" },
+      { "price": "99.0", "quantity": "2" }
+    ],
+    "asks": [
+      { "price": "100.5", "quantity": "1.5" },
+      { "price": "101.0", "quantity": "2" }
+    ]
+  }
+}

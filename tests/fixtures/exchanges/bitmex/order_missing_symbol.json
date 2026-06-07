@@ -1,0 +1,10 @@
+{
+  "orderID": "order-missing-symbol",
+  "clOrdID": "client-missing-symbol",
+  "side": "Buy",
+  "ordType": "Limit",
+  "ordStatus": "New",
+  "orderQty": 100,
+  "price": 99.5,
+  "cumQty": 0
+}

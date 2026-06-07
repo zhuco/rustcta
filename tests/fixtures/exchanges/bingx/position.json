@@ -1,0 +1,13 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTC-USDT",
+      "positionSide": "LONG",
+      "positionAmt": "0.5",
+      "avgPrice": "65000",
+      "markPrice": "65100",
+      "leverage": "5"
+    }
+  ]
+}

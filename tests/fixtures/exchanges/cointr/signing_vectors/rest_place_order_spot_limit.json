@@ -1,0 +1,12 @@
+{
+  "exchange": "cointr",
+  "name": "rest-place-order-spot-limit",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/api/v2/spot/trade/place-order",
+  "body": "{\"clientOid\":\"CID1\",\"force\":\"gtc\",\"orderType\":\"limit\",\"price\":\"65000\",\"recvWindow\":5000,\"side\":\"buy\",\"size\":\"0.01\",\"symbol\":\"BTCUSDT\"}",
+  "payload": "1700000000000POST/api/v2/spot/trade/place-order{\"clientOid\":\"CID1\",\"force\":\"gtc\",\"orderType\":\"limit\",\"price\":\"65000\",\"recvWindow\":5000,\"side\":\"buy\",\"size\":\"0.01\",\"symbol\":\"BTCUSDT\"}",
+  "expected_signature": "RcDjez690NvTm2KfkQ816np0xiCPsQHhGhlBe/eTx+A="
+}

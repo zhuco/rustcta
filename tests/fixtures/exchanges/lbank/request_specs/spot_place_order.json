@@ -1,0 +1,25 @@
+{
+  "exchange": "lbank",
+  "operation": "place_order",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/create_order.do",
+  "auth": "md5_hmac_sha256",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "signature_method": "HmacSHA256",
+    "timestamp": "<millis>",
+    "echostr": "<32-plus-char nonce>"
+  },
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "type": "buy",
+    "amount": "0.02",
+    "price": "65000",
+    "custom_id": "LIMIT1"
+  },
+  "forbidden_form_fields": ["timestamp", "signature_method", "echostr", "api_secret"],
+  "signature_vector": "../signing_vectors/contract_account_official_hmac_sha256.json"
+}

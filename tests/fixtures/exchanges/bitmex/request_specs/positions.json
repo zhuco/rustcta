@@ -1,0 +1,36 @@
+{
+  "exchange": "bitmex",
+  "operation": "positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/position",
+  "auth": "signed",
+  "query": {
+    "filter": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "api-expires": {
+      "match": "non_empty"
+    },
+    "api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null,
+  "forbid_query_values_containing": [
+    "secret"
+  ],
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "bitmex/rest_get_instrument"
+}

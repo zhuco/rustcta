@@ -1,0 +1,20 @@
+{
+  "exchange": "bitget",
+  "operation": "cancel_all_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v2/spot/trade/cancel-symbol-order",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": { "match": "exact", "value": "key" },
+    "ACCESS-SIGN": { "match": "non_empty" },
+    "ACCESS-TIMESTAMP": { "match": "non_empty" },
+    "ACCESS-PASSPHRASE": { "match": "exact", "value": "passphrase" }
+  },
+  "body_contains": {
+    "symbol": "BTCUSDT"
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "bitget/place_order_limit"
+}

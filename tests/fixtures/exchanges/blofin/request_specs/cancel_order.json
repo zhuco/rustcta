@@ -1,0 +1,37 @@
+{
+  "exchange": "blofin",
+  "operation": "cancel_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/trade/cancel-order",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "ACCESS-NONCE": {
+      "match": "non_empty"
+    },
+    "ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "pass"
+    }
+  },
+  "body_contains": {
+    "instId": "BTC-USDT",
+    "orderId": "ord-1",
+    "clientOrderId": "cid-1"
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": false,
+  "signing_vector": "blofin/rest_place_order_hex"
+}

@@ -32,6 +32,7 @@ pub(crate) enum ControlPanelView {
     Overview,
     SpotArb,
     CrossArb,
+    FundingArb,
     Exchanges,
     Symbols,
     Plans,
@@ -43,11 +44,12 @@ pub(crate) enum ControlPanelView {
 }
 
 impl ControlPanelView {
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::Workspace,
         Self::Overview,
         Self::SpotArb,
         Self::CrossArb,
+        Self::FundingArb,
         Self::Exchanges,
         Self::Symbols,
         Self::Plans,
@@ -64,6 +66,7 @@ impl ControlPanelView {
             Self::Overview => "nav_overview",
             Self::SpotArb => "nav_spot_arb",
             Self::CrossArb => "nav_cross_arb",
+            Self::FundingArb => "nav_funding_arb",
             Self::Exchanges => "nav_exchanges",
             Self::Symbols => "nav_symbols",
             Self::Plans => "nav_plans",
@@ -81,6 +84,7 @@ impl ControlPanelView {
             Self::Overview => "overview",
             Self::SpotArb => "spot-arb",
             Self::CrossArb => "cross-arb",
+            Self::FundingArb => "funding-arb",
             Self::Exchanges => "exchanges",
             Self::Symbols => "symbols",
             Self::Plans => "plans",
@@ -98,6 +102,7 @@ impl ControlPanelView {
             "overview" => Some(Self::Overview),
             "spot-arb" | "spot_arb" => Some(Self::SpotArb),
             "cross-arb" | "cross_arb" => Some(Self::CrossArb),
+            "funding-arb" | "funding_arb" => Some(Self::FundingArb),
             "exchanges" => Some(Self::Exchanges),
             "symbols" => Some(Self::Symbols),
             "plans" => Some(Self::Plans),
@@ -289,6 +294,7 @@ pub(crate) struct ExchangeCredentialAccountRow {
     pub(crate) label: String,
     pub(crate) account_id: String,
     pub(crate) account_label: String,
+    pub(crate) credential_namespace: String,
     pub(crate) row_key: String,
     pub(crate) exchange_account_id: String,
     pub(crate) wallet_address: String,
@@ -299,9 +305,23 @@ pub(crate) struct ExchangeCredentialAccountRow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AccountManagerAccountRow {
+    pub(crate) account_id: String,
+    pub(crate) name: String,
+    pub(crate) exchange: String,
+    pub(crate) account_type: String,
+    pub(crate) description: String,
+    pub(crate) env_prefix: String,
+    pub(crate) credential_namespace: String,
+    pub(crate) enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CredentialAccountOption {
     pub(crate) value: String,
     pub(crate) label: String,
+    pub(crate) env_prefix: String,
+    pub(crate) credential_namespace: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -309,6 +329,7 @@ pub(crate) struct ExchangeCredentialPanelData {
     pub(crate) enabled_exchange_text: String,
     pub(crate) restart_required: bool,
     pub(crate) store_path: String,
+    pub(crate) account_manager_rows: Vec<AccountManagerAccountRow>,
     pub(crate) exchange_rows: Vec<ExchangeCredentialAccountRow>,
     pub(crate) supported_rows: Vec<ExchangeCredentialSchema>,
     pub(crate) configured_account_count: usize,
@@ -333,6 +354,12 @@ impl ExchangeCredentialPanelData {
             value.get("exchanges").unwrap_or(&Value::Null),
             lang,
         );
+        let account_manager_rows = AccountManagerAccountRow::from_rows(
+            value
+                .get("account_manager_accounts")
+                .unwrap_or(&Value::Null),
+            lang,
+        );
         let configured_account_count = exchange_rows
             .iter()
             .filter(|row| row.fields.iter().all(|field| field.configured))
@@ -341,6 +368,7 @@ impl ExchangeCredentialPanelData {
             enabled_exchange_text,
             restart_required: bool_at(value, "restart_required"),
             store_path: text_at(value, "store_path", lang),
+            account_manager_rows,
             supported_rows: ExchangeCredentialSchema::from_supported_rows(
                 value.get("supported_exchanges").unwrap_or(&Value::Null),
                 lang,
@@ -359,12 +387,14 @@ impl CredentialAccountOption {
         lang: Language,
     ) -> Vec<Self> {
         let mut options = Vec::new();
-        for row in ExchangeCredentialAccountRow::from_rows(
-            api_keys.get("exchanges").unwrap_or(&Value::Null),
+        for row in AccountManagerAccountRow::from_rows(
+            api_keys
+                .get("account_manager_accounts")
+                .unwrap_or(&Value::Null),
             lang,
         )
         .into_iter()
-        .filter(|row| row.exchange.eq_ignore_ascii_case(exchange))
+        .filter(|row| row.exchange.eq_ignore_ascii_case(exchange) && row.enabled)
         {
             let account_id = if row.account_id.trim().is_empty() || row.account_id == "-" {
                 "default".to_string()
@@ -377,46 +407,14 @@ impl CredentialAccountOption {
             {
                 continue;
             }
-            let configured = row
-                .fields
-                .iter()
-                .filter(|field| field.required)
-                .all(|field| field.configured);
-            let status = if configured {
-                s(lang, "configured")
-            } else {
-                s(lang, "missing_credentials")
-            };
-            let label = if row.account_label.trim().is_empty()
-                || row.account_label == "-"
-                || row.account_label.eq_ignore_ascii_case(&account_id)
-            {
-                format!("{account_id} ({status})")
-            } else {
-                format!("{account_id} - {} ({status})", row.account_label)
-            };
             options.push(Self {
-                value: account_id,
-                label,
+                value: account_id.clone(),
+                label: account_id,
+                env_prefix: row.env_prefix,
+                credential_namespace: row.credential_namespace,
             });
         }
-        let current = current_account.trim();
-        if !current.is_empty()
-            && !options
-                .iter()
-                .any(|option| option.value.eq_ignore_ascii_case(current))
-        {
-            options.push(Self {
-                value: current.to_string(),
-                label: format!("{} ({})", current, s(lang, "current_config")),
-            });
-        }
-        if options.is_empty() {
-            options.push(Self {
-                value: "default".to_string(),
-                label: format!("default ({})", s(lang, "current_config")),
-            });
-        }
+        let _ = current_account;
         options.sort_by(|left, right| {
             let left_default = left.value.eq_ignore_ascii_case("default");
             let right_default = right.value.eq_ignore_ascii_case("default");
@@ -428,8 +426,27 @@ impl CredentialAccountOption {
     }
 }
 
+impl AccountManagerAccountRow {
+    pub(crate) fn from_rows(value: &Value, lang: Language) -> Vec<Self> {
+        as_array(value)
+            .into_iter()
+            .map(|row| Self {
+                account_id: text_at(&row, "account_id", Language::En),
+                name: text_at(&row, "name", lang),
+                exchange: text_at(&row, "exchange", Language::En),
+                account_type: text_at(&row, "account_type", lang),
+                description: text_at(&row, "description", lang),
+                env_prefix: text_at(&row, "env_prefix", Language::En),
+                credential_namespace: text_at(&row, "credential_namespace", Language::En),
+                enabled: bool_at(&row, "enabled"),
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ExchangeCredentialAccountField {
+    pub(crate) name: String,
     pub(crate) label: String,
     pub(crate) required: bool,
     pub(crate) configured: bool,
@@ -449,6 +466,7 @@ impl ExchangeCredentialAccountField {
             "-".to_string()
         };
         Self {
+            name: text_at(value, "field", Language::En),
             label: text_at(value, "label", lang),
             required: bool_at(value, "required"),
             configured: bool_at(value, "configured"),
@@ -472,6 +490,7 @@ impl ExchangeCredentialAccountRow {
                     label: text_at(&row, "label", lang),
                     account_id,
                     account_label: text_at(&row, "account_label", lang),
+                    credential_namespace: text_at(&row, "credential_namespace", Language::En),
                     exchange_account_id: exchange_field_value(&raw_fields, "account_id"),
                     wallet_address: exchange_field_value(&raw_fields, "wallet_address"),
                     is_vault_address: exchange_field_value(&raw_fields, "is_vault_address"),
@@ -1581,6 +1600,108 @@ impl CrossArbSettingsFormData {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FundingArbExchangeFormData {
+    pub(crate) exchange: String,
+    pub(crate) enabled: bool,
+    pub(crate) account_id: String,
+    pub(crate) env_prefix: String,
+    pub(crate) demo_trading: bool,
+    pub(crate) private_ws_enabled: bool,
+    pub(crate) position_mode: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FundingArbSettingsFormData {
+    pub(crate) path: String,
+    pub(crate) strategy_id: String,
+    pub(crate) mode: String,
+    pub(crate) per_exchange_limit: String,
+    pub(crate) min_funding_rate: String,
+    pub(crate) require_next_funding_time: bool,
+    pub(crate) max_funding_snapshot_age_ms: String,
+    pub(crate) min_seconds_to_settlement_at_scan: String,
+    pub(crate) max_seconds_to_settlement_at_scan: String,
+    pub(crate) scan_minute: String,
+    pub(crate) notional_usdt: String,
+    pub(crate) open_seconds_before_settlement: String,
+    pub(crate) close_seconds_after_settlement: String,
+    pub(crate) order_readback_delay_secs: String,
+    pub(crate) close_limit_timeout_secs: String,
+    pub(crate) close_limit_max_retries: String,
+    pub(crate) max_slippage_pct: String,
+    pub(crate) allow_existing_symbol_position: bool,
+    pub(crate) symbol_allowlist_text: String,
+    pub(crate) symbol_blocklist_text: String,
+    pub(crate) exchanges: Vec<FundingArbExchangeFormData>,
+}
+
+impl FundingArbSettingsFormData {
+    pub(crate) fn from_settings(settings: &Value, lang: Language) -> Self {
+        let exchanges = rows_at(settings, "exchanges")
+            .into_iter()
+            .map(|row| FundingArbExchangeFormData {
+                exchange: text_at(&row, "exchange", Language::En),
+                enabled: bool_at(&row, "enabled"),
+                account_id: text_at(&row, "account_id", lang),
+                env_prefix: text_at(&row, "env_prefix", Language::En),
+                demo_trading: bool_at(&row, "demo_trading"),
+                private_ws_enabled: bool_at(&row, "private_ws_enabled"),
+                position_mode: text_at(&row, "position_mode", Language::En),
+            })
+            .collect::<Vec<_>>();
+        Self {
+            path: text_at(settings, "path", lang),
+            strategy_id: text_at(settings, "strategy_id", Language::En),
+            mode: text_at(settings, "mode", Language::En),
+            per_exchange_limit: number_setting_text(settings, "per_exchange_limit", 1.0),
+            min_funding_rate: number_setting_text(settings, "min_funding_rate", -0.005),
+            require_next_funding_time: bool_at(settings, "require_next_funding_time"),
+            max_funding_snapshot_age_ms: number_setting_text(
+                settings,
+                "max_funding_snapshot_age_ms",
+                5000.0,
+            ),
+            min_seconds_to_settlement_at_scan: optional_number_setting_text(
+                settings,
+                "min_seconds_to_settlement_at_scan",
+            ),
+            max_seconds_to_settlement_at_scan: optional_number_setting_text(
+                settings,
+                "max_seconds_to_settlement_at_scan",
+            ),
+            scan_minute: number_setting_text(settings, "scan_minute", 55.0),
+            notional_usdt: number_setting_text(settings, "notional_usdt", 10.0),
+            open_seconds_before_settlement: number_setting_text(
+                settings,
+                "open_seconds_before_settlement",
+                1.0,
+            ),
+            close_seconds_after_settlement: number_setting_text(
+                settings,
+                "close_seconds_after_settlement",
+                1.0,
+            ),
+            order_readback_delay_secs: number_setting_text(
+                settings,
+                "order_readback_delay_secs",
+                3.0,
+            ),
+            close_limit_timeout_secs: number_setting_text(
+                settings,
+                "close_limit_timeout_secs",
+                300.0,
+            ),
+            close_limit_max_retries: number_setting_text(settings, "close_limit_max_retries", 3.0),
+            max_slippage_pct: number_setting_text(settings, "max_slippage_pct", 0.003),
+            allow_existing_symbol_position: bool_at(settings, "allow_existing_symbol_position"),
+            symbol_allowlist_text: value_array_text(settings, "symbol_allowlist"),
+            symbol_blocklist_text: value_array_text(settings, "symbol_blocklist"),
+            exchanges,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CrossArbSaveResultData {
     pub(crate) strategy_status: String,
     pub(crate) skipped: bool,
@@ -2604,12 +2725,36 @@ fn cross_arb_symbols_text(settings: &Value) -> String {
         .unwrap_or_default()
 }
 
+fn value_array_text(settings: &Value, key: &str) -> String {
+    settings
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| crate::utils::value_text(item, Language::En))
+                .filter(|value| !value.trim().is_empty() && value != "-")
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+}
+
 fn number_setting_text(settings: &Value, key: &str, default: f64) -> String {
     let value = crate::utils::numeric_at(settings, key);
-    if value.is_finite() && value > 0.0 {
+    if value.is_finite() {
         value.to_string()
     } else {
         default.to_string()
+    }
+}
+
+fn optional_number_setting_text(settings: &Value, key: &str) -> String {
+    let value = settings.get(key).unwrap_or(&Value::Null);
+    if value.is_null() {
+        String::new()
+    } else {
+        crate::utils::value_text(value, Language::En)
     }
 }
 

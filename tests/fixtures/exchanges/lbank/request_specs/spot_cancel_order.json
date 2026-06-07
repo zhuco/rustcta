@@ -1,0 +1,16 @@
+{
+  "exchange": "lbank",
+  "operation": "cancel_order",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/cancel_order.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "orderId": "2001",
+    "origClientOrderId": "LIMIT1"
+  },
+  "forbidden_form_fields": ["timestamp", "signature_method", "echostr", "api_secret"]
+}

@@ -1,0 +1,459 @@
+schema_version: 1
+exchange: lbank
+status_date: "2026-06-07"
+products:
+- spot
+- perpetual
+base_urls:
+  spot_rest: https://api.lbkex.com
+  perpetual_rest: https://lbkperp.lbank.com
+  spot_ws: wss://www.lbkex.net/ws/V2/
+  perpetual_ws: wss://lbkperpws.lbank.com/ws
+auth:
+  private_rest:
+    type: md5_then_hmac_sha256_hex
+    prehash: MD5_UPPER(sorted_query_string)
+    required_params:
+    - api_key
+    - timestamp
+    - signature_method=HmacSHA256
+    - echostr
+    credential_scopes:
+    - read_only
+    - trade
+  private_ws:
+    type: rest_subscribe_key
+    create: POST /v2/subscribe/get_key.do
+    refresh: POST /v2/subscribe/refresh_key.do
+    destroy: POST /v2/subscribe/destroy_key.do
+rate_limits:
+  rest:
+    plan: exchange_default
+    note: Adapter preserves request weights in endpoint docs; local token buckets
+      are not enforced yet.
+  websocket:
+    plan: client_ping
+pagination:
+  open_orders:
+    support: native
+    cursor: unsupported
+    limit: venue_default
+  order_history:
+    support: rest_fallback
+    cursor: unsupported
+    limit: 100
+  fills:
+    support: rest_fallback
+    since_until: supported
+    cursor: unsupported
+    limit: 100
+reconciliation:
+  after_private_ws_gap:
+  - get_open_orders
+  - query_order
+  - get_recent_fills
+  - get_balances
+  - get_positions
+  unknown_order_policy: query_by_order_id_then_client_order_id
+  kill_switch: spot_cancel_all_native_perp_unsupported
+batch:
+  place_orders:
+    spot:
+      support: native
+      atomicity: partial
+      max_items: 50
+      supports_partial_failure: true
+    perpetual:
+      support: composed
+      atomicity: non_atomic
+      max_items: 20
+      source_endpoint: POST /cfd/openApi/v1/prv/placeOrder
+  cancel_orders:
+    spot:
+      support: composed
+      atomicity: non_atomic
+      max_items: 50
+      source_endpoint: POST /v2/supplement/cancel_order.do
+    perpetual:
+      support: unsupported
+      reason: stable official cancel path not confirmed in this adapter pass
+unsupported:
+  - operation: get_positions
+    market_types: [spot]
+    reason: spot has no position concept
+  - operation: get_fees
+    market_types: [perpetual]
+    reason: stable contract fee endpoint not confirmed in this adapter pass
+  - operation: cancel_order
+    market_types: [perpetual]
+    reason: stable contract cancel endpoint not confirmed in this adapter pass
+  - operation: batch_cancel_orders
+    market_types: [perpetual]
+    reason: stable contract batch cancel endpoint not confirmed in this adapter pass
+  - operation: amend_order
+    market_types: [spot, perpetual]
+    reason: not present in gateway-supported LBank endpoint set
+streams:
+  public:
+    support: native
+    market_types:
+    - spot
+    channels:
+      order_book_snapshot: depth
+      trades: trade
+      ticker: tick
+      candles: kbar
+    standard_events:
+    - order_book_snapshot
+    - heartbeat
+    typed_events:
+    - trades
+    - ticker
+    - candles
+    heartbeat:
+      direction: client_ping
+      ping_interval_ms: 30000
+      pong_timeout_ms: 10000
+    resync:
+      order_book: rest_snapshot
+  private:
+    support: spot_only_with_subscribe_key
+    channels:
+      orders: orderUpdate
+      balances: assetUpdate
+    standard_events:
+    - order_update
+    - balance_snapshot
+    - heartbeat
+    unsupported_events:
+    - positions
+    heartbeat:
+      direction: client_ping
+      ping_interval_ms: 30000
+      pong_timeout_ms: 10000
+    auth_renewal:
+      kind: listen_key_keep_alive
+      renewal_interval_ms: 1800000
+endpoints:
+- operation: get_symbol_rules
+  support: native
+  market_types:
+  - spot
+  method: GET
+  path: /v2/accuracy.do
+  auth: none
+  rate_limit_bucket: lbank_public_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: false
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_symbol_rules
+  support: native
+  market_types:
+  - perpetual
+  method: GET
+  path: /cfd/openApi/v1/pub/instrument
+  auth: none
+  rate_limit_bucket: lbank_public_rest
+  weight: 1
+  transport: rest
+  product: linear_perp
+  request_spec_required: false
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_order_book
+  support: native
+  market_types:
+  - spot
+  method: GET
+  path: /v2/depth.do
+  auth: none
+  rate_limit_bucket: lbank_public_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: false
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_order_book
+  support: native
+  market_types:
+  - perpetual
+  method: GET
+  path: /cfd/openApi/v1/pub/marketOrder
+  auth: none
+  rate_limit_bucket: lbank_public_rest
+  weight: 1
+  transport: rest
+  product: linear_perp
+  request_spec_required: false
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_balances
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/user_info_account.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_get_balances.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_balances
+  support: native
+  market_types:
+  - perpetual
+  method: POST
+  path: /cfd/openApi/v1/prv/account
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  transport: rest
+  product: linear_perp
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/contract_get_balances.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_positions
+  support: unsupported
+  market_types:
+  - spot
+  reason: spot has no position concept
+  transport: rest
+  product: spot
+  native_batch: false
+  atomicity: unsupported
+- operation: get_positions
+  support: rest_fallback
+  market_types:
+  - perpetual
+  method: POST
+  path: /cfd/openApi/v1/prv/account
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  reason: parsed only when account response includes positions
+  transport: rest
+  product: linear_perp
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/contract_get_positions.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_fees
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/customer_trade_fee.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_get_fees.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: place_order
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/create_order.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_place_order.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: place_order
+  support: native
+  market_types:
+  - perpetual
+  method: POST
+  path: /cfd/openApi/v1/prv/placeOrder
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: linear_perp
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/contract_place_order.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: place_quote_market_order
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/create_order.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_place_quote_market_order.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: cancel_order
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/cancel_order.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_cancel_order.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: cancel_order
+  support: unsupported
+  market_types:
+  - perpetual
+  reason: official stable private lifecycle endpoint not confirmed
+  transport: rest
+  product: linear_perp
+  native_batch: false
+  atomicity: unsupported
+- operation: batch_place_orders
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/batch_create_order.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_batch_place_orders.json
+  native_batch: true
+  atomicity: partial
+  max_items: 50
+- operation: batch_place_orders
+  support: composed
+  market_types:
+  - perpetual
+  method: POST
+  path: /cfd/openApi/v1/prv/placeOrder
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: linear_perp
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/contract_batch_place_orders.json
+  native_batch: false
+  atomicity: non_atomic
+  max_items: 20
+- operation: batch_cancel_orders
+  support: composed
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/cancel_order.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_batch_cancel_orders.json
+  native_batch: false
+  atomicity: non_atomic
+  max_items: 50
+- operation: batch_cancel_orders
+  support: unsupported
+  market_types:
+  - perpetual
+  reason: official stable private lifecycle endpoint not confirmed
+  transport: rest
+  product: linear_perp
+  native_batch: false
+  atomicity: unsupported
+- operation: cancel_all_orders
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/cancel_order_by_symbol.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_order_write
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_cancel_all_orders.json
+  native_batch: true
+  atomicity: partial
+- operation: query_order
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/orders_info.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_query_order.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_open_orders
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/supplement/orders_info_no_deal.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_get_open_orders.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: get_recent_fills
+  support: native
+  market_types:
+  - spot
+  method: POST
+  path: /v2/order_transaction_detail.do
+  auth: md5_hmac_sha256
+  rate_limit_bucket: lbank_private_rest
+  weight: 1
+  transport: rest
+  product: spot
+  request_spec_required: true
+  request_spec_fixture: tests/fixtures/exchanges/lbank/request_specs/spot_get_recent_fills_by_order.json
+  native_batch: false
+  atomicity: non_atomic
+- operation: amend_order
+  support: unsupported
+  market_types:
+  - spot
+  - perpetual
+  reason: not present in gateway-supported LBank endpoint set
+  transport: rest
+  product: mixed
+  native_batch: false
+  atomicity: unsupported

@@ -1,0 +1,18 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "base": "btc",
+      "name": "BTC",
+      "quote": "usdt",
+      "pricePrecision": 1,
+      "minSize": 1,
+      "oneLotSize": 0.001,
+      "maxPosition": 20000,
+      "makerFee": "0.0001",
+      "takerFee": "0.0006",
+      "status": "online"
+    }
+  ],
+  "msg": ""
+}

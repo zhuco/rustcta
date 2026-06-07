@@ -420,10 +420,10 @@ impl StrategyCreatePreset {
     const FUNDING_ARB: Self = Self {
         kind: "funding_arbitrage",
         strategy_id: "funding-arb-local",
-        config_path: "config/funding_rate_arbitrage_usdt.yml",
+        config_path: "config/funding_rate_arbitrage_live_usdt.yml",
         log_path: "logs/control_panel/funding-arb-local.log",
         command: "cargo",
-        args: "run --bin funding_arb_observe -- --config config/funding_rate_arbitrage_usdt.yml",
+        args: "run --bin funding_arb_live -- --config config/funding_rate_arbitrage_live_usdt.yml --confirm-live-order",
     };
 
     const CUSTOM: Self = Self {

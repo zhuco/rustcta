@@ -1,0 +1,15 @@
+{
+  "exchange": "bigone",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/contract/v2/orders/cancel",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "order_ids": ["order-1"]
+  }
+}

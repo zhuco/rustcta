@@ -1,0 +1,17 @@
+{
+  "exchange": "deepcoin",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/deepcoin/trade/fills",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

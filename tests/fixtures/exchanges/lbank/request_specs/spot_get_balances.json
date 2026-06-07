@@ -1,0 +1,12 @@
+{
+  "exchange": "lbank",
+  "operation": "get_balances",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/user_info_account.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>"
+  }
+}

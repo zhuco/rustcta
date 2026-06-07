@@ -1,0 +1,46 @@
+# OrangeX industrial gateway adapter example.
+# Keep disabled until read-only validation and token handling are verified.
+
+exchange: orangex
+market_types:
+  - spot
+  - perpetual
+adapter: orangex
+enabled: false
+
+# Private REST/WS prefers ORANGEX_ACCESS_TOKEN. If no token is present, the
+# adapter can request one with ORANGEX_CLIENT_ID + ORANGEX_CLIENT_SECRET.
+client_id: ${ORANGEX_CLIENT_ID}
+access_token: ${ORANGEX_ACCESS_TOKEN}
+api_key: ${ORANGEX_API_KEY}
+client_secret: ${ORANGEX_CLIENT_SECRET}
+api_secret: ${ORANGEX_API_SECRET}
+
+rest_base_url: https://api.orangex.com/api/v1
+ws_base_url: wss://api.orangex.com/ws/api/v1
+
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT-PERPETUAL
+    - ETH-USDT-PERPETUAL
+
+permissions:
+  required:
+    - read_account
+    - trade
+
+notes:
+  - OrangeX REST uses JSON-RPC at the base URL, not path-per-endpoint REST.
+  - Private WebSocket request-spec/parser helpers cover user.changes and user.asset channels; full long-running runtime orchestration remains in the gateway supervisor layer.
+  - Confirm USDT perpetual discovery with live read-only validation before live-dry-run promotion.

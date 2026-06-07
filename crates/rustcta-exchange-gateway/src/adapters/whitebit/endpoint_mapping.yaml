@@ -1,0 +1,290 @@
+schema_version: 1
+exchange: whitebit
+adapter: rustcta_exchange_gateway::adapters::whitebit
+market_types: [spot, linear_perp]
+metadata:
+  status: validated
+  source: WhiteBIT REST/WebSocket docs plus adapter tests.
+rate_limits:
+  buckets:
+    ip: { scope: ip, plan: fixed_window }
+    key: { scope: api_key, plan: fixed_window }
+    stream: { scope: connection, plan: client_ping }
+pagination:
+  query_order: { style: by_id }
+  get_open_orders: { style: limit_and_offset }
+  get_recent_fills: { style: limit_and_offset }
+reconciliation:
+  ambiguous_mutation: query_order_then_open_orders_then_recent_fills
+  private_stream_fallback: rest
+batch:
+  place_orders:
+    support: native
+    atomicity: partial
+    max_items: 20
+    partial_failure: stopOnFail=false; failed items are not represented by legacy response and require reconciliation.
+  cancel_orders:
+    support: native
+    atomicity: partial
+    max_items: 100
+    partial_failure: per-item failures require query/open-orders reconciliation.
+websocket:
+  public:
+    support: native
+    channels: [depth_subscribe, trades_subscribe, ticker_subscribe, candles_subscribe]
+    heartbeat: { required: true, direction: client_ping, interval_ms: 50000, timeout_ms: 15000 }
+    resync: rest_order_book_snapshot_after_reconnect
+  private:
+    support: native
+    auth: bearer
+    channels:
+      spot: [ordersPending_subscribe, deals_subscribe, balanceSpot_subscribe]
+      linear_perp: [ordersPending_subscribe, deals_subscribe, balanceMargin_subscribe, positionsMargin_subscribe]
+    renewal: refresh_websocket_token_on_reconnect
+    reconciliation: query_order_then_open_orders_then_recent_fills
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v4/public/markets | /api/v4/public/futures
+    auth: none
+    rate_limit_bucket: ip
+    weight: 1
+    request_spec_required: false
+    request_spec: { status: not_required }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/whitebit/parser/symbol_rules_success.json }
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT public Spot markets and Futures markets endpoints.
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v4/public/orderbook/{market}
+    auth: none
+    rate_limit_bucket: ip
+    weight: 1
+    request_spec_required: false
+    request_spec: { status: not_required }
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT public order book endpoint.
+  - operation: get_balances
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v4/trade-account/balance | /api/v4/collateral-account/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT balance endpoints.
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v4/collateral-account/positions/open
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT open margin positions endpoint.
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/market/fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT market fee endpoint.
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v4/order/new | /api/v4/order/market | /api/v4/collateral-account/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/whitebit/request_specs/order_new_limit.json }
+    native_batch: false
+    atomicity: atomic
+    testnet: false
+    official_doc: WhiteBIT Spot and collateral order creation endpoints.
+  - operation: place_quote_market_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/order/market
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: false
+    official_doc: WhiteBIT Spot market order endpoint.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v4/order/cancel | /api/v4/collateral-account/order/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: false
+    official_doc: WhiteBIT cancel order endpoints.
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: UNSUPPORTED
+    path: whitebit.amend_order
+    auth: unsupported
+    rate_limit_bucket: key
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unknown
+    support: unsupported_unverified
+    reason: No verified WhiteBIT amend mapping is enabled in the shared adapter.
+    testnet: false
+    official_doc: No verified WhiteBIT amend mapping is enabled in the shared adapter.
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/order/status
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT order status endpoint.
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT open orders endpoint.
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/trade-account/order/history
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT order/trade history endpoint.
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v4/order/bulk | /api/v4/collateral-account/order/bulk
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: WhiteBIT bulk order endpoints.
+    notes: Adapter capability caps batch place at 20 items.
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/order/cancel/bulk
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: WhiteBIT bulk cancel endpoint.
+    notes: Adapter capability caps batch cancel at 100 items.
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v4/order/cancel/all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: WhiteBIT cancel all orders endpoint.
+  - operation: websocket_token
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v4/profile/websocket_token
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: WhiteBIT private WebSocket token endpoint.

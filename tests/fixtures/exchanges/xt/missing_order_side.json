@@ -1,0 +1,13 @@
+{
+  "rc": 0,
+  "result": {
+    "symbol": "btc_usdt",
+    "orderId": 1003,
+    "clientOrderId": "CLIENT3",
+    "price": "65000",
+    "origQty": "0.01",
+    "executedQty": "0",
+    "state": "NEW",
+    "type": "LIMIT"
+  }
+}

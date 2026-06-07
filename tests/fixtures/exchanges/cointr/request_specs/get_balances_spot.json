@@ -1,0 +1,15 @@
+{
+  "exchange": "cointr",
+  "operation": "cointr.get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v2/spot/account/assets",
+  "auth": "signed",
+  "headers": {
+    "access-key": { "match": "exact", "value": "key" },
+    "access-sign": { "match": "non_empty" },
+    "access-timestamp": { "match": "non_empty" },
+    "access-passphrase": { "match": "non_empty" }
+  }
+}

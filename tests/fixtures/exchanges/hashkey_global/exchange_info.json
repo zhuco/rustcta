@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": {
+    "symbols": [
+      {
+        "symbol": "BTCUSDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "filters": [
+          {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+          {"filterType": "LOT_SIZE", "stepSize": "0.00001", "minQty": "0.00001", "maxQty": "100"}
+        ],
+        "minVal": "5"
+      }
+    ]
+  }
+}

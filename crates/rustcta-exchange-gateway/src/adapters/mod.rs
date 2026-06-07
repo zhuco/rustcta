@@ -17,22 +17,82 @@ use crate::{
     GATEWAY_PROTOCOL_SCHEMA_VERSION,
 };
 
+pub mod ascendex;
+pub mod backpack;
+pub mod biconomy;
+pub mod bigone;
 pub mod binance;
+pub mod bingx;
 pub mod bitget;
+pub mod bitkan;
+pub mod bitmex;
+pub mod bitrue;
+pub mod bitunix;
+pub mod blofin;
+pub mod coinbase;
+pub mod coindcx;
 pub mod coinex;
+pub mod coinstore;
+pub mod cointr;
+pub mod coinw;
+pub mod cryptocom;
+pub mod deepcoin;
+pub mod digifinex;
 pub mod gateio;
+pub mod hashkey_global;
+pub mod kraken;
 pub mod kucoin;
+pub mod lbank;
 pub mod mexc;
 pub mod okx;
+pub mod orangex;
 pub mod paper;
+pub mod phemex;
+pub mod poloniex;
+pub mod tapbit;
+pub mod toobit;
+pub mod weex;
+pub mod whitebit;
+pub mod woo;
+pub mod xt;
 
+pub use ascendex::AscendexGatewayConfig;
+pub use backpack::BackpackGatewayConfig;
+pub use biconomy::BiconomyGatewayConfig;
+pub use bigone::BigOneGatewayConfig;
 pub use binance::BinanceGatewayConfig;
+pub use bingx::BingxGatewayConfig;
 pub use bitget::BitgetGatewayConfig;
+pub use bitkan::BitkanGatewayConfig;
+pub use bitmex::BitmexGatewayConfig;
+pub use bitrue::BitrueGatewayConfig;
+pub use bitunix::BitunixGatewayConfig;
+pub use blofin::BlofinGatewayConfig;
+pub use coinbase::CoinbaseGatewayConfig;
+pub use coindcx::CoinDcxGatewayConfig;
 pub use coinex::CoinExGatewayConfig;
+pub use coinstore::CoinstoreGatewayConfig;
+pub use cointr::CointrGatewayConfig;
+pub use coinw::CoinwGatewayConfig;
+pub use cryptocom::CryptoComGatewayConfig;
+pub use deepcoin::DeepcoinGatewayConfig;
+pub use digifinex::DigiFinexGatewayConfig;
 pub use gateio::GateIoGatewayConfig;
+pub use hashkey_global::HashKeyGlobalGatewayConfig;
+pub use kraken::KrakenGatewayConfig;
 pub use kucoin::KuCoinGatewayConfig;
+pub use lbank::LBankGatewayConfig;
 pub use mexc::MexcGatewayConfig;
 pub use okx::OkxGatewayConfig;
+pub use orangex::OrangeXGatewayConfig;
+pub use phemex::PhemexGatewayConfig;
+pub use poloniex::PoloniexGatewayConfig;
+pub use tapbit::TapbitGatewayConfig;
+pub use toobit::ToobitGatewayConfig;
+pub use weex::WeexGatewayConfig;
+pub use whitebit::WhiteBitGatewayConfig;
+pub use woo::WooGatewayConfig;
+pub use xt::XtGatewayConfig;
 
 #[cfg(test)]
 mod paper_tests;
@@ -83,13 +143,47 @@ impl AdapterBackedGateway {
         match adapter.as_str() {
             "" => Ok(()),
             "paper" => self.register_paper_adapter(),
+            "ascendex" | "ascend_ex" => self.register_ascendex_public_adapter(None),
+            "backpack" => self.register_backpack_public_adapter(None),
+            "biconomy" => self.register_biconomy_public_adapter(None),
             "binance" => self.register_binance_public_adapter(None),
+            "bigone" | "big_one" => self.register_bigone_public_adapter(None),
+            "bingx" => self.register_bingx_public_adapter(None),
+            "bitunix" => self.register_bitunix_public_adapter(None),
+            "bitkan" => self.register_bitkan_public_adapter(None),
+            "bitrue" => self.register_bitrue_public_adapter(None),
+            "bitmex" => self.register_bitmex_public_adapter(None),
             "bitget" => self.register_bitget_public_adapter(None),
+            "blofin" | "blo_fin" => self.register_blofin_public_adapter(None),
+            "coinbase" => self.register_coinbase_public_adapter(None),
+            "coindcx" | "coin_dcx" => self.register_coindcx_public_adapter(None),
+            "coinstore" => self.register_coinstore_public_adapter(None),
+            "cointr" => self.register_cointr_public_adapter(None),
+            "coinw" => self.register_coinw_public_adapter(None),
             "coinex" => self.register_coinex_public_adapter(None),
+            "crypto.com" | "cryptocom" | "crypto_com" => {
+                self.register_cryptocom_public_adapter(None)
+            }
+            "deepcoin" | "deep_coin" => self.register_deepcoin_public_adapter(None),
+            "digifinex" | "digi_finex" => self.register_digifinex_public_adapter(None),
             "gate" | "gate.io" | "gateio" => self.register_gateio_public_adapter(None),
+            "hashkey" | "hashkey_global" | "hashkey-global" => {
+                self.register_hashkey_global_public_adapter(None)
+            }
             "kucoin" => self.register_kucoin_public_adapter(None),
+            "kraken" => self.register_kraken_public_adapter(None),
+            "lbank" => self.register_lbank_public_adapter(None),
             "mexc" => self.register_mexc_public_adapter(None),
             "okx" => self.register_okx_public_adapter(None),
+            "orange_x" | "orangex" => self.register_orangex_public_adapter(None),
+            "phemex" => self.register_phemex_public_adapter(None),
+            "poloniex" => self.register_poloniex_public_adapter(None),
+            "tapbit" => self.register_tapbit_public_adapter(None),
+            "toobit" => self.register_toobit_public_adapter(None),
+            "weex" => self.register_weex_public_adapter(None),
+            "whitebit" | "white_bit" => self.register_whitebit_public_adapter(None),
+            "woo" | "woo_x" | "woox" => self.register_woo_public_adapter(None),
+            "xt" | "xt.com" | "xtcom" => self.register_xt_public_adapter(None),
             other => Err(GatewayError::UnsupportedOperation {
                 operation: format!("unknown gateway adapter {other}"),
             }),
@@ -98,6 +192,66 @@ impl AdapterBackedGateway {
 
     pub fn register_paper_adapter(&self) -> Result<(), GatewayError> {
         self.register_adapter(Arc::new(paper::PaperGatewayAdapter::default_paper()?))
+    }
+
+    pub fn register_ascendex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = ascendex::AscendexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_ascendex_adapter(config)
+    }
+
+    pub fn register_ascendex_adapter(
+        &self,
+        config: ascendex::AscendexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            ascendex::AscendexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_backpack_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = backpack::BackpackGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_backpack_adapter(config)
+    }
+
+    pub fn register_backpack_adapter(
+        &self,
+        config: backpack::BackpackGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            backpack::BackpackGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_biconomy_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = biconomy::BiconomyGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_biconomy_adapter(config)
+    }
+
+    pub fn register_biconomy_adapter(
+        &self,
+        config: biconomy::BiconomyGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            biconomy::BiconomyGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
     }
 
     pub fn register_binance_public_adapter(
@@ -117,6 +271,149 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             binance::BinanceGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bigone_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bigone::BigOneGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.contract_rest_base_url = rest_base_url;
+        }
+        self.register_bigone_adapter(config)
+    }
+
+    pub fn register_bigone_adapter(
+        &self,
+        config: bigone::BigOneGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bigone::BigOneGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bingx_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bingx::BingxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bingx_adapter(config)
+    }
+
+    pub fn register_bingx_adapter(
+        &self,
+        config: bingx::BingxGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bingx::BingxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bitrue_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitrue::BitrueGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_bitrue_adapter(config)
+    }
+
+    pub fn register_bitrue_adapter(
+        &self,
+        config: bitrue::BitrueGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitrue::BitrueGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bitmex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitmex::BitmexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bitmex_adapter(config)
+    }
+
+    pub fn register_bitmex_adapter(
+        &self,
+        config: bitmex::BitmexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitmex::BitmexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bitunix_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitunix::BitunixGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_bitunix_adapter(config)
+    }
+
+    pub fn register_bitunix_adapter(
+        &self,
+        config: bitunix::BitunixGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitunix::BitunixGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bitkan_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitkan::BitkanGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bitkan_adapter(config)
+    }
+
+    pub fn register_bitkan_adapter(
+        &self,
+        config: bitkan::BitkanGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitkan::BitkanGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_blofin_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = blofin::BlofinGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_blofin_adapter(config)
+    }
+
+    pub fn register_blofin_adapter(
+        &self,
+        config: blofin::BlofinGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            blofin::BlofinGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -140,6 +437,88 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_coinbase_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = coinbase::CoinbaseGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.international_rest_base_url = rest_base_url;
+        }
+        self.register_coinbase_adapter(config)
+    }
+
+    pub fn register_coinbase_adapter(
+        &self,
+        config: coinbase::CoinbaseGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            coinbase::CoinbaseGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_coindcx_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = coindcx::CoinDcxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_coindcx_adapter(config)
+    }
+
+    pub fn register_coindcx_adapter(
+        &self,
+        config: coindcx::CoinDcxGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            coindcx::CoinDcxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_cointr_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = cointr::CointrGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_cointr_adapter(config)
+    }
+
+    pub fn register_cointr_adapter(
+        &self,
+        config: cointr::CointrGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            cointr::CointrGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_coinw_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = coinw::CoinwGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_coinw_adapter(config)
+    }
+
+    pub fn register_coinw_adapter(
+        &self,
+        config: coinw::CoinwGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            coinw::CoinwGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_coinex_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -160,6 +539,67 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_coinstore_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = coinstore::CoinstoreGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_coinstore_adapter(config)
+    }
+
+    pub fn register_coinstore_adapter(
+        &self,
+        config: coinstore::CoinstoreGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = coinstore::CoinstoreGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_cryptocom_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = cryptocom::CryptoComGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_cryptocom_adapter(config)
+    }
+
+    pub fn register_cryptocom_adapter(
+        &self,
+        config: cryptocom::CryptoComGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = cryptocom::CryptoComGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_deepcoin_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = deepcoin::DeepcoinGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_deepcoin_adapter(config)
+    }
+
+    pub fn register_deepcoin_adapter(
+        &self,
+        config: deepcoin::DeepcoinGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            deepcoin::DeepcoinGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_kucoin_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -177,6 +617,48 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             kucoin::KuCoinGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_kraken_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = kraken::KrakenGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_kraken_adapter(config)
+    }
+
+    pub fn register_kraken_adapter(
+        &self,
+        config: kraken::KrakenGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            kraken::KrakenGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_lbank_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = lbank::LBankGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.contract_rest_base_url = rest_base_url;
+        }
+        self.register_lbank_adapter(config)
+    }
+
+    pub fn register_lbank_adapter(
+        &self,
+        config: lbank::LBankGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            lbank::LBankGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -220,6 +702,48 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_digifinex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = digifinex::DigiFinexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.swap_rest_base_url = rest_base_url;
+        }
+        self.register_digifinex_adapter(config)
+    }
+
+    pub fn register_digifinex_adapter(
+        &self,
+        config: digifinex::DigiFinexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = digifinex::DigiFinexGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_hashkey_global_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = hashkey_global::HashKeyGlobalGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_hashkey_global_adapter(config)
+    }
+
+    pub fn register_hashkey_global_adapter(
+        &self,
+        config: hashkey_global::HashKeyGlobalGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = hashkey_global::HashKeyGlobalGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_okx_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -233,6 +757,181 @@ impl AdapterBackedGateway {
 
     pub fn register_okx_adapter(&self, config: okx::OkxGatewayConfig) -> Result<(), GatewayError> {
         let adapter = okx::OkxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_orangex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = orangex::OrangeXGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_orangex_adapter(config)
+    }
+
+    pub fn register_orangex_adapter(
+        &self,
+        config: orangex::OrangeXGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            orangex::OrangeXGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_phemex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = phemex::PhemexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_phemex_adapter(config)
+    }
+
+    pub fn register_phemex_adapter(
+        &self,
+        config: phemex::PhemexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            phemex::PhemexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_poloniex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = poloniex::PoloniexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_poloniex_adapter(config)
+    }
+
+    pub fn register_poloniex_adapter(
+        &self,
+        config: poloniex::PoloniexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            poloniex::PoloniexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_tapbit_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = tapbit::TapbitGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.swap_rest_base_url = rest_base_url;
+        }
+        self.register_tapbit_adapter(config)
+    }
+
+    pub fn register_tapbit_adapter(
+        &self,
+        config: tapbit::TapbitGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            tapbit::TapbitGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_toobit_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = toobit::ToobitGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_toobit_adapter(config)
+    }
+
+    pub fn register_toobit_adapter(
+        &self,
+        config: toobit::ToobitGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            toobit::ToobitGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_whitebit_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = whitebit::WhiteBitGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_whitebit_adapter(config)
+    }
+
+    pub fn register_whitebit_adapter(
+        &self,
+        config: whitebit::WhiteBitGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            whitebit::WhiteBitGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_weex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = weex::WeexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.contract_rest_base_url = rest_base_url;
+        }
+        self.register_weex_adapter(config)
+    }
+
+    pub fn register_weex_adapter(
+        &self,
+        config: weex::WeexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            weex::WeexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_woo_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = woo::WooGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_woo_adapter(config)
+    }
+
+    pub fn register_woo_adapter(&self, config: woo::WooGatewayConfig) -> Result<(), GatewayError> {
+        let adapter = woo::WooGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_xt_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = xt::XtGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.spot_rest_base_url = rest_base_url.clone();
+            config.futures_rest_base_url = rest_base_url;
+        }
+        self.register_xt_adapter(config)
+    }
+
+    pub fn register_xt_adapter(&self, config: xt::XtGatewayConfig) -> Result<(), GatewayError> {
+        let adapter = xt::XtGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -559,15 +1258,7 @@ impl LocalGateway for AdapterBackedGateway {
 }
 
 fn exchange_api_error_to_gateway(error: ExchangeApiError) -> GatewayError {
-    match error {
-        ExchangeApiError::Unsupported { operation } => GatewayError::UnsupportedOperation {
-            operation: operation.to_string(),
-        },
-        ExchangeApiError::InvalidRequest { message }
-        | ExchangeApiError::Serialization { message }
-        | ExchangeApiError::Transport { message } => GatewayError::Rejected(message),
-        ExchangeApiError::Exchange(error) => GatewayError::Rejected(error.message),
-    }
+    GatewayError::from(error)
 }
 
 pub(crate) fn missing_order_identity(request: &CancelOrderRequest) -> bool {

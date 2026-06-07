@@ -1,0 +1,97 @@
+schema_version: 1
+exchange: weex
+status: validated
+market_types: [spot, perpetual]
+support:
+  public_rest: native
+  private_rest: native_when_credentials_configured
+  public_streams: native
+  private_streams: native_when_credentials_configured
+  symbol_rules: native
+  order_book_snapshot: native
+  balances: native_when_credentials_configured
+  positions:
+    spot: unsupported
+    perpetual: native_when_credentials_configured
+  fees:
+    spot: public_exchange_info_fee_metadata
+    perpetual: native_when_credentials_configured
+  order_lifecycle: native_when_credentials_configured
+  client_order_id: native
+  quote_market_order: unsupported
+  amend_order: unsupported
+  order_list: unsupported
+  post_only: unsupported
+  reduce_only: unsupported
+stream_runtime:
+  public:
+    support: native
+    subscribe: true
+    unsubscribe: false
+    heartbeat:
+      direction: server_ping
+      reply: PONG
+      timeout_ms: 30000
+    resync:
+      order_book: rest_snapshot_on_gap_or_reconnect
+  private:
+    support: native_when_credentials_configured
+    auth:
+      mode: connection_headers
+      algorithm: hmac_sha256_base64
+      headers: [ACCESS-KEY, ACCESS-SIGN, ACCESS-PASSPHRASE, ACCESS-TIMESTAMP]
+      renewal: reconnect_and_reauth
+      listen_key: false
+    heartbeat:
+      direction: server_ping
+      reply: PONG
+      timeout_ms: 30000
+    reconciliation_fallback:
+      balances: /api/v2/account/assets or /capi/v3/account/balance
+      positions: /capi/v3/account/position/allPosition
+      orders: /api/v3/order or /capi/v3/order
+batch:
+  place:
+    support: native_when_credentials_configured
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    same_symbol_required: false
+  cancel:
+    support: native_when_credentials_configured
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    same_symbol_required: true
+pagination:
+  order_book:
+    mode: limit
+    max_limit: 200
+  recent_fills:
+    mode: start_end_time_limit
+    max_limit: 100
+  order_history:
+    mode: order_id_or_client_order_id
+  open_orders:
+    mode: symbol_optional
+rate_limit_plan:
+  policy: conservative_until_live_verified
+  buckets:
+    public_rest: weex_public_rest
+    private_rest: weex_private_rest
+    order_write: weex_order_write
+reconciliation_plan:
+  place_order: query_order_after_ack
+  cancel_order: query_order_then_open_orders
+  batch_place: query_each_acknowledged_order
+  batch_cancel: query_each_cancelled_order_or_open_orders
+  ws_gap: rest_snapshot_and_private_rest_refresh
+unsupported_gaps:
+  - spot_positions
+  - quote_market_order
+  - amend_order
+  - order_list
+  - post_only_order_placement
+  - reduce_only_order_placement
+  - leverage_margin_position_mode_mutations
+  - owned_long_running_socket_task_in_current_exchange_client_trait

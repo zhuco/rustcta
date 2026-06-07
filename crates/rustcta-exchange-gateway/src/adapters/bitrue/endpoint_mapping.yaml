@@ -1,0 +1,393 @@
+schema_version: 1
+exchange: bitrue
+adapter: crates/rustcta-exchange-gateway/src/adapters/bitrue
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway Bitrue adapter implementation and docs/bitrue_adapter.md
+  last_reviewed: '2026-06-08'
+  notes: Spot and USDT-M endpoint mapping for task 16 with conservative unsupported/native
+    boundaries.
+  operation_aliases:
+  - operation: bitrue.get_symbol_rules
+    expands_to:
+    - get_symbol_rules_spot
+    - get_symbol_rules_perp
+market_types:
+- spot
+- linear_perp
+base_urls:
+  spot_rest: https://openapi.bitrue.com
+  futures_rest: https://fapi.bitrue.com
+  spot_public_ws: wss://ws.bitrue.com/market/ws
+  spot_private_ws: wss://wsapi.bitrue.com/stream
+  futures_private_ws: wss://fapiws.bitrue.com/stream
+auth:
+  spot: X-MBX-APIKEY with signature query param
+  futures: X-CH-APIKEY/X-CH-SIGN/X-CH-TS over timestamp + method + path + body
+rate_limits:
+  public: conservative weight 1 per mapped public REST request
+  private: conservative weight 1 per mapped signed REST request
+  orders: conservative weight 1 per mapped order request
+pagination:
+  fills: startTime/endTime/limit, max 1000
+  open_orders: no cursor
+batch:
+  place:
+    mode: composed_sequential
+    route: single orders
+  cancel:
+    mode: composed_sequential
+    route: single cancels
+  atomicity: non_atomic
+  max_items: 10
+reconciliation:
+  private_state: REST fallback via query_order, get_open_orders, and get_recent_fills
+    before live-dry-run promotion
+websocket:
+  support: request-spec/parser/session helpers; shared supervisor/live validation
+    remains required
+  heartbeat: ping/pong or server ping per adapter stream helpers
+  private_auth: listen-key or signed private subscription where supported
+  auth_renewal: listen_key_keepalive
+  reconciliation: REST query_order + open_orders + recent_fills after reconnect/auth
+    renewal
+endpoints:
+- operation: get_symbol_rules_spot
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v1/exchangeInfo
+  auth: none
+  rate_limit_bucket: bitrue_public_rest
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/public_tests.rs
+- operation: get_symbol_rules_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v1/contracts
+  auth: none
+  rate_limit_bucket: bitrue_public_rest
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/public_tests.rs
+- operation: get_order_book_spot
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v1/depth
+  auth: none
+  rate_limit_bucket: bitrue_public_rest
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/public_tests.rs
+- operation: get_order_book_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v1/depth
+  auth: none
+  rate_limit_bucket: bitrue_public_rest
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/public_tests.rs
+- operation: get_balances_spot
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v1/account
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_balances_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v2/account
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_positions_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v2/account
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_fees_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v2/commissionRate
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: place_order_spot
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/order
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: place_order_perp
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /fapi/v2/order
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: cancel_order_spot
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /api/v1/order
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: cancel_order_perp
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /fapi/v2/cancel
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: batch_place_spot
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/order
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  notes: Composed sequential fallback; no verified native Spot batch endpoint is advertised.
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: batch_place_perp
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /fapi/v2/order
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  notes: Composed sequential fallback; native batch endpoint remains unsupported until
+    verified.
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: batch_cancel_spot
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /api/v1/order
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  notes: Composed sequential fallback.
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: batch_cancel_perp
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /fapi/v2/cancel
+  auth: hmac
+  rate_limit_bucket: bitrue_order_rest
+  weight: 1
+  request_spec_required: true
+  native_batch: false
+  atomicity: non_atomic
+  notes: Composed sequential fallback.
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_open_orders_spot
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v1/openOrders
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_open_orders_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v2/openOrders
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_recent_fills_spot
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v2/myTrades
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: get_recent_fills_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /fapi/v2/myTrades
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/private_tests.rs
+- operation: listen_key_spot
+  product: spot
+  transport: rest
+  method: POST
+  path: /poseidon/api/v1/listenKey
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/stream_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/stream_tests.rs
+- operation: listen_key_perp
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /user_stream/api/v1/listenKey
+  auth: hmac
+  rate_limit_bucket: bitrue_private_rest
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/stream_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/bitrue/stream_tests.rs

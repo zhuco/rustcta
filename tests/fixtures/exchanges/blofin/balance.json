@@ -1,0 +1,13 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": [
+    {
+      "currency": "USDT",
+      "balance": "1000",
+      "available": "900",
+      "frozen": "100",
+      "equity": "1000"
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+schema_version: 1
+exchange: coindcx
+market_types: [spot, perpetual]
+support:
+  public_rest: native
+  private_rest: native_with_credentials
+  public_streams: socket_io
+  private_streams: socket_io_with_hmac_join
+stream_runtime:
+  transport: socket.io
+  public_private_separate_connections: false
+  subscribe: supported
+  unsubscribe: unsupported
+  heartbeat:
+    direction: application_message
+    ping_interval_ms: 25000
+    pong_timeout_ms: 35000
+    stale_message_ms: 45000
+  auth_renewal:
+    kind: re_login
+    renewal_interval_ms: 1800000
+    reconnect_on_renewal_failure: true
+    resubscribe_after_renewal: true
+  reconnect:
+    supported: true
+    requires_login: true
+    requires_resubscribe: true
+  resync:
+    order_book: rest_snapshot
+    orders: query_order_open_orders_recent_fills
+    balances: rest_balances
+    positions: rest_positions
+batch:
+  place:
+    spot:
+      mode: native
+      atomicity: partial
+      max_items: 10
+      supports_client_order_id: true
+      supports_partial_failure: true
+    perpetual:
+      mode: unsupported
+      reason: futures batch create endpoint not verified
+  cancel:
+    spot:
+      mode: native
+      atomicity: partial
+      max_items: 50
+      supports_client_order_id: true
+      supports_partial_failure: true
+    perpetual:
+      mode: unsupported
+      reason: futures multi-id cancel endpoint not verified
+pagination:
+  recent_fills:
+    mode: limit
+    max_limit: 1000
+  order_history:
+    mode: none
+  cursor: unsupported
+rate_limits:
+  mode: fixed_window
+  buckets:
+    - name: coindcx.public_rest
+      scope: ip
+      limit: 300
+      window_ms: 60000
+    - name: coindcx.public_market
+      scope: ip
+      limit: 600
+      window_ms: 60000
+    - name: coindcx.private_rest
+      scope: account
+      limit: 300
+      window_ms: 60000
+    - name: coindcx.orders
+      scope: orders
+      limit: 120
+      window_ms: 60000
+reconciliation:
+  place_timeout:
+    query_order: true
+    open_orders: true
+    recent_fills: true
+    allow_order_replay: false
+  cancel_timeout:
+    query_order: true
+    open_orders: true
+    recent_fills: false
+  private_stream_disconnect:
+    open_orders: true
+    recent_fills: true
+    balances: true
+    positions: true
+credentials:
+  scopes: [read_only, trade]
+  no_listen_key: true

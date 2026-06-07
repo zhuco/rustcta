@@ -1,0 +1,19 @@
+{
+  "exchange": "gateio",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/spot/orders/1001",
+  "auth": "signed",
+  "query": {
+    "currency_pair": { "match": "exact", "value": "BTC_USDT" }
+  },
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

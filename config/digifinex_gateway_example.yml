@@ -1,0 +1,13 @@
+exchange: digifinex
+enabled: false
+adapter: digifinex
+spot_rest_base_url: https://openapi.digifinex.com
+swap_rest_base_url: https://openapi.digifinex.com
+spot_public_ws_url: wss://openapi.digifinex.com/ws/v1/
+spot_private_ws_url: wss://openapi.digifinex.com/ws/v1/
+swap_public_ws_url: wss://openapi.digifinex.com/swap_ws/v2/
+swap_private_ws_url: wss://openapi.digifinex.com/swap_ws/v2/
+private_rest:
+  enabled: false
+  api_key_env: DIGIFINEX_API_KEY
+  api_secret_env: DIGIFINEX_API_SECRET

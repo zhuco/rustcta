@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "timestamp": 1743054548123,
+  "data": {
+    "rows": [
+      {
+        "symbol": "SPOT_BTC_USDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "quoteTick": "0.01",
+        "baseTick": "0.000001",
+        "baseMin": "0.0001",
+        "baseMax": "100",
+        "minNotional": "1"
+      },
+      {
+        "symbol": "PERP_BTC_USDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "quoteTick": "0.1",
+        "baseTick": "0.001",
+        "baseMin": "0.001",
+        "minNotional": "5"
+      }
+    ]
+  }
+}

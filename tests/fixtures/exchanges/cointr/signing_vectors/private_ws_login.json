@@ -1,0 +1,12 @@
+{
+  "exchange": "cointr",
+  "name": "private-ws-login",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "timestamp": "1700000000",
+  "method": "GET",
+  "request_path": "/user/verify",
+  "body": "",
+  "payload": "1700000000GET/user/verify",
+  "expected_signature": "asp8h2LSGzNFWF9BshQJj0WiZA5uDIWsAk9FCfz2Ilk="
+}

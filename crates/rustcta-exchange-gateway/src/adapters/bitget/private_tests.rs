@@ -1,8 +1,8 @@
 use rustcta_exchange_api::{
-    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
-    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest,
+    CancelOrderRequest, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient,
+    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -12,6 +12,7 @@ use super::test_support::{
     spawn_rest_server, symbol_scope,
 };
 use super::{BitgetGatewayAdapter, BitgetGatewayConfig};
+use crate::request_spec::RequestSpec;
 
 #[tokio::test]
 async fn bitget_adapter_should_keep_private_operations_unsupported_without_credentials() {
@@ -36,6 +37,91 @@ async fn bitget_adapter_should_keep_private_operations_unsupported_without_crede
         .await
         .expect_err("private operation should be unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[test]
+fn bitget_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
+    let adapter = BitgetGatewayAdapter::new(BitgetGatewayConfig {
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..BitgetGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(matches!(
+        &capabilities.capabilities_v2.public_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.private_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.public_streams,
+        CapabilitySupport::RestFallback { .. }
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.private_streams,
+        CapabilitySupport::RestFallback { .. }
+    ));
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.mode,
+        BatchExecutionMode::ComposedSequential
+    );
+    assert!(
+        capabilities
+            .capabilities_v2
+            .batch_place_orders
+            .supports_partial_failure
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.fills_history.max_limit,
+        Some(100)
+    );
+    assert!(capabilities.capabilities_v2.fills_history.supports_since);
+    assert_eq!(
+        capabilities.capabilities_v2.credential_scopes,
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade]
+    );
+    assert!(capabilities.capabilities_v2.stream_runtime.resync.orders);
+}
+
+#[test]
+fn bitget_signing_should_match_known_hmac_vector() {
+    let vector = signing_vector("place_order_limit.json");
+    let signature = super::signing::sign_request(
+        vector["secret"].as_str().expect("secret"),
+        vector["timestamp"].as_str().expect("timestamp"),
+        vector["method"].as_str().expect("method"),
+        vector["request_path"].as_str().expect("request path"),
+        vector["body"].as_str().expect("body"),
+    );
+    assert_eq!(
+        signature,
+        vector["expected_signature"]
+            .as_str()
+            .expect("expected signature")
+    );
+}
+
+fn load_request_spec(path: &str) -> RequestSpec {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/bitget/request_specs/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("request spec fixture");
+    serde_json::from_str(&text).expect("request spec fixture")
+}
+
+fn signing_vector(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/bitget/signing_vectors/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("signing vector fixture");
+    serde_json::from_str(&text).expect("signing vector fixture")
 }
 
 #[tokio::test]
@@ -169,6 +255,7 @@ async fn bitget_adapter_should_route_private_rest_readbacks_with_signed_headers(
             exchange: exchange_id(),
             market_type: Some(MarketType::Spot),
             symbol: Some(symbol_scope()),
+            page: None,
         })
         .await
         .expect("open orders");
@@ -205,6 +292,7 @@ async fn bitget_adapter_should_route_private_rest_readbacks_with_signed_headers(
             start_time: None,
             end_time: None,
             limit: Some(25),
+            page: None,
         })
         .await
         .expect("fills");
@@ -219,7 +307,13 @@ async fn bitget_adapter_should_route_private_rest_readbacks_with_signed_headers(
 
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 5);
+    load_request_spec("get_balances.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("get balances request spec");
     assert_signed_bitget_request(&requests[0], "/api/v2/spot/account/assets");
+    load_request_spec("query_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("query order request spec");
     assert_signed_bitget_request(&requests[1], "/api/v2/spot/trade/orderInfo");
     assert_eq!(
         requests[1].query.get("orderId").map(String::as_str),
@@ -230,11 +324,20 @@ async fn bitget_adapter_should_route_private_rest_readbacks_with_signed_headers(
         requests[2].query.get("symbol").map(String::as_str),
         Some("BTCUSDT")
     );
+    load_request_spec("get_open_orders.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("get open orders request spec");
     assert_signed_bitget_request(&requests[3], "/api/v3/account/fee-rate");
+    load_request_spec("get_fees.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("get fees request spec");
     assert_eq!(
         requests[3].query.get("category").map(String::as_str),
         Some("SPOT")
     );
+    load_request_spec("get_recent_fills.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("get recent fills request spec");
     assert_signed_bitget_request(&requests[4], "/api/v2/spot/trade/fills");
     assert_eq!(
         requests[4].query.get("limit").map(String::as_str),
@@ -355,6 +458,9 @@ async fn bitget_adapter_should_route_private_order_mutations() {
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 5);
 
+    load_request_spec("place_order.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("place order request spec");
     assert_signed_bitget_request_method(&requests[0], "POST", "/api/v2/spot/trade/place-order");
     let body = requests[0].body.as_ref().expect("place body");
     assert_eq!(body["symbol"], "BTCUSDT");
@@ -366,11 +472,17 @@ async fn bitget_adapter_should_route_private_order_mutations() {
     assert_eq!(body["clientOid"], "LIMIT1");
 
     assert_signed_bitget_request_method(&requests[1], "POST", "/api/v2/spot/trade/place-order");
+    load_request_spec("place_quote_market_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("quote market order request spec");
     let body = requests[1].body.as_ref().expect("quote body");
     assert_eq!(body["orderType"], "market");
     assert_eq!(body["size"], "25.5");
     assert_eq!(body["clientOid"], "QUOTE1");
 
+    load_request_spec("cancel_order.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("cancel order request spec");
     assert_signed_bitget_request_method(&requests[2], "POST", "/api/v2/spot/trade/cancel-order");
     let body = requests[2].body.as_ref().expect("cancel body");
     assert_eq!(body["symbol"], "BTCUSDT");
@@ -382,10 +494,16 @@ async fn bitget_adapter_should_route_private_order_mutations() {
         "POST",
         "/api/v2/spot/trade/cancel-symbol-order",
     );
+    load_request_spec("cancel_all_orders.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("cancel all request spec");
     let body = requests[3].body.as_ref().expect("cancel all body");
     assert_eq!(body["symbol"], "BTCUSDT");
 
     assert_signed_bitget_request_method(&requests[4], "POST", "/api/v3/trade/modify-order");
+    load_request_spec("amend_order.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("amend order request spec");
     let body = requests[4].body.as_ref().expect("amend body");
     assert_eq!(body["category"], "SPOT");
     assert_eq!(body["symbol"], "BTCUSDT");

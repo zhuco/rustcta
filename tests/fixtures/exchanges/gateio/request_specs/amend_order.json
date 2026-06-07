@@ -1,0 +1,21 @@
+{
+  "exchange": "gateio",
+  "operation": "amend_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "PATCH",
+  "path": "/spot/orders/2005",
+  "auth": "signed",
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "currency_pair": "BTC_USDT",
+    "account": "spot",
+    "amount": "0.015"
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

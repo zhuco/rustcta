@@ -3,25 +3,39 @@ use rustcta_exchange_api::{
 };
 use serde_json::json;
 
+use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::test_support::{context, spawn_rest_server, symbol_scope};
 use super::{MexcGatewayAdapter, MexcGatewayConfig};
 
+fn fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/mexc/toolchain/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("fixture");
+    serde_json::from_str(&text).expect("fixture json")
+}
+
+#[test]
+fn mexc_parser_fixtures_should_cover_success_empty_and_error_shapes() {
+    let exchange = super::test_support::exchange_id();
+    let rules =
+        parse_symbol_rules(&exchange, &fixture("symbol_rules_success.json")).expect("symbol rules");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].base_asset, "BTC");
+
+    let empty = parse_symbol_rules(&exchange, &fixture("symbol_rules_empty.json")).expect("empty");
+    assert!(empty.is_empty());
+    assert!(parse_symbol_rules(&exchange, &fixture("symbol_rules_missing_field.json")).is_err());
+    assert!(
+        parse_orderbook_snapshot(&exchange, symbol_scope(), &fixture("orderbook_error.json"))
+            .is_err()
+    );
+}
+
 #[tokio::test]
 async fn mexc_adapter_should_load_symbol_rules_from_public_rest() {
-    let (base_url, seen) = spawn_rest_server(vec![json!({
-        "symbols": [{
-            "symbol": "BTCUSDT",
-            "status": "TRADING",
-            "baseAsset": "BTC",
-            "quoteAsset": "USDT",
-            "filters": [
-                {"filterType": "PRICE_FILTER", "minPrice": "0.01", "maxPrice": "1000000", "tickSize": "0.01"},
-                {"filterType": "LOT_SIZE", "minQty": "0.00001", "maxQty": "9000", "stepSize": "0.00001"},
-                {"filterType": "MIN_NOTIONAL", "minNotional": "5"}
-            ]
-        }]
-    })])
-    .await;
+    let (base_url, seen) = spawn_rest_server(vec![fixture("symbol_rules_success.json")]).await;
     let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
         rest_base_url: base_url,
         ..MexcGatewayConfig::default()

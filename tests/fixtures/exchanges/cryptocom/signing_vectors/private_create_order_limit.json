@@ -1,0 +1,9 @@
+{
+  "exchange": "cryptocom",
+  "name": "private_create_order_limit",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "payload": "private/create-order42keyinstrument_nameBTC_USDTprice65000quantity0.02sideBUYtime_in_forceGOOD_TILL_CANCELtypeLIMIT1700000000000",
+  "expected_signature": "f28cd0f1488544c87e61db21ff1fdf84f3f3524cfbd921afaf25d08a90553f91",
+  "payload_format": "raw_payload"
+}

@@ -1,0 +1,71 @@
+[
+  {
+    "operation": "spot_balance",
+    "method": "GET",
+    "path": "/42/api/pro/v1/cash/balance",
+    "sign_path": "balance",
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "spot_place_order",
+    "method": "POST",
+    "path": "/42/api/pro/v1/cash/order",
+    "sign_path": "order",
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "spot_query_order",
+    "method": "GET",
+    "path": "/42/api/pro/v1/cash/order/status",
+    "sign_path": "order/status",
+    "query": {
+      "orderId": "OID1"
+    },
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "spot_batch_place",
+    "method": "POST",
+    "path": "/42/api/pro/v1/cash/order/batch",
+    "sign_path": "order/batch",
+    "max_items": 10,
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "futures_position",
+    "method": "GET",
+    "path": "/42/api/pro/v2/futures/position",
+    "sign_path": "v2/futures/position",
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "futures_place_order",
+    "method": "POST",
+    "path": "/42/api/pro/v2/futures/order",
+    "sign_path": "v2/futures/order",
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "futures_batch_cancel",
+    "method": "DELETE",
+    "path": "/42/api/pro/v2/futures/order/batch",
+    "sign_path": "v2/futures/order/batch",
+    "max_items": 10,
+    "auth": "account_group_hmac"
+  },
+  {
+    "operation": "public_ws_depth",
+    "method": "WS_SUBSCRIBE",
+    "url": "wss://ascendex.com/api/pro/v1/stream",
+    "channel": "depth:BTC/USDT",
+    "auth": "none"
+  },
+  {
+    "operation": "private_ws_futures_orders",
+    "method": "WS_SUBSCRIBE",
+    "url": "wss://ascendex.com/42/api/pro/v2/stream",
+    "auth_sign_path": "v2/stream",
+    "channel": "futures-order",
+    "auth": "account_group_hmac"
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "exchange": "poloniex",
+  "operation": "place_order",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v3/trade/order",
+  "auth": "signed",
+  "headers": {
+    "key": { "match": "exact", "value": "key" },
+    "signaturemethod": { "match": "exact", "value": "HmacSHA256" },
+    "signatureversion": { "match": "exact", "value": "2" },
+    "signtimestamp": { "match": "non_empty" },
+    "recvwindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "body": {
+    "clOrdId": "LIMIT1",
+    "mgnMode": "CROSS",
+    "posSide": "LONG",
+    "px": "65000",
+    "side": "BUY",
+    "sz": "0.02",
+    "symbol": "BTC_USDT_PERP",
+    "timeInForce": "GTC",
+    "type": "LIMIT"
+  },
+  "strict_body": true,
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "poloniex/rest_get_orders"
+}

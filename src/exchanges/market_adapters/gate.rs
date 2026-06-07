@@ -104,13 +104,11 @@ impl MarketDataAdapter for GateMarketAdapter {
         vec![
             PublicBookProfile::new(
                 PublicBookProfileKind::FastestL1,
-                "futures.order_book_update",
-                20,
-                Some(20),
+                "futures.book_ticker",
+                1,
+                None,
             )
             .with_sequence(true)
-            .with_rest_snapshot(true)
-            .with_local_merge(true)
             .with_max_symbols_per_connection(50),
             PublicBookProfile::new(
                 PublicBookProfileKind::FastestDepth,
@@ -272,8 +270,8 @@ fn parse_orderbook_payload(
     let canonical_symbol = compact_symbol_to_canonical(symbol)
         .ok_or_else(|| anyhow!("gate orderbook message has unsupported symbol: {symbol}"))?;
     let exchange_symbol = ExchangeSymbol::new(ExchangeId::Gate, symbol.to_ascii_uppercase());
-    let bids = parse_levels(bids_value);
-    let asks = parse_levels(asks_value);
+    let bids = parse_gate_side_levels(payload, bids_value, "b", "B");
+    let asks = parse_gate_side_levels(payload, asks_value, "a", "A");
     let exchange_ts = timestamp_from_value(
         payload
             .get("t")
@@ -334,6 +332,39 @@ fn parse_levels(value: &Value) -> Vec<BookLevel> {
         .flatten()
         .filter_map(parse_level)
         .collect()
+}
+
+fn parse_gate_side_levels(
+    payload: &Value,
+    value: &Value,
+    price_key: &str,
+    quantity_key: &str,
+) -> Vec<BookLevel> {
+    if value.as_array().is_some() {
+        return parse_levels(value);
+    }
+
+    let Some(price) = value
+        .as_str()
+        .and_then(|text| {
+            if text.is_empty() {
+                None
+            } else {
+                text.parse::<f64>().ok()
+            }
+        })
+        .or_else(|| parse_json_f64(value))
+    else {
+        return Vec::new();
+    };
+    let Some(quantity) = payload.get(quantity_key).and_then(parse_json_f64) else {
+        return Vec::new();
+    };
+    if payload.get(price_key).is_some() {
+        vec![BookLevel::new(price, quantity)]
+    } else {
+        Vec::new()
+    }
 }
 
 fn parse_level(value: &Value) -> Option<BookLevel> {
@@ -509,6 +540,26 @@ mod tests {
     }
 
     #[test]
+    fn gate_should_build_book_ticker_subscription_for_fastest_l1() {
+        let symbols = vec![
+            ExchangeSymbol::new(ExchangeId::Gate, "BTC_USDT"),
+            ExchangeSymbol::new(ExchangeId::Gate, "ETH_USDT"),
+        ];
+
+        let subscriptions = GateMarketAdapter
+            .build_public_ws_subscriptions_for_profile(&symbols, PublicBookProfileKind::FastestL1);
+
+        assert_eq!(subscriptions.len(), 1);
+        assert_eq!(subscriptions[0].exchange, ExchangeId::Gate);
+        assert_eq!(subscriptions[0].channel, "futures.book_ticker");
+        assert_eq!(subscriptions[0].symbols, symbols);
+        assert_eq!(subscriptions[0].profile, PublicBookProfileKind::FastestL1);
+        assert_eq!(subscriptions[0].depth, 1);
+        assert!(!subscriptions[0].requires_rest_snapshot);
+        assert!(!subscriptions[0].requires_local_merge);
+    }
+
+    #[test]
     fn gate_should_parse_orderbook_snapshot() {
         let raw = r#"{
             "time":1541500161,
@@ -632,5 +683,40 @@ mod tests {
         assert_eq!(funding.canonical_symbol.as_pair(), "草根文化/USDT");
         assert_eq!(funding.exchange_symbol.unwrap().symbol, "草根文化_USDT");
         assert_eq!(funding.funding_rate, -0.009172);
+    }
+
+    #[test]
+    fn gate_should_parse_book_ticker_update() {
+        let raw = r#"{
+            "time":1615366379,
+            "time_ms":1615366379123,
+            "channel":"futures.book_ticker",
+            "event":"update",
+            "result":{
+                "t":1615366379123,
+                "u":"2517661076",
+                "s":"BTC_USDT",
+                "b":"54696.6",
+                "B":"37000",
+                "a":"54696.7",
+                "A":"47061"
+            }
+        }"#;
+
+        let events = GateMarketAdapter
+            .parse_public_ws_message(raw, Utc::now())
+            .expect("valid gate book ticker");
+
+        assert_eq!(events.len(), 1);
+        let MarketEvent::OrderBook(book) = &events[0] else {
+            panic!("expected orderbook event");
+        };
+        assert_eq!(book.exchange, ExchangeId::Gate);
+        assert_eq!(book.canonical_symbol.as_pair(), "BTC/USDT");
+        assert_eq!(book.exchange_symbol.symbol, "BTC_USDT");
+        assert_eq!(book.best_bid(), Some(BookLevel::new(54696.6, 37000.0)));
+        assert_eq!(book.best_ask(), Some(BookLevel::new(54696.7, 47061.0)));
+        assert_eq!(book.sequence, Some(2517661076));
+        assert!(book.is_usable());
     }
 }

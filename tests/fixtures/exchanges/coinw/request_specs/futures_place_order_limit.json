@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "exchange": "coinw",
+  "operation": "coinw.place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v1/perpum/order",
+  "body": {
+    "instrument": "BTC",
+    "direction": "long",
+    "orderPrice": "1000",
+    "orderVolume": "0.1",
+    "positionType": "plan",
+    "leverage": 1,
+    "thirdOrderId": "perp-1"
+  },
+  "signing": "futures_hmac_headers",
+  "required_auth_headers": ["api_key", "timestamp", "sign"]
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "deepcoin",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/deepcoin/trade/order",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

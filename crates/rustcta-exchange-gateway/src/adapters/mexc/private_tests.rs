@@ -1,6 +1,7 @@
 use rustcta_exchange_api::{
-    BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient,
-    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest, CancelOrderRequest,
+    CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient, FeesRequest,
+    OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
     RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
@@ -11,6 +12,7 @@ use super::test_support::{
     symbol_scope,
 };
 use super::{MexcGatewayAdapter, MexcGatewayConfig};
+use crate::request_spec::RequestSpec;
 
 #[tokio::test]
 async fn mexc_adapter_should_keep_private_operations_unsupported_without_credentials() {
@@ -28,6 +30,59 @@ async fn mexc_adapter_should_keep_private_operations_unsupported_without_credent
         .await
         .expect_err("private operation should be unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[test]
+fn mexc_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(matches!(
+        &capabilities.capabilities_v2.public_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.private_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.public_streams,
+        CapabilitySupport::RestFallback { .. }
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.private_streams,
+        CapabilitySupport::RestFallback { .. }
+    ));
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.mode,
+        BatchExecutionMode::ComposedSequential
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_cancel_orders.mode,
+        BatchExecutionMode::Native
+    );
+    assert!(
+        capabilities
+            .capabilities_v2
+            .batch_cancel_orders
+            .same_symbol_required
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.fills_history.max_limit,
+        Some(1000)
+    );
+    assert!(capabilities.capabilities_v2.fills_history.supports_since);
+    assert!(capabilities.capabilities_v2.fills_history.supports_from_id);
+    assert_eq!(
+        capabilities.capabilities_v2.credential_scopes,
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade]
+    );
+    assert!(capabilities.capabilities_v2.stream_runtime.resync.orders);
 }
 
 #[tokio::test]
@@ -152,6 +207,9 @@ async fn mexc_adapter_should_route_private_order_mutations() {
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 4);
 
+    load_request_spec("place_order.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("place order request spec");
     assert_signed_request_method(&requests[0], "POST", "/api/v3/order");
     assert_eq!(
         requests[0].query.get("symbol").map(String::as_str),
@@ -186,6 +244,9 @@ async fn mexc_adapter_should_route_private_order_mutations() {
     );
 
     assert_signed_request_method(&requests[1], "POST", "/api/v3/order");
+    load_request_spec("place_quote_market_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("quote market order request spec");
     assert_eq!(
         requests[1].query.get("type").map(String::as_str),
         Some("MARKET")
@@ -203,6 +264,9 @@ async fn mexc_adapter_should_route_private_order_mutations() {
     );
     assert!(!requests[1].query.contains_key("quantity"));
 
+    load_request_spec("cancel_order.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("cancel order request spec");
     assert_signed_request_method(&requests[2], "DELETE", "/api/v3/order");
     assert_eq!(
         requests[2].query.get("orderId").map(String::as_str),
@@ -217,6 +281,9 @@ async fn mexc_adapter_should_route_private_order_mutations() {
     );
 
     assert_signed_request_method(&requests[3], "DELETE", "/api/v3/openOrders");
+    load_request_spec("cancel_all_orders.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("cancel all request spec");
     assert_eq!(
         requests[3].query.get("symbol").map(String::as_str),
         Some("BTCUSDT")
@@ -225,12 +292,36 @@ async fn mexc_adapter_should_route_private_order_mutations() {
 
 #[test]
 fn mexc_signing_should_match_known_hmac() {
-    let query = "symbol=BTCUSDT&side=BUY&type=LIMIT&quantity=1&price=11&recvWindow=5000&timestamp=1644489390087";
-    let signature = super::signing::sign_raw_query("secret", query).expect("signature");
+    let vector = signing_vector("place_order_limit.json");
+    let signature = super::signing::sign_raw_query(
+        vector["secret"].as_str().expect("secret"),
+        vector["payload"].as_str().expect("payload"),
+    )
+    .expect("signature");
     assert_eq!(
         signature,
-        "28ba033f359efa9f91364321c923653ac346dfad5fdb95e5b38f41b50c31d4cf"
+        vector["expected_signature"]
+            .as_str()
+            .expect("expected signature")
     );
+}
+
+fn load_request_spec(path: &str) -> RequestSpec {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/mexc/request_specs/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("request spec fixture");
+    serde_json::from_str(&text).expect("request spec fixture")
+}
+
+fn signing_vector(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/mexc/signing_vectors/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("signing vector fixture");
+    serde_json::from_str(&text).expect("signing vector fixture")
 }
 
 #[tokio::test]
@@ -345,6 +436,7 @@ async fn mexc_adapter_should_sign_private_readbacks_and_parse_responses() {
             exchange: exchange_id(),
             market_type: Some(MarketType::Spot),
             symbol: Some(symbol_scope()),
+            page: None,
         })
         .await
         .expect("open orders");
@@ -381,6 +473,7 @@ async fn mexc_adapter_should_sign_private_readbacks_and_parse_responses() {
             start_time: None,
             end_time: None,
             limit: Some(100),
+            page: None,
         })
         .await
         .expect("fills");
@@ -394,8 +487,14 @@ async fn mexc_adapter_should_sign_private_readbacks_and_parse_responses() {
 
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 5);
+    load_request_spec("get_balances.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("get balances request spec");
     assert_signed_request(&requests[0], "/api/v3/account");
     assert!(requests[0].query.get("symbol").is_none());
+    load_request_spec("query_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("query order request spec");
     assert_signed_request(&requests[1], "/api/v3/order");
     assert_eq!(
         requests[1].query.get("symbol").map(String::as_str),
@@ -405,8 +504,17 @@ async fn mexc_adapter_should_sign_private_readbacks_and_parse_responses() {
         requests[1].query.get("orderId").map(String::as_str),
         Some("1001")
     );
+    load_request_spec("get_open_orders.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("get open orders request spec");
     assert_signed_request(&requests[2], "/api/v3/openOrders");
+    load_request_spec("get_fees.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("get fees request spec");
     assert_signed_request(&requests[3], "/api/v3/tradeFee");
+    load_request_spec("get_recent_fills.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("get recent fills request spec");
     assert_signed_request(&requests[4], "/api/v3/myTrades");
     assert_eq!(
         requests[4].query.get("limit").map(String::as_str),

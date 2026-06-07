@@ -1,0 +1,17 @@
+{
+  "exchange": "tapbit",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/spot/order",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "body_contains": {"instrument_id": "BTC/USDT", "direction": "1", "price": "65000", "quantity": "0.02"},
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "spot-account-one"
+}

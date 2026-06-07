@@ -1,0 +1,12 @@
+{
+  "exchange": "bingx",
+  "name": "recv_window_sorted_query",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1700000000000",
+  "method": "GET",
+  "request_path": "/openApi/swap/v2/user/positions",
+  "payload": "recvWindow=5000&symbol=BTC-USDT&timestamp=1700000000000",
+  "expected_signature": "61c3e9b4b7efd1abca937bec7654a3230c7c30fe2773f9f21a3a3e5ffb222b9e",
+  "payload_format": "raw_payload"
+}

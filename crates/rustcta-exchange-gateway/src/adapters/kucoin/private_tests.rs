@@ -1,14 +1,30 @@
 use rustcta_exchange_api::{
-    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
-    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest,
+    CancelAllOrdersRequest, CancelOrderRequest, ExchangeApiError, ExchangeClient, FeesRequest,
+    OpenOrdersRequest, PageCursor, PageRequest, PlaceOrderRequest, QueryOrderRequest,
+    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{context, exchange_id, spawn_rest_server, symbol_scope, SeenRequest};
 use super::{KuCoinGatewayAdapter, KuCoinGatewayConfig};
+
+fn kucoin_fixture(name: &str) -> serde_json::Value {
+    let text = match name {
+        "request_specs/place_order_limit.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/kucoin/request_specs/place_order_limit.json"
+        ),
+        "request_specs/cancel_order.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/kucoin/request_specs/cancel_order.json"
+        ),
+        "signing_vectors/private_get_accounts.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/kucoin/signing_vectors/private_get_accounts.json"
+        ),
+        _ => panic!("unknown kucoin fixture {name}"),
+    };
+    serde_json::from_str(text).expect("kucoin fixture")
+}
 
 #[tokio::test]
 async fn kucoin_adapter_should_keep_private_operations_unsupported_without_credentials() {
@@ -62,9 +78,29 @@ fn assert_signed_request_method(request: &SeenRequest, method: &str, path: &str)
 
 #[test]
 fn kucoin_signing_should_base64_encode_hmac_sha256() {
-    let signature = super::signing::sign_base64("secret", "1700000000000GET/api/v1/accounts")
-        .expect("signature");
-    assert_eq!(signature, "ka2jGwVPj+HJ5t7L4fEM4HttekAXENIQpmo8ulfZmV8=");
+    let vector = kucoin_fixture("signing_vectors/private_get_accounts.json");
+    let signature = super::signing::sign_base64(
+        vector["secret"].as_str().unwrap(),
+        vector["payload"].as_str().unwrap(),
+    )
+    .expect("signature");
+    assert_eq!(signature, vector["expected_signature"].as_str().unwrap());
+}
+
+#[test]
+fn kucoin_request_spec_fixtures_should_cover_private_writes() {
+    let place = kucoin_fixture("request_specs/place_order_limit.json");
+    assert_eq!(place["operation"], "kucoin.place_order");
+    assert_eq!(place["method"], "POST");
+    assert_eq!(place["path"], "/api/v1/hf/orders");
+    assert_eq!(place["body"]["symbol"], "BTC-USDT");
+    assert_eq!(place["body"]["clientOid"], "LIMIT1");
+
+    let cancel = kucoin_fixture("request_specs/cancel_order.json");
+    assert_eq!(cancel["operation"], "kucoin.cancel_order");
+    assert_eq!(cancel["method"], "DELETE");
+    assert_eq!(cancel["path"], "/api/v1/hf/orders/2001");
+    assert_eq!(cancel["query"]["symbol"], "BTC-USDT");
 }
 
 #[tokio::test]
@@ -229,6 +265,80 @@ async fn kucoin_adapter_should_route_private_order_mutations() {
 }
 
 #[tokio::test]
+async fn kucoin_adapter_should_compose_batch_place_and_cancel_requests() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "code": "200000",
+            "data": {"orderId": "3001", "clientOid": "BATCH1"}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"orderId": "3002", "clientOid": "BATCH2"}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"orderId": "3001"}
+        }),
+        json!({
+            "code": "200000",
+            "data": {"orderId": "3002"}
+        }),
+    ])
+    .await;
+    let adapter = KuCoinGatewayAdapter::new(KuCoinGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        api_passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..KuCoinGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let mut order_one = place_limit_order("BATCH1", "0.01");
+    order_one.context = context("batch-place-one");
+    let mut order_two = place_limit_order("BATCH2", "0.02");
+    order_two.context = context("batch-place-two");
+
+    let placed = adapter
+        .batch_place_orders(BatchPlaceOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-place"),
+            exchange: exchange_id(),
+            orders: vec![order_one, order_two],
+        })
+        .await
+        .expect("batch place");
+    assert_eq!(placed.orders.len(), 2);
+    assert_eq!(placed.orders[0].exchange_order_id.as_deref(), Some("3001"));
+    assert_eq!(placed.orders[1].exchange_order_id.as_deref(), Some("3002"));
+
+    let cancelled = adapter
+        .batch_cancel_orders(BatchCancelOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("batch-cancel"),
+            exchange: exchange_id(),
+            cancels: vec![
+                cancel_request("3001", "BATCH1"),
+                cancel_request("3002", "BATCH2"),
+            ],
+        })
+        .await
+        .expect("batch cancel");
+    assert_eq!(cancelled.cancelled_count, 2);
+    assert_eq!(cancelled.orders[0].status, OrderStatus::Cancelled);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 4);
+    assert_signed_request_method(&requests[0], "POST", "/api/v1/hf/orders");
+    assert_eq!(requests[0].body.as_ref().unwrap()["clientOid"], "BATCH1");
+    assert_signed_request_method(&requests[1], "POST", "/api/v1/hf/orders");
+    assert_eq!(requests[1].body.as_ref().unwrap()["clientOid"], "BATCH2");
+    assert_signed_request_method(&requests[2], "DELETE", "/api/v1/hf/orders/3001");
+    assert_signed_request_method(&requests[3], "DELETE", "/api/v1/hf/orders/3002");
+}
+
+#[tokio::test]
 async fn kucoin_adapter_should_sign_private_readbacks_and_parse_responses() {
     let (base_url, seen) = spawn_rest_server(vec![
         json!({
@@ -356,6 +466,10 @@ async fn kucoin_adapter_should_sign_private_readbacks_and_parse_responses() {
             exchange: exchange_id(),
             market_type: Some(MarketType::Spot),
             symbol: Some(symbol_scope()),
+            page: Some(PageRequest::next_page(
+                Some(50),
+                PageCursor::Offset { offset: 100 },
+            )),
         })
         .await
         .expect("open orders");
@@ -391,7 +505,11 @@ async fn kucoin_adapter_should_sign_private_readbacks_and_parse_responses() {
             from_trade_id: None,
             start_time: None,
             end_time: None,
-            limit: Some(100),
+            limit: None,
+            page: Some(PageRequest::next_page(
+                Some(100),
+                PageCursor::Offset { offset: 200 },
+            )),
         })
         .await
         .expect("fills");
@@ -419,6 +537,14 @@ async fn kucoin_adapter_should_sign_private_readbacks_and_parse_responses() {
         requests[2].query.get("status").map(String::as_str),
         Some("active")
     );
+    assert_eq!(
+        requests[2].query.get("pageSize").map(String::as_str),
+        Some("50")
+    );
+    assert_eq!(
+        requests[2].query.get("currentPage").map(String::as_str),
+        Some("3")
+    );
     assert_signed_request(&requests[3], "/api/v1/trade-fees");
     assert_eq!(
         requests[3].query.get("symbols").map(String::as_str),
@@ -429,4 +555,36 @@ async fn kucoin_adapter_should_sign_private_readbacks_and_parse_responses() {
         requests[4].query.get("pageSize").map(String::as_str),
         Some("100")
     );
+    assert_eq!(
+        requests[4].query.get("currentPage").map(String::as_str),
+        Some("3")
+    );
+}
+
+fn place_limit_order(client_order_id: &str, quantity: &str) -> PlaceOrderRequest {
+    PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context(client_order_id),
+        symbol: symbol_scope(),
+        client_order_id: Some(client_order_id.to_string()),
+        side: OrderSide::Buy,
+        position_side: None,
+        order_type: OrderType::Limit,
+        time_in_force: Some(TimeInForce::GTC),
+        quantity: quantity.to_string(),
+        price: Some("65000".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: false,
+    }
+}
+
+fn cancel_request(exchange_order_id: &str, client_order_id: &str) -> CancelOrderRequest {
+    CancelOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context(client_order_id),
+        symbol: symbol_scope(),
+        client_order_id: Some(client_order_id.to_string()),
+        exchange_order_id: Some(exchange_order_id.to_string()),
+    }
 }

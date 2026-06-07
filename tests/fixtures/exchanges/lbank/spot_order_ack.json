@@ -1,0 +1,14 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": {
+    "order_id": "2001",
+    "custom_id": "LIMIT1",
+    "symbol": "btc_usdt",
+    "type": "buy",
+    "status": 0,
+    "price": "65000",
+    "amount": "0.02",
+    "deal_amount": "0"
+  }
+}

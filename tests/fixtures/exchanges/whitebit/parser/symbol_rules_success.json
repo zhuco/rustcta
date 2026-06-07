@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "name": "BTC_USDT",
+      "stock": "BTC",
+      "money": "USDT",
+      "moneyPrec": 2,
+      "stockPrec": 6,
+      "minAmount": "0.0001",
+      "minTotal": "1",
+      "maxTotal": "100000",
+      "tradesEnabled": true,
+      "type": "spot"
+    }
+  ]
+}

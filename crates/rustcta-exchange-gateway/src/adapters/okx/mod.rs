@@ -25,6 +25,7 @@ mod public_tests;
 mod signing;
 #[cfg(test)]
 mod test_support;
+mod toolchain;
 mod transport;
 mod types;
 
@@ -161,6 +162,10 @@ impl ExchangeClient for OkxGatewayAdapter {
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(400));
         capabilities.max_recent_fill_limit = Some(100);
+        toolchain::apply_toolchain_capabilities(
+            &mut capabilities,
+            self.config.private_rest_available(),
+        );
         capabilities
     }
 

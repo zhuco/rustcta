@@ -1,0 +1,9 @@
+{
+  "topic": "match",
+  "data": {
+    "orderId": "fixture-order-1",
+    "clientOrderId": "fixture-client-1",
+    "symbol": "BTCUSDT",
+    "status": "filled"
+  }
+}

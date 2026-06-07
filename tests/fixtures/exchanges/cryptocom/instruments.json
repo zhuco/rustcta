@@ -1,0 +1,33 @@
+{
+  "id": 1,
+  "method": "public/get-instruments",
+  "code": 0,
+  "result": {
+    "data": [
+      {
+        "symbol": "BTC_USDT",
+        "inst_type": "SPOT",
+        "base_ccy": "BTC",
+        "quote_ccy": "USDT",
+        "price_tick_size": "0.01",
+        "qty_tick_size": "0.000001",
+        "min_quantity": "0.00001",
+        "max_quantity": "1000",
+        "min_notional": "1",
+        "quote_decimals": 2,
+        "quantity_decimals": 6,
+        "tradable": true
+      },
+      {
+        "symbol": "BTCUSD-PERP",
+        "inst_type": "PERPETUAL_SWAP",
+        "base_ccy": "BTC",
+        "quote_ccy": "USD",
+        "price_tick_size": "0.1",
+        "qty_tick_size": "0.001",
+        "min_quantity": "0.001",
+        "tradable": true
+      }
+    ]
+  }
+}

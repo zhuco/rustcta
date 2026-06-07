@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "base": "BTC",
+      "baseSize": "0.25",
+      "direction": "long",
+      "leverage": "5",
+      "openPrice": "1000",
+      "profitUnreal": "12.5",
+      "liquidationPrice": "500"
+    }
+  ],
+  "msg": ""
+}

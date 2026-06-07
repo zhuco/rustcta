@@ -1,0 +1,29 @@
+{
+  "id": "1",
+  "jsonrpc": "2.0",
+  "usIn": 1606458143935,
+  "usOut": 1606458143946,
+  "usDiff": 11,
+  "result": [
+    {
+      "base_currency": "USDT",
+      "contract_size": "1",
+      "creation_timestamp": "1606361968520",
+      "expiration_timestamp": "2114352000000",
+      "instrument_name": "BTC-USDT-PERPETUAL",
+      "is_active": true,
+      "kind": "future",
+      "leverage": 125,
+      "maker_commission": "0.0002",
+      "min_trade_amount": "0.001",
+      "min_qty": "0.001",
+      "option_type": "init",
+      "quote_currency": "BTC",
+      "settlement_period": "perpetual",
+      "strike": "0",
+      "taker_commission": "0.0005",
+      "tick_size": "0.1",
+      "instr_multiple": "0.001"
+    }
+  ]
+}

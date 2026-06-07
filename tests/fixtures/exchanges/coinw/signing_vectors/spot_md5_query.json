@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "exchange": "coinw",
+  "product": "spot",
+  "algorithm": "md5_uppercase",
+  "secret": "secret",
+  "params": {
+    "amount": "0.01",
+    "api_key": "key",
+    "symbol": "BTC_USDT"
+  },
+  "expected_signature": "1F739D1FCDD9E1A86F45D47630B27909"
+}

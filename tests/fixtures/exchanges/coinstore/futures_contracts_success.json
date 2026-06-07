@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": {
+    "contracts": [
+      {
+        "contractId": 12345,
+        "contractName": "BTC-USDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "tickSize": "0.1",
+        "minOrderSize": "1",
+        "makerFeeRate": "0.0002",
+        "takerFeeRate": "0.0005"
+      }
+    ]
+  }
+}

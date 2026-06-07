@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": {
+    "contracts": [
+      {
+        "symbol": "BTC-PERP",
+        "side": "LONG",
+        "position": "0.25",
+        "avgOpenPrice": "65000",
+        "markPrice": "65100",
+        "unrealizedPnl": "25",
+        "leverage": "5"
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "fixture-order-002",
+  "side": "buy",
+  "order_type": "limit_order",
+  "status": "open",
+  "total_quantity": "0.01",
+  "price_per_unit": "64000",
+  "filled_quantity": "0"
+}

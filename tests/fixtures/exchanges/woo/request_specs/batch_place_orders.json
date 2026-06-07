@@ -1,0 +1,18 @@
+{
+  "exchange": "woo",
+  "operation": "batch_place_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v3/trade/order",
+  "auth": "signed",
+  "headers": {
+    "x-api-key": { "match": "exact", "value": "key" },
+    "x-api-signature": { "match": "non_empty" },
+    "x-api-timestamp": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "symbol": "SPOT_BTC_USDT"
+  },
+  "forbid_header_values_containing": ["secret"]
+}

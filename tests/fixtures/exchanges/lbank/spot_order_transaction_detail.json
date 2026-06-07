@@ -1,0 +1,17 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "transaction": [
+    {
+      "txUuid": "fill-1",
+      "orderUuid": "2001",
+      "tradeType": "buy",
+      "dealPrice": "65000",
+      "dealQuantity": "0.01",
+      "dealVolumePrice": "650",
+      "tradeFee": "0.65",
+      "tradeFeeAsset": "USDT",
+      "dealTime": 1700000000000
+    }
+  ]
+}

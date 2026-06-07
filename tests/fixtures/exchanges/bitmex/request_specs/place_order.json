@@ -1,0 +1,36 @@
+{
+  "exchange": "bitmex",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/order",
+  "auth": "signed",
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "api-expires": {
+      "match": "non_empty"
+    },
+    "api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "body_contains": {
+    "symbol": "XBTUSD",
+    "side": "Buy",
+    "ordType": "Limit",
+    "orderQty": 100,
+    "price": 99.5,
+    "clOrdID": "client-1"
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "bitmex/rest_place_order"
+}

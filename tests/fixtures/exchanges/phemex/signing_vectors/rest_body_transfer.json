@@ -1,0 +1,13 @@
+{
+  "exchange": "phemex",
+  "name": "rest_body_transfer",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "sample-secret",
+  "timestamp": "1780837600",
+  "method": "POST",
+  "request_path": "/assets/transfer",
+  "body": "{\"amount\":\"10\",\"currency\":\"USDT\",\"from\":\"spot\",\"to\":\"futures\"}",
+  "payload": "/assets/transfer1780837600{\"amount\":\"10\",\"currency\":\"USDT\",\"from\":\"spot\",\"to\":\"futures\"}",
+  "expected_signature": "66a1abc498b03fd5018e963576804f34c325a75617f039734fdc85deeb564b60",
+  "payload_format": "raw_payload"
+}

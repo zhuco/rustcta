@@ -1,0 +1,19 @@
+{
+  "method": "subscribe",
+  "result": {
+    "channel": "user.order",
+    "data": [
+      {
+        "order_id": "1001",
+        "client_oid": "CID1001",
+        "instrument_name": "BTC_USDT",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "status": "ACTIVE",
+        "quantity": "0.01",
+        "limit_price": "65000",
+        "cumulative_quantity": "0"
+      }
+    ]
+  }
+}

@@ -28,6 +28,7 @@ pub(crate) fn CrossArbPanel(
     mut active_view: Signal<ControlPanelView>,
     mut api_key_exchange: Signal<String>,
     mut api_key_account: Signal<String>,
+    mut api_key_namespace: Signal<String>,
 ) -> Element {
     let mut opp_page = use_signal(|| 0usize);
     let mut hedge_page = use_signal(|| 0usize);
@@ -60,6 +61,9 @@ pub(crate) fn CrossArbPanel(
         CredentialAccountOption::for_exchange(&api_keys, "bitget", &bitget_account(), lang);
     let gate_account_options =
         CredentialAccountOption::for_exchange(&api_keys, "gate", &gate_account(), lang);
+    let binance_select_options = binance_account_options.clone();
+    let bitget_select_options = bitget_account_options.clone();
+    let gate_select_options = gate_account_options.clone();
     let opportunities = source.opportunities.clone();
     let signals = source.signals.clone();
     let hedge_records = source.hedge_records.clone();
@@ -321,7 +325,12 @@ pub(crate) fn CrossArbPanel(
                             CrossArbAccountSelect {
                                 value: binance_account(),
                                 options: binance_account_options.clone(),
-                                on_change: move |value| binance_account.set(value)
+                                on_change: move |value: String| {
+                                    if let Some(env_prefix) = env_prefix_for_account(&binance_select_options, &value) {
+                                        binance_env.set(env_prefix);
+                                    }
+                                    binance_account.set(value);
+                                }
                             }
                         }
                         label { class: "form-field",
@@ -337,7 +346,12 @@ pub(crate) fn CrossArbPanel(
                             CrossArbAccountSelect {
                                 value: bitget_account(),
                                 options: bitget_account_options.clone(),
-                                on_change: move |value| bitget_account.set(value)
+                                on_change: move |value: String| {
+                                    if let Some(env_prefix) = env_prefix_for_account(&bitget_select_options, &value) {
+                                        bitget_env.set(env_prefix);
+                                    }
+                                    bitget_account.set(value);
+                                }
                             }
                         }
                         label { class: "form-field",
@@ -353,7 +367,12 @@ pub(crate) fn CrossArbPanel(
                             CrossArbAccountSelect {
                                 value: gate_account(),
                                 options: gate_account_options.clone(),
-                                on_change: move |value| gate_account.set(value)
+                                on_change: move |value: String| {
+                                    if let Some(env_prefix) = env_prefix_for_account(&gate_select_options, &value) {
+                                        gate_env.set(env_prefix);
+                                    }
+                                    gate_account.set(value);
+                                }
                             }
                         }
                         label { class: "form-field",
@@ -454,6 +473,7 @@ pub(crate) fn CrossArbPanel(
                                     {
                                         let credential_exchange = row.credential_exchange.clone();
                                         let credential_account = row.credential_account.clone();
+                                        let credential_namespace = row.credential_namespace.clone();
                                         rsx! {
                                     tr {
                                         td { "{row.exchange}" }
@@ -471,6 +491,7 @@ pub(crate) fn CrossArbPanel(
                                                     onclick: move |_| {
                                                         api_key_exchange.set(credential_exchange.clone());
                                                         api_key_account.set(credential_account.clone());
+                                                        api_key_namespace.set(credential_namespace.clone());
                                                         save_active_view(ControlPanelView::ApiKeys);
                                                         active_view.set(ControlPanelView::ApiKeys);
                                                         message.set(t(lang, "api_keys_loaded_for_edit").to_string());
@@ -771,7 +792,7 @@ pub(crate) fn CrossArbPanel(
 }
 
 #[component]
-fn CrossArbAccountSelect(
+pub(crate) fn CrossArbAccountSelect(
     value: String,
     options: Vec<CredentialAccountOption>,
     on_change: EventHandler<String>,
@@ -785,6 +806,19 @@ fn CrossArbAccountSelect(
             }
         }
     }
+}
+
+pub(crate) fn env_prefix_for_account(
+    options: &[CredentialAccountOption],
+    account_id: &str,
+) -> Option<String> {
+    options
+        .iter()
+        .find(|option| option.value.eq_ignore_ascii_case(account_id))
+        .and_then(|option| {
+            let env_prefix = option.env_prefix.trim();
+            (!env_prefix.is_empty() && env_prefix != "-").then(|| env_prefix.to_string())
+        })
 }
 
 fn cross_arb_save_result_message(value: &Value, lang: Language) -> String {

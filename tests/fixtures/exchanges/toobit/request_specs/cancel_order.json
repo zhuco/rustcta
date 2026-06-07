@@ -1,0 +1,20 @@
+{
+  "exchange": "toobit",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/v1/spot/order",
+  "auth": "signed",
+  "headers": {
+    "X-BB-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "orderId": { "match": "exact", "value": "1001" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "timestamp": { "match": "non_empty" },
+    "signature": { "match": "non_empty" }
+  },
+  "forbid_query_values_containing": ["secret"]
+}

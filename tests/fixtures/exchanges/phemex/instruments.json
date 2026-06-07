@@ -1,0 +1,35 @@
+{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "products": [
+      {
+        "symbol": "sBTCUSDT",
+        "type": "Spot",
+        "quoteCurrency": "USDT",
+        "pricePrecision": 2,
+        "baseCurrency": "BTC",
+        "baseTickSize": "0.000001 BTC",
+        "quoteTickSize": "0.01 USDT",
+        "baseQtyPrecision": 6,
+        "minOrderValue": "1 USDT",
+        "status": "Listed"
+      }
+    ],
+    "perpProductsV2": [
+      {
+        "symbol": "BTCUSDT",
+        "type": "PerpetualV2",
+        "settleCurrency": "USDT",
+        "quoteCurrency": "USDT",
+        "tickSize": "0.1",
+        "pricePrecision": 1,
+        "baseCurrency": "BTC",
+        "status": "Listed",
+        "minOrderValueRv": "1",
+        "qtyPrecision": 3,
+        "qtyStepSize": "0.001"
+      }
+    ]
+  }
+}

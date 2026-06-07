@@ -1,0 +1,16 @@
+{
+  "exchange": "coinbase",
+  "operation": "recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders/historical/fills",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer test.jwt" }
+  },
+  "query": {
+    "limit": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["secret"]
+}

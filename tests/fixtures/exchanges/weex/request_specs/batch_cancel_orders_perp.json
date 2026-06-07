@@ -1,0 +1,17 @@
+{
+  "exchange": "weex",
+  "operation": "weex_batch_cancel_perpetual",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/capi/v3/batchOrders",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-passphrase": {"match": "exact", "value": "passphrase"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "body_contains": {"orderIdList": ["3001"]},
+  "forbid_header_values_containing": ["secret"]
+}

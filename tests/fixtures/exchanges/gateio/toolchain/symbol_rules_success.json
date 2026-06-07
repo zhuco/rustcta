@@ -1,0 +1,12 @@
+[
+  {
+    "id": "BTC_USDT",
+    "base": "BTC",
+    "quote": "USDT",
+    "precision": 2,
+    "amount_precision": 5,
+    "min_base_amount": "0.00001",
+    "min_quote_amount": "5",
+    "trade_status": "tradable"
+  }
+]

@@ -1,0 +1,1 @@
+{"operation":"backpack.place_quote_market_order","method":"POST","path":"/api/v1/order","query":{},"body":{"symbol":"SOL_USDC","side":"Bid","orderType":"Market","quoteQuantity":"25","clientId":"9"},"signed":true}

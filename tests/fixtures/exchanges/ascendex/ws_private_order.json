@@ -1,0 +1,16 @@
+{
+  "m": "futures-order",
+  "accountId": "fut123",
+  "data": {
+    "s": "BTC-PERP",
+    "orderId": "OID1",
+    "id": "CID1",
+    "ot": "Limit",
+    "sd": "Buy",
+    "st": "Filled",
+    "q": "0.25",
+    "p": "65000",
+    "cfq": "0.25",
+    "ap": "65000"
+  }
+}

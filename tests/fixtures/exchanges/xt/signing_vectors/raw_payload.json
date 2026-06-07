@@ -1,0 +1,8 @@
+{
+  "exchange": "xt",
+  "name": "raw-payload",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "payload": "payload",
+  "expected_signature": "b82fcb791acec57859b989b430a826488ce2e479fdf92326bd0a2e8375a42ba4"
+}

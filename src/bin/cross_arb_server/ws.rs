@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
 use rustcta::market::{
     CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketDataAdapter, MarketEvent, OrderBook5,
+    PublicBookProfileKind, WsSubscription,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -23,6 +24,7 @@ pub struct PublicWsConfig {
     pub reconnect_delay_ms: u64,
     pub heartbeat_interval_ms: u64,
     pub max_symbols_per_connection: usize,
+    pub profile: PublicBookProfileKind,
 }
 
 impl Default for PublicWsConfig {
@@ -32,6 +34,7 @@ impl Default for PublicWsConfig {
             reconnect_delay_ms: 2_000,
             heartbeat_interval_ms: 20_000,
             max_symbols_per_connection: 80,
+            profile: PublicBookProfileKind::FastestDepth,
         }
     }
 }
@@ -66,8 +69,13 @@ pub struct PublicWsEndpoint {
     pub subscribe_messages: Vec<String>,
     pub symbol_count: usize,
     pub send_interval_ms: u64,
+    pub channel: String,
+    pub profile: PublicBookProfileKind,
+    pub depth: u16,
+    pub expected_push_interval_ms: Option<u64>,
 }
 
+#[cfg(test)]
 pub fn build_public_ws_endpoints(
     exchange: ExchangeId,
     symbols: &[ExchangeSymbol],
@@ -87,6 +95,7 @@ pub fn build_public_ws_endpoints(
     Ok(endpoints)
 }
 
+#[cfg(test)]
 fn build_public_ws_endpoint(
     exchange: ExchangeId,
     symbols: &[ExchangeSymbol],
@@ -108,6 +117,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages: Vec::new(),
                 symbol_count: symbols.len(),
                 send_interval_ms: 0,
+                channel: "depth5@100ms".to_string(),
+                profile: PublicBookProfileKind::FastestDepth,
+                depth: 5,
+                expected_push_interval_ms: Some(100),
             }
         }
         ExchangeId::Okx => {
@@ -121,6 +134,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
                 symbol_count: symbols.len(),
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel: "books5".to_string(),
+                profile: PublicBookProfileKind::FastestDepth,
+                depth: 5,
+                expected_push_interval_ms: Some(100),
             }
         }
         ExchangeId::Bitget => {
@@ -140,6 +157,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
                 symbol_count: symbols.len(),
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel: "books5".to_string(),
+                profile: PublicBookProfileKind::FastestDepth,
+                depth: 5,
+                expected_push_interval_ms: Some(150),
             }
         }
         ExchangeId::Gate => {
@@ -161,6 +182,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages,
                 symbol_count: symbols.len(),
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel: "futures.order_book".to_string(),
+                profile: PublicBookProfileKind::FastestDepth,
+                depth: 5,
+                expected_push_interval_ms: None,
             }
         }
         ExchangeId::Bybit => {
@@ -174,6 +199,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
                 symbol_count: symbols.len(),
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel: "orderbook.1".to_string(),
+                profile: PublicBookProfileKind::FastestL1,
+                depth: 1,
+                expected_push_interval_ms: Some(10),
             }
         }
         ExchangeId::Mexc => {
@@ -196,6 +225,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages,
                 symbol_count: symbols.len(),
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel: "sub.depth.full".to_string(),
+                profile: PublicBookProfileKind::FastestDepth,
+                depth: 5,
+                expected_push_interval_ms: None,
             }
         }
         ExchangeId::Htx => {
@@ -215,6 +248,10 @@ fn build_public_ws_endpoint(
                 subscribe_messages,
                 symbol_count: symbols.len(),
                 send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel: "depth.step0".to_string(),
+                profile: PublicBookProfileKind::FastestDepth,
+                depth: 20,
+                expected_push_interval_ms: None,
             }
         }
         ExchangeId::CoinEx | ExchangeId::KuCoin | ExchangeId::Kraken | ExchangeId::Toobit => {
@@ -238,9 +275,10 @@ pub async fn run_public_ws_adapter(
     tx: mpsc::Sender<PublicWsUpdate>,
 ) {
     let exchange = adapter.exchange();
-    let endpoints = match build_public_ws_endpoints(
-        exchange.clone(),
+    let endpoints = match build_public_ws_profile_endpoints(
+        adapter.as_ref(),
         &symbols,
+        config.profile,
         config.max_symbols_per_connection,
     ) {
         Ok(endpoints) => endpoints,
@@ -267,6 +305,239 @@ pub async fn run_public_ws_adapter(
             run_public_ws_endpoint(adapter, adapter_exchange, endpoint, config, tx).await;
         });
     }
+}
+
+pub fn build_public_ws_profile_endpoints(
+    adapter: &(dyn MarketDataAdapter + Send + Sync),
+    symbols: &[ExchangeSymbol],
+    profile: PublicBookProfileKind,
+    max_symbols_per_connection: usize,
+) -> anyhow::Result<Vec<PublicWsEndpoint>> {
+    let exchange = adapter.exchange();
+    let profile_batch_size = adapter
+        .public_book_profiles()
+        .into_iter()
+        .find(|candidate| candidate.kind == profile)
+        .and_then(|candidate| candidate.max_symbols_per_connection)
+        .unwrap_or(max_symbols_per_connection);
+    let batch_size = profile_batch_size
+        .min(max_symbols_per_connection.max(1))
+        .max(1);
+    let mut endpoints = Vec::new();
+
+    for chunk in symbols.chunks(batch_size) {
+        let subscriptions = adapter.build_public_ws_subscriptions_for_profile(chunk, profile);
+        if subscriptions.is_empty() {
+            continue;
+        }
+        endpoints.push(build_public_ws_endpoint_from_subscriptions(
+            exchange.clone(),
+            &subscriptions,
+        )?);
+    }
+
+    Ok(endpoints)
+}
+
+fn build_public_ws_endpoint_from_subscriptions(
+    exchange: ExchangeId,
+    subscriptions: &[WsSubscription],
+) -> anyhow::Result<PublicWsEndpoint> {
+    let first = subscriptions
+        .first()
+        .ok_or_else(|| anyhow!("public ws endpoint requires at least one subscription"))?;
+    let profile = first.profile;
+    let depth = first.depth;
+    let expected_push_interval_ms = first.expected_push_interval_ms;
+    let channel = first.channel.clone();
+    let symbols = subscriptions
+        .iter()
+        .flat_map(|subscription| subscription.symbols.iter().cloned())
+        .collect::<Vec<_>>();
+    if symbols.is_empty() {
+        return Err(anyhow!("public ws endpoint requires at least one symbol"));
+    }
+
+    let endpoint = match exchange {
+        ExchangeId::Binance => {
+            let streams = subscriptions
+                .iter()
+                .filter_map(|subscription| subscription.route.as_deref())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if streams.is_empty() {
+                return Err(anyhow!(
+                    "binance public ws subscription missing stream routes"
+                ));
+            }
+            PublicWsEndpoint {
+                exchange,
+                url: format!(
+                    "wss://fstream.binance.com/stream?streams={}",
+                    streams.join("/")
+                ),
+                subscribe_messages: Vec::new(),
+                symbol_count: symbols.len(),
+                send_interval_ms: 0,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Okx => {
+            let args = symbols
+                .iter()
+                .map(|symbol| json!({"channel": channel.as_str(), "instId": symbol.symbol}))
+                .collect::<Vec<_>>();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://ws.okx.com:8443/ws/v5/public".to_string(),
+                subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
+                symbol_count: symbols.len(),
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Bitget => {
+            let args = symbols
+                .iter()
+                .map(|symbol| {
+                    json!({
+                        "instType": "USDT-FUTURES",
+                        "channel": channel.as_str(),
+                        "instId": symbol.symbol
+                    })
+                })
+                .collect::<Vec<_>>();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://ws.bitget.com/v2/ws/public".to_string(),
+                subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
+                symbol_count: symbols.len(),
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Gate => {
+            let subscribe_messages = symbols
+                .iter()
+                .map(|symbol| {
+                    let payload = if channel == "futures.book_ticker" {
+                        json!([symbol.symbol])
+                    } else {
+                        let interval = format!("{}ms", expected_push_interval_ms.unwrap_or(100));
+                        json!([symbol.symbol, interval, depth.to_string()])
+                    };
+                    json!({
+                        "time": Utc::now().timestamp(),
+                        "channel": channel.as_str(),
+                        "event": "subscribe",
+                        "payload": payload
+                    })
+                    .to_string()
+                })
+                .collect();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://fx-ws.gateio.ws/v4/ws/usdt".to_string(),
+                subscribe_messages,
+                symbol_count: symbols.len(),
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Bybit => {
+            let args = symbols
+                .iter()
+                .map(|symbol| format!("{channel}.{}", symbol.symbol))
+                .collect::<Vec<_>>();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://stream.bybit.com/v5/public/linear".to_string(),
+                subscribe_messages: vec![json!({"op": "subscribe", "args": args}).to_string()],
+                symbol_count: symbols.len(),
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Mexc => {
+            let subscribe_messages = symbols
+                .iter()
+                .map(|symbol| {
+                    json!({
+                        "method": channel.as_str(),
+                        "param": {
+                            "symbol": symbol.symbol,
+                            "limit": depth
+                        }
+                    })
+                    .to_string()
+                })
+                .collect();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://contract.mexc.com/edge".to_string(),
+                subscribe_messages,
+                symbol_count: symbols.len(),
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Htx => {
+            let subscribe_messages = symbols
+                .iter()
+                .map(|symbol| {
+                    json!({
+                        "sub": format!("market.{}.{}", symbol.symbol, channel),
+                        "id": format!("{}-{}", symbol.symbol, channel)
+                    })
+                    .to_string()
+                })
+                .collect();
+            PublicWsEndpoint {
+                exchange,
+                url: "wss://api.hbdm.com/linear-swap-ws".to_string(),
+                subscribe_messages,
+                symbol_count: symbols.len(),
+                send_interval_ms: PUBLIC_MARKET_SUBSCRIBE_INTERVAL_MS,
+                channel,
+                profile,
+                depth,
+                expected_push_interval_ms,
+            }
+        }
+        ExchangeId::Kraken | ExchangeId::Toobit => {
+            return Err(anyhow!(
+                "profile public ws endpoint is not wired for exchange {}",
+                exchange.as_str()
+            ));
+        }
+        ExchangeId::CoinEx | ExchangeId::KuCoin => {
+            return Err(anyhow!(
+                "unsupported public ws exchange in perp ws server: {}",
+                exchange.as_str()
+            ));
+        }
+        ExchangeId::Other(other) => return Err(anyhow!("unsupported public ws exchange: {other}")),
+    };
+
+    Ok(endpoint)
 }
 
 async fn run_public_ws_endpoint(
@@ -333,11 +604,11 @@ async fn run_public_ws_endpoint(
                         message = ws.next() => {
                             match message {
                                 Some(Ok(Message::Text(raw))) => {
-                                    handle_ws_text(adapter.as_ref(), exchange.clone(), &raw, &tx).await;
+                                    handle_ws_text(adapter.as_ref(), exchange.clone(), &endpoint, &raw, &tx).await;
                                 }
                                 Some(Ok(Message::Binary(raw))) => {
                                     match String::from_utf8(raw) {
-                                        Ok(text) => handle_ws_text(adapter.as_ref(), exchange.clone(), &text, &tx).await,
+                                        Ok(text) => handle_ws_text(adapter.as_ref(), exchange.clone(), &endpoint, &text, &tx).await,
                                         Err(err) => {
                                             let _ = tx.send(PublicWsUpdate::Error(ws_error(
                                                 exchange.clone(),
@@ -417,6 +688,7 @@ async fn run_public_ws_endpoint(
 async fn handle_ws_text(
     adapter: &(dyn MarketDataAdapter + Send + Sync),
     exchange: ExchangeId,
+    endpoint: &PublicWsEndpoint,
     raw: &str,
     tx: &mpsc::Sender<PublicWsUpdate>,
 ) {
@@ -432,6 +704,7 @@ async fn handle_ws_text(
         Ok(events) => {
             for event in events {
                 if let MarketEvent::OrderBook(book) = event {
+                    let book = annotate_public_ws_book(book, endpoint);
                     let _ = tx.send(PublicWsUpdate::OrderBook(book)).await;
                 }
             }
@@ -447,6 +720,18 @@ async fn handle_ws_text(
                 .await;
         }
     }
+}
+
+fn annotate_public_ws_book(mut book: OrderBook5, endpoint: &PublicWsEndpoint) -> OrderBook5 {
+    let marker = format!(
+        "profile_kind={};depth={};channel={}",
+        endpoint.profile, endpoint.depth, endpoint.channel
+    );
+    book.source_route = Some(match book.source_route {
+        Some(source_route) if !source_route.is_empty() => format!("{source_route};{marker}"),
+        _ => marker,
+    });
+    book
 }
 
 fn ws_error(
@@ -483,6 +768,28 @@ mod tests {
         assert!(endpoint.url.contains("arbusdt@depth5@100ms"));
         assert!(endpoint.url.contains("opusdt@depth5@100ms"));
         assert!(endpoint.subscribe_messages.is_empty());
+    }
+
+    #[test]
+    fn public_ws_profile_endpoint_should_use_fastest_l1_subscription() {
+        let adapter = rustcta::exchanges::market_adapters::BitgetMarketAdapter;
+        let endpoints = build_public_ws_profile_endpoints(
+            &adapter,
+            &[
+                ExchangeSymbol::new(ExchangeId::Bitget, "BTCUSDT"),
+                ExchangeSymbol::new(ExchangeId::Bitget, "ETHUSDT"),
+            ],
+            PublicBookProfileKind::FastestL1,
+            80,
+        )
+        .unwrap();
+
+        assert_eq!(endpoints.len(), 1);
+        assert_eq!(endpoints[0].profile, PublicBookProfileKind::FastestL1);
+        assert_eq!(endpoints[0].channel, "books1");
+        assert_eq!(endpoints[0].depth, 1);
+        assert_eq!(endpoints[0].expected_push_interval_ms, Some(10));
+        assert!(endpoints[0].subscribe_messages[0].contains("\"channel\":\"books1\""));
     }
 
     #[test]

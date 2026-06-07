@@ -1,0 +1,17 @@
+{
+  "exchange": "deepcoin",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/deepcoin/trade/batch-cancel-order",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "body_contains": {"OrderSysIDs": ["3001", "3002"]},
+  "forbid_header_values_containing": ["secret"]
+}

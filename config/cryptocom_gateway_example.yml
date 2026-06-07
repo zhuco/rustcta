@@ -1,0 +1,61 @@
+# Crypto.com Exchange industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# CRYPTOCOM_API_KEY and CRYPTOCOM_API_SECRET.
+
+exchange: cryptocom
+market_types:
+  - spot
+  - perpetual
+adapter: cryptocom
+enabled: true
+
+api_key: ${CRYPTOCOM_API_KEY}
+api_secret: ${CRYPTOCOM_API_SECRET}
+
+rest_base_url: https://api.crypto.com/exchange/v1
+public_websocket_url: wss://stream.crypto.com/exchange/v1/market
+private_websocket_url: wss://stream.crypto.com/exchange/v1/user
+
+# UAT endpoints for preflight only:
+# rest_base_url: https://uat-api.3ona.co/exchange/v1
+# public_websocket_url: wss://uat-stream.3ona.co/exchange/v1/market
+# private_websocket_url: wss://uat-stream.3ona.co/exchange/v1/user
+
+# Keep private REST disabled until account permissions, symbols, and notional
+# limits are verified with dry-run keys.
+enabled_private_rest: false
+enable_public_stream: true
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC_USDT
+    - ETH_USDT
+  perpetual:
+    - BTCUSD-PERP
+    - ETHUSD-PERP
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 10
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - derivatives_trading
+  optional:
+    - websocket_user_stream
+    - fee_rate
+    - positions
+
+notes:
+  - Crypto.com Exchange symbols use underscores for Spot, for example BTC_USDT.
+  - Perpetual instruments are routed through the same Exchange v1 JSON-RPC REST surface.
+  - The adapter supports native create-order-list and cancel-order-list batch calls.
+  - Private WebSocket sessions send public/auth before user.* subscriptions and respond to public/heartbeat with public/respond-heartbeat.

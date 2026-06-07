@@ -1,0 +1,7 @@
+{
+  "error_response": {
+    "error": "ORDER_NOT_FOUND",
+    "message": "order not found",
+    "error_details": "fixture error"
+  }
+}

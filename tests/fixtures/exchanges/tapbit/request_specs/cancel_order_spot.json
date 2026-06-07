@@ -1,0 +1,16 @@
+{
+  "exchange": "tapbit",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/spot/cancel_order",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "body_contains": {"order_id": "3001"},
+  "forbid_header_values_containing": ["secret"]
+}

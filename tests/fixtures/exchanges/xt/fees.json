@@ -1,0 +1,10 @@
+{
+  "returnCode": 0,
+  "result": [
+    {
+      "symbol": "btc_usdt",
+      "makerFee": "0.0002",
+      "takerFee": "0.0005"
+    }
+  ]
+}

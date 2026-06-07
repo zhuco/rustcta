@@ -1,0 +1,15 @@
+{
+  "exchange": "lbank",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "mode": "by_order_id",
+  "method": "POST",
+  "path": "/v2/order_transaction_detail.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "order_id": "2001"
+  }
+}

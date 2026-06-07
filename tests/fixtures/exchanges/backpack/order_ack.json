@@ -1,0 +1,13 @@
+{
+  "symbol": "SOL_USDC_PERP",
+  "id": "42",
+  "clientId": 7,
+  "side": "Bid",
+  "orderType": "Limit",
+  "quantity": "1",
+  "executedQuantity": "0.4",
+  "price": "100",
+  "status": "PartiallyFilled",
+  "timeInForce": "GTC",
+  "reduceOnly": true
+}

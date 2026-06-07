@@ -1,0 +1,31 @@
+{
+  "exchange": "phemex",
+  "operation": "perp_account_positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/g-accounts/accountPositions",
+  "auth": "signed",
+  "query": {
+    "currency": {
+      "match": "exact",
+      "value": "USDT"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null,
+  "signing_vector": "phemex/rest_query_order"
+}

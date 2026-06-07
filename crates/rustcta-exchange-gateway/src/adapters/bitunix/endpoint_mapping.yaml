@@ -1,0 +1,187 @@
+schema_version: 1
+exchange: bitunix
+adapter: BitunixGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bitunix_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 20 mapping for Spot and USDT perpetual REST plus WS spec/parser helpers.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  spot_rest: https://openapi.bitunix.com
+  futures_rest: https://fapi.bitunix.com
+  spot_public_ws: wss://openapi.bitunix.com:443/ws-api/v1
+  futures_public_ws: wss://fapi.bitunix.com/public/
+  futures_private_ws: wss://fapi.bitunix.com/private/
+auth:
+  private_rest: Bitunix api-key, nonce, timestamp and double-SHA256 sign headers
+rate_limits:
+  public_rest: { scope: ip, interval_ms: 1000, limit: 10 }
+  private_rest: { scope: api_key, interval_ms: 1000, limit: 5 }
+pagination:
+  order_book: { mode: limit, max_limit: 200 }
+  open_orders: { mode: limit, max_limit: 100 }
+  recent_fills: { mode: limit, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  endpoint_operation: open_orders
+  notes: Use REST account, pending orders, order detail and trade history after WS reconnect or sequence gaps.
+batch:
+  place: { support: native, atomicity: partial, max_items: null, same_market_type_required: true, partial_failure: true }
+  cancel: { support: native, atomicity: partial, max_items: null, same_market_type_required: true, partial_failure: true }
+websocket:
+  public:
+    support: spec_only
+    heartbeat: { mode: client_ping, interval_ms: 15000, timeout_ms: 30000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: spec_only
+    heartbeat: { mode: client_ping, interval_ms: 15000, timeout_ms: 30000 }
+    auth_renewal: { mode: relogin }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/spot/v1/common/coin_pair/list
+    auth: none
+    rate_limit_bucket: bitunix_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: Perpetual symbols use /api/v1/futures/market/trading_pairs.
+  - operation: order_book
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/spot/v1/market/depth
+    auth: none
+    rate_limit_bucket: bitunix_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: Perpetual order book uses /api/v1/futures/market/depth.
+  - operation: account
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/futures/account
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_sign_private_readbacks_and_parse_responses }
+    notes: Spot balances use /api/spot/v1/user/account.
+  - operation: positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/futures/position/get_pending_positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_sign_private_readbacks_and_parse_responses }
+  - operation: place_order
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/futures/trade/place_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_route_private_order_mutations }
+    notes: Spot orders use /api/spot/v1/order/place_order.
+  - operation: cancel_order
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/futures/trade/cancel_orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_route_private_order_mutations }
+  - operation: batch_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/futures/trade/batch_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_route_private_order_mutations }
+  - operation: open_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/futures/trade/get_pending_orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_sign_private_readbacks_and_parse_responses }
+  - operation: recent_fills
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/futures/trade/get_history_trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitunix_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitunix/private_tests.rs::bitunix_adapter_should_sign_private_readbacks_and_parse_responses }

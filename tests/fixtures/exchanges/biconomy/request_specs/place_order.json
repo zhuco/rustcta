@@ -1,0 +1,23 @@
+{
+  "exchange": "biconomy",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v2/private/order",
+  "auth": "signed",
+  "headers": {
+    "X-CH-APIKEY": { "match": "exact", "value": "key" },
+    "X-CH-SIGN": { "match": "non_empty" },
+    "X-CH-TS": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "quantity": "0.01",
+    "price": "65000"
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "biconomy/private_post_order"
+}

@@ -1,0 +1,440 @@
+schema_version: 1
+exchange: bigone
+adapter: rustcta_exchange_gateway::adapters::bigone
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway BigONE adapter implementation
+  last_reviewed: "2026-06-08"
+  notes: Spot and perpetual mapping for declared BigONE ExchangeClient capabilities.
+market_types:
+  - spot
+  - perpetual
+products:
+  - spot
+  - perpetual
+rest:
+  base_url: https://api.big.one
+base_urls:
+  spot_rest: https://api.big.one
+  contract_rest: https://api.big.one
+  spot_public_ws: wss://big.one/ws/v2
+  spot_private_ws: wss://big.one/ws/v2
+auth:
+  private_rest: jwt_bearer
+  signing_vector: tests/fixtures/exchanges/bigone/signing_vectors/jwt_openapi.json
+rate_limits:
+  plan: fixed_window
+  buckets:
+    public_ip:
+      scope: ip
+      interval_ms: 60000
+      limit: 120
+    private_account:
+      scope: account
+      interval_ms: 60000
+      limit: 60
+    orders:
+      scope: account
+      interval_ms: 60000
+      limit: 30
+    websocket:
+      scope: ip
+      interval_ms: 60000
+      limit: 60
+pagination:
+  order_book:
+    mode: limit
+    limit_param: limit
+    max_limit: 200
+  open_orders:
+    mode: limit
+    limit_param: limit
+    max_limit: 200
+  recent_fills:
+    mode: limit
+    limit_param: limit
+    max_limit: 200
+  cursor:
+    support: unsupported
+    reason: current adapter does not expose cursor tokens for BigONE readbacks
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  unknown_order_policy: query_by_client_order_id_then_exchange_order_id
+  retry_policy: retry_rate_limited_network_timeout_decode_then_manual_review
+  allow_order_replay: false
+batch:
+  place_orders:
+    support: composed
+    spot_mode: native_multi_endpoint
+    contract_mode: composed_sequential
+    atomicity: partial
+    max_items: 20
+    partial_failure: true
+  cancel_orders:
+    support: composed
+    spot_mode: composed_sequential
+    contract_mode: native_multi_cancel_endpoint
+    atomicity: partial
+    max_items: 20
+    partial_failure: true
+  cancel_all_orders:
+    support: composed
+    composed_from:
+      - get_open_orders
+      - cancel_order
+    atomicity: partial
+    partial_failure: true
+websocket:
+  public:
+    support: parser_only
+    subscriptions:
+      - order_book
+      - trades
+      - ticker
+      - candles
+    heartbeat:
+      required: true
+      direction: client_ping
+      interval_ms: 15000
+      timeout_ms: 30000
+    resync: rest_order_book_snapshot
+  private:
+    support: parser_only
+    auth: jwt_login_message
+    renewal_ms: 1500000
+    relogin_on_reconnect: true
+    resubscribe_after_reauth: true
+    fallback: rest_reconciliation
+streams:
+  public_order_book:
+    transport: websocket
+    support: parser_only
+    heartbeat: client_ping_15000ms
+    resync: rest_snapshot
+    parser_fixture: tests/fixtures/exchanges/bigone/ws_public_depth.json
+  private_orders:
+    transport: websocket
+    support: parser_only
+    auth: jwt
+    renewal: jwt_refresh_or_relogin
+    parser_fixture: tests/fixtures/exchanges/bigone/ws_private_order.json
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/asset_pairs
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/spot_symbol_rules.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/public_tests.rs
+  - operation: get_contract_symbol_rules
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/contract/v2/instruments
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/contract_symbol_rules.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/public_tests.rs
+  - operation: get_order_book
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/asset_pairs/{asset_pair_name}/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/orderbook.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/public_tests.rs
+  - operation: get_contract_order_book
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/contract/v2/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/orderbook.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/public_tests.rs
+  - operation: get_balances
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/viewer/accounts
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/get_balances_spot.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/balance.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: get_contract_balances
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/contract/v2/accounts
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bigone/request_specs/get_balances_contract.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/balance.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: get_positions
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /api/contract/v2/positions
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bigone/request_specs/get_positions_contract.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/position.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: place_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/viewer/orders
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/place_order_spot.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_ack.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: place_contract_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/contract/v2/orders
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/place_order_contract.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_ack.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: cancel_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/viewer/orders/{order_id}/cancel
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/cancel_order_spot.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_cancelled.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: cancel_contract_order
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /api/contract/v2/order
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bigone/request_specs/cancel_order_contract.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_cancelled.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: batch_place_orders
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/viewer/orders/multi
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 5
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/batch_place_spot.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/open_orders.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: batch_place_contract_orders
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/contract/v2/orders
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bigone/request_specs/place_order_contract.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_ack.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    notes: Composed sequentially from single contract place-order calls.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /api/contract/v2/orders/cancel
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 5
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/batch_cancel_contract.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/open_orders.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: cancel_all_orders
+    transport: rest
+    product: spot
+    method: COMPOSED
+    path: get_open_orders+cancel_order
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 10
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/cancel_order_spot.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_cancelled.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: query_order
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/viewer/order
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/request_specs/query_order_spot.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/order_ack.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: get_open_orders
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/viewer/orders
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bigone/request_specs/open_orders_spot.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/open_orders.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs
+  - operation: get_recent_fills
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/viewer/trades
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bigone/request_specs/recent_fills_spot.json
+    response_parser:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bigone/fill.json
+      test: crates/rustcta-exchange-gateway/src/adapters/bigone/private_tests.rs

@@ -1,0 +1,11 @@
+{
+  "code": 200,
+  "data": [
+    {
+      "base_asset": "BTC",
+      "quote_asset": "USDT",
+      "price_precision": "2",
+      "amount_precision": "6"
+    }
+  ]
+}

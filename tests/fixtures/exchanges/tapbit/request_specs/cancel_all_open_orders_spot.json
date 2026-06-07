@@ -1,0 +1,16 @@
+{
+  "exchange": "tapbit",
+  "operation": "cancel_all_orders.open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/spot/open_order_list",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

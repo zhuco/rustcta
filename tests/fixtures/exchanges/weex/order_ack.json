@@ -1,0 +1,17 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "data": {
+    "symbol": "BTCUSDT",
+    "orderId": "1001",
+    "clientOrderId": "CLIENT1",
+    "side": "BUY",
+    "type": "LIMIT",
+    "status": "NEW",
+    "origQty": "0.010",
+    "executedQty": "0",
+    "price": "65000.00",
+    "time": 1700000000000,
+    "updateTime": 1700000000000
+  }
+}

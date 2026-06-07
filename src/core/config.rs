@@ -176,6 +176,11 @@ fn load_dotenv_lenient() {
     for path in [".env", "data/control_api/exchange_api_keys.env"] {
         load_dotenv_file_lenient(path);
     }
+    for key in ["RUSTCTA_EXCHANGE_API_KEY_STORE", "EXCHANGE_API_KEY_STORE"] {
+        if let Ok(path) = std::env::var(key) {
+            load_dotenv_file_lenient(&path);
+        }
+    }
 }
 
 fn load_dotenv_file_lenient(path: &str) {

@@ -1,0 +1,183 @@
+schema_version: 1
+exchange: digifinex
+adapter: DigiFinexGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/digifinex_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 20 mapping for DigiFinex Spot and perpetual swap adapter.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  spot_rest: https://openapi.digifinex.com
+  swap_rest: https://openapi.digifinex.com
+  websocket: wss://openapi.digifinex.com/ws
+auth:
+  private_rest: HMAC-SHA256 private REST signing in signing.rs
+rate_limits:
+  public_rest: { scope: ip, interval_ms: 1000, limit: 10 }
+  private_rest: { scope: api_key, interval_ms: 1000, limit: 5 }
+pagination:
+  order_book: { mode: limit, max_limit: 200 }
+  open_orders: { mode: limit, max_limit: 200 }
+  recent_fills: { mode: limit, max_limit: 200 }
+reconciliation:
+  private_state: rest_fallback
+  endpoint_operation: open_orders
+batch:
+  place: { support: native, atomicity: partial, max_items: null, partial_failure: true }
+  cancel: { support: native, atomicity: partial, max_items: null, partial_failure: true }
+websocket:
+  public:
+    support: spec_only
+    heartbeat: { mode: server_ping, interval_ms: 30000, timeout_ms: 45000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: spec_only
+    heartbeat: { mode: server_ping, interval_ms: 30000, timeout_ms: 45000 }
+    auth_renewal: { mode: none }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /v3/spot/markets
+    auth: none
+    rate_limit_bucket: digifinex_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: Perpetual instruments use /swap/v2/public/instruments.
+  - operation: order_book
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /swap/v2/public/order_book
+    auth: none
+    rate_limit_bucket: digifinex_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: Spot order books use /v3/spot/order_book.
+  - operation: account
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /v3/spot/assets
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }
+  - operation: positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /swap/v2/account/positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }
+  - operation: place_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /v3/spot/order/new
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_route_orders_and_batches }
+    notes: Swap place uses /swap/v2/trade/order.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /v3/spot/order/cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_route_orders_and_batches }
+  - operation: batch_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /swap/v2/trade/batch_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_route_orders_and_batches }
+  - operation: open_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /v3/spot/order/current
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }
+  - operation: recent_fills
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /v3/spot/my_trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: digifinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/digifinex/private_tests.rs::digifinex_adapter_should_sign_private_readbacks_and_parse_responses }

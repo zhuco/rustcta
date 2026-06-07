@@ -4,6 +4,7 @@ use rustcta_exchange_api::{
     ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
     SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
 };
+use serde_json::Value;
 
 use super::parser::{
     normalize_binance_symbol, normalize_depth, parse_orderbook_snapshot, parse_symbol_rules,
@@ -28,15 +29,21 @@ impl BinanceGatewayAdapter {
             self.ensure_spot(symbol.market_type)?;
         }
 
-        let response = self
-            .rest
-            .send_public_request("/api/v3/exchangeInfo", &HashMap::new())
-            .await?;
         let requested = request
             .symbols
             .iter()
             .map(|symbol| normalize_binance_symbol(&symbol.exchange_symbol.symbol))
             .collect::<ExchangeApiResult<Vec<_>>>()?;
+        let mut params = HashMap::new();
+        if requested.len() == 1 {
+            params.insert("symbol".to_string(), requested[0].clone());
+        }
+
+        let mut response = self
+            .rest
+            .send_public_request("/api/v3/exchangeInfo", &params)
+            .await?;
+        retain_requested_symbols(&mut response, &requested);
         let mut rules = parse_symbol_rules(&self.exchange_id, &response)?;
         if !requested.is_empty() {
             rules.retain(|rule| requested.contains(&rule.symbol.exchange_symbol.symbol));
@@ -74,4 +81,20 @@ impl BinanceGatewayAdapter {
             order_book,
         })
     }
+}
+
+fn retain_requested_symbols(response: &mut Value, requested: &[String]) {
+    if requested.is_empty() {
+        return;
+    }
+    let Some(symbols) = response.get_mut("symbols").and_then(Value::as_array_mut) else {
+        return;
+    };
+    symbols.retain(|symbol| {
+        symbol
+            .get("symbol")
+            .and_then(Value::as_str)
+            .and_then(|symbol| normalize_binance_symbol(symbol).ok())
+            .is_some_and(|symbol| requested.contains(&symbol))
+    });
 }

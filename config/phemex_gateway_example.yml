@@ -1,0 +1,71 @@
+# Phemex industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# PHEMEX_API_KEY and PHEMEX_API_SECRET.
+
+exchange: phemex
+market_types:
+  - spot
+  - perpetual
+adapter: phemex
+enabled: true
+
+api_key: ${PHEMEX_API_KEY}
+api_secret: ${PHEMEX_API_SECRET}
+
+rest_base_url: https://api.phemex.com
+testnet_rest_base_url: https://testnet-api.phemex.com
+public_websocket_url: wss://ws.phemex.com
+private_websocket_url: wss://ws.phemex.com
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+request_expiry_seconds: 60
+order_timeout_ms: 10000
+orderbook_depth: 30
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - sBTCUSDT
+    - sETHUSDT
+  perpetual:
+    - BTCUSDT
+    - ETHUSDT
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 10
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - transfer
+    - deposit_withdraw_read
+
+live_safety:
+  dry_run: true
+  enable_private_stream: true
+  require_reconciliation: true
+  require_kill_switch: true
+  max_live_notional_per_order: 0
+  batch_place_mode: composed_single_order_requests
+  native_batch_cancel_perpetual: true
+  websocket_heartbeat:
+    enabled: true
+    ping_interval_ms: 15000
+    stale_after_ms: 45000
+
+notes:
+  - Phemex Spot symbols usually use the s prefix, for example sBTCUSDT.
+  - Phemex USDT perpetual symbols use compact format, for example BTCUSDT.
+  - Standard batch_place_orders is composed from individual signed order-create calls for Spot and perpetual.
+  - Native batch_cancel_orders is implemented for USDT perpetual orders with one symbol and one id type.

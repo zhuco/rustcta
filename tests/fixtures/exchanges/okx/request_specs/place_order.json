@@ -1,0 +1,45 @@
+{
+  "exchange": "okx",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v5/trade/order",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "OK-ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "OK-ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "OK-ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "passphrase"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/json"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "okx/place_order",
+  "body": {
+    "clOrdId": "LIMIT1",
+    "instId": "BTC-USDT",
+    "ordType": "limit",
+    "px": "65000",
+    "side": "buy",
+    "sz": "0.02",
+    "tdMode": "cash"
+  }
+}

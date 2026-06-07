@@ -1,8 +1,8 @@
 use rustcta_exchange_api::{
-    AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
-    ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, PlaceOrderRequest,
-    QueryOrderRequest, QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce,
-    EXCHANGE_API_SCHEMA_VERSION,
+    AmendOrderRequest, BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest,
+    CancelOrderRequest, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient,
+    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
+    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
@@ -12,6 +12,7 @@ use super::test_support::{
     symbol_scope,
 };
 use super::{GateIoGatewayAdapter, GateIoGatewayConfig};
+use crate::request_spec::RequestSpec;
 
 #[tokio::test]
 async fn gateio_adapter_should_keep_private_operations_unsupported_without_credentials() {
@@ -29,6 +30,95 @@ async fn gateio_adapter_should_keep_private_operations_unsupported_without_crede
         .await
         .expect_err("private operation should be unsupported");
     assert!(matches!(error, ExchangeApiError::Unsupported { .. }));
+}
+
+#[test]
+fn gateio_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        api_key: Some("gate-key".to_string()),
+        api_secret: Some("gate-secret".to_string()),
+        enabled_private_rest: true,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+    assert!(matches!(
+        &capabilities.capabilities_v2.public_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.private_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.public_streams,
+        CapabilitySupport::RestFallback { .. }
+    ));
+    assert!(matches!(
+        &capabilities.capabilities_v2.private_streams,
+        CapabilitySupport::RestFallback { .. }
+    ));
+    assert_eq!(
+        capabilities.capabilities_v2.batch_place_orders.mode,
+        BatchExecutionMode::ComposedSequential
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.batch_cancel_orders.mode,
+        BatchExecutionMode::Native
+    );
+    assert!(
+        capabilities
+            .capabilities_v2
+            .batch_cancel_orders
+            .same_symbol_required
+    );
+    assert_eq!(
+        capabilities.capabilities_v2.fills_history.max_limit,
+        Some(1000)
+    );
+    assert!(capabilities.capabilities_v2.fills_history.supports_from_id);
+    assert_eq!(
+        capabilities.capabilities_v2.credential_scopes,
+        vec![CredentialScope::ReadOnly, CredentialScope::Trade]
+    );
+    assert!(capabilities.capabilities_v2.stream_runtime.resync.orders);
+}
+
+#[test]
+fn gateio_signing_should_match_known_hmac_vector() {
+    let vector = signing_vector("place_order_limit.json");
+    let signature = super::signing::sign_gateio_request(
+        vector["secret"].as_str().expect("secret"),
+        vector["method"].as_str().expect("method"),
+        "/api/v4/spot/orders",
+        "currency_pair=BTC_USDT",
+        vector["body"].as_str().expect("body"),
+        vector["timestamp"].as_str().expect("timestamp"),
+    );
+    assert_eq!(
+        signature,
+        vector["expected_signature"]
+            .as_str()
+            .expect("expected signature")
+    );
+}
+
+fn load_request_spec(path: &str) -> RequestSpec {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/gateio/request_specs/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("request spec fixture");
+    serde_json::from_str(&text).expect("request spec fixture")
+}
+
+fn signing_vector(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/gateio/signing_vectors/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("signing vector fixture");
+    serde_json::from_str(&text).expect("signing vector fixture")
 }
 
 #[tokio::test]
@@ -180,6 +270,9 @@ async fn gateio_adapter_should_route_private_order_mutations() {
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 5);
 
+    load_request_spec("place_order.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("place order request spec");
     assert_signed_request_method(&requests[0], "POST", "/spot/orders");
     let body = requests[0].body.as_ref().expect("place body");
     assert_eq!(body["currency_pair"], "BTC_USDT");
@@ -191,6 +284,9 @@ async fn gateio_adapter_should_route_private_order_mutations() {
     assert_eq!(body["text"], "t-LIMIT1");
 
     assert_signed_request_method(&requests[1], "POST", "/spot/orders");
+    load_request_spec("place_quote_market_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("quote market order request spec");
     let body = requests[1].body.as_ref().expect("quote body");
     assert_eq!(body["currency_pair"], "BTC_USDT");
     assert_eq!(body["side"], "buy");
@@ -199,6 +295,9 @@ async fn gateio_adapter_should_route_private_order_mutations() {
     assert_eq!(body["time_in_force"], "ioc");
     assert_eq!(body["text"], "t-QUOTE1");
 
+    load_request_spec("cancel_order.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("cancel order request spec");
     assert_signed_request_method(&requests[2], "DELETE", "/spot/orders/2001");
     assert_eq!(
         requests[2].query.get("currency_pair").map(String::as_str),
@@ -206,12 +305,18 @@ async fn gateio_adapter_should_route_private_order_mutations() {
     );
 
     assert_signed_request_method(&requests[3], "DELETE", "/spot/orders");
+    load_request_spec("cancel_all_orders.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("cancel all request spec");
     assert_eq!(
         requests[3].query.get("currency_pair").map(String::as_str),
         Some("BTC_USDT")
     );
 
     assert_signed_request_method(&requests[4], "PATCH", "/spot/orders/2005");
+    load_request_spec("amend_order.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("amend order request spec");
     let body = requests[4].body.as_ref().expect("amend body");
     assert_eq!(body["currency_pair"], "BTC_USDT");
     assert_eq!(body["account"], "spot");
@@ -313,6 +418,7 @@ async fn gateio_adapter_should_sign_private_readback_requests_and_parse_response
             exchange: exchange_id(),
             market_type: Some(MarketType::Spot),
             symbol: Some(symbol_scope("BTC_USDT")),
+            page: None,
         })
         .await
         .expect("open orders");
@@ -347,6 +453,7 @@ async fn gateio_adapter_should_sign_private_readback_requests_and_parse_response
             start_time: None,
             end_time: None,
             limit: Some(50),
+            page: None,
         })
         .await
         .expect("fills");
@@ -357,10 +464,25 @@ async fn gateio_adapter_should_sign_private_readback_requests_and_parse_response
 
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 5);
+    load_request_spec("get_balances.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("get balances request spec");
     assert_signed_request(&requests[0], "/spot/accounts");
+    load_request_spec("query_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("query order request spec");
     assert_signed_request(&requests[1], "/spot/orders/1001");
+    load_request_spec("get_open_orders.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("get open orders request spec");
     assert_signed_request(&requests[2], "/spot/open_orders");
+    load_request_spec("get_fees.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("get fees request spec");
     assert_signed_request(&requests[3], "/spot/fee");
+    load_request_spec("get_recent_fills.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("get recent fills request spec");
     assert_signed_request(&requests[4], "/spot/my_trades");
     assert_eq!(
         requests[1].query.get("currency_pair").map(String::as_str),

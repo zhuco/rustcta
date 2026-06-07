@@ -1,0 +1,12 @@
+[
+  {
+    "currency": "USDT",
+    "balance": "100.0",
+    "locked_balance": "5.0"
+  },
+  {
+    "currency": "BTC",
+    "balance": "0.25",
+    "locked_balance": "0.01"
+  }
+]

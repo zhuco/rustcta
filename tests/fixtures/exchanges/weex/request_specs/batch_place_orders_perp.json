@@ -1,0 +1,17 @@
+{
+  "exchange": "weex",
+  "operation": "weex_batch_place_perpetual",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/capi/v3/batchOrders",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-passphrase": {"match": "exact", "value": "passphrase"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "body_contains": {"batchOrders": [{"newClientOrderId": "BATCH1", "positionSide": "SHORT"}]},
+  "forbid_header_values_containing": ["secret"]
+}

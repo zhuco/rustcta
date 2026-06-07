@@ -1,0 +1,18 @@
+{
+  "exchange": "coinbase",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer test.jwt" }
+  },
+  "body_contains": {
+    "client_order_id": "client-1",
+    "product_id": "BTC-USD",
+    "side": "BUY"
+  },
+  "forbid_header_values_containing": ["secret"]
+}

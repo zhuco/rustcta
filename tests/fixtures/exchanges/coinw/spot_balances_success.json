@@ -1,0 +1,9 @@
+{
+  "code": "200",
+  "data": {
+    "BTC": {"available": "1.2", "onOrders": "0.3"},
+    "USDT": {"available": "50", "onOrders": "10"}
+  },
+  "msg": "SUCCESS",
+  "failed": false
+}

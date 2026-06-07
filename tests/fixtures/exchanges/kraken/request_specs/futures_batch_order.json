@@ -1,0 +1,9 @@
+{
+  "operation": "kraken.batch_place_orders.perpetual",
+  "method": "POST",
+  "path": "/derivatives/api/v3/batchorder",
+  "auth": "hmac",
+  "form": {
+    "batchOrder": "[{\"order\":\"send\",\"order_tag\":\"fut-batch-1\",\"orderType\":\"lmt\",\"side\":\"buy\",\"size\":\"0.01\",\"limitPrice\":\"65000\",\"symbol\":\"PF_XBTUSDT\"}]"
+  }
+}

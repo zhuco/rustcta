@@ -1,0 +1,11 @@
+{
+  "code": 0,
+  "data": {
+    "symbols": [
+      {
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT"
+      }
+    ]
+  }
+}

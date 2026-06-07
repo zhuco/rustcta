@@ -1,0 +1,97 @@
+schema_version: 2
+exchange: bingx
+status: adapter_scoped_validated
+last_reviewed: "2026-06-08"
+market_types:
+  spot:
+    support: supported
+    products: [spot]
+  perpetual:
+    support: supported
+    products: [usdt_linear_perpetual]
+rest:
+  public:
+    support: supported
+    operations:
+      symbol_rules: supported
+      order_book_snapshot: supported
+  private:
+    support: credential_gated
+    credential_scope:
+      headers: [X-BX-APIKEY]
+      signing: hmac_sha256_query
+      timestamp_param: timestamp
+      recv_window_param: recvWindow
+    operations:
+      balances: supported
+      positions:
+        spot: unsupported
+        perpetual: supported
+      fees: supported
+      place_order: supported
+      quote_market_order: supported
+      cancel_order: supported
+      amend_order:
+        spot: unsupported
+        perpetual: supported
+      order_list:
+        spot: oco_only
+        perpetual: unsupported
+      batch_place_order: supported
+      batch_cancel_order: supported
+      cancel_all_orders: supported_symbol_required
+      query_order: supported
+      open_orders: supported
+      recent_fills: supported
+      leverage:
+        spot: unsupported
+        perpetual: adapter_extension
+      position_mode:
+        spot: unsupported
+        perpetual: adapter_extension
+      margin_type:
+        spot: unsupported
+        perpetual: adapter_extension
+streams:
+  public:
+    support: supported
+    products: [spot, perpetual]
+    runtime:
+      channels: [trades, ticker, order_book_delta, order_book_snapshot, candles]
+      heartbeat:
+        inbound_text: [Ping, ping]
+        outbound_text: Pong
+      resync:
+        order_book: snapshot_on_connect_gap_or_reconnect
+        subscription: resubscribe_after_reconnect
+  private:
+    support: credential_gated
+    products: [spot, perpetual]
+    runtime:
+      auth: listen_key
+      listen_key_endpoint: /openApi/user/auth/userDataStream
+      channels: [orders, fills, balances, positions, account]
+      heartbeat:
+        inbound_text: [Ping, ping]
+        outbound_text: Pong
+      auth_renewal:
+        policy: recreate_listen_key_before_expiry
+        renew_before_ms: 1800000
+        fallback: rest_reconciliation
+rate_limits:
+  plan_ref: endpoint_mapping.yaml#rate_limit_plan
+pagination:
+  plan_ref: endpoint_mapping.yaml#pagination_plan
+reconciliation:
+  plan_ref: endpoint_mapping.yaml#reconciliation_plan
+batch:
+  plan_ref: endpoint_mapping.yaml#batch_capability
+live_readiness:
+  reconciliation: supported
+  kill_switch: cancel_all_orders_symbol_required
+  disabled_symbol: required_before_order_entry
+  max_notional: required_before_order_entry
+unsupported:
+  - testnet host is not enabled.
+  - options and delivery futures are not advertised.
+  - spot positions, perpetual OCO, and spot amend are unsupported.

@@ -1,0 +1,14 @@
+[
+  {
+    "symbol": "BTC_USDT",
+    "baseCurrencyName": "BTC",
+    "quoteCurrencyName": "USDT",
+    "state": "NORMAL",
+    "symbolTradeLimit": {
+      "priceScale": 2,
+      "quantityScale": 6,
+      "minQuantity": "0.000001",
+      "minAmount": "1"
+    }
+  }
+]

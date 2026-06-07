@@ -1,0 +1,12 @@
+{
+  "exchange": "ascendex",
+  "name": "spot_order_rest",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "<ascendex-api-secret>",
+  "timestamp": "1608133910000",
+  "method": "POST",
+  "request_path": "/42/api/pro/v1/cash/order",
+  "payload": "1608133910000+order",
+  "expected_signature": "BnPrD5/wA2HHEHp7kH51DptC9Rm97SbtXTTAgxX5Fj0=",
+  "payload_format": "raw_payload"
+}

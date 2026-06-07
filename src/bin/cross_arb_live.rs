@@ -1131,11 +1131,16 @@ async fn ws_market_execution_loop(
             continue;
         }
         let batch_size = config.ws_batch_size_for(exchange, 80);
+        let profile = config
+            .market
+            .public_book_trigger_profile_kind()
+            .unwrap_or(rustcta::market::PublicBookProfileKind::FastestL1);
         tokio::spawn(cross_arb_server_ws::run_public_ws_adapter(
             adapter.clone(),
             symbols,
             cross_arb_server_ws::PublicWsConfig {
                 max_symbols_per_connection: batch_size,
+                profile,
                 ..Default::default()
             },
             ws_tx.clone(),
@@ -1473,7 +1478,7 @@ async fn execute_live_open_candidates_for_symbols(
         if snapshots.len() < runtime.state.config.market.min_common_exchanges {
             continue;
         }
-        let signals = runtime.on_market_snapshots_event(&symbol, snapshots, now);
+        let signals = runtime.on_market_snapshots(&symbol, snapshots, now);
         if let Some(signal) = signals
             .iter()
             .find(|signal| signal.action == ArbSignalAction::Open)
@@ -2360,8 +2365,8 @@ fn market_symbol_snapshots_to_runtime_snapshots(
                     .map(|snapshot| snapshot.funding_rate)
                     .unwrap_or(0.0),
                 next_funding_time: funding.and_then(|snapshot| snapshot.next_funding_time),
-                trigger_book_profile: None,
-                validation_book_profile: None,
+                trigger_book_profile: config.market.public_book_trigger_profile_kind(),
+                validation_book_profile: config.market.public_book_validation_profile_kind(),
             })
         })
         .collect()

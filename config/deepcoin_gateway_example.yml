@@ -1,0 +1,58 @@
+# Deepcoin industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# DEEPCOIN_API_KEY, DEEPCOIN_API_SECRET, and DEEPCOIN_PASSPHRASE.
+
+exchange: deepcoin
+market_types:
+  - spot
+  - perpetual
+adapter: deepcoin
+enabled: true
+
+api_key: ${DEEPCOIN_API_KEY}
+api_secret: ${DEEPCOIN_API_SECRET}
+passphrase: ${DEEPCOIN_PASSPHRASE}
+
+rest_base_url: https://api.deepcoin.com
+public_spot_ws_url: wss://stream.deepcoin.com/streamlet/trade/public/spot?platform=api&version=v2
+public_swap_ws_url: wss://stream.deepcoin.com/streamlet/trade/public/swap?platform=api&version=v2
+private_ws_url: wss://stream.deepcoin.com/v1/private
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - Deepcoin USDT perpetual symbols use the -SWAP suffix, for example BTC-USDT-SWAP.
+  - Cancel-all is only implemented for contract limit orders; Spot cancel-all remains unsupported.
+  - Public/private WebSocket subscription specs, ping/pong heartbeat, listenkey renewal, and session helpers are implemented; keep external socket supervision enabled before relying on WS-only reconciliation.

@@ -1,0 +1,45 @@
+{
+  "id": "1",
+  "jsonrpc": "2.0",
+  "usIn": 1606458245947,
+  "usOut": 1606458245957,
+  "usDiff": 10,
+  "result": [
+    {
+      "base_currency": "USDT",
+      "contract_size": "0",
+      "creation_timestamp": "1606361432728",
+      "expiration_timestamp": "2114352000000",
+      "instrument_name": "BTC-USDT-SPOT",
+      "is_active": true,
+      "kind": "spot",
+      "leverage": 0,
+      "maker_commission": "0.001",
+      "min_trade_amount": "0.00001",
+      "min_notional": "5",
+      "option_type": "init",
+      "quote_currency": "BTC",
+      "strike": "0",
+      "taker_commission": "0.001",
+      "tick_size": "0.01",
+      "instr_multiple": "0.00001"
+    },
+    {
+      "base_currency": "USDT",
+      "contract_size": "0",
+      "creation_timestamp": "1606361432728",
+      "expiration_timestamp": "2114352000000",
+      "instrument_name": "BTC-USDT-MARGIN",
+      "is_active": true,
+      "kind": "margin",
+      "leverage": 0,
+      "maker_commission": "0.001",
+      "min_trade_amount": "0.00001",
+      "option_type": "init",
+      "quote_currency": "BTC",
+      "strike": "0",
+      "taker_commission": "0.001",
+      "tick_size": "0.01"
+    }
+  ]
+}

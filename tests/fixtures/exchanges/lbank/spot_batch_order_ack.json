@@ -1,0 +1,24 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": [
+    {
+      "order_id": "3001",
+      "custom_id": "BATCH1",
+      "symbol": "btc_usdt",
+      "type": "buy",
+      "status": 0,
+      "price": "65000",
+      "amount": "0.01"
+    },
+    {
+      "order_id": "3002",
+      "custom_id": "BATCH2",
+      "symbol": "btc_usdt",
+      "type": "sell",
+      "status": 0,
+      "price": "65100",
+      "amount": "0.02"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"operation":"backpack.batch_place_orders","method":"POST","path":"/api/v1/orders","query":{},"body":[{"symbol":"SOL_USDC_PERP","side":"Bid","orderType":"Limit","quantity":"1","price":"100","timeInForce":"GTC","clientId":"101"},{"symbol":"SOL_USDC_PERP","side":"Ask","orderType":"Limit","quantity":"1","price":"101","timeInForce":"GTC","clientId":"102"}],"signed":true}

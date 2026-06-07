@@ -1,0 +1,17 @@
+{
+  "result": true,
+  "error_code": 0,
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "baseCurrency": "BTC",
+      "priceCurrency": "USDT",
+      "clearCurrency": "USDT",
+      "priceTick": "0.1",
+      "volumeTick": "0.001",
+      "minOrderVolume": "0.001",
+      "maxOrderVolume": "100",
+      "minOrderCost": "5"
+    }
+  ]
+}

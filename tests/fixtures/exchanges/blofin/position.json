@@ -1,0 +1,17 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": [
+    {
+      "instId": "BTC-USDT",
+      "positionSide": "long",
+      "positions": "0.01",
+      "availablePositions": "0.01",
+      "averagePrice": "65000",
+      "markPrice": "65010",
+      "liquidationPrice": "50000",
+      "unrealizedPnl": "0.10",
+      "leverage": "10"
+    }
+  ]
+}

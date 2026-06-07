@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "data": {
+    "rows": [
+      {
+        "id": 9001,
+        "symbol": "SPOT_BTC_USDT",
+        "orderId": 1001,
+        "clientOrderId": 1001001,
+        "executedPrice": "70000",
+        "executedQuantity": "0.01",
+        "isMaker": false,
+        "side": "BUY",
+        "fee": "0.7",
+        "feeAsset": "USDT",
+        "executedTimestamp": 1743054548123
+      }
+    ]
+  }
+}

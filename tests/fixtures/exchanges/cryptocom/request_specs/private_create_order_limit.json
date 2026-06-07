@@ -1,0 +1,24 @@
+{
+  "exchange": "cryptocom",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "json_rpc",
+  "method": "POST",
+  "path": "/private/create-order",
+  "auth": "signed",
+  "body_contains": {
+    "method": "private/create-order",
+    "api_key": "key",
+    "params": {
+      "client_oid": "CLIENTLIMIT1",
+      "instrument_name": "BTC_USDT",
+      "price": "65000",
+      "quantity": "0.02",
+      "side": "BUY",
+      "time_in_force": "GOOD_TILL_CANCEL",
+      "type": "LIMIT"
+    }
+  },
+  "forbid_query_values_containing": ["secret"],
+  "signing_vector": "cryptocom/private_create_order_limit"
+}

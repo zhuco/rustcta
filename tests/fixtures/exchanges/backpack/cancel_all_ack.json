@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "SOL_USDC_PERP",
+    "id": "43",
+    "clientId": 8,
+    "side": "Ask",
+    "orderType": "Limit",
+    "quantity": "1",
+    "executedQuantity": "0",
+    "price": "110",
+    "status": "Cancelled"
+  }
+]

@@ -1,0 +1,39 @@
+# BitMEX gateway example.
+# Keep disabled until credentials, kill-switch, reconciliation, and live-dry-run gates pass.
+
+exchange: bitmex
+enabled: false
+rest_base_url: https://www.bitmex.com
+testnet_rest_base_url: https://testnet.bitmex.com
+public_ws_url: wss://ws.bitmex.com/realtime
+private_ws_url: wss://ws.bitmex.com/realtime
+request_timeout_ms: 10000
+
+private_rest:
+  enabled: false
+  api_key_env: BITMEX_API_KEY
+  api_secret_env: BITMEX_API_SECRET
+
+products:
+  spot:
+    enabled: true
+    default_symbols:
+      - XBT_USDT
+    orderbook_depth: 25
+  perpetual:
+    enabled: true
+    default_symbols:
+      - XBTUSD
+    orderbook_depth: 25
+
+live_safety:
+  dry_run: true
+  enable_private_stream: true
+  require_reconciliation: true
+  require_kill_switch: true
+  max_live_notional_per_order: 0
+  native_batch_orders: true
+  websocket_heartbeat:
+    enabled: true
+    ping_interval_ms: 15000
+    stale_after_ms: 45000

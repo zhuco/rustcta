@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "exchange": "coinw",
+  "operation": "coinw.place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/private",
+  "query": {
+    "command": "doTrade",
+    "symbol": "BTC_USDT",
+    "type": "buy",
+    "amount": "0.1",
+    "price": "1000",
+    "out_trade_no": "cid-1"
+  },
+  "signing": "spot_md5_query",
+  "required_auth_fields": ["api_key", "sign"]
+}

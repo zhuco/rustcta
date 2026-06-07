@@ -1,0 +1,9 @@
+{
+  "exchange": "xt",
+  "operation": "get_fees_futures",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/future/market/v3/public/symbol/list",
+  "auth": "none"
+}

@@ -1,0 +1,60 @@
+# HashKey Global industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# HASHKEY_GLOBAL_API_KEY and HASHKEY_GLOBAL_API_SECRET.
+
+exchange: hashkey_global
+market_types:
+  - spot
+  - perpetual
+adapter: hashkey_global
+enabled: true
+
+api_key: ${HASHKEY_GLOBAL_API_KEY}
+api_secret: ${HASHKEY_GLOBAL_API_SECRET}
+
+spot_rest_base_url: https://api-glb.hashkey.com
+futures_rest_base_url: https://api-glb.hashkey.com
+spot_public_ws_url: wss://stream-glb.hashkey.com/quote/ws/v1
+spot_private_ws_url: wss://stream-glb.hashkey.com/api/v1/ws
+futures_private_ws_url: wss://stream-glb.hashkey.com/api/v1/ws
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+recv_window_ms: 5000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - HashKey Global REST signing uses X-HK-APIKEY plus query-string HMAC SHA256.
+  - Spot and futures REST currently share api-glb.hashkey.com but can be overridden independently.
+  - Batch place/cancel and cancel-all use composed gateway flows; they are not native atomic batch calls.
+  - Public/private WebSocket subscription specs, ping/pong heartbeat helpers, and parsers are implemented; keep REST reconciliation enabled until live-dry-run validates stream behavior.

@@ -1,0 +1,20 @@
+{
+  "exchange": "orangex",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "headers": {
+    "authorization": {"match": "exact", "value": "bearer fresh-token"}
+  },
+  "body_contains": {
+    "method": "/private/sell",
+    "params": {
+      "instrument_name": "BTC-USDT",
+      "custom_order_id": "CTA.auth-1"
+    }
+  },
+  "forbid_header_values_containing": ["secret"]
+}

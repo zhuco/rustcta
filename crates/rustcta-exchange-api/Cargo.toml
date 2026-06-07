@@ -8,9 +8,9 @@ publish.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 rustcta-types = { path = "../rustcta-types" }
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio.workspace = true

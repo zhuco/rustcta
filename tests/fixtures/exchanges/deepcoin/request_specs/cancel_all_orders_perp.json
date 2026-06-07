@@ -1,0 +1,16 @@
+{
+  "exchange": "deepcoin",
+  "operation": "cancel_all_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/deepcoin/trade/swap/cancel-all",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "forbid_header_values_containing": ["secret"]
+}

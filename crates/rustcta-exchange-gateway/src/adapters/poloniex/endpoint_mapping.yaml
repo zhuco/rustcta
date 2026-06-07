@@ -1,0 +1,261 @@
+schema_version: 1
+exchange: poloniex
+adapter: rustcta_exchange_gateway::adapters::poloniex
+market_types: [spot, linear_perp]
+metadata:
+  status: validated
+  source: Poloniex Spot and Futures REST/WebSocket docs plus adapter tests.
+rate_limits:
+  buckets:
+    ip: { scope: ip, plan: exchange_header, headers: [X-RateLimit-Remaining] }
+    key: { scope: api_key, plan: exchange_header, headers: [X-RateLimit-Remaining] }
+    stream: { scope: connection, plan: heartbeat_and_subscription_window }
+pagination:
+  query_order: { style: by_id }
+  get_open_orders: { style: symbol_filter }
+  get_recent_fills: { style: limit_and_time, limit_param: limit, max_limit: 1000 }
+reconciliation:
+  ambiguous_mutation: query_order_then_open_orders_then_recent_fills
+  private_stream_fallback: rest
+batch:
+  place_orders:
+    support: native
+    atomicity: partial
+    max_items: 10
+    partial_failure: item errors are skipped in legacy response and require REST reconciliation.
+  cancel_orders:
+    support: native
+    atomicity: partial
+    max_items: 10
+    partial_failure: item errors are skipped in legacy response and require REST reconciliation.
+websocket:
+  public:
+    support: native
+    channels:
+      spot: [book_lv2, trades, ticker, candles_minute]
+      linear_perp: [book_lv2, trades, tickers, candles_minute]
+    heartbeat: { required: true, direction: client_ping, interval_ms: 20000, timeout_ms: 10000 }
+    resync: rest_order_book_snapshot_after_reconnect
+  private:
+    support: native
+    auth: hmac
+    channels:
+      spot: [orders, balances]
+      linear_perp: [orders, balances, account, positions]
+    renewal: relogin_on_reconnect
+    reconciliation: query_order_then_open_orders_then_recent_fills
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /markets | /v3/market/allInstruments
+    auth: none
+    rate_limit_bucket: ip
+    weight: 1
+    request_spec_required: false
+    request_spec: { status: not_required }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/poloniex/parser/symbol_rules_success.json }
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex Spot markets and Futures instruments endpoints.
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /markets/{symbol}/orderBook | /v3/market/orderBook
+    auth: none
+    rate_limit_bucket: ip
+    weight: 1
+    request_spec_required: false
+    request_spec: { status: not_required }
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex Spot and Futures order book endpoints.
+  - operation: get_balances
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /accounts/balances | /v3/account/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex account balance endpoints.
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: GET
+    path: /v3/trade/position/opens
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex Futures open positions endpoint.
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /feeinfo
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex account fee endpoint.
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /orders | /v3/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/poloniex/request_specs/place_order_perp_limit.json }
+    native_batch: false
+    atomicity: atomic
+    testnet: false
+    official_doc: Poloniex create order endpoints.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: DELETE
+    path: /orders/{id} | /v3/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: false
+    official_doc: Poloniex cancel order endpoints.
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: PUT
+    path: /orders/{id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: false
+    official_doc: Poloniex Spot amend order endpoint; Futures amend remains unsupported.
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /orders/batch | /v3/trade/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: Poloniex batch create order endpoints.
+    notes: Adapter capability caps batch place at 10 items across Spot and Futures.
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: DELETE
+    path: /orders/cancelByIds | /v3/trade/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: Poloniex batch cancel endpoints.
+    notes: Adapter capability caps batch cancel at 10 items across Spot and Futures.
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: DELETE
+    path: /orders | /v3/trade/allOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: Poloniex cancel all endpoints.
+  - operation: query_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /orders/{id} | /v3/trade/order/details
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex order lookup endpoints.
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /orders | /v3/trade/order/opens
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex open order endpoints.
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /trades | /v3/trade/order/trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    official_doc: Poloniex trade history endpoints.

@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "data": {
+    "rows": [
+      {
+        "symbol": "SPOT_BTC_USDT",
+        "status": "NEW",
+        "side": "SELL",
+        "positionSide": "BOTH",
+        "createdTime": 1743054548123,
+        "orderId": 1002,
+        "price": "71000",
+        "type": "LIMIT",
+        "quantity": "0.02",
+        "executed": "0",
+        "clientOrderId": 1002002,
+        "reduceOnly": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "btc_usdt",
+      "price_precision": 2,
+      "amount_precision": 6,
+      "min_amount": "0.0001",
+      "min_order_value": "5"
+    }
+  ]
+}

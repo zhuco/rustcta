@@ -1,0 +1,52 @@
+# Biconomy Exchange industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# BICONOMY_API_KEY and BICONOMY_API_SECRET.
+
+exchange: biconomy
+market_types:
+  - spot
+adapter: biconomy
+enabled: true
+
+api_key: ${BICONOMY_API_KEY}
+api_secret: ${BICONOMY_API_SECRET}
+
+rest_base_url: https://www.biconomy.com
+public_ws_url: wss://www.biconomy.com/ws
+private_ws_url: wss://www.biconomy.com/ws
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+recv_window_ms: 5000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+  optional:
+    - fee_rate
+
+notes:
+  - Current adapter scope is verified Spot REST plus public/private WebSocket request specs.
+  - Futures endpoints were not enabled because a stable official Biconomy futures API surface was not confirmed during implementation.
+  - Batch place/cancel and cancel-all are gateway-composed sequential flows, not native atomic batch calls.
+  - Keep REST reconciliation enabled until live-dry-run validates private WebSocket event behavior.

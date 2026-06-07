@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "exchange": "coinw",
+  "product": "perpetual",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "timestamp_ms": 1701945494169,
+  "method": "POST",
+  "path_with_query": "/v1/fapi/open",
+  "body": "{\"instrument\":\"ADA\"}",
+  "expected_signature": "lHHB2LP6weApCS4ezLsIndvCuZNIEsMnvoB01/O7lXc="
+}

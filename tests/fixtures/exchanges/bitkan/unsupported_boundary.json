@@ -1,0 +1,14 @@
+{
+  "exchange": "bitkan",
+  "status": "unsupported_unverified",
+  "unsupported_reasons": [
+    "bitkan.symbol_rules_unverified",
+    "bitkan.order_book_unverified",
+    "bitkan.place_order_unverified",
+    "bitkan.batch_place_orders_unverified",
+    "bitkan.public_streams_unverified",
+    "bitkan.private_streams_unverified"
+  ],
+  "scan_only": false,
+  "trade_enabled": false
+}

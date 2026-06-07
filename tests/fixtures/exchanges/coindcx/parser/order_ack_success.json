@@ -1,0 +1,11 @@
+{
+  "id": "fixture-order-001",
+  "client_order_id": "fixture-client-001",
+  "market": "BTCUSDT",
+  "side": "buy",
+  "order_type": "limit_order",
+  "status": "open",
+  "total_quantity": "0.01",
+  "price_per_unit": "64000",
+  "filled_quantity": "0"
+}

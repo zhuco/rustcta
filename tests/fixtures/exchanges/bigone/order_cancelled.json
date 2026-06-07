@@ -1,0 +1,11 @@
+{
+  "data": {
+    "id": "order-1",
+    "asset_pair_name": "BTC-USDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "state": "CANCELED",
+    "amount": "0.1",
+    "filled_amount": "0"
+  }
+}

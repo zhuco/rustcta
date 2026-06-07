@@ -1,0 +1,45 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": [
+    {
+      "instId": "BTC-USDT",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT",
+      "contractType": "linear",
+      "state": "live",
+      "tickSize": "0.1",
+      "lotSize": "0.001",
+      "minSize": "0.001",
+      "maxLimitSize": "100",
+      "contractValue": "0.001",
+      "settleCurrency": "USDT"
+    },
+    {
+      "instId": "ETH-USDT",
+      "baseCurrency": "ETH",
+      "quoteCurrency": "USDT",
+      "contractType": "linear",
+      "state": "live",
+      "tickSize": "0.01",
+      "lotSize": "0.01",
+      "minSize": "0.01",
+      "maxLimitSize": "1000",
+      "contractValue": "0.01",
+      "settleCurrency": "USDT"
+    },
+    {
+      "instId": "BTC-USDT-260626",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT",
+      "contractType": "future",
+      "state": "live",
+      "tickSize": "0.1",
+      "lotSize": "0.001",
+      "minSize": "0.001",
+      "maxLimitSize": "100",
+      "contractValue": "0.001",
+      "settleCurrency": "USDT"
+    }
+  ]
+}

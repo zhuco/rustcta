@@ -1,0 +1,1 @@
+{"operation":"backpack.get_recent_fills","method":"GET","path":"/wapi/v1/history/fills","query":{"from":"1704000000000","limit":"50","orderId":"42","symbol":"SOL_USDC_PERP","to":"1704003600000"},"body":null,"signed":true}

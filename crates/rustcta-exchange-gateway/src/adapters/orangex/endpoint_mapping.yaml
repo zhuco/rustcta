@@ -1,0 +1,262 @@
+schema_version: 1
+exchange: orangex
+adapter: rustcta_exchange_gateway::adapters::orangex
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway OrangeX adapter implementation and OrangeX JSON-RPC/WebSocket docs
+  last_reviewed: "2026-06-08"
+  notes: JSON-RPC REST mapping for Spot and USDT perpetual. OrangeX has published a WebSocket API deprecation notice; WS helpers are spec/parser coverage only.
+market_types:
+  - spot
+  - linear_perp
+rest:
+  base_url: https://api.orangex.com/api/v1
+base_urls:
+  websocket: wss://api.orangex.com/ws/api/v1
+auth:
+  private_rest:
+    mode: bearer
+    token_operation: auth_token
+    client_signature_prehash: client_id + newline + timestamp + newline + nonce + newline
+    signing_vector_test: crates/rustcta-exchange-gateway/src/adapters/orangex/private_tests.rs
+rate_limits:
+  buckets:
+    public_rpc:
+      scope: ip
+      interval: 1m
+      limit: unknown
+    auth_rpc:
+      scope: api_key
+      interval: 1m
+      limit: unknown
+    private_rpc:
+      scope: account
+      interval: 1m
+      limit: unknown
+    trade_rpc:
+      scope: account
+      interval: 1m
+      limit: unknown
+pagination:
+  get_recent_fills:
+    style: time_window
+    since_param: start_timestamp
+    until_param: end_timestamp
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_balances, get_positions, query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: composed
+    atomicity: non_atomic
+    max_items: unknown
+    partial_failure: true
+    reason: No verified native batch endpoint; adapter sequentially calls /private/buy and /private/sell.
+  cancel_orders:
+    support: composed
+    atomicity: non_atomic
+    max_items: unknown
+    partial_failure: true
+    reason: No verified native batch cancel endpoint; adapter sequentially calls /private/cancel.
+websocket:
+  public:
+    support: spec_only
+    reason: OrangeX published WebSocket API deprecation notice.
+    heartbeat:
+      direction: ping_pong
+      interval_ms: 20000
+      timeout_ms: 60000
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    runtime_support: unsupported
+    reason: orangex.subscribe_private_stream.deprecated_official_websocket_api
+    auth: bearer
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: POST
+    path: /public/get_instruments
+    auth: none
+    rate_limit_bucket: public_rpc
+    weight: 1
+    request_spec_required: false
+  - operation: get_symbol_rules_perp
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /public/get_instruments
+    auth: none
+    rate_limit_bucket: public_rpc
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: POST
+    path: /public/get_order_book
+    auth: none
+    rate_limit_bucket: public_rpc
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book_perp
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /public/get_order_book
+    auth: none
+    rate_limit_bucket: public_rpc
+    weight: 1
+    request_spec_required: false
+  - operation: auth_token
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /public/auth
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: auth_rpc
+    weight: 1
+    request_spec_required: true
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /private/get_assets_info
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rpc
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /private/get_positions
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rpc
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /public/get_instruments
+    auth: none
+    rate_limit_bucket: public_rpc
+    weight: 1
+    request_spec_required: false
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/buy
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: trade_rpc
+    weight: 1
+    request_spec_required: true
+    reason: Sell orders use /private/sell selected by request side.
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /private/buy
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: trade_rpc
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/cancel
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: trade_rpc
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/cancel_all_by_currency
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: trade_rpc
+    weight: 1
+    request_spec_required: true
+    reason: Instrument-scoped cancel-all uses /private/cancel_all_by_instrument.
+  - operation: query_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/get_order_state
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rpc
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/get_open_orders_by_currency
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rpc
+    weight: 1
+    request_spec_required: true
+    reason: Instrument-scoped read uses /private/get_open_orders_by_instrument.
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/get_user_trades_by_currency
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rpc
+    weight: 1
+    request_spec_required: true
+    reason: Symbol/order scoped reads use /private/get_user_trades_by_instrument and /private/get_user_trades_by_order.
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/buy
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: trade_rpc
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/cancel
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: trade_rpc
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic

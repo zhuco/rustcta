@@ -1,0 +1,20 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "data": {
+    "symbols": [
+      {
+        "symbol": "BTCUSDT",
+        "status": "TRADING",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "tickSize": "0.01",
+        "stepSize": "0.00001",
+        "minTradeAmount": "0.00001",
+        "maxTradeAmount": "100",
+        "makerFeeRate": "0.001",
+        "takerFeeRate": "0.001"
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "exchange": "orangex",
+  "operation": "batch_place_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "headers": {
+    "authorization": {"match": "exact", "value": "bearer token"}
+  },
+  "body_contains": {
+    "method": "/private/sell",
+    "params": {"custom_order_id": "CTA.batch-2"}
+  }
+}

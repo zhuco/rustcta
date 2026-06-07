@@ -1,0 +1,14 @@
+{
+  "id": 1,
+  "method": "public/get-instruments",
+  "code": 0,
+  "result": {
+    "data": [
+      {
+        "inst_type": "SPOT",
+        "base_ccy": "BTC",
+        "quote_ccy": "USDT"
+      }
+    ]
+  }
+}

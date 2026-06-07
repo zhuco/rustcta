@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTC/USDT",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "tickSize": "0.01",
+      "lotSize": "0.000001",
+      "minQty": "0.00001",
+      "minNotional": "5",
+      "priceScale": 2,
+      "qtyScale": 6
+    }
+  ]
+}

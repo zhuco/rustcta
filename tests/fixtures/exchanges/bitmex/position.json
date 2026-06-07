@@ -1,0 +1,11 @@
+[
+  {
+    "symbol": "XBTUSD",
+    "isOpen": true,
+    "currentQty": -10,
+    "avgEntryPrice": 100,
+    "markPrice": 99,
+    "liquidationPrice": 150,
+    "leverage": 2
+  }
+]

@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, PageCursor, PlaceOrderRequest, PlaceOrderResponse,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{OrderSide, OrderStatus, OrderType};
 use serde_json::{json, Value};
@@ -80,6 +81,82 @@ impl CoinExGatewayAdapter {
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
             order,
             cancelled: true,
+        })
+    }
+
+    pub(super) async fn batch_place_orders_impl(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.orders.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "coinex batch_place_orders requires at least one order".to_string(),
+            });
+        }
+        if request.orders.len() > super::capabilities::COINEX_COMPOSED_BATCH_MAX_ITEMS as usize {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: format!(
+                    "coinex batch_place_orders supports at most {} orders",
+                    super::capabilities::COINEX_COMPOSED_BATCH_MAX_ITEMS
+                ),
+            });
+        }
+
+        let mut orders = Vec::with_capacity(request.orders.len());
+        for order_request in request.orders {
+            self.ensure_exchange(&order_request.symbol.exchange)?;
+            self.ensure_spot(order_request.symbol.market_type)?;
+            orders.push(self.place_order_impl(order_request).await?.order);
+        }
+
+        Ok(BatchPlaceOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            report: None,
+        })
+    }
+
+    pub(super) async fn batch_cancel_orders_impl(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.cancels.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "coinex batch_cancel_orders requires at least one cancel".to_string(),
+            });
+        }
+        if request.cancels.len() > super::capabilities::COINEX_COMPOSED_BATCH_MAX_ITEMS as usize {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: format!(
+                    "coinex batch_cancel_orders supports at most {} cancels",
+                    super::capabilities::COINEX_COMPOSED_BATCH_MAX_ITEMS
+                ),
+            });
+        }
+
+        let mut orders = Vec::with_capacity(request.cancels.len());
+        let mut cancelled_count = 0_u32;
+        for cancel_request in request.cancels {
+            self.ensure_exchange(&cancel_request.symbol.exchange)?;
+            self.ensure_spot(cancel_request.symbol.market_type)?;
+            let response = self.cancel_order_impl(cancel_request).await?;
+            if response.cancelled {
+                cancelled_count += 1;
+            }
+            orders.push(response.order);
+        }
+
+        Ok(BatchCancelOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            cancelled_count,
+            report: None,
         })
     }
 
@@ -313,10 +390,21 @@ impl CoinExGatewayAdapter {
                 end_time.timestamp_millis().to_string(),
             );
         }
-        if let Some(limit) = request.limit {
-            params.insert("limit".to_string(), limit.min(1000).to_string());
-        } else {
-            params.insert("limit".to_string(), "1000".to_string());
+        apply_coinex_fills_pagination(&request, &mut params)?;
+        if !params.contains_key("limit") {
+            if let Some(limit) = request.limit {
+                params.insert(
+                    "limit".to_string(),
+                    limit
+                        .min(super::capabilities::COINEX_SPOT_MAX_PAGE_LIMIT)
+                        .to_string(),
+                );
+            } else {
+                params.insert(
+                    "limit".to_string(),
+                    super::capabilities::COINEX_SPOT_MAX_PAGE_LIMIT.to_string(),
+                );
+            }
         }
         let value = self
             .send_signed_get("coinex.get_recent_fills", "/spot/finished-order", &params)
@@ -328,6 +416,50 @@ impl CoinExGatewayAdapter {
             fills,
         })
     }
+}
+
+fn apply_coinex_fills_pagination(
+    request: &RecentFillsRequest,
+    params: &mut HashMap<String, String>,
+) -> ExchangeApiResult<()> {
+    let Some(page) = &request.page else {
+        return Ok(());
+    };
+    page.validate(Some(super::capabilities::COINEX_SPOT_MAX_PAGE_LIMIT))
+        .map_err(|message| ExchangeApiError::InvalidRequest { message })?;
+    if let Some(limit) = page.limit {
+        params.insert("limit".to_string(), limit.to_string());
+    }
+    let Some(cursor) = page.cursor.as_ref() else {
+        return Ok(());
+    };
+    match cursor {
+        PageCursor::Timestamp { millis } => {
+            params.insert("start_time".to_string(), millis.to_string());
+        }
+        PageCursor::TimeRange { start_ms, end_ms } => {
+            params.insert("start_time".to_string(), start_ms.to_string());
+            if let Some(end_ms) = end_ms {
+                params.insert("end_time".to_string(), end_ms.to_string());
+            }
+        }
+        PageCursor::Id { id } | PageCursor::Token { token: id } => {
+            if id.trim().is_empty() {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "coinex fills pagination cursor id must not be empty".to_string(),
+                });
+            }
+            params.insert("last_id".to_string(), id.clone());
+        }
+        PageCursor::Offset { .. } => {
+            return Err(ExchangeApiError::InvalidRequest {
+                message:
+                    "coinex fills pagination supports timestamp/time-range/id cursors, not offset"
+                        .to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn coinex_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {

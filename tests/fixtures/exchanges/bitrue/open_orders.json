@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "orderId": 1002,
+      "clientOrderId": "CLIENT2",
+      "price": "70000",
+      "origQty": "0.02",
+      "executedQty": "0",
+      "status": "NEW",
+      "type": "LIMIT",
+      "side": "SELL"
+    }
+  ]
+}

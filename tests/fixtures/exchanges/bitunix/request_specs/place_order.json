@@ -1,0 +1,24 @@
+{
+  "exchange": "bitunix",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/futures/trade/place_order",
+  "auth": "signed",
+  "headers": {
+    "api-key": { "match": "exact", "value": "key" },
+    "sign": { "match": "non_empty" },
+    "nonce": { "match": "non_empty" },
+    "timestamp": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "orderType": "LIMIT",
+    "qty": "1",
+    "price": "65000"
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "bitunix/rest_double_sha256"
+}

@@ -1,0 +1,22 @@
+{
+  "exchange": "lbank",
+  "operation": "place_order",
+  "product": "linear_perp",
+  "method": "POST",
+  "path": "/cfd/openApi/v1/prv/placeOrder",
+  "auth": "md5_hmac_sha256",
+  "supported_order_types": ["limit"],
+  "json": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "clientOrderId": "PERP1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "offsetFlag": "0",
+    "orderPriceType": "4",
+    "origType": "0",
+    "price": "65000",
+    "volume": "0.02"
+  },
+  "unsupported": ["market", "post_only"]
+}

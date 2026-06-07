@@ -1,0 +1,13 @@
+{
+  "code": 0,
+  "data": {
+    "symbol": "BTC-USDT",
+    "orderId": 1001,
+    "clientOrderId": "CLIENT1",
+    "price": "65000",
+    "origQty": "0.01",
+    "executedQty": "0",
+    "status": "NEW",
+    "type": "LIMIT"
+  }
+}

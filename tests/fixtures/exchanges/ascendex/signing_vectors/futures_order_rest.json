@@ -1,0 +1,12 @@
+{
+  "exchange": "ascendex",
+  "name": "futures_order_rest",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "<ascendex-api-secret>",
+  "timestamp": "1608133910000",
+  "method": "POST",
+  "request_path": "/42/api/pro/v2/futures/order",
+  "payload": "1608133910000+v2/futures/order",
+  "expected_signature": "AFsodhT0DE7HRtiOT/rOr/X/AQT3BmxTPD0qRcKZM4k=",
+  "payload_format": "raw_payload"
+}

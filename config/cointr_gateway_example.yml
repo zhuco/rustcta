@@ -1,0 +1,60 @@
+# CoinTR industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# COINTR_API_KEY, COINTR_API_SECRET, and COINTR_API_PASSPHRASE.
+
+exchange: cointr
+market_types:
+  - spot
+  - perpetual
+adapter: cointr
+enabled: true
+
+api_key: ${COINTR_API_KEY}
+api_secret: ${COINTR_API_SECRET}
+passphrase: ${COINTR_API_PASSPHRASE}
+
+rest_base_url: https://api.cointr.com
+public_ws_url: wss://ws.cointr.com/v2/ws/public
+private_ws_url: wss://ws.cointr.com/v2/ws/private
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+recv_window_ms: 5000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT
+    - ETH-USDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - CoinTR REST signing uses ACCESS-KEY, ACCESS-SIGN, ACCESS-TIMESTAMP, ACCESS-PASSPHRASE, Base64 HMAC-SHA256, and locale=en-US.
+  - Spot order bodies use side/orderType/force/size/clientOid, matching CoinTR V2 Spot order docs.
+  - Spot and USDT futures native batch place/cancel endpoints are wired for homogeneous market-type batches.
+  - Cancel-all is implemented as a symbol-scoped open-order sweep, not as an unverified account-wide native cancel endpoint.
+  - Private WebSocket sessions send signed login before subscribing to user.orders, user.fills, user.account, or user.positions.

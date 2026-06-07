@@ -1,0 +1,240 @@
+schema_version: 1
+exchange: coindcx
+adapter: rustcta-exchange-gateway::adapters::coindcx
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway CoinDCX adapter implementation and sanitized task-18 fixtures
+  last_reviewed: "2026-06-08"
+  notes: Spot plus perpetual REST and Socket.IO mapping. Private REST signs compact JSON bodies with HMAC-SHA256 and X-AUTH-* headers.
+market_types: [spot, linear_perp]
+products: [spot, linear_perp]
+rest:
+  base_url: https://api.coindcx.com
+base_urls:
+  public_rest: https://public.coindcx.com
+  public_ws: wss://stream.coindcx.com
+  private_ws: wss://stream.coindcx.com
+auth:
+  private_rest:
+    mode: hmac_sha256_hex_compact_json
+    headers: [X-AUTH-APIKEY, X-AUTH-SIGNATURE]
+  private_socket_io:
+    mode: hmac_signed_join
+rate_limits:
+  plan: fixed_window_conservative
+  buckets:
+    coindcx.public_rest: { scope: ip, limit: 300, window_ms: 60000 }
+    coindcx.public_market: { scope: ip, limit: 600, window_ms: 60000 }
+    coindcx.private_rest: { scope: account, limit: 300, window_ms: 60000 }
+    coindcx.orders: { scope: orders, limit: 120, window_ms: 60000 }
+    coindcx.ws: { scope: websocket, limit: 60, window_ms: 60000 }
+pagination:
+  cursor: unsupported
+  recent_fills: { mode: limit, limit_param: limit, max_limit: 1000 }
+  order_history: { mode: none }
+reconciliation:
+  place_timeout: query_order_by_client_order_id_or_exchange_order_id_then_open_orders_then_recent_fills
+  cancel_timeout: query_order_by_exchange_order_id_then_open_orders
+  private_stream_gap: rest_open_orders_recent_fills_balances_positions
+  allow_order_replay: false
+batch:
+  place:
+    mode: native
+    atomicity: partial
+    max_items: 10
+    products: [spot]
+    supports_partial_failure: true
+    unsupported_products: [linear_perp]
+  cancel:
+    mode: native
+    atomicity: partial
+    max_items: 50
+    products: [spot]
+    supports_partial_failure: true
+    unsupported_products: [linear_perp]
+websocket:
+  transport: socket_io
+  public:
+    supports_subscribe: true
+    supports_unsubscribe: false
+    channels: ["{symbol}@orderbook@50", "{symbol}@trades", "{symbol}@prices", "{symbol}_{interval}", "{instrument}@orderbook@50-futures", "{instrument}@trades-futures"]
+    heartbeat: { direction: application_message, ping_interval_ms: 25000, pong_timeout_ms: 35000, stale_message_ms: 45000 }
+    resync: rest_snapshot_after_reconnect
+  private:
+    supports_subscribe: true
+    supports_unsubscribe: false
+    channel: coindcx
+    auth: hmac_signed_join
+    auth_renewal: { kind: relogin, renewal_interval_ms: 1800000, reconnect_on_failure: true, resubscribe_after_renewal: true }
+    fallback: rest_reconciliation
+streams:
+  public:
+    transport: socket_io
+    parser_test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs
+    fixture: tests/fixtures/exchanges/coindcx/ws_public_orderbook.json
+    resync_endpoint_operation: get_order_book
+  private:
+    transport: socket_io
+    auth: hmac_signed_join
+    parser_test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs
+    fixture: tests/fixtures/exchanges/coindcx/ws_private_order.json
+    auth_renewal: relogin_and_resubscribe
+    resync_endpoint_operation: get_open_orders
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /exchange/v1/markets_details
+    auth: none
+    rate_limit_bucket: coindcx.public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/parser/symbol_rules_success.json }
+  - operation: get_futures_symbol_rules
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: GET
+    path: /exchange/v1/derivatives/futures/data/active_instruments
+    auth: none
+    rate_limit_bucket: coindcx.public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/parser/symbol_rules_success.json }
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /market_data/orderbook
+    auth: none
+    rate_limit_bucket: coindcx.public_market
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/parser/orderbook_success.json }
+  - operation: get_futures_order_book
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: GET
+    path: /market_data/v3/orderbook/{instrument}/{depth}
+    auth: none
+    rate_limit_bucket: coindcx.public_market
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/parser/orderbook_success.json }
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /exchange/v1/users/balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coindcx.private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/get_balances.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coindcx/parser/balances_success.json }
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/derivatives/futures/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coindcx.private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/get_positions.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coindcx/parser/positions_success.json }
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/create | /exchange/v1/derivatives/futures/orders/create
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/place_order_spot_limit.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coindcx/parser/order_ack_success.json }
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/cancel | /exchange/v1/derivatives/futures/orders/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/cancel_order_spot.json }
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/create_multiple
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 10
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/batch_place_spot.json }
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/cancel_by_ids
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coindcx.orders
+    weight: 10
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/batch_cancel_spot.json }
+  - operation: query_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/status | /exchange/v1/derivatives/futures/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coindcx.private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/active_orders | /exchange/v1/derivatives/futures/orders/active_orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coindcx.private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /exchange/v1/orders/trade_history | /exchange/v1/derivatives/futures/orders/trade_history
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coindcx.private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coindcx/tests.rs, fixture: tests/fixtures/exchanges/coindcx/request_spec/get_recent_fills.json }

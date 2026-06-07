@@ -70,6 +70,473 @@ exchanges:
       burst: 8
     log_raw_messages: false
 
+  coinbase:
+    enabled: false
+    market_type: spot
+    adapter: coinbase
+    bearer_token: ${COINBASE_API_BEARER_TOKEN}
+    perpetual_portfolio_uuid: ${COINBASE_INTX_PORTFOLIO_UUID}
+    spot_rest_base_url: https://api.coinbase.com/api/v3/brokerage
+    international_rest_base_url: https://api.coinbase.com/api/v3/brokerage
+    public_ws_url: wss://advanced-trade-ws.coinbase.com
+    private_ws_url: wss://advanced-trade-ws-user.coinbase.com
+    dry_run: true
+    enable_private_stream: false
+    stale_book_ms: 10000
+    reconnect_interval_ms: 1000
+    max_reconnect_attempts: 10
+    order_timeout_ms: 10000
+    request_timeout_ms: 10000
+    orderbook_depth: 50
+    enabled_symbols:
+      - BTC-USD
+      - ETH-USD
+      - BTC-PERP-INTX
+    symbol_mappings:
+      BTCUSD: BTC-USD
+      ETHUSD: ETH-USD
+      BTCUSDC_PERP: BTC-PERP-INTX
+    fee_override:
+      maker_fee_rate: 0.006
+      taker_fee_rate: 0.012
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  kraken:
+    enabled: false
+    market_type: spot
+    adapter: kraken
+    spot_api_key: ${KRAKEN_API_KEY}
+    spot_api_secret: ${KRAKEN_API_SECRET}
+    futures_api_key: ${KRAKEN_FUTURES_API_KEY}
+    futures_api_secret: ${KRAKEN_FUTURES_API_SECRET}
+    spot_rest_base_url: https://api.kraken.com/0
+    futures_rest_base_url: https://futures.kraken.com/derivatives/api/v3
+    spot_ws_url: wss://ws.kraken.com/v2
+    spot_private_ws_url: wss://ws-auth.kraken.com/v2
+    futures_ws_url: wss://futures.kraken.com/ws/v1
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    orderbook_depth: 100
+    enabled_symbols:
+      - XBTUSD
+      - ETHUSD
+      - PF_XBTUSDT
+    symbol_mappings:
+      BTCUSD: XBTUSD
+      ETHUSD: ETHUSD
+      BTCUSDT_PERP: PF_XBTUSDT
+    fee_override:
+      maker_fee_rate: 0.0025
+      taker_fee_rate: 0.004
+    rate_limit:
+      max_requests_per_second: 3
+      burst: 6
+    log_raw_messages: false
+
+  cryptocom:
+    enabled: false
+    market_type: spot
+    adapter: cryptocom
+    api_key: ${CRYPTOCOM_API_KEY}
+    api_secret: ${CRYPTOCOM_API_SECRET}
+    base_url: https://api.crypto.com/exchange/v1
+    websocket_url: wss://stream.crypto.com/exchange/v1/market
+    dry_run: true
+    enable_private_stream: false
+    stale_book_ms: 10000
+    reconnect_interval_ms: 1000
+    max_reconnect_attempts: 10
+    order_timeout_ms: 10000
+    request_timeout_ms: 10000
+    orderbook_depth: 10
+    enabled_symbols:
+      - BTC_USDT
+      - ETH_USDT
+    symbol_mappings:
+      BTCUSDT: BTC_USDT
+      ETHUSDT: ETH_USDT
+    fee_override:
+      maker_fee_rate: 0.00065
+      taker_fee_rate: 0.00069
+    rate_limit:
+      max_requests_per_second: 10
+      burst: 20
+    log_raw_messages: false
+
+  bingx:
+    enabled: false
+    market_type: spot
+    adapter: bingx
+    api_key: ${BINGX_API_KEY}
+    api_secret: ${BINGX_API_SECRET}
+    base_url: https://open-api.bingx.com
+    websocket_url: wss://open-api-ws.bingx.com/market
+    dry_run: true
+    enable_private_stream: false
+    stale_book_ms: 10000
+    reconnect_interval_ms: 1000
+    max_reconnect_attempts: 10
+    order_timeout_ms: 10000
+    request_timeout_ms: 10000
+    orderbook_depth: 100
+    enabled_symbols:
+      - BTC-USDT
+      - ETH-USDT
+    symbol_mappings:
+      BTCUSDT: BTC-USDT
+      ETHUSDT: ETH-USDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 10
+      burst: 20
+    log_raw_messages: false
+
+  bitmex:
+    enabled: false
+    market_type: spot
+    adapter: bitmex
+    api_key: ${BITMEX_API_KEY}
+    api_secret: ${BITMEX_API_SECRET}
+    base_url: https://www.bitmex.com
+    websocket_url: wss://ws.bitmex.com/realtime
+    dry_run: true
+    enable_private_stream: true
+    request_timeout_ms: 10000
+    orderbook_depth: 25
+    enabled_symbols:
+      - XBT_USDT
+    fee_override:
+      maker_fee_rate: 0.0001
+      taker_fee_rate: 0.00075
+    rate_limit:
+      max_requests_per_second: 2
+      burst: 4
+    websocket_heartbeat:
+      ping_interval_ms: 15000
+      stale_after_ms: 45000
+    log_raw_messages: false
+
+  coinw:
+    enabled: false
+    market_type: spot
+    adapter: coinw
+    api_key: ${COINW_API_KEY}
+    api_secret: ${COINW_API_SECRET}
+    base_url: https://api.coinw.com
+    spot_public_ws_url: wss://ws.futurescw.info?token={public_token}
+    spot_private_ws_url: wss://ws.futurescw.com
+    futures_public_ws_url: wss://ws.futurescw.com/perpum
+    futures_private_ws_url: wss://ws.futurescw.com/perpum
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    orderbook_depth: 20
+    enabled_symbols:
+      - BTC_USDT
+      - ETH_USDT
+    symbol_mappings:
+      BTCUSDT: BTC_USDT
+      ETHUSDT: ETH_USDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  bitrue:
+    enabled: false
+    market_type: spot
+    adapter: bitrue
+    api_key: ${BITRUE_API_KEY}
+    api_secret: ${BITRUE_API_SECRET}
+    spot_rest_base_url: https://openapi.bitrue.com
+    futures_rest_base_url: https://fapi.bitrue.com
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    recv_window: 5000
+    orderbook_depth: 50
+    enabled_symbols:
+      - BTCUSDT
+      - ETHUSDT
+      - E-BTC-USDT
+    symbol_mappings:
+      BTCUSDT: BTCUSDT
+      ETHUSDT: ETHUSDT
+      BTCUSDT_PERP: E-BTC-USDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  bitunix:
+    enabled: false
+    market_type: spot
+    adapter: bitunix
+    api_key: ${BITUNIX_API_KEY}
+    api_secret: ${BITUNIX_API_SECRET}
+    spot_rest_base_url: https://openapi.bitunix.com
+    futures_rest_base_url: https://fapi.bitunix.com
+    spot_ws_base_url: wss://openapi.bitunix.com:443/ws-api/v1
+    futures_public_ws_url: wss://fapi.bitunix.com/public/
+    futures_private_ws_url: wss://fapi.bitunix.com/private/
+    dry_run: true
+    enabled_private_rest: false
+    enabled_public_streams: false
+    enabled_private_streams: false
+    request_timeout_ms: 10000
+    orderbook_depth: 100
+    enabled_symbols:
+      - BTCUSDT
+      - ETHUSDT
+    symbol_mappings:
+      BTCUSDT: BTCUSDT
+      ETHUSDT: ETHUSDT
+      BTCUSDT_PERP: BTCUSDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 1
+      burst: 2
+    websocket_heartbeat:
+      ping_interval_ms: 15000
+      stale_after_ms: 45000
+    log_raw_messages: false
+
+  poloniex:
+    enabled: false
+    market_type: spot
+    adapter: poloniex
+    api_key: ${POLONIEX_API_KEY}
+    api_secret: ${POLONIEX_API_SECRET}
+    base_url: https://api.poloniex.com
+    spot_public_ws_url: wss://ws.poloniex.com/ws/public
+    spot_private_ws_url: wss://ws.poloniex.com/ws/private
+    futures_public_ws_url: wss://ws.poloniex.com/ws/v3/public
+    futures_private_ws_url: wss://ws.poloniex.com/ws/v3/private
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    recv_window: 5000
+    orderbook_depth: 50
+    enabled_symbols:
+      - BTC_USDT
+      - ETH_USDT
+      - BTC_USDT_PERP
+    symbol_mappings:
+      BTCUSDT: BTC_USDT
+      ETHUSDT: ETH_USDT
+      BTCUSDT_PERP: BTC_USDT_PERP
+    fee_override:
+      maker_fee_rate: 0.0015
+      taker_fee_rate: 0.0015
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  ascendex:
+    enabled: false
+    market_type: spot
+    adapter: ascendex
+    account_group: ${ASCENDEX_ACCOUNT_GROUP}
+    api_key: ${ASCENDEX_API_KEY}
+    api_secret: ${ASCENDEX_API_SECRET}
+    base_url: https://ascendex.com
+    futures_sandbox_base_url: https://api-test.ascendex-sandbox.com
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    orderbook_depth: 50
+    enabled_symbols:
+      - BTC/USDT
+      - ETH/USDT
+      - BTC-PERP
+    symbol_mappings:
+      BTCUSDT: BTC/USDT
+      ETHUSDT: ETH/USDT
+      BTCUSDT_PERP: BTC-PERP
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  tapbit:
+    enabled: false
+    market_type: spot
+    adapter: tapbit
+    api_key: ${TAPBIT_API_KEY}
+    api_secret: ${TAPBIT_API_SECRET}
+    spot_rest_base_url: https://openapi.tapbit.com/spot
+    swap_rest_base_url: https://openapi.tapbit.com/swap
+    public_ws_url: wss://ws-openapi.tapbit.com/stream/ws
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    orderbook_depth: 10
+    enabled_symbols:
+      - BTC/USDT
+      - ETH/USDT
+      - BTC-SWAP
+    symbol_mappings:
+      BTCUSDT: BTC/USDT
+      ETHUSDT: ETH/USDT
+      BTCUSDT_PERP: BTC-SWAP
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  weex:
+    enabled: false
+    market_type: spot
+    adapter: weex
+    api_key: ${WEEX_API_KEY}
+    api_secret: ${WEEX_API_SECRET}
+    passphrase: ${WEEX_API_PASSPHRASE}
+    spot_rest_base_url: https://api-spot.weex.com
+    contract_rest_base_url: https://api-contract.weex.com
+    spot_public_ws_url: wss://ws-spot.weex.com/v3/ws/public
+    spot_private_ws_url: wss://ws-spot.weex.com/v3/ws/private
+    contract_public_ws_url: wss://ws-contract.weex.com/v3/ws/public
+    contract_private_ws_url: wss://ws-contract.weex.com/v3/ws/private
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    orderbook_depth: 15
+    enabled_symbols:
+      - BTCUSDT
+      - ETHUSDT
+    symbol_mappings:
+      BTCUSDT: BTCUSDT
+      ETHUSDT: ETHUSDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
+  deepcoin:
+    enabled: false
+    market_type: spot
+    adapter: deepcoin
+    api_key: ${DEEPCOIN_API_KEY}
+    api_secret: ${DEEPCOIN_API_SECRET}
+    passphrase: ${DEEPCOIN_PASSPHRASE}
+    rest_base_url: https://api.deepcoin.com
+    public_spot_ws_url: wss://stream.deepcoin.com/streamlet/trade/public/spot?platform=api&version=v2
+    public_swap_ws_url: wss://stream.deepcoin.com/streamlet/trade/public/swap?platform=api&version=v2
+    private_ws_url: wss://stream.deepcoin.com/v1/private
+    dry_run: true
+    enable_private_stream: false
+    enabled_private_rest: false
+    request_timeout_ms: 10000
+    orderbook_depth: 100
+    enabled_symbols:
+      - BTC-USDT
+      - ETH-USDT
+      - BTC-USDT-SWAP
+    symbol_mappings:
+      BTCUSDT: BTC-USDT
+      ETHUSDT: ETH-USDT
+      BTCUSDT_PERP: BTC-USDT-SWAP
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 1
+      burst: 2
+    websocket_heartbeat:
+      ping_payload: ping
+      pong_payload: pong
+      ping_interval_ms: 15000
+      stale_after_ms: 45000
+    log_raw_messages: false
+
+  bigone:
+    enabled: false
+    market_type: spot
+    adapter: bigone
+    api_key: ${BIGONE_API_KEY}
+    api_secret: ${BIGONE_API_SECRET}
+    spot_rest_base_url: https://api.big.one
+    contract_rest_base_url: https://api.big.one
+    spot_public_ws_url: wss://big.one/ws/v2
+    spot_private_ws_url: wss://big.one/ws/v2
+    contract_public_ws_url: wss://big.one/ws/contract/v2
+    contract_private_ws_url: wss://big.one/ws/contract/v2
+    dry_run: true
+    enable_private_stream: false
+    enabled_private_rest: false
+    request_timeout_ms: 10000
+    orderbook_depth: 100
+    enabled_symbols:
+      - BTC-USDT
+      - ETH-USDT
+      - BTC-USDT-SWAP
+    symbol_mappings:
+      BTCUSDT: BTC-USDT
+      ETHUSDT: ETH-USDT
+      BTCUSDT_PERP: BTC-USDT-SWAP
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 2
+      burst: 5
+    websocket_heartbeat:
+      ping_payload: ping
+      pong_payload: pong
+      ping_interval_ms: 15000
+      stale_after_ms: 45000
+    log_raw_messages: false
+
+  whitebit:
+    enabled: false
+    market_type: spot
+    adapter: whitebit
+    api_key: ${WHITEBIT_API_KEY}
+    api_secret: ${WHITEBIT_API_SECRET}
+    base_url: https://whitebit.com
+    websocket_url: wss://api.whitebit.com/ws
+    dry_run: true
+    enable_private_stream: false
+    request_timeout_ms: 10000
+    orderbook_depth: 25
+    enabled_symbols:
+      - BTC_USDT
+      - ETH_USDT
+    symbol_mappings:
+      BTCUSDT: BTC_USDT
+      ETHUSDT: ETH_USDT
+    fee_override:
+      maker_fee_rate: 0.001
+      taker_fee_rate: 0.001
+    rate_limit:
+      max_requests_per_second: 5
+      burst: 10
+    log_raw_messages: false
+
 spot_risk_defaults:
   max_live_notional_per_trade: 0
   require_balance_reservation: true

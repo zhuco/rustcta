@@ -1,0 +1,10 @@
+{
+  "operation": "coindcx.batch_place_orders",
+  "method": "POST",
+  "path": "/exchange/v1/orders/create_multiple",
+  "auth": "hmac",
+  "native_batch": true,
+  "atomicity": "partial",
+  "expected_envelope_key": "orders",
+  "max_items": 10
+}

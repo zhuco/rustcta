@@ -1,0 +1,13 @@
+{
+  "exchange": "bigone",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/viewer/orders/order-1/cancel",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["test-secret"]
+}

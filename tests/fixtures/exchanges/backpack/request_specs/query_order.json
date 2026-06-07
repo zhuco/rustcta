@@ -1,0 +1,1 @@
+{"operation":"backpack.query_order","method":"GET","path":"/api/v1/order","query":{"orderId":"42","symbol":"SOL_USDC_PERP"},"body":null,"signed":true}

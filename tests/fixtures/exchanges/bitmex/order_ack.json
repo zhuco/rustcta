@@ -1,0 +1,14 @@
+{
+  "orderID": "order-1",
+  "clOrdID": "client-1",
+  "symbol": "XBTUSD",
+  "side": "Buy",
+  "ordType": "Limit",
+  "timeInForce": "GoodTillCancel",
+  "ordStatus": "New",
+  "orderQty": 100,
+  "price": 99.5,
+  "cumQty": 0,
+  "execInst": "ParticipateDoNotInitiate,ReduceOnly",
+  "timestamp": "2026-06-07T00:00:00.000Z"
+}

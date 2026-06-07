@@ -1,0 +1,21 @@
+{
+  "exchange": "lbank",
+  "operation": "get_balances",
+  "product": "linear_perp",
+  "method": "POST",
+  "path": "/cfd/openApi/v1/prv/account",
+  "auth": "md5_hmac_sha256",
+  "headers": {
+    "Content-Type": "application/json",
+    "signature_method": "HmacSHA256",
+    "timestamp": "<millis>",
+    "echostr": "<32-plus-char nonce>"
+  },
+  "json": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "productGroup": "SwapU",
+    "asset": "USDT"
+  },
+  "forbidden_json_fields": ["timestamp", "signature_method", "echostr", "api_secret"]
+}

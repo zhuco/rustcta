@@ -1,0 +1,16 @@
+{
+  "rc": 0,
+  "result": {
+    "symbol": "btc_usdt",
+    "orderId": 1001,
+    "clientOrderId": "CLIENT1",
+    "price": "65000",
+    "origQty": "0.01",
+    "executedQty": "0.004",
+    "state": "PARTIALLY_FILLED",
+    "type": "LIMIT",
+    "side": "BUY",
+    "time": 1700000000000,
+    "updateTime": 1700000001000
+  }
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "XBTH26",
+    "typ": "FFCCSX",
+    "state": "Open",
+    "underlying": "XBT",
+    "quoteCurrency": "USD",
+    "tickSize": 0.5,
+    "lotSize": 1,
+    "maxOrderQty": 10000000,
+    "expiry": "2026-03-27T12:00:00.000Z"
+  }
+]

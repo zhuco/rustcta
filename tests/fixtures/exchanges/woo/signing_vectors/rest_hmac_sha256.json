@@ -1,0 +1,13 @@
+{
+  "exchange": "woo",
+  "name": "rest_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "QHKRXHPAW1MC9YGZMAT8YDJG2HPR",
+  "timestamp": "1578565539808",
+  "method": "GET",
+  "request_path": "/v3/algo/orders?algoType=STOP",
+  "body": "",
+  "payload": "1578565539808GET/v3/algo/orders?algoType=STOP",
+  "expected_signature": "fddab579aff8c193f920c2d4f0cda6a21a60f06fd9c3916541ecc4f6461f5977",
+  "payload_format": "timestamp_method_path_body"
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "lbank",
+  "operation": "place_quote_market_order",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/create_order.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "type": "buy_market",
+    "price": "25.5",
+    "custom_id": "QUOTE1"
+  },
+  "unsupported": ["sell_quote_quantity"]
+}

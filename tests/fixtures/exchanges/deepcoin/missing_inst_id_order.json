@@ -1,0 +1,12 @@
+{
+  "code": "0",
+  "data": {
+    "ordId": "1001",
+    "clOrdId": "CLIENT1",
+    "state": "live",
+    "ordType": "limit",
+    "side": "buy",
+    "sz": "0.01",
+    "px": "65000"
+  }
+}

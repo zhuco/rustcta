@@ -1,0 +1,17 @@
+{
+  "code": 200,
+  "message": null,
+  "data": [
+    {
+      "trade_pair_name": "BTC/USDT",
+      "base_asset": "BTC",
+      "quote_asset": "USDT",
+      "price_precision": "2",
+      "amount_precision": "6",
+      "maker_fee_rate": "0.001",
+      "taker_fee_rate": "0.0015",
+      "min_amount": "0.00001",
+      "min_notional": "10"
+    }
+  ]
+}

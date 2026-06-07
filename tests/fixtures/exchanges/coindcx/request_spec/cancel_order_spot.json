@@ -1,0 +1,14 @@
+{
+  "operation": "coindcx.cancel_order",
+  "method": "POST",
+  "path": "/exchange/v1/orders/cancel",
+  "auth": "hmac",
+  "input": {
+    "market_type": "spot",
+    "symbol": "BTCUSDT",
+    "exchange_order_id": "fixture-order-001"
+  },
+  "expected_body": {
+    "id": "fixture-order-001"
+  }
+}

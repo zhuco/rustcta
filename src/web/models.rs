@@ -17,7 +17,7 @@ use crate::strategies::arbitrage_core::{
 };
 
 fn default_bind_addr() -> String {
-    "127.0.0.1:8080".to_string()
+    "127.0.0.1:8091".to_string()
 }
 
 fn default_true() -> bool {

@@ -1,0 +1,7 @@
+{
+  "operation": "coindcx.get_balances",
+  "method": "POST",
+  "path": "/exchange/v1/users/balances",
+  "auth": "hmac",
+  "expected_body": {}
+}

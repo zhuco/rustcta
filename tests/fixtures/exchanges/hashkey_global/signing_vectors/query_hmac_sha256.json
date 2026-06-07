@@ -1,0 +1,8 @@
+{
+  "exchange": "hashkey_global",
+  "name": "query-hmac-sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "query": "price=65000&quantity=0.01&side=BUY&symbol=BTCUSDT&timestamp=1649404670162&type=LIMIT",
+  "expected_signature": "c4b6ab7dae7526d1d779a336cdf2ea93ceef7d02cec1173f08f302147940b0cd"
+}

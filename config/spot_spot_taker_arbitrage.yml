@@ -44,7 +44,7 @@ replay:
 monitoring:
   enabled: false
   http_enabled: false
-  bind_addr: "127.0.0.1:8080"
+  bind_addr: "127.0.0.1:8091"
   expose_publicly: false
   require_token: true
   token_env: "RUSTCTA_MONITOR_TOKEN"

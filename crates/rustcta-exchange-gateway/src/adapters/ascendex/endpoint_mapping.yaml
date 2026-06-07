@@ -1,0 +1,264 @@
+schema_version: 1
+exchange: ascendex
+status: implemented
+rest_base_url: https://ascendex.com
+auth:
+  account_group_required: true
+  headers:
+    api_key: x-auth-key
+    timestamp_ms: x-auth-timestamp
+    signature: x-auth-signature
+  signature:
+    algorithm: hmac_sha256_base64
+    prehash: "{timestamp_ms}+{api_path}"
+    api_path_examples:
+      spot_order: order
+      spot_balance: balance
+      futures_order: v2/futures/order
+      spot_stream: stream
+      futures_stream: v2/stream
+capabilities_v2:
+  public_rest: native
+  private_rest: native_when_credentials_present
+  public_ws:
+    support: spec_payload_and_parser
+    runtime: subscribe_payloads_and_message_parser
+  private_ws:
+    support: spec_payload_and_order_parser_when_credentials_present
+    unsupported_gaps:
+      - private balance stream events are not normalized
+      - private position stream events are not normalized
+      - private account stream events are subscription-only
+  market_types:
+    - spot
+    - perpetual
+  order_types:
+    - market
+    - limit
+    - post_only
+    - ioc
+    - fok
+  unsupported:
+    - quote market order placement
+    - amend order
+    - stop market and stop limit orders
+    - leverage, margin mode, and position mode mutation
+rate_limit_plan:
+  source: exchange_public_docs
+  enforcement: platform_shared_http_limiter_follow_up
+  buckets:
+    - name: public_rest
+      scope: ip
+      adapter_default: conservative
+    - name: private_rest
+      scope: account_group
+      adapter_default: conservative
+    - name: websocket
+      scope: connection
+      adapter_default: heartbeat_and_subscription_rate_guard
+pagination:
+  recent_fills:
+    endpoint: order_history_current
+    limit_param: n
+    max_limit: 500
+    cursor: unsupported
+  open_orders:
+    endpoint: order_open
+    cursor: unsupported
+  order_history:
+    current_history_only: true
+    historical_cursor: unsupported_gap
+reconciliation:
+  read_models:
+    - balances
+    - positions
+    - open_orders
+    - query_order
+    - recent_fills_from_order_history
+  policy:
+    after_place: query_order_or_open_orders
+    after_cancel: query_order_then_open_orders
+    after_batch: query_each_order_id_when_present
+    unknown_order: treat_as_reconcile_required
+  live_dry_run_guards:
+    - kill_switch_required_by_runner
+    - disabled_symbol_filter_required_by_runner
+    - max_notional_required_by_runner
+batch:
+  place:
+    native: true
+    max_items: 10
+    atomicity: exchange_defined_non_atomic
+    partial_failure: parse_each_returned_item_then_reconcile_missing_items
+  cancel:
+    native: true
+    max_items: 10
+    atomicity: exchange_defined_non_atomic
+    partial_failure: parse_each_returned_item_then_reconcile_missing_items
+websocket_policy:
+  heartbeat:
+    ping_payload: '{"op":"ping"}'
+    pong_payload: '{"op":"pong"}'
+    ping_interval_ms: 15000
+    pong_timeout_ms: 30000
+    stale_message_ms: 30000
+  auth_renewal:
+    model: reconnect_and_reauth
+    listen_key: unsupported
+    token_refresh: not_required
+operations:
+  symbol_rules:
+    spot:
+      method: GET
+      path: /api/pro/v1/cash/products
+      auth: none
+    perpetual:
+      method: GET
+      path: /api/pro/v2/futures/contract
+      auth: none
+  order_book:
+    spot:
+      method: GET
+      path: /api/pro/v1/depth
+      auth: none
+      query:
+        symbol: required
+    perpetual:
+      method: GET
+      path: /api/pro/v1/depth
+      auth: none
+      query:
+        symbol: required
+      note: shared depth endpoint used as scan-only fallback
+  balances:
+    spot:
+      method: GET
+      path: /{account_group}/api/pro/v1/cash/balance
+      sign_path: balance
+    perpetual:
+      method: GET
+      path: /{account_group}/api/pro/v2/futures/position
+      sign_path: v2/futures/position
+  positions:
+    perpetual:
+      method: GET
+      path: /{account_group}/api/pro/v2/futures/position
+      sign_path: v2/futures/position
+    spot:
+      support: unsupported
+  fees:
+    spot:
+      method: GET
+      path: /{account_group}/api/pro/v1/spot/fee
+      sign_path: fee
+    perpetual:
+      method: GET
+      path: /{account_group}/api/pro/v1/futures/fee
+      sign_path: fee
+  place_order:
+    spot:
+      method: POST
+      path: /{account_group}/api/pro/v1/cash/order
+      sign_path: order
+    perpetual:
+      method: POST
+      path: /{account_group}/api/pro/v2/futures/order
+      sign_path: v2/futures/order
+  cancel_order:
+    spot:
+      method: DELETE
+      path: /{account_group}/api/pro/v1/cash/order
+      sign_path: order
+    perpetual:
+      method: DELETE
+      path: /{account_group}/api/pro/v2/futures/order
+      sign_path: v2/futures/order
+  cancel_all_orders:
+    spot:
+      method: DELETE
+      path: /{account_group}/api/pro/v1/cash/order/all
+      sign_path: order/all
+    perpetual:
+      method: DELETE
+      path: /{account_group}/api/pro/v2/futures/order/all
+      sign_path: v2/futures/order/all
+  batch_place_orders:
+    spot:
+      method: POST
+      path: /{account_group}/api/pro/v1/cash/order/batch
+      sign_path: order/batch
+    perpetual:
+      method: POST
+      path: /{account_group}/api/pro/v2/futures/order/batch
+      sign_path: v2/futures/order/batch
+  batch_cancel_orders:
+    spot:
+      method: DELETE
+      path: /{account_group}/api/pro/v1/cash/order/batch
+      sign_path: order/batch
+    perpetual:
+      method: DELETE
+      path: /{account_group}/api/pro/v2/futures/order/batch
+      sign_path: v2/futures/order/batch
+  query_order:
+    spot:
+      method: GET
+      path: /{account_group}/api/pro/v1/cash/order/status
+      sign_path: order/status
+      query:
+        orderId: required
+    perpetual:
+      method: GET
+      path: /{account_group}/api/pro/v2/futures/order/status
+      sign_path: v2/futures/order/status
+      query:
+        orderId: required
+  open_orders:
+    spot:
+      method: GET
+      path: /{account_group}/api/pro/v1/cash/order/open
+      sign_path: order/open
+    perpetual:
+      method: GET
+      path: /{account_group}/api/pro/v2/futures/order/open
+      sign_path: v2/futures/order/open
+  recent_fills:
+    spot:
+      method: GET
+      path: /{account_group}/api/pro/v1/cash/order/hist/current
+      sign_path: order/hist/current
+      fallback: fills_from_order_history
+    perpetual:
+      method: GET
+      path: /{account_group}/api/pro/v2/futures/order/hist/current
+      sign_path: v2/futures/order/hist/current
+      fallback: fills_from_order_history
+  public_ws:
+    spot:
+      url: wss://ascendex.com/api/pro/v1/stream
+      channels:
+        order_book: depth:{symbol}
+        trades: trades:{symbol}
+        ticker: bbo:{symbol}
+        candles: bar:{interval}:{symbol}
+    perpetual:
+      url: wss://ascendex.com/api/pro/v2/stream
+      channels:
+        order_book: depth:{symbol}
+        trades: trades:{symbol}
+        ticker: bbo:{symbol}
+        candles: bar:{interval}:{symbol}
+  private_ws:
+    spot:
+      url: wss://ascendex.com/{account_group}/api/pro/v1/stream
+      auth_sign_path: stream
+      channels:
+        orders: order:cash
+        fills: order:cash
+    perpetual:
+      url: wss://ascendex.com/{account_group}/api/pro/v2/stream
+      auth_sign_path: v2/stream
+      channels:
+        orders: futures-order
+        fills: futures-order
+        account: futures-account-update

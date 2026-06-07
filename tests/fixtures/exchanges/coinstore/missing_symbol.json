@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT",
+      "pricePrecision": 2
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "exchange": "phemex",
+  "operation": "spot_place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/spot/orders/create",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "sBTCUSDT"
+    },
+    "side": {
+      "match": "exact",
+      "value": "Buy"
+    },
+    "ordType": {
+      "match": "exact",
+      "value": "Limit"
+    },
+    "clOrdID": {
+      "match": "exact",
+      "value": "client-1"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

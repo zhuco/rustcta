@@ -223,7 +223,7 @@ PY
   exit 0
 fi
 
-BASE_URL="${CONTROL_API_BASE_URL:-http://127.0.0.1:8080}"
+BASE_URL="${CONTROL_API_BASE_URL:-http://127.0.0.1:8091}"
 TOKEN_ENV="${CONTROL_API_TOKEN_ENV:-RUSTCTA_MONITOR_TOKEN}"
 COMMAND_PATH="${COMMAND_PATH:-data/control_api/control_commands.jsonl}"
 SAFETY_CONFIG="${SAFETY_CONFIG:-config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml}"

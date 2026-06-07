@@ -1,0 +1,12 @@
+{
+  "exchange": "bitmex",
+  "name": "rest_get_instrument",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1518064237",
+  "method": "GET",
+  "request_path": "/api/v1/instrument?symbol=XBTUSD",
+  "payload": "GET/api/v1/instrument?symbol=XBTUSD1518064237",
+  "expected_signature": "39278e0e75111f370be05ea10773b7399db40cc10006e6a974b44699926ea8fe",
+  "payload_format": "raw_payload"
+}

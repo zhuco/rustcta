@@ -1,0 +1,33 @@
+{
+  "exchange": "phemex",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/g-orders/create",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSDT"
+    },
+    "clOrdID": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

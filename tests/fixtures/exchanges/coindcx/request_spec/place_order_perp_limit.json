@@ -1,0 +1,24 @@
+{
+  "operation": "coindcx.place_futures_order",
+  "method": "POST",
+  "path": "/exchange/v1/derivatives/futures/orders/create",
+  "auth": "hmac",
+  "input": {
+    "market_type": "perpetual",
+    "symbol": "BTCUSDT",
+    "side": "sell",
+    "order_type": "limit",
+    "quantity": "1",
+    "price": "65000",
+    "post_only": false,
+    "reduce_only": false
+  },
+  "expected_body": {
+    "market": "BTCUSDT-FUTURES",
+    "side": "sell",
+    "order_type": "limit_order",
+    "total_quantity": "1",
+    "price_per_unit": "65000",
+    "price": "65000"
+  }
+}

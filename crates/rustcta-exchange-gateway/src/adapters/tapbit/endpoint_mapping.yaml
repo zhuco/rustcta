@@ -1,0 +1,254 @@
+schema_version: 1
+exchange: tapbit
+adapter: rustcta_exchange_gateway::adapters::tapbit
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway Tapbit adapter implementation and Tapbit OpenAPI docs
+  last_reviewed: "2026-06-08"
+  notes: Spot plus USDT perpetual REST mapping. Private WebSocket remains unsupported because public Tapbit docs do not publish private order/account topics.
+market_types:
+  - spot
+  - linear_perp
+rest:
+  base_url: https://openapi.tapbit.com
+base_urls:
+  spot_rest: https://openapi.tapbit.com/spot
+  swap_rest: https://openapi.tapbit.com/swap
+  public_ws: wss://ws-openapi.tapbit.com/stream/ws
+auth:
+  private_rest:
+    mode: hmac
+    headers: [ACCESS-KEY, ACCESS-SIGN, ACCESS-TIMESTAMP, Content-Type]
+    prehash: timestamp + uppercase(method) + request_path + optional_query + body
+    signing_vector_test: crates/rustcta-exchange-gateway/src/adapters/tapbit/private_tests.rs
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: unknown
+    private_account:
+      scope: account
+      interval: 1m
+      limit: unknown
+    trade:
+      scope: account
+      interval: 1m
+      limit: unknown
+pagination:
+  get_recent_fills:
+    style: time_window
+    since_param: start_time
+    until_param: end_time
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_balances, get_positions, query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    spot:
+      support: native
+      atomicity: partial
+      max_items: unknown
+      partial_failure: true
+    linear_perp:
+      support: composed
+      atomicity: non_atomic
+      max_items: unknown
+      partial_failure: true
+      reason: Official native USDT perpetual batch endpoint is not verified; adapter uses sequential single-order fallback.
+  cancel_orders:
+    spot:
+      support: native
+      atomicity: partial
+      max_items: unknown
+      partial_failure: true
+    linear_perp:
+      support: composed
+      atomicity: non_atomic
+      max_items: unknown
+      partial_failure: true
+      reason: Official native USDT perpetual batch cancel endpoint is not verified; adapter uses sequential single-cancel fallback.
+websocket:
+  public:
+    support: spec_only
+    url: wss://ws-openapi.tapbit.com/stream/ws
+    topics: [spot/orderBook, spot/ticker, usdt/orderBook, usdt/ticker]
+    heartbeat:
+      direction: server_ping
+      interval_ms: 5000
+      timeout_ms: 10000
+      response: pong
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    reason: tapbit.subscribe_private_stream.no_official_private_ws_topics
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/spot/instruments/trade_pair_list
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/tapbit/public_tests.rs
+  - operation: get_symbol_rules_perp
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /api/usdt/instruments/list
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/tapbit/public_tests.rs
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/spot/instruments/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/tapbit/public_tests.rs
+  - operation: get_order_book_perp
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /api/usdt/instruments/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/tapbit/public_tests.rs
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/spot/account/list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/tapbit/private_tests.rs
+  - operation: get_positions
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /api/v1/usdt/position_list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: place_order_perp
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /api/v1/usdt/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/spot/cancel_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order_perp
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /api/v1/usdt/cancel_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/spot/order_info
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/spot/open_order_list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /api/v1/usdt/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/spot/batch_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/spot/batch_cancel_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial

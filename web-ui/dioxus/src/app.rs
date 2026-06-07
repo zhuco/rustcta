@@ -11,6 +11,7 @@ use crate::dashboard_panels::{
     BookPanel, ConfigPanel, DryRunPanel, ExchangePanel, InventoryPanel, LogsPanel, RiskPanel,
     RuntimePublisherPanel, ScannerPanel, SymbolPanel,
 };
+use crate::funding_arb::FundingArbPanel;
 use crate::i18n::{command_label, s, t};
 use crate::overview::Overview;
 use crate::spot_arb::SpotArbPanel;
@@ -28,6 +29,7 @@ struct ActiveViewContext {
     active_view: Signal<ControlPanelView>,
     api_key_exchange: Signal<String>,
     api_key_account: Signal<String>,
+    api_key_namespace: Signal<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -52,12 +54,14 @@ pub(crate) fn App() -> Element {
     let mut active_view = use_signal(load_active_view);
     let api_key_exchange = use_signal(|| "gate".to_string());
     let api_key_account = use_signal(|| "default".to_string());
+    let api_key_namespace = use_signal(String::new);
     let view_context = ActiveViewContext {
         data,
         message,
         active_view,
         api_key_exchange,
         api_key_account,
+        api_key_namespace,
     };
     let refresh_context = DashboardRefreshContext {
         data,
@@ -194,10 +198,29 @@ pub(crate) fn App() -> Element {
                         button { class: "button danger", onclick: kill, {s(lang, "kill_switch")} }
                     }
                 }
+                if is_auth_error(&message()) {
+                    div { class: "modal-backdrop",
+                        div { class: "error-dialog", role: "alertdialog", "aria-modal": "true",
+                            div { class: "error-dialog-title", "认证 Token 错误" }
+                            p { "{message()}" }
+                            div { class: "row-actions",
+                                button {
+                                    class: "button danger",
+                                    onclick: move |_| message.set(String::new()),
+                                    "OK"
+                                }
+                            }
+                        }
+                    }
+                }
                 {render_active_view(active_view(), view_context, token(), lang)}
             }
         }
     }
+}
+
+fn is_auth_error(message: &str) -> bool {
+    message.contains("AUTH_TOKEN_ERROR") || message.contains("HTTP 401")
 }
 
 fn render_active_view(
@@ -212,6 +235,7 @@ fn render_active_view(
         active_view,
         api_key_exchange,
         api_key_account,
+        api_key_namespace,
     } = context;
     match view {
         ControlPanelView::Workspace => {
@@ -255,9 +279,26 @@ fn render_active_view(
                     lang,
                     active_view,
                     api_key_exchange,
-                    api_key_account
+                    api_key_account,
+                    api_key_namespace
                 }
                 ControlActionPanel { lang }
+            }
+        }
+        ControlPanelView::FundingArb => {
+            let snapshot = data();
+            rsx! {
+                FundingArbPanel {
+                    api_keys: snapshot.api_keys,
+                    processes: snapshot.processes,
+                    token,
+                    message,
+                    lang,
+                    active_view,
+                    api_key_exchange,
+                    api_key_account,
+                    api_key_namespace
+                }
             }
         }
         ControlPanelView::ApiKeys => {
@@ -268,7 +309,8 @@ fn render_active_view(
                     message,
                     lang,
                     selected_exchange: api_key_exchange(),
-                    selected_account: api_key_account()
+                    selected_account: api_key_account(),
+                    selected_namespace: api_key_namespace()
                 }
                 ControlActionPanel { lang }
             }

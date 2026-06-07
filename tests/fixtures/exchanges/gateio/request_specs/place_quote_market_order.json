@@ -1,0 +1,24 @@
+{
+  "exchange": "gateio",
+  "operation": "place_quote_market_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/spot/orders",
+  "auth": "signed",
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "currency_pair": "BTC_USDT",
+    "side": "buy",
+    "type": "market",
+    "amount": "25.5",
+    "time_in_force": "ioc",
+    "text": "t-QUOTE1"
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

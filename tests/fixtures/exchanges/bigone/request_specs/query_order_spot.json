@@ -1,0 +1,15 @@
+{
+  "exchange": "bigone",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/viewer/order",
+  "auth": "signed",
+  "query": {
+    "order_id": { "match": "exact", "value": "order-1" }
+  },
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  }
+}

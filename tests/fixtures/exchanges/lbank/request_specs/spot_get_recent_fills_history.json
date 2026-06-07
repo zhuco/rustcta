@@ -1,0 +1,22 @@
+{
+  "exchange": "lbank",
+  "operation": "get_recent_fills_history",
+  "product": "spot",
+  "mode": "history",
+  "method": "POST",
+  "path": "/v2/supplement/transaction_history.do",
+  "auth": "md5_hmac_sha256",
+  "pagination": {
+    "mode": "from_trade_id_time_window_limit",
+    "max_limit": 100
+  },
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "fromId": "fill-0",
+    "startTim": "1700000000000",
+    "endTime": "1700003600000",
+    "limit": "100"
+  }
+}

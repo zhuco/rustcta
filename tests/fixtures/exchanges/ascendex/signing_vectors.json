@@ -1,0 +1,26 @@
+[
+  {
+    "name": "spot-order-rest",
+    "timestamp_ms": "1608133910000",
+    "api_path": "order",
+    "secret": "<ascendex-api-secret>",
+    "prehash": "1608133910000+order",
+    "signature": "BnPrD5/wA2HHEHp7kH51DptC9Rm97SbtXTTAgxX5Fj0="
+  },
+  {
+    "name": "spot-stream-auth",
+    "timestamp_ms": "1608133910000",
+    "api_path": "stream",
+    "secret": "<ascendex-api-secret>",
+    "prehash": "1608133910000+stream",
+    "signature": "cto6cuprxvssrBIwIUdc5D5wses/1MVw06B7goXLLuo="
+  },
+  {
+    "name": "futures-order-rest",
+    "timestamp_ms": "1608133910000",
+    "api_path": "v2/futures/order",
+    "secret": "<ascendex-api-secret>",
+    "prehash": "1608133910000+v2/futures/order",
+    "signature": "AFsodhT0DE7HRtiOT/rOr/X/AQT3BmxTPD0qRcKZM4k="
+  }
+]

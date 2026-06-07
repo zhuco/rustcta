@@ -1,0 +1,8 @@
+{
+  "id": 1,
+  "method": "public/get-instruments",
+  "code": 0,
+  "result": {
+    "data": []
+  }
+}

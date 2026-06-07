@@ -1,0 +1,15 @@
+{
+  "exchange": "bigone",
+  "operation": "cancel_contract_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/contract/v2/order",
+  "auth": "signed",
+  "query": {
+    "order_id": { "match": "exact", "value": "order-1" }
+  },
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  }
+}

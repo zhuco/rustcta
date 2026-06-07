@@ -1,0 +1,17 @@
+{
+  "exchange": "lbank",
+  "operation": "batch_place_orders",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/batch_create_order.do",
+  "auth": "md5_hmac_sha256",
+  "native_batch": true,
+  "atomicity": "partial",
+  "max_items": 50,
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "orders": "[{\"symbol\":\"btc_usdt\",\"type\":\"buy\",\"amount\":\"0.01\",\"price\":\"65000\",\"custom_id\":\"BATCH1\"}]"
+  },
+  "partial_failure_policy": "reconcile every client_order_id after ambiguous response"
+}

@@ -1,0 +1,19 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "instType": "SPOT",
+      "instId": "BTC-USDT",
+      "ordId": "1001",
+      "clOrdId": "CLIENT1",
+      "px": "65000",
+      "sz": "0.01",
+      "accFillSz": "0.004",
+      "state": "partially_filled",
+      "ordType": "limit",
+      "side": "buy",
+      "cTime": "1700000000000",
+      "uTime": "1700000001000"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "deepcoin",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/deepcoin/trade/batch-orders",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "body_contains": {"orders": [{"clOrdId": "BATCH1"}, {"clOrdId": "BATCH2"}]},
+  "forbid_header_values_containing": ["secret"]
+}

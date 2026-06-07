@@ -1,0 +1,185 @@
+[
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.get_balances",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/users/balances",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"],
+    "signing_vector": "coindcx/hmac_compact_json"
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.get_positions",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/derivatives/futures/positions",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.place_order",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/create",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "market": "BTCUSDT",
+      "side": "buy",
+      "order_type": "limit_order",
+      "total_quantity": "0.01",
+      "price": "64000",
+      "client_order_id": "fixture-client-001"
+    },
+    "forbid_header_values_containing": ["secret"],
+    "signing_vector": "coindcx/hmac_compact_json"
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.place_futures_order",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/derivatives/futures/orders/create",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "market": "BTCUSDT-FUTURES",
+      "side": "sell",
+      "order_type": "limit_order",
+      "total_quantity": "1",
+      "price": "65000"
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.cancel_order",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/cancel",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "id": "fixture-order-001"
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.batch_place_orders",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/create_multiple",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "orders": [
+        {
+          "market": "BTCUSDT",
+          "side": "buy",
+          "order_type": "limit_order"
+        }
+      ]
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.batch_cancel_orders",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/cancel_by_ids",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "ids": ["fixture-order-001"],
+      "client_order_ids": ["fixture-client-001"]
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.query_order",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/status",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "id": "fixture-order-001"
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.get_open_orders",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/active_orders",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "market": "BTCUSDT"
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "coindcx",
+    "operation": "coindcx.get_recent_fills",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/exchange/v1/orders/trade_history",
+    "auth": "signed",
+    "headers": {
+      "X-AUTH-APIKEY": { "match": "exact", "value": "key" },
+      "X-AUTH-SIGNATURE": { "match": "non_empty" }
+    },
+    "body_contains": {
+      "market": "BTCUSDT",
+      "limit": 1000
+    },
+    "forbid_header_values_containing": ["secret"]
+  }
+]

@@ -1,33 +1,91 @@
-# Gate.io Spot Adapter
+# Gate.io Gateway Adapter
 
-`src/exchanges/gateio/mod.rs` implements `ExchangeClient` for Gate.io Spot.
+`gateio` implements the RustCTA gateway `ExchangeClient` surface for Gate.io
+Spot REST in `crates/rustcta-exchange-gateway/src/adapters/gateio`.
 
 ## Scope
 
-- REST public: spot symbols and order books.
-- REST private: balances, place order, cancel order, query order, open orders, recent fills, fee rate.
-- Public WebSocket: `spot.order_book` snapshots/updates normalized into `OrderBookSnapshot`.
-- Safety default: `GateIoSpotConfig::default().dry_run == true`; dry-run `place_order` returns a synthetic order and does not submit.
+Supported:
 
-## Symbol Projection
+- Spot public REST: currency pairs and order book snapshots.
+- Spot private REST: balances, fees, place order, quote-sized market buy,
+  cancel order, native cancel all by currency pair, amend order, query order,
+  open orders, and recent fills.
+- HMAC-SHA512 signing with `KEY`, `Timestamp`, and `SIGN` headers.
 
-Gate.io exchange symbols use underscore pairs such as `BTC_USDT`. The adapter exposes compact internal symbols such as `BTCUSDT` through `SymbolRule.internal_symbol` and keeps the native pair in `exchange_symbol`.
+Explicitly unsupported:
 
-Loaded symbol rules include base/quote asset, tick size, step size, min quantity, min notional, and trade status.
+- Non-Spot markets in this gateway adapter.
+- Public/private WebSocket runtime wiring. REST snapshots and private REST
+  readbacks are the declared fallback for resync and reconciliation.
 
-## Credentials
-
-Private REST requires:
+## Environment
 
 ```bash
-export GATEIO_API_KEY=...
-export GATEIO_API_SECRET=...
+RUSTCTA_GATEIO_REST_BASE_URL=https://api.gateio.ws/api/v4
+GATEIO_API_KEY=...
+GATEIO_API_SECRET=...
 ```
 
-`GATE_API_KEY` and `GATE_API_SECRET` are also accepted as fallbacks. Use read/trade-only keys for live dry-run; withdrawal permission must be disabled.
+`GATE_API_KEY` and `GATE_API_SECRET` are accepted as fallbacks. Use read/trade
+keys with withdrawal permission disabled.
 
-## Live-Dry-Run Use
+## Endpoint Mapping
 
-For `spot_spot_taker_arbitrage`, configure `exchanges: [gateio, bitget]`, keep `dry_run: true`, `live_trading_enabled: false`, and `live_dry_run.submit_orders: false`.
+Machine-readable mapping:
+`crates/rustcta-exchange-gateway/src/adapters/gateio/endpoint_mapping.yaml`.
 
-The adapter supports order reconciliation primitives through `get_order`, `get_recent_fills`, and `get_open_orders`.
+| Capability | Endpoint |
+| --- | --- |
+| symbol rules | `GET /spot/currency_pairs` |
+| order book | `GET /spot/order_book` |
+| balances | `GET /spot/accounts` |
+| fees | `GET /spot/fee` |
+| place / quote market order | `POST /spot/orders` |
+| cancel order | `DELETE /spot/orders/{order_id}` |
+| cancel all by symbol | `DELETE /spot/orders` |
+| amend order | `PATCH /spot/orders/{order_id}` |
+| query order | `GET /spot/orders/{order_id}` |
+| open orders | `GET /spot/open_orders` |
+| recent fills | `GET /spot/my_trades` |
+
+## Capability V2
+
+- Product boundary: Spot only.
+- Public/private REST: native when credentials are configured for private REST.
+- Public/private streams: `RestFallback`; the trait methods return
+  `Unsupported`.
+- Order book: snapshot-only, max depth 100; reconnect/resync uses REST
+  snapshot.
+- Recent fills pagination: `last_id` cursor and `limit <= 1000`.
+- Batch place: composed sequential planner, non-atomic, max 20, partial failure
+  possible. Cancel-all is native for a single currency pair and partial.
+
+## Runtime Policies
+
+- Heartbeat/auth renewal: no gateway WebSocket session, so no heartbeat or
+  renewal is active.
+- Reconciliation: unknown order outcomes should query order, then open orders,
+  then fills. Balances are read from private REST.
+- Rate limits: mapping declares public, private, and order buckets; runtime
+  should classify HTTP 429 and Gate.io rate-limit labels as retryable.
+- Live dry-run gates: require reconciliation enabled, kill-switch, disabled
+  symbol list, and max-notional limits before enabling any live private REST
+  mutation.
+
+## Fixtures And Tests
+
+- Request-spec coverage is in `private_tests.rs` and asserts method, path,
+  query/body, auth headers, and secret-free requests.
+- Signing vector coverage is
+  `gateio_signing_should_match_known_hmac_vector`.
+- Parser fixtures live under `tests/fixtures/exchanges/gateio/toolchain/` and
+  cover success, empty response, error response, and missing required fields.
+
+## Validation
+
+```bash
+cargo test -p rustcta-exchange-gateway gateio --lib
+python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/gateio/endpoint_mapping.yaml
+python scripts/audit_gateway_adapters.py --exchange gateio
+```

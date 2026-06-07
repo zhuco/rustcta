@@ -16,6 +16,15 @@ pub(super) struct SeenRequest {
     pub(super) body: Option<Value>,
 }
 
+impl SeenRequest {
+    pub(super) fn actual_http_request(&self) -> crate::request_spec::ActualHttpRequest {
+        crate::request_spec::ActualHttpRequest::new(self.method.clone(), self.path.clone())
+            .with_query(self.query.clone())
+            .with_headers(self.headers.clone())
+            .with_body(self.body.clone())
+    }
+}
+
 pub(super) async fn spawn_rest_server(
     responses: Vec<Value>,
 ) -> (String, Arc<Mutex<Vec<SeenRequest>>>) {

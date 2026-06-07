@@ -1,0 +1,15 @@
+{
+  "exchange": "lbank",
+  "operation": "get_positions",
+  "product": "linear_perp",
+  "method": "POST",
+  "path": "/cfd/openApi/v1/prv/account",
+  "auth": "md5_hmac_sha256",
+  "mode": "best_effort_positions_from_account_payload",
+  "json": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "productGroup": "SwapU",
+    "asset": "USDT"
+  }
+}

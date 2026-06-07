@@ -1,0 +1,16 @@
+{
+  "exchange": "coinbase",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/orders/batch_cancel",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer test.jwt" }
+  },
+  "body_contains": {
+    "order_ids": ["order-1"]
+  },
+  "forbid_header_values_containing": ["secret"]
+}

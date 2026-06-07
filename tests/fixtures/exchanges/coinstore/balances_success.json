@@ -1,0 +1,11 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "currency": "USDT",
+      "available": "100.5",
+      "frozen": "2.5",
+      "total": "103"
+    }
+  ]
+}

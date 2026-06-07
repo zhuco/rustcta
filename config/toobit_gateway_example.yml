@@ -1,0 +1,61 @@
+# Toobit industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# TOOBIT_API_KEY and TOOBIT_API_SECRET.
+
+exchange: toobit
+market_types:
+  - spot
+  - perpetual
+adapter: toobit
+enabled: true
+
+api_key: ${TOOBIT_API_KEY}
+api_secret: ${TOOBIT_API_SECRET}
+
+rest_base_url: https://api.toobit.com
+public_ws_url: wss://stream.toobit.com/quote/ws/v1
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+recv_window_ms: 5000
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+# Optional Spot fee fallback because Toobit Spot fee-rate endpoint is not
+# advertised as a stable Binance-equivalent endpoint by this adapter.
+spot_maker_fee_override: null
+spot_taker_fee_override: null
+
+enabled_symbols:
+  spot:
+    - BTCUSDT
+    - ETHUSDT
+  perpetual:
+    - BTC-SWAP-USDT
+    - ETH-SWAP-USDT
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 10
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - Toobit private REST uses X-BB-APIKEY plus HMAC-SHA256 query signatures.
+  - Spot symbols use compact form such as BTCUSDT; perpetual symbols use BTC-SWAP-USDT.
+  - Public WS heartbeat accepts ping/pong JSON payloads and private WS uses listenKey URLs.

@@ -1,0 +1,12 @@
+{
+  "exchange": "phemex",
+  "name": "rest_query_order",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "sample-secret",
+  "timestamp": "1780837600",
+  "method": "PUT",
+  "request_path": "/g-orders/create?clOrdID=client-1&orderQtyRq=0.001&side=Buy&symbol=BTCUSDT",
+  "payload": "/g-orders/createclOrdID=client-1&orderQtyRq=0.001&side=Buy&symbol=BTCUSDT1780837600",
+  "expected_signature": "6f8651dd20012512cc70343d2e29835d2e7f6b2ed653aa17f462fc83072bbd23",
+  "payload_format": "raw_payload"
+}

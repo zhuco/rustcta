@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "CID1",
+      "orderId": "OID1",
+      "symbol": "BTC-PERP",
+      "orderType": "Limit",
+      "side": "Buy",
+      "status": "Filled",
+      "orderQty": "0.25",
+      "cumFilledQty": "0.25",
+      "avgFilledPx": "65000",
+      "lastExecTime": 1700000000000
+    }
+  ]
+}

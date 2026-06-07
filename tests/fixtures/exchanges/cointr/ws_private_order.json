@@ -1,0 +1,18 @@
+{
+  "arg": {
+    "channel": "user.orders",
+    "instType": "SPOT"
+  },
+  "data": [
+    {
+      "orderId": "1001",
+      "clientOrderId": "CID1",
+      "symbol": "BTCUSDT",
+      "side": "buy",
+      "orderType": "limit",
+      "status": "new",
+      "size": "0.01",
+      "price": "65000"
+    }
+  ]
+}

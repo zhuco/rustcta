@@ -1,0 +1,28 @@
+{
+  "exchange": "cointr",
+  "operation": "cointr.place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v2/spot/trade/place-order",
+  "auth": "signed",
+  "headers": {
+    "access-key": { "match": "exact", "value": "key" },
+    "access-sign": { "match": "non_empty" },
+    "access-timestamp": { "match": "non_empty" },
+    "access-passphrase": { "match": "non_empty" },
+    "locale": { "match": "exact", "value": "en-US" }
+  },
+  "body_contains": {
+    "symbol": "BTCUSDT",
+    "side": "buy",
+    "orderType": "limit",
+    "force": "gtc",
+    "size": "0.01",
+    "price": "65000",
+    "clientOid": "CID1",
+    "recvWindow": 5000
+  },
+  "forbid_header_values_containing": ["real_", "sk_live", "token_"],
+  "signing_vector": "tests/fixtures/exchanges/cointr/signing_vectors/rest_place_order_spot_limit.json"
+}

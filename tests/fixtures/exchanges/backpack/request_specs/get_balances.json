@@ -1,0 +1,1 @@
+{"operation":"backpack.get_balances","method":"GET","path":"/api/v1/capital","query":{},"body":null,"signed":true}

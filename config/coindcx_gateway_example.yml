@@ -1,0 +1,19 @@
+adapters:
+  - coindcx
+
+coindcx:
+  enabled: false
+  spot_rest_base_url: "https://api.coindcx.com"
+  futures_rest_base_url: "https://api.coindcx.com"
+  public_rest_base_url: "https://public.coindcx.com"
+  spot_ws_url: "wss://stream.coindcx.com"
+  futures_public_ws_url: "wss://stream.coindcx.com"
+  futures_private_ws_url: "wss://stream.coindcx.com"
+  private_rest:
+    enabled: false
+    api_key_env: "COINDCX_API_KEY"
+    api_secret_env: "COINDCX_API_SECRET"
+
+notes:
+  - "CoinDCX WebSocket uses Socket.IO join/ping payloads, not plain JSON WS subscribe frames."
+  - "Spot supports native batch place/cancel-by-ids; Futures batch place and multi-id batch cancel are unsupported."

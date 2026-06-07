@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "data": {
+    "positions": [
+      {
+        "symbol": "PERP_BTC_USDT",
+        "holding": "1.25",
+        "positionSide": "BOTH",
+        "averageOpenPrice": "69000",
+        "markPrice": "70000",
+        "estLiqPrice": "45000",
+        "pnl24H": "12.5",
+        "timestamp": 1743054548123
+      }
+    ]
+  }
+}

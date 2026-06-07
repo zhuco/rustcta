@@ -1,0 +1,45 @@
+{
+  "exchange": "blofin",
+  "operation": "query_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/trade/order-detail",
+  "auth": "signed",
+  "query": {
+    "instId": {
+      "match": "exact",
+      "value": "BTC-USDT"
+    },
+    "orderId": {
+      "match": "exact",
+      "value": "ord-1"
+    },
+    "clientOrderId": {
+      "match": "exact",
+      "value": "cid-1"
+    }
+  },
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "ACCESS-NONCE": {
+      "match": "non_empty"
+    },
+    "ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "pass"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

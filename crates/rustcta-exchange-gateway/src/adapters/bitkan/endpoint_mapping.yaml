@@ -1,0 +1,125 @@
+schema_version: 1
+exchange: bitkan
+adapter: BitkanGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bitkan_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 20 conservative shell. All unverified REST and live WS surfaces remain unsupported.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  rest: https://bitkan.com
+  public_ws: wss://bitkan.com/ws
+auth:
+  private_rest: unsupported; no verified signing scheme
+rate_limits:
+  unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  all: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: No verified open-order/account/fill endpoint; adapter must not be promoted to live-dry-run.
+batch:
+  place: { support: unsupported, reason: bitkan.batch_place_orders_unverified }
+  cancel: { support: unsupported, reason: bitkan.batch_cancel_orders_unverified }
+websocket:
+  public:
+    support: unsupported
+    helper_only: true
+    heartbeat: { mode: unsupported, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/bitkan/symbol_rules
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.symbol_rules_unverified
+  - operation: order_book
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/bitkan/order_book
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.order_book_unverified
+  - operation: place_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitkan/place_order
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.place_order_unverified
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitkan/cancel_order
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.cancel_order_unverified
+  - operation: batch_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bitkan/batch_orders
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.batch_orders_unverified
+  - operation: open_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/bitkan/open_orders
+    auth: unsupported
+    rate_limit_bucket: bitkan_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: bitkan.open_orders_unverified

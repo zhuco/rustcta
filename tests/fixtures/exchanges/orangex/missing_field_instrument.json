@@ -1,0 +1,12 @@
+{
+  "id": "1",
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "is_active": true,
+      "kind": "spot",
+      "tick_size": "0.01",
+      "instr_multiple": "0.00001"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "code": "00000",
+  "msg": "success",
+  "data": [
+    {
+      "coinName": "BTC",
+      "available": "0.10",
+      "frozen": "0.02",
+      "equity": "0.12"
+    }
+  ]
+}

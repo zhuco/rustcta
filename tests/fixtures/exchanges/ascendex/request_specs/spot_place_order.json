@@ -1,0 +1,30 @@
+{
+  "exchange": "ascendex",
+  "operation": "spot_place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/42/api/pro/v1/cash/order",
+  "auth": "signed",
+  "headers": {
+    "x-auth-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-auth-timestamp": {
+      "match": "non_empty"
+    },
+    "x-auth-signature": {
+      "match": "non_empty"
+    }
+  },
+  "body_contains": {
+    "symbol": "BTC/USDT",
+    "orderQty": "0.01",
+    "orderType": "limit"
+  },
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "ascendex/spot_order_rest"
+}

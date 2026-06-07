@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "stock": "BTC",
+      "money": "USDT",
+      "type": "spot"
+    }
+  ]
+}

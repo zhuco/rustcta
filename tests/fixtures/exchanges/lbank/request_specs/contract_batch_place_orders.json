@@ -1,0 +1,24 @@
+{
+  "exchange": "lbank",
+  "operation": "batch_place_orders",
+  "product": "linear_perp",
+  "method": "COMPOSED_POST",
+  "path": "/cfd/openApi/v1/prv/placeOrder",
+  "auth": "md5_hmac_sha256",
+  "native_batch": false,
+  "atomicity": "non_atomic",
+  "max_items": 20,
+  "item_json": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "clientOrderId": "CBATCH1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "offsetFlag": "0",
+    "orderPriceType": "4",
+    "origType": "0",
+    "price": "65000",
+    "volume": "0.01"
+  },
+  "partial_failure_policy": "stop on item error and reconcile manually unless desk has confirmed raw query endpoint"
+}

@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": {
+    "order_id": "2001",
+    "market": "BTCUSDT",
+    "client_id": "CLIENTLIMIT1",
+    "side": "buy",
+    "type": "limit",
+    "option": "normal",
+    "status": "open",
+    "price": "65000",
+    "amount": "0.02",
+    "filled_amount": "0",
+    "created_at": 1743054548000
+  }
+}

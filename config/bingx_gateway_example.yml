@@ -1,0 +1,67 @@
+# BingX gateway app environment example.
+# Keep disabled/dry-run by default; inject secrets via environment variables.
+
+gateway:
+  adapters:
+    - bingx
+  env:
+    RUSTCTA_GATEWAY_ADAPTERS: bingx
+    RUSTCTA_BINGX_REST_BASE_URL: https://open-api.bingx.com
+    BINGX_SPOT_WS_URL: wss://open-api-ws.bingx.com/market
+    BINGX_SWAP_WS_URL: wss://open-api-swap.bingx.com/swap-market
+    RUSTCTA_BINGX_API_KEY: ${BINGX_API_KEY}
+    RUSTCTA_BINGX_API_SECRET: ${BINGX_API_SECRET}
+    BINGX_PRIVATE_REST_ENABLED: "true"
+    BINGX_RECV_WINDOW_MS: "5000"
+
+capabilities:
+  spot:
+    market_data:
+      - symbol_rules
+      - order_book_snapshot
+      - public_websocket_subscribe
+      - websocket_heartbeat
+    private:
+      - balances
+      - fees
+      - place_order
+      - quote_market_order
+      - cancel_order
+      - cancel_all_orders
+      - query_order
+      - open_orders
+      - recent_fills
+      - batch_place_orders
+      - batch_cancel_orders
+      - oco_order_list
+      - private_websocket_subscribe
+  perpetual:
+    market_data:
+      - symbol_rules
+      - order_book_snapshot
+      - public_websocket_subscribe
+      - websocket_heartbeat
+    private:
+      - balances
+      - positions
+      - fees
+      - place_order
+      - cancel_order
+      - cancel_all_orders
+      - query_order
+      - open_orders
+      - recent_fills
+      - batch_place_orders
+      - batch_cancel_orders
+      - amend_order
+      - set_leverage
+      - position_mode
+      - multi_assets_mode
+      - margin_type
+      - private_websocket_subscribe
+
+unsupported:
+  - countdown_cancel_all
+  - spot_amend_order
+  - oto_order_list
+  - perpetual_order_list

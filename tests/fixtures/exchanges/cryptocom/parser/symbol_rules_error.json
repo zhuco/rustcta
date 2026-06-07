@@ -1,0 +1,6 @@
+{
+  "id": 1,
+  "method": "public/get-instruments",
+  "code": 10001,
+  "message": "invalid request"
+}

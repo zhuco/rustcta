@@ -1,0 +1,11 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": {
+    "symbol": "btc_usdt",
+    "bidPrice": "64999",
+    "bidQty": "0.5",
+    "askPrice": "65001",
+    "askQty": "0.4"
+  }
+}

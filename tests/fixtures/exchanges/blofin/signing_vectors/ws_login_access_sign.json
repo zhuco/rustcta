@@ -1,0 +1,13 @@
+{
+  "exchange": "blofin",
+  "name": "ws_login_access_sign",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1700000000000",
+  "method": "GET",
+  "request_path": "/users/self/verify",
+  "payload": "/users/self/verifyGET1700000000000nonce",
+  "expected_signature": "643bf0b65c1e7d26e2a909abf5733627f245fc828ccc6b1f3c982cb6846311ea",
+  "payload_format": "raw_payload",
+  "access_sign_base64_hex": "NjQzYmYwYjY1YzFlN2QyNmUyYTkwOWFiZjU3MzM2MjdmMjQ1ZmM4MjhjY2M2YjFmM2M5ODJjYjY4NDYzMTFlYQ=="
+}

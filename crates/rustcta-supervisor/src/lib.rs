@@ -1291,6 +1291,13 @@ impl LocalProcessSupervisor {
         Ok(exited)
     }
 
+    pub fn mark_stopped_if_registered(
+        &mut self,
+        strategy_id: &str,
+    ) -> Result<StrategyProcess, SupervisorError> {
+        self.mark_process_stopped(strategy_id, None)
+    }
+
     fn mark_process_stopped(
         &mut self,
         strategy_id: &str,

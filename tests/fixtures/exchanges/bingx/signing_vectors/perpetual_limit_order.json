@@ -1,0 +1,12 @@
+{
+  "exchange": "bingx",
+  "name": "perpetual_limit_order",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1649404670162",
+  "method": "POST",
+  "request_path": "/openApi/swap/v2/trade/order",
+  "payload": "price=65000&quantity=0.01&side=BUY&symbol=BTC-USDT&timestamp=1649404670162&type=LIMIT",
+  "expected_signature": "d7795e8dcfd94bdf9e79ed3faea0c565fd8e92a9ba1fe6680c852e8b50105652",
+  "payload_format": "raw_payload"
+}

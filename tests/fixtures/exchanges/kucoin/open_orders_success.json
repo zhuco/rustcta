@@ -1,0 +1,19 @@
+{
+  "code": "200000",
+  "data": {
+    "items": [
+      {
+        "id": "1002",
+        "symbol": "BTC-USDT",
+        "clientOid": "CID1002",
+        "side": "sell",
+        "type": "limit",
+        "isActive": true,
+        "price": "70000",
+        "size": "0.02",
+        "dealSize": "0",
+        "createdAt": 1743054549000
+      }
+    ]
+  }
+}

@@ -4,19 +4,21 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest,
-    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
-    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
-    SymbolRulesResponse, TimeInForce,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
+    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
+    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
+    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
 use super::GatewayAdapter;
 use crate::GatewayExchangeStatus;
 
+mod capabilities;
 mod config;
 mod parser;
 mod private;
@@ -27,6 +29,9 @@ mod public;
 #[cfg(test)]
 mod public_tests;
 mod signing;
+#[cfg(test)]
+mod stream_tests;
+mod streams;
 #[cfg(test)]
 mod test_support;
 mod transport;
@@ -196,6 +201,11 @@ impl ExchangeClient for CoinExGatewayAdapter {
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = self.config.private_rest_enabled();
+        capabilities.supports_public_streams = true;
+        capabilities.supports_private_streams = self.config.private_rest_enabled();
+        capabilities.private_stream_capabilities = Some(
+            streams::coinex_private_stream_capabilities(self.config.private_rest_enabled()),
+        );
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_enabled();
@@ -208,6 +218,8 @@ impl ExchangeClient for CoinExGatewayAdapter {
         capabilities.supports_query_order = self.config.private_rest_enabled();
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
+        capabilities.supports_batch_place_order = self.config.private_rest_enabled();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_client_order_id = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
@@ -223,8 +235,13 @@ impl ExchangeClient for CoinExGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(50);
+        capabilities.max_recent_fill_limit = Some(capabilities::COINEX_SPOT_MAX_PAGE_LIMIT);
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
+        capabilities::apply_coinex_capabilities_v2(
+            &mut capabilities,
+            self.config.private_rest_enabled(),
+        );
         capabilities
     }
 
@@ -278,6 +295,20 @@ impl ExchangeClient for CoinExGatewayAdapter {
         self.cancel_order_impl(request).await
     }
 
+    async fn batch_place_orders(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.batch_place_orders_impl(request).await
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.batch_cancel_orders_impl(request).await
+    }
+
     async fn amend_order(
         &self,
         request: AmendOrderRequest,
@@ -315,18 +346,16 @@ impl ExchangeClient for CoinExGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "coinex.subscribe_public_stream",
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(
         &self,
-        _subscription: PrivateStreamSubscription,
+        subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        self.unsupported_private("coinex.subscribe_private_stream")
+        self.subscribe_private_stream_impl(subscription).await
     }
 }
 

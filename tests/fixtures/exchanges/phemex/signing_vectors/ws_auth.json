@@ -1,0 +1,12 @@
+{
+  "exchange": "phemex",
+  "name": "ws_auth",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "sample-secret",
+  "timestamp": "1780837600",
+  "method": "websocket",
+  "request_path": "user.auth",
+  "payload": "sample-key1780837600",
+  "expected_signature": "ba7a39d2688e8f2001d79dadd63031c302dfa8067cfda7dcd373ec1ae52ab317",
+  "payload_format": "raw_payload"
+}

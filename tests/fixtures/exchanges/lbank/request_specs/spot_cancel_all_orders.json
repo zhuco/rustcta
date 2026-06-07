@@ -1,0 +1,15 @@
+{
+  "exchange": "lbank",
+  "operation": "cancel_all_orders",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/cancel_order_by_symbol.do",
+  "auth": "md5_hmac_sha256",
+  "scope": "symbol_required",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt"
+  },
+  "reconciliation": "fetch open orders for the same symbol after timeout or partial response"
+}

@@ -1,0 +1,10 @@
+{
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "status": "TRADING",
+      "quoteAsset": "USDT",
+      "filters": []
+    }
+  ]
+}

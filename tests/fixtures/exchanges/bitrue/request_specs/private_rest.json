@@ -1,0 +1,346 @@
+[
+  {
+    "exchange": "bitrue",
+    "operation": "get_balances_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/api/v1/account",
+    "auth": "signed",
+    "query": {
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_balances_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/fapi/v2/account",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_positions_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/fapi/v2/account",
+    "auth": "signed",
+    "query": {
+      "contractName": { "match": "exact", "value": "E-BTC-USDT" }
+    },
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_fees_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/fapi/v2/commissionRate",
+    "auth": "signed",
+    "query": {
+      "contractName": { "match": "exact", "value": "E-BTC-USDT" }
+    },
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "query_order_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/api/v1/order",
+    "auth": "signed",
+    "query": {
+      "symbol": { "match": "exact", "value": "BTCUSDT" },
+      "orderId": { "match": "exact", "value": "1001" },
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_open_orders_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/api/v1/openOrders",
+    "auth": "signed",
+    "query": {
+      "symbol": { "match": "exact", "value": "BTCUSDT" },
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_recent_fills_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/api/v2/myTrades",
+    "auth": "signed",
+    "query": {
+      "symbol": { "match": "exact", "value": "BTCUSDT" },
+      "orderId": { "match": "exact", "value": "1001" },
+      "limit": { "match": "exact", "value": "50" },
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "place_order_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/fapi/v2/order",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"],
+    "signing_vector": "bitrue/futures_payload_hmac"
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "cancel_order_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/fapi/v2/cancel",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "cancel_all_orders_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/fapi/v2/openOrders",
+    "auth": "signed",
+    "query": {
+      "contractName": { "match": "exact", "value": "E-BTC-USDT" }
+    },
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "batch_place_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/fapi/v2/order",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "batch_cancel_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/fapi/v2/cancel",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "place_order_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/api/v1/order",
+    "auth": "signed",
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "query": {
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret"],
+    "signing_vector": "bitrue/spot_query_hmac"
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "cancel_order_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "DELETE",
+    "path": "/api/v1/order",
+    "auth": "signed",
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "query": {
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "batch_place_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/api/v1/order",
+    "auth": "signed",
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "query": {
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "batch_cancel_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "DELETE",
+    "path": "/api/v1/order",
+    "auth": "signed",
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "query": {
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_open_orders_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/fapi/v2/openOrders",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "get_recent_fills_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "GET",
+    "path": "/fapi/v2/myTrades",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "listen_key_spot",
+    "product": "spot",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/poseidon/api/v1/listenKey",
+    "auth": "signed",
+    "headers": {
+      "X-MBX-APIKEY": { "match": "exact", "value": "key" }
+    },
+    "query": {
+      "timestamp": { "match": "non_empty" },
+      "recvWindow": { "match": "exact", "value": "5000" },
+      "signature": { "match": "non_empty" }
+    },
+    "forbid_query_values_containing": ["secret"]
+  },
+  {
+    "exchange": "bitrue",
+    "operation": "listen_key_perp",
+    "product": "linear_perp",
+    "transport": "rest",
+    "method": "POST",
+    "path": "/user_stream/api/v1/listenKey",
+    "auth": "signed",
+    "headers": {
+      "X-CH-APIKEY": { "match": "exact", "value": "key" },
+      "X-CH-TS": { "match": "non_empty" },
+      "X-CH-SIGN": { "match": "non_empty" }
+    },
+    "forbid_header_values_containing": ["secret"]
+  }
+]

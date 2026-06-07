@@ -1,0 +1,57 @@
+# LBank industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# LBANK_API_KEY and LBANK_API_SECRET.
+
+exchange: lbank
+market_types:
+  - spot
+  - perpetual
+adapter: lbank
+enabled: true
+
+api_key: ${LBANK_API_KEY}
+api_secret: ${LBANK_API_SECRET}
+
+spot_rest_base_url: https://api.lbkex.com
+contract_rest_base_url: https://lbkperp.lbank.com
+spot_public_websocket_url: wss://www.lbkex.net/ws/V2/
+spot_private_websocket_url: wss://www.lbkex.net/ws/V2/
+contract_websocket_url: wss://lbkperpws.lbank.com/ws
+contract_product_group: SwapU
+
+# Keep private REST disabled until preflight, permissions, notional limits, and
+# logs are verified with read-only keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - btc_usdt
+    - eth_usdt
+  perpetual:
+    - BTCUSDT
+    - ETHUSDT
+
+rate_limit:
+  max_requests_per_second: 4
+  burst: 6
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+  optional:
+    - perpetual_trading
+    - fee_rate
+    - private_stream
+
+notes:
+  - LBank Spot symbols use lowercase underscores, for example btc_usdt.
+  - LBank perpetual symbols use uppercase concatenation, for example BTCUSDT.
+  - Perpetual cancel/query/open-orders/fills and leverage/margin mutations remain unsupported until official endpoint specs are confirmed.

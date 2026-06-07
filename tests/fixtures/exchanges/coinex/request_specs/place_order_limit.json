@@ -1,0 +1,16 @@
+{
+  "operation": "coinex.place_order",
+  "method": "POST",
+  "path": "/spot/order",
+  "auth": "hmac",
+  "body": {
+    "market": "BTCUSDT",
+    "market_type": "SPOT",
+    "side": "buy",
+    "type": "limit",
+    "option": "normal",
+    "amount": "0.02",
+    "price": "65000",
+    "client_id": "CLIENTLIMIT1"
+  }
+}

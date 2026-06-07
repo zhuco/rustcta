@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "name": "BTC-USDT",
+      "base_asset": "BTC",
+      "quote_asset": "USDT",
+      "base_scale": 6,
+      "quote_scale": 2,
+      "min_quote_value": "5",
+      "state": "active"
+    }
+  ]
+}

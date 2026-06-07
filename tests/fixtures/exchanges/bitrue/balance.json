@@ -1,0 +1,16 @@
+{
+  "makerCommission": 15,
+  "takerCommission": 20,
+  "balances": [
+    {
+      "asset": "BTC",
+      "free": "0.1",
+      "locked": "0.02"
+    },
+    {
+      "asset": "USDT",
+      "free": "10",
+      "locked": "0"
+    }
+  ]
+}

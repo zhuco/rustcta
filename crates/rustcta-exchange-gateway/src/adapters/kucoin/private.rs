@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, OrderState, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchPlaceOrdersRequest,
+    BatchPlaceOrdersResponse, CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest,
+    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse,
+    OpenOrdersRequest, OpenOrdersResponse, OrderState, PageCursor, PageRequest, PlaceOrderRequest,
+    PlaceOrderResponse, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::{json, Value};
@@ -109,6 +110,87 @@ impl KuCoinGatewayAdapter {
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
             order,
             cancelled: true,
+        })
+    }
+
+    pub(super) async fn batch_place_orders_impl(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.orders.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "kucoin batch_place_orders requires at least one order".to_string(),
+            });
+        }
+        if request.orders.len() > 20 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "kucoin composed batch_place_orders supports at most 20 orders"
+                    .to_string(),
+            });
+        }
+
+        let mut prepared = Vec::with_capacity(request.orders.len());
+        for order in &request.orders {
+            ensure_exchange_api_schema(order.schema_version)?;
+            self.ensure_exchange(&order.symbol.exchange)?;
+            self.ensure_spot(order.symbol.market_type)?;
+            prepared.push((order, kucoin_order_body(order)?));
+        }
+
+        let mut orders = Vec::with_capacity(prepared.len());
+        for (order, body) in prepared {
+            let value = self
+                .send_signed_post(
+                    "kucoin.batch_place_orders.composed",
+                    "/api/v1/hf/orders",
+                    &HashMap::new(),
+                    &body,
+                )
+                .await?;
+            orders.push(order_state_from_place_ack(&self.exchange_id, order, &value));
+        }
+
+        Ok(BatchPlaceOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            report: None,
+        })
+    }
+
+    pub(super) async fn batch_cancel_orders_impl(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request.cancels.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "kucoin batch_cancel_orders requires at least one cancel".to_string(),
+            });
+        }
+        if request.cancels.len() > 20 {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "kucoin composed batch_cancel_orders supports at most 20 cancels"
+                    .to_string(),
+            });
+        }
+
+        let mut orders = Vec::with_capacity(request.cancels.len());
+        for cancel in &request.cancels {
+            let response = self.cancel_order_impl(cancel.clone()).await?;
+            orders.push(response.order);
+        }
+        let cancelled_count = orders.len() as u32;
+
+        Ok(BatchCancelOrdersResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            orders,
+            cancelled_count,
+            report: None,
         })
     }
 
@@ -285,6 +367,7 @@ impl KuCoinGatewayAdapter {
                 normalize_kucoin_symbol(&symbol.exchange_symbol.symbol)?,
             );
         }
+        apply_kucoin_page_params(&mut params, request.page.as_ref(), None)?;
         let value = self
             .send_signed_get(
                 "kucoin.get_open_orders",
@@ -335,9 +418,7 @@ impl KuCoinGatewayAdapter {
         if let Some(end_time) = request.end_time {
             params.insert("endAt".to_string(), end_time.timestamp_millis().to_string());
         }
-        if let Some(limit) = request.limit {
-            params.insert("pageSize".to_string(), limit.min(500).to_string());
-        }
+        apply_kucoin_page_params(&mut params, request.page.as_ref(), request.limit)?;
         let value = self
             .send_signed_get("kucoin.get_recent_fills", "/api/v1/hf/fills", &params)
             .await?;
@@ -348,6 +429,73 @@ impl KuCoinGatewayAdapter {
             fills,
         })
     }
+}
+
+fn apply_kucoin_page_params(
+    params: &mut HashMap<String, String>,
+    page: Option<&PageRequest>,
+    legacy_limit: Option<u32>,
+) -> ExchangeApiResult<()> {
+    if let Some(page) = page {
+        page.validate(Some(500))
+            .map_err(|message| ExchangeApiError::InvalidRequest { message })?;
+    }
+    if legacy_limit == Some(0) {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "kucoin pagination limit must be positive".to_string(),
+        });
+    }
+
+    let limit = page.and_then(|page| page.limit).or(legacy_limit);
+    let encoded_limit = limit.map(|limit| limit.min(500));
+    if let Some(limit) = encoded_limit {
+        params.insert("pageSize".to_string(), limit.to_string());
+    }
+
+    let Some(cursor) = page.and_then(|page| page.cursor.as_ref()) else {
+        return Ok(());
+    };
+    let page_size = u64::from(encoded_limit.unwrap_or(100));
+    match cursor {
+        PageCursor::Offset { offset } => {
+            if offset % page_size != 0 {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "kucoin pagination offset must align with pageSize".to_string(),
+                });
+            }
+            params.insert(
+                "currentPage".to_string(),
+                (offset / page_size + 1).to_string(),
+            );
+            if encoded_limit.is_none() {
+                params.insert("pageSize".to_string(), page_size.to_string());
+            }
+        }
+        PageCursor::Token { token } => {
+            let current_page =
+                token
+                    .parse::<u64>()
+                    .map_err(|_| ExchangeApiError::InvalidRequest {
+                        message: "kucoin pagination token cursor must be a page number".to_string(),
+                    })?;
+            if current_page == 0 {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "kucoin pagination token cursor must be positive".to_string(),
+                });
+            }
+            params.insert("currentPage".to_string(), current_page.to_string());
+            if encoded_limit.is_none() {
+                params.insert("pageSize".to_string(), page_size.to_string());
+            }
+        }
+        PageCursor::Id { .. } | PageCursor::Timestamp { .. } | PageCursor::TimeRange { .. } => {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "kucoin pagination supports offset or page-number token cursors"
+                    .to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn kucoin_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {

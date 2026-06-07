@@ -1,0 +1,273 @@
+schema_version: 1
+exchange: cointr
+adapter: rustcta-exchange-gateway::adapters::cointr
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway CoinTR adapter implementation
+  last_reviewed: "2026-06-08"
+  notes: Spot and USDT perpetual REST plus native WebSocket mapping. CoinTR adapter uses plain WebSocket JSON frames; Socket.IO transport is explicitly unsupported/not required for this venue implementation.
+market_types: [spot, linear_perp]
+products: [spot, linear_perp]
+rest:
+  base_url: https://api.cointr.com
+base_urls:
+  public_ws_url: wss://ws.cointr.com/v2/ws/public
+  private_ws_url: wss://ws.cointr.com/v2/ws/private
+auth:
+  rest:
+    mode: hmac_sha256_base64
+    headers: [ACCESS-KEY, ACCESS-SIGN, ACCESS-TIMESTAMP, ACCESS-PASSPHRASE, locale]
+    payload: timestamp + uppercase_method + request_path_with_sorted_query + compact_json_body
+  private_ws:
+    mode: signed_login
+    payload: timestamp + GET + /user/verify
+rate_limits:
+  plan: fixed_window_conservative
+  buckets:
+    cointr.rest.public: { scope: ip, limit: 60, window_ms: 60000, burst: 10 }
+    cointr.rest.private: { scope: account, limit: 30, window_ms: 60000, burst: 5 }
+    cointr.orders: { scope: orders, limit: 20, window_ms: 60000, burst: 5 }
+    cointr.ws: { scope: websocket, limit: 60, window_ms: 60000, burst: 10 }
+pagination:
+  order_history: { mode: unsupported, reason: CoinTR adapter query_order/open_orders are id-based or current-state reads }
+  fills_history: { mode: limit, limit_param: limit, max_limit: 100, cursor: unsupported }
+reconciliation:
+  after_place_or_cancel_unknown:
+    requires_query_order: true
+    requires_open_orders: true
+    requires_recent_fills: true
+    unknown_order_policy: query_by_client_order_id
+    allow_order_replay: false
+  after_ws_reconnect:
+    requires_order_book_snapshot: true
+    requires_balances: true
+    requires_positions: true
+    requires_open_orders: true
+batch:
+  place:
+    mode: native
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    supports_client_order_id: true
+    supports_partial_failure: true
+  cancel:
+    mode: native
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    supports_client_order_id: true
+    supports_partial_failure: true
+websocket:
+  transport: websocket
+  socket_io: unsupported
+  public:
+    supports_subscribe: true
+    supports_unsubscribe: false
+    channels: [books5, trade, ticker, candle]
+    heartbeat: { direction: client_ping, ping_interval_ms: 15000, pong_timeout_ms: 30000, stale_message_ms: 30000 }
+  private:
+    supports_subscribe: true
+    supports_unsubscribe: false
+    channels: [user.orders, user.fills, user.account, user.positions]
+    auth_renewal: { kind: relogin, renewal_interval_ms: null, reconnect_requires_login: true, resubscribe_after_renewal: true }
+streams:
+  public:
+    operation: subscribe_public_stream
+    transport: websocket
+    product: spot
+    support: parser_only
+    request_spec_required: true
+    rate_limit_bucket: cointr.ws
+    weight: 1
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/stream_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/stream_tests.rs, fixture: tests/fixtures/exchanges/cointr/ws/public_book.json }
+    resync: { endpoint_operation: get_order_book }
+  private:
+    operation: subscribe_private_stream
+    transport: websocket
+    product: spot
+    support: parser_only
+    auth: signed
+    credential_scopes: [read_only, trade]
+    request_spec_required: true
+    rate_limit_bucket: cointr.ws
+    weight: 1
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/stream_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/stream_tests.rs, fixture: tests/fixtures/exchanges/cointr/ws/private_order.json }
+    resync: { endpoint_operation: get_open_orders }
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v2/spot/public/symbols | /api/v2/mix/market/contracts
+    auth: none
+    rate_limit_bucket: cointr.rest.public
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/public_tests.rs, fixture: tests/fixtures/exchanges/cointr/parser/spot_symbols_success.json }
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v2/spot/market/orderbook | /api/v2/mix/market/orderbook
+    auth: none
+    rate_limit_bucket: cointr.rest.public
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/public_tests.rs, fixture: tests/fixtures/exchanges/cointr/parser/orderbook_success.json }
+    params:
+      - { name: symbol, source: symbol, required: true }
+      - { name: productType, source: static, required: false, value: USDT-FUTURES }
+      - { name: limit, source: request, required: false, max: 100 }
+  - operation: get_balances
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v2/spot/account/assets | /api/v2/mix/account/accounts
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cointr.rest.private
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/get_balances_spot.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/cointr/parser/balances_success.json }
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v2/mix/position/all-position
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cointr.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v2/spot/account/bills
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cointr.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/place-order | /api/v2/mix/order/place-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/place_order_spot_limit.json }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/cointr/parser/order_ack_success.json }
+  - operation: place_quote_market_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/place-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/place_quote_market_order_spot.json }
+    notes: Spot market buy only; spot sell quote-market and futures quote-market are unsupported.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/cancel-order | /api/v2/mix/order/cancel-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/cancel_order_spot.json }
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/batch-orders | /api/v2/mix/order/batch-place-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 5
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/batch_place_orders_spot.json }
+    native_batch: true
+    atomicity: partial
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/batch-cancel-order | /api/v2/mix/order/batch-cancel-orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 5
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/cointr/private_tests.rs, fixture: tests/fixtures/exchanges/cointr/request_specs/batch_cancel_orders_spot.json }
+    native_batch: true
+    atomicity: partial
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: COMPOSED
+    path: get_open_orders+cancel_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cointr.orders
+    weight: 10
+    request_spec_required: true
+    support: composed
+    atomicity: partial
+  - operation: query_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/orderInfo | /api/v2/mix/order/detail
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cointr.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/unfilled-orders | /api/v2/mix/order/orders-pending
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cointr.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /api/v2/spot/trade/fills | /api/v2/mix/order/fills
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cointr.rest.private
+    weight: 1
+    request_spec_required: true

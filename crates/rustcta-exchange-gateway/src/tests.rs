@@ -86,9 +86,11 @@ fn place_order_request(request_id: &str) -> GatewayProtocolRequest {
     }
 }
 
+mod batch;
 mod client;
 mod http;
 mod mock_gateway;
+mod reconciliation;
 mod security;
 mod status;
 

@@ -1,0 +1,200 @@
+exchange: lbank
+schema_version: 1
+status: adapter-local capability declaration pending shared Capability v2 structs
+products:
+  spot:
+    public_rest: native
+    private_rest: native_when_credentials_present
+    public_websocket: request_spec_session_helper
+    private_websocket: spot_subscribe_key_session_helper
+  linear_perp:
+    public_rest: native
+    private_rest: confirmed_account_and_place_order_subset
+    public_websocket: unsupported_unverified
+    private_websocket: unsupported_unverified
+private_rest_scope:
+  spot: native_when_credentials_present
+  linear_perp: confirmed_account_and_place_order_subset
+capabilities:
+  get_symbol_rules:
+    spot: native
+    linear_perp: native
+  get_order_book:
+    spot: native_snapshot_only
+    linear_perp: native_snapshot_only
+    max_depth:
+      spot: 200
+      linear_perp: 200
+  get_balances:
+    spot: native
+    linear_perp: native_account_endpoint
+  get_positions:
+    spot: unsupported_no_spot_positions
+    linear_perp: rest_fallback_from_account_payload
+  get_fees:
+    spot: native
+    linear_perp: unsupported_unconfirmed
+  place_order:
+    spot: native
+    linear_perp: native_limit_only
+  place_quote_market_order:
+    spot: native_buy_market_quote_amount
+    linear_perp: unsupported_unconfirmed
+  cancel_order:
+    spot: native
+    linear_perp: unsupported_unconfirmed_endpoint
+  cancel_all_orders:
+    spot: native_symbol_scoped
+    linear_perp: unsupported_unconfirmed_endpoint
+  batch_place_orders:
+    spot:
+      mode: native
+      atomicity: partial
+      max_items: 50
+      partial_failure: venue_response_must_be_reconciled
+    linear_perp:
+      mode: composed
+      atomicity: non_atomic
+      max_items: 20
+      partial_failure: stop_on_item_error_and_reconcile_by_client_order_id
+  batch_cancel_orders:
+    spot:
+      mode: composed
+      atomicity: non_atomic
+      max_items: 50
+      partial_failure: returns_successful_item_count
+    linear_perp:
+      mode: unsupported
+      reason: contract cancel endpoint not confirmed for typed support
+  amend_order:
+    spot: unsupported
+    linear_perp: unsupported
+  query_order:
+    spot: native
+    linear_perp: unsupported_unconfirmed_endpoint
+  get_open_orders:
+    spot: native_symbol_required
+    linear_perp: unsupported_unconfirmed_endpoint
+  get_recent_fills:
+    spot:
+      by_order_id: native_order_transaction_detail
+      history: native_transaction_history
+    linear_perp: unsupported_unconfirmed_endpoint
+websocket_runtime:
+  public:
+    products: [spot]
+    url: wss://www.lbkex.net/ws/V2/
+    channels:
+      order_book: depth
+      trades: trade
+      ticker: tick
+      candles: kbar
+    heartbeat:
+      direction: bidirectional
+      ping_payload: '{"action":"ping","ping":"<nonce>"}'
+      pong_payload: '{"action":"pong","pong":"<nonce>"}'
+      local_ping_interval_ms: 30000
+      stale_after_ms: 90000
+    resync:
+      order_book: rest_snapshot_required_after_gap
+      sequence_gap_detection: unsupported_no_confirmed_sequence_fields
+  private:
+    products: [spot]
+    url: wss://www.lbkex.net/ws/V2/
+    auth:
+      type: subscribe_key
+      create: /v2/subscribe/get_key.do
+      refresh: /v2/subscribe/refresh_key.do
+      destroy: /v2/subscribe/destroy_key.do
+    channels:
+      orders_and_fills: orderUpdate
+      balances: assetUpdate
+    auth_renewal_policy:
+      refresh_interval_ms: 1800000
+      refresh_before_expiry_ms: 300000
+      on_refresh_failure: reconnect_and_recreate_subscribe_key
+    heartbeat:
+      direction: bidirectional
+      local_ping_interval_ms: 30000
+      stale_after_ms: 90000
+    unsupported:
+      - spot_positions_stream
+      - linear_perp_private_stream
+rate_limit_plan:
+  status: conservative_until_shared_rate_limiter_and_live_headers_are_available
+  buckets:
+    - name: public_rest_ip
+      scope: ip
+      max_requests_per_second: 4
+      burst: 6
+      applies_to: [spot_public_rest, contract_public_rest]
+    - name: private_rest_key
+      scope: api_key
+      max_requests_per_second: 2
+      burst: 4
+      applies_to: [spot_private_rest, contract_private_rest]
+    - name: order_write_key
+      scope: api_key
+      max_requests_per_second: 1
+      burst: 2
+      applies_to: [place_order, cancel_order, batch_place_orders, batch_cancel_orders, cancel_all_orders]
+    - name: websocket_control
+      scope: connection
+      max_requests_per_second: 1
+      burst: 3
+      applies_to: [subscribe, unsubscribe, ping, pong]
+  error_mapping:
+    rate_limited_codes: [10004, 10012, 183]
+    auth_codes: [10005, 10007, 10203, 176]
+    permission_codes: [10009, 10022, 10067]
+    invalid_symbol_codes: [8, 10008]
+    order_not_found_codes: [24, 10032]
+pagination:
+  get_open_orders:
+    spot:
+      mode: page_number
+      params:
+        current_page: starts_at_1
+        page_length: 100
+      adapter_current_state: single_page_first_100
+      follow_up: shared pagination model needed before automatic multi-page sweep
+  get_recent_fills:
+    spot_by_order_id:
+      mode: order_id
+      endpoint: /v2/order_transaction_detail.do
+    spot_history:
+      mode: from_trade_id_time_window_limit
+      params: [fromId, startTim, endTime, limit]
+      max_limit: 100
+  contract_history:
+    mode: unsupported_unconfirmed
+reconciliation:
+  after_place_order_timeout:
+    spot: query_order_by_exchange_or_client_order_id
+    linear_perp: use_raw_confirmed_endpoint_only_if_desk_has_venue_confirmation_otherwise_manual_review
+  after_cancel_timeout:
+    spot: query_order_then_get_open_orders_symbol_page
+    linear_perp: unsupported_manual_review
+  after_batch_place_partial_failure:
+    spot: query_each_client_order_id_then_open_orders_symbol_page
+    linear_perp: query_each_client_order_id_only_when_confirmed_raw_endpoint_is_desk_approved
+  after_stream_gap:
+    spot_public: fetch_rest_order_book_snapshot_and_resubscribe
+    spot_private: refresh_or_recreate_subscribe_key_then_reconcile_open_orders_balances_and_recent_fills
+  kill_switch_preflight:
+    required: [disabled_symbol_check, max_notional_check, read_only_probe, private_rest_credentials_present]
+signing:
+  algorithm: md5_uppercase_prehash_then_hmac_sha256_hex
+  signature_method_header: HmacSHA256
+  timestamp_location: header_and_signed_prehash_only
+  echostr_location: header_and_signed_prehash_only
+  spot_body: form_urlencoded_api_key_and_sign_only
+  contract_body: json_api_key_and_sign_only
+  vectors:
+    - tests/fixtures/exchanges/lbank/signing_vectors/contract_account_official_hmac_sha256.json
+unsupported_gaps:
+  - linear_perp_cancel_query_open_orders_fills_are_not_typed_without_confirmed_official_endpoint_specs
+  - linear_perp_market_post_only_orders_are_not_declared_supported
+  - live_websocket_supervisor_network_loop_is_platform_follow_up
+  - order_book_delta_sequence_gap_detection_is_unverified_for_lbank_spot_payloads
+  - leverage_margin_position_mode_mutations_are_outside_current_shared_trait

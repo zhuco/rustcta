@@ -1,0 +1,8 @@
+{
+  "code": 0,
+  "data": {
+    "balances": [
+      { "asset": "BTC", "free": "1.2", "locked": "0.3" }
+    ]
+  }
+}

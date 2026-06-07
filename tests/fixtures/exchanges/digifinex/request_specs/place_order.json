@@ -1,0 +1,23 @@
+{
+  "exchange": "digifinex",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v3/spot/order/new",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": { "match": "exact", "value": "key" },
+    "ACCESS-SIGN": { "match": "non_empty" },
+    "ACCESS-TIMESTAMP": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "symbol": "btc_usdt",
+    "type": "buy",
+    "order_type": "limit",
+    "amount": "0.01",
+    "price": "65000"
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "digifinex/private_post_order"
+}

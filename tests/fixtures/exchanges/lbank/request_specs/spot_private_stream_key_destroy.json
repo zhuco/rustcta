@@ -1,0 +1,13 @@
+{
+  "exchange": "lbank",
+  "operation": "private_stream_key_destroy",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/subscribe/destroy_key.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "subscribeKey": "sub-key"
+  }
+}

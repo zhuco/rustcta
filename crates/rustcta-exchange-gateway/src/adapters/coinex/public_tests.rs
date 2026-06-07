@@ -3,8 +3,28 @@ use rustcta_exchange_api::{
 };
 use serde_json::json;
 
+use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::test_support::{context, spawn_rest_server, symbol_scope};
 use super::{CoinExGatewayAdapter, CoinExGatewayConfig};
+
+fn coinex_fixture(name: &str) -> serde_json::Value {
+    let text = match name {
+        "spot_markets_success.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/coinex/spot_markets_success.json")
+        }
+        "spot_markets_empty.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/coinex/spot_markets_empty.json")
+        }
+        "spot_markets_missing_field.json" => include_str!(
+            "../../../../../tests/fixtures/exchanges/coinex/spot_markets_missing_field.json"
+        ),
+        "orderbook_success.json" => {
+            include_str!("../../../../../tests/fixtures/exchanges/coinex/orderbook_success.json")
+        }
+        _ => panic!("unknown coinex fixture {name}"),
+    };
+    serde_json::from_str(text).expect("coinex fixture")
+}
 
 #[tokio::test]
 async fn coinex_adapter_should_load_symbol_rules_from_public_rest() {
@@ -48,6 +68,40 @@ async fn coinex_adapter_should_load_symbol_rules_from_public_rest() {
     assert_eq!(response.rules[0].min_quantity.as_deref(), Some("0.0001"));
     assert_eq!(response.rules[0].min_notional.as_deref(), Some("1"));
     assert_eq!(seen.lock().unwrap()[0].path, "/spot/market".to_string());
+}
+
+#[test]
+fn coinex_public_parser_fixtures_should_cover_success_empty_and_missing_field() {
+    let rules = parse_symbol_rules(
+        &super::test_support::exchange_id(),
+        &coinex_fixture("spot_markets_success.json")["data"],
+    )
+    .expect("rules");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].symbol.exchange_symbol.symbol, "BTCUSDT");
+
+    let empty = parse_symbol_rules(
+        &super::test_support::exchange_id(),
+        &coinex_fixture("spot_markets_empty.json")["data"],
+    )
+    .expect("empty");
+    assert!(empty.is_empty());
+
+    let missing = parse_symbol_rules(
+        &super::test_support::exchange_id(),
+        &coinex_fixture("spot_markets_missing_field.json")["data"],
+    )
+    .expect_err("missing market/name field should fail");
+    assert!(format!("{missing:?}").contains("missing field name"));
+
+    let book = parse_orderbook_snapshot(
+        &super::test_support::exchange_id(),
+        symbol_scope(),
+        &coinex_fixture("orderbook_success.json")["data"],
+    )
+    .expect("orderbook");
+    assert_eq!(book.sequence, Some(100));
+    assert_eq!(book.bids[0].price, 65000.0);
 }
 
 #[tokio::test]

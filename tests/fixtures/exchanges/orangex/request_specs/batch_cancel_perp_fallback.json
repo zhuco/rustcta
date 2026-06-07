@@ -1,0 +1,16 @@
+{
+  "exchange": "orangex",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "headers": {
+    "authorization": {"match": "exact", "value": "bearer token"}
+  },
+  "body_contains": {
+    "method": "/private/cancel",
+    "params": {"order_id": "cancel-2"}
+  }
+}

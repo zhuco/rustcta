@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "deal_id": "9001",
+      "order_id": "1001",
+      "client_id": "CID1001",
+      "market": "BTCUSDT",
+      "side": "buy",
+      "price": "65010",
+      "amount": "0.006",
+      "fee": "0.39",
+      "fee_ccy": "USDT",
+      "created_at": 1743054550000
+    }
+  ]
+}

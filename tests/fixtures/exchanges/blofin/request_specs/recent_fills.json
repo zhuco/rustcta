@@ -1,0 +1,41 @@
+{
+  "exchange": "blofin",
+  "operation": "recent_fills",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/trade/fills-history",
+  "auth": "signed",
+  "query": {
+    "instId": {
+      "match": "exact",
+      "value": "BTC-USDT"
+    },
+    "limit": {
+      "match": "exact",
+      "value": "100"
+    }
+  },
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "ACCESS-NONCE": {
+      "match": "non_empty"
+    },
+    "ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "pass"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

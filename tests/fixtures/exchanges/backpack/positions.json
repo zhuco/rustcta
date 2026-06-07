@@ -1,0 +1,10 @@
+[
+  {
+    "symbol": "SOL_USDC_PERP",
+    "netQuantity": "2",
+    "entryPrice": "90",
+    "markPrice": "100",
+    "estLiquidationPrice": "50",
+    "pnlUnrealized": "20"
+  }
+]

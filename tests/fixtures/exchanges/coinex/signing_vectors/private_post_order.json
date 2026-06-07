@@ -1,0 +1,8 @@
+{
+  "secret": "coinex-secret",
+  "method": "POST",
+  "request_path": "/spot/order",
+  "body": "{\"amount\":\"0.02\",\"client_id\":\"CLIENTLIMIT1\",\"market\":\"BTCUSDT\",\"market_type\":\"SPOT\",\"option\":\"normal\",\"price\":\"65000\",\"side\":\"buy\",\"type\":\"limit\"}",
+  "timestamp": "1700000000000",
+  "expected_signature": "ada9355760121c86ba51aa65682009db6e8bcb1f7b96ee332ce2041530cf674f"
+}

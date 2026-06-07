@@ -507,6 +507,7 @@ impl ExchangeClient for PaperGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(exchange, request_id),
             orders,
+            report: None,
         })
     }
 
@@ -530,6 +531,7 @@ impl ExchangeClient for PaperGatewayAdapter {
             metadata: response_metadata(exchange, request_id),
             orders,
             cancelled_count,
+            report: None,
         })
     }
 

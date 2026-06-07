@@ -1,0 +1,11 @@
+[
+  {
+    "coindcx_name": "BTCUSDT",
+    "base_currency_short_name": "BTC",
+    "target_currency_short_name": "USDT",
+    "min_price_increment": "0.01",
+    "min_quantity_increment": "0.0001",
+    "min_order_value": "10",
+    "status": "active"
+  }
+]

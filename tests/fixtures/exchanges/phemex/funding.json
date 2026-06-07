@@ -1,0 +1,13 @@
+{
+  "code": 0,
+  "msg": "OK",
+  "data": {
+    "rows": [
+      {
+        "symbol": "BTCUSDT",
+        "fundingRateRr": "0.0001",
+        "fundingTime": 1780836000000
+      }
+    ]
+  }
+}

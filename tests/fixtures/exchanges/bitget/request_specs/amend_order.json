@@ -1,0 +1,25 @@
+{
+  "exchange": "bitget",
+  "operation": "amend_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/trade/modify-order",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": { "match": "exact", "value": "key" },
+    "ACCESS-SIGN": { "match": "non_empty" },
+    "ACCESS-TIMESTAMP": { "match": "non_empty" },
+    "ACCESS-PASSPHRASE": { "match": "exact", "value": "passphrase" }
+  },
+  "body_contains": {
+    "category": "SPOT",
+    "symbol": "BTCUSDT",
+    "orderId": "2004",
+    "clientOid": "AMEND1",
+    "qty": "0.015",
+    "autoCancel": "no"
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "bitget/place_order_limit"
+}

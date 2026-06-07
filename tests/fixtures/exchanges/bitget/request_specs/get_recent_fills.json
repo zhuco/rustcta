@@ -1,0 +1,22 @@
+{
+  "exchange": "bitget",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v2/spot/trade/fills",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "orderId": { "match": "exact", "value": "1001" },
+    "limit": { "match": "exact", "value": "25" }
+  },
+  "headers": {
+    "ACCESS-KEY": { "match": "exact", "value": "key" },
+    "ACCESS-SIGN": { "match": "non_empty" },
+    "ACCESS-TIMESTAMP": { "match": "non_empty" },
+    "ACCESS-PASSPHRASE": { "match": "exact", "value": "passphrase" }
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "bitget/place_order_limit"
+}

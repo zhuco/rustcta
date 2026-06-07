@@ -6566,15 +6566,19 @@ impl PrivatePerpProtocol for ToobitPrivatePerpProtocol {
         _subscription: &PrivateWsSubscription,
         _timestamp: i64,
     ) -> Result<PrivateWsRequest> {
-        anyhow::bail!("toobit private websocket is not supported by this adapter")
+        Ok(PrivateWsRequest {
+            exchange: ExchangeId::Toobit,
+            url: PrivatePerpExchange::Toobit.private_ws_url().to_string(),
+            message: String::new(),
+        })
     }
 
     fn parse_private_ws_message(
         &self,
-        _raw: &str,
-        _received_at: DateTime<Utc>,
+        raw: &str,
+        received_at: DateTime<Utc>,
     ) -> Result<Vec<PrivateEvent>> {
-        anyhow::bail!("toobit private websocket is not supported by this adapter")
+        parse_toobit_private_message(raw, received_at)
     }
 }
 
@@ -8825,6 +8829,99 @@ fn parse_htx_private_message(raw: &str, received_at: DateTime<Utc>) -> Result<Ve
             parse_htx_position(&item, received_at)
         } else if topic.contains("accounts") {
             parse_htx_balance(&item, received_at)
+        } else {
+            None
+        };
+        if let Some(event) = event {
+            events.push(event.with_raw(item));
+        }
+    }
+    Ok(events)
+}
+
+fn parse_toobit_private_message(
+    raw: &str,
+    received_at: DateTime<Utc>,
+) -> Result<Vec<PrivateEvent>> {
+    let value: Value = serde_json::from_str(raw)?;
+    if value.get("pong").is_some()
+        || value.get("ping").is_some()
+        || value.get("event").and_then(Value::as_str) == Some("sub")
+        || value.get("event").and_then(Value::as_str) == Some("subscribe")
+        || value.get("e").and_then(Value::as_str) == Some("listenKeyExpired")
+    {
+        return Ok(vec![PrivateEvent::new(
+            ExchangeId::Toobit,
+            PrivateEventKind::Heartbeat,
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+    if value.get("code").is_some()
+        && value
+            .get("code")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| code != 0)
+    {
+        return Ok(vec![private_error_event(
+            ExchangeId::Toobit,
+            ExchangeErrorClass::InvalidRequest,
+            str_field(&value, &["code"]),
+            str_field(&value, &["msg", "message"])
+                .unwrap_or_else(|| "toobit websocket error".to_string()),
+            received_at,
+        )
+        .with_raw(value)]);
+    }
+
+    let event_type = value
+        .get("e")
+        .or_else(|| value.get("eventType"))
+        .or_else(|| value.get("event"))
+        .or_else(|| value.get("topic"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let data = value
+        .get("data")
+        .or_else(|| value.get("o"))
+        .cloned()
+        .unwrap_or_else(|| value.clone());
+    let items = match data {
+        Value::Array(items) => items,
+        Value::Object(_) => vec![data],
+        _ => Vec::new(),
+    };
+
+    let mut events = Vec::new();
+    for item in items {
+        let event = if matches!(event_type, "executionReport" | "ORDER_TRADE_UPDATE")
+            || event_type.contains("order")
+        {
+            parse_toobit_order_or_fill(&item, received_at)
+        } else if event_type == "ticketInfo" || event_type.contains("trade") {
+            parse_toobit_fill(&item, received_at)
+        } else if event_type.contains("position") {
+            parse_toobit_position(&item, received_at)
+        } else if event_type == "outboundAccountInfo"
+            || event_type.contains("account")
+            || event_type.contains("balance")
+        {
+            parse_toobit_balance(&item, received_at)
+        } else if item
+            .get("positionAmt")
+            .or_else(|| item.get("positionQty"))
+            .is_some()
+        {
+            parse_toobit_position(&item, received_at)
+        } else if item
+            .get("asset")
+            .or_else(|| item.get("availableBalance"))
+            .or_else(|| item.get("walletBalance"))
+            .is_some()
+        {
+            parse_toobit_balance(&item, received_at)
+        } else if item.get("orderId").is_some() {
+            parse_toobit_order_or_fill(&item, received_at)
         } else {
             None
         };

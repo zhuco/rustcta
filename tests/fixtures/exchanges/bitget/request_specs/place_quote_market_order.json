@@ -1,0 +1,24 @@
+{
+  "exchange": "bitget",
+  "operation": "place_quote_market_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v2/spot/trade/place-order",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": { "match": "exact", "value": "key" },
+    "ACCESS-SIGN": { "match": "non_empty" },
+    "ACCESS-TIMESTAMP": { "match": "non_empty" },
+    "ACCESS-PASSPHRASE": { "match": "exact", "value": "passphrase" }
+  },
+  "body_contains": {
+    "symbol": "BTCUSDT",
+    "side": "buy",
+    "orderType": "market",
+    "size": "25.5",
+    "clientOid": "QUOTE1"
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "bitget/place_order_limit"
+}

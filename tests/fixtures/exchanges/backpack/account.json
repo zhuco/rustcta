@@ -1,0 +1,6 @@
+{
+  "spotMakerFee": "5",
+  "spotTakerFee": "10",
+  "futuresMakerFee": "2",
+  "futuresTakerFee": "6"
+}

@@ -1,0 +1,28 @@
+{
+  "exchange": "bitmex",
+  "operation": "balances",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/user/margin",
+  "auth": "signed",
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "api-expires": {
+      "match": "non_empty"
+    },
+    "api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "body": null,
+  "forbid_header_values_containing": [
+    "secret"
+  ],
+  "signing_vector": "bitmex/rest_get_instrument"
+}

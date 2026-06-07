@@ -1,0 +1,17 @@
+{
+  "accounts": [
+    {
+      "uuid": "fixture-account",
+      "currency": "USD",
+      "available_balance": {
+        "value": "100.00",
+        "currency": "USD"
+      },
+      "hold": {
+        "value": "0.00",
+        "currency": "USD"
+      }
+    }
+  ],
+  "has_next": false
+}

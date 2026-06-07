@@ -1,0 +1,60 @@
+# XT.com industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# XT_API_KEY and XT_API_SECRET.
+
+exchange: xt
+market_types:
+  - spot
+  - perpetual
+adapter: xt
+enabled: true
+
+api_key: ${XT_API_KEY}
+api_secret: ${XT_API_SECRET}
+
+spot_rest_base_url: https://sapi.xt.com
+futures_rest_base_url: https://fapi.xt.com
+spot_public_ws_url: wss://stream.xt.com/public
+spot_private_ws_url: wss://stream.xt.com/private
+futures_public_ws_url: wss://fstream.xt.com/ws/market
+futures_private_ws_url: wss://fstream.xt.com/ws/user
+testnet: false
+sandbox: false
+
+# Keep private REST disabled until read-only preflight, permissions, notional
+# limits, and audit logging are verified with exchange-issued API keys.
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+recv_window_ms: 60000
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - btc_usdt
+    - eth_usdt
+  perpetual:
+    - btc_usdt
+    - eth_usdt
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 10
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - XT Spot and USDT-M Futures use lowercase underscore symbols such as btc_usdt.
+  - Spot and Futures private REST use different HMAC-SHA256 signature payload formats.
+  - WebSocket heartbeat uses text ping and expects text pong; Spot timeout is 1 minute and Futures timeout is 30 seconds.

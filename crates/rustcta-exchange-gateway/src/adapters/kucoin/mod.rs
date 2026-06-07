@@ -3,13 +3,17 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
-    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
-    CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
-    ExchangeApiError, ExchangeApiResult, ExchangeClient, ExchangeClientCapabilities, FeesRequest,
-    FeesResponse, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse,
-    PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
-    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
-    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, BatchAtomicity,
+    BatchCancelOrdersRequest, BatchCancelOrdersResponse, BatchCapability, BatchExecutionMode,
+    BatchPlaceOrdersRequest, BatchPlaceOrdersResponse, CancelAllOrdersRequest,
+    CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse, CapabilitySupport,
+    CredentialScope, ExchangeApiError, ExchangeApiResult, ExchangeClient,
+    ExchangeClientCapabilities, FeesRequest, FeesResponse, HeartbeatCapability, HistoryCapability,
+    OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest, OrderBookResponse, PlaceOrderRequest,
+    PlaceOrderResponse, PositionsRequest, PositionsResponse, PrivateStreamSubscription,
+    PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, ReconnectCapability, StreamAuthCapability,
+    StreamHeartbeatDirection, StreamResyncCapability, StreamRuntimeCapability, SymbolRulesRequest,
     SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
@@ -27,6 +31,9 @@ mod public;
 #[cfg(test)]
 mod public_tests;
 mod signing;
+#[cfg(test)]
+mod stream_tests;
+mod streams;
 #[cfg(test)]
 mod test_support;
 mod transport;
@@ -199,6 +206,11 @@ impl ExchangeClient for KuCoinGatewayAdapter {
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = self.config.private_rest_enabled();
+        capabilities.supports_public_streams = true;
+        capabilities.supports_private_streams = self.config.private_rest_enabled();
+        capabilities.private_stream_capabilities = Some(
+            streams::kucoin_private_stream_capabilities(self.config.private_rest_enabled()),
+        );
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_enabled();
@@ -211,6 +223,8 @@ impl ExchangeClient for KuCoinGatewayAdapter {
         capabilities.supports_query_order = self.config.private_rest_enabled();
         capabilities.supports_open_orders = self.config.private_rest_enabled();
         capabilities.supports_recent_fills = self.config.private_rest_enabled();
+        capabilities.supports_batch_place_order = self.config.private_rest_enabled();
+        capabilities.supports_batch_cancel_order = self.config.private_rest_enabled();
         capabilities.supports_client_order_id = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
@@ -226,8 +240,134 @@ impl ExchangeClient for KuCoinGatewayAdapter {
             OrderType::FOK,
         ];
         capabilities.max_order_book_depth = Some(100);
+        capabilities.max_recent_fill_limit = Some(500);
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(100));
+        capabilities.refresh_v2_from_legacy_flags();
+        capabilities.capabilities_v2.public_streams = CapabilitySupport::native();
+        capabilities.capabilities_v2.private_streams = if self.config.private_rest_enabled() {
+            CapabilitySupport::native()
+        } else {
+            CapabilitySupport::unsupported("kucoin private streams require bullet-private token")
+        };
+        capabilities.capabilities_v2.stream_runtime = StreamRuntimeCapability {
+            public: CapabilitySupport::native(),
+            private: if self.config.private_rest_enabled() {
+                CapabilitySupport::rest_fallback(
+                    "kucoin private streams require REST bullet-private token acquisition and renewal",
+                )
+            } else {
+                CapabilitySupport::unsupported(
+                    "kucoin private stream token requires API key, secret and passphrase",
+                )
+            },
+            supports_subscribe: true,
+            supports_unsubscribe: true,
+            heartbeat: HeartbeatCapability {
+                supported: true,
+                required: true,
+                direction: StreamHeartbeatDirection::ServerPing,
+                interval_ms: Some(20_000),
+                timeout_ms: Some(10_000),
+            },
+            reconnect: ReconnectCapability {
+                supported: true,
+                requires_resubscribe: true,
+                preserves_session: false,
+                max_reconnect_attempts: None,
+            },
+            resync: StreamResyncCapability {
+                order_book: true,
+                balances: true,
+                positions: false,
+                orders: true,
+            },
+            auth: StreamAuthCapability {
+                required: self.config.private_rest_enabled(),
+                credential_scopes: vec![CredentialScope::ReadOnly, CredentialScope::Trade],
+                renewal_ms: Some(20 * 60 * 60 * 1_000),
+                uses_listen_key: true,
+                requires_relogin_on_reconnect: true,
+            },
+            ..StreamRuntimeCapability::default()
+        };
+        capabilities.capabilities_v2.batch_place_orders = BatchCapability {
+            support: if self.config.private_rest_enabled() {
+                CapabilitySupport::composed("kucoin has no adapter-declared native batch place endpoint; gateway sends sequential hf order creates")
+            } else {
+                CapabilitySupport::unsupported(
+                    "kucoin batch place requires private REST credentials",
+                )
+            },
+            mode: if self.config.private_rest_enabled() {
+                BatchExecutionMode::ComposedSequential
+            } else {
+                BatchExecutionMode::Unsupported
+            },
+            atomicity: BatchAtomicity::NonAtomic,
+            max_items: Some(20),
+            same_symbol_required: false,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: false,
+        };
+        capabilities.capabilities_v2.batch_cancel_orders = BatchCapability {
+            support: if self.config.private_rest_enabled() {
+                CapabilitySupport::composed(
+                    "kucoin batch cancel is gateway-composed from sequential hf cancel requests",
+                )
+            } else {
+                CapabilitySupport::unsupported(
+                    "kucoin batch cancel requires private REST credentials",
+                )
+            },
+            mode: if self.config.private_rest_enabled() {
+                BatchExecutionMode::ComposedSequential
+            } else {
+                BatchExecutionMode::Unsupported
+            },
+            atomicity: BatchAtomicity::NonAtomic,
+            max_items: Some(20),
+            same_symbol_required: false,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: false,
+        };
+        capabilities.capabilities_v2.fills_history = HistoryCapability {
+            support: if self.config.private_rest_enabled() {
+                CapabilitySupport::native()
+            } else {
+                CapabilitySupport::unsupported(
+                    "kucoin fills history requires private REST credentials",
+                )
+            },
+            supports_since: true,
+            supports_until: true,
+            supports_limit: true,
+            supports_cursor: true,
+            supports_from_id: false,
+            max_limit: Some(500),
+            max_window_ms: None,
+        };
+        capabilities.capabilities_v2.order_history = HistoryCapability {
+            support: if self.config.private_rest_enabled() {
+                CapabilitySupport::native()
+            } else {
+                CapabilitySupport::unsupported(
+                    "kucoin order history requires private REST credentials",
+                )
+            },
+            supports_since: false,
+            supports_until: false,
+            supports_limit: true,
+            supports_cursor: true,
+            supports_from_id: false,
+            max_limit: Some(500),
+            max_window_ms: None,
+        };
+        capabilities.capabilities_v2.credential_scopes =
+            vec![CredentialScope::ReadOnly, CredentialScope::Trade];
+        capabilities.apply_v2_to_legacy_flags();
         capabilities
     }
 
@@ -281,6 +421,20 @@ impl ExchangeClient for KuCoinGatewayAdapter {
         self.cancel_order_impl(request).await
     }
 
+    async fn batch_place_orders(
+        &self,
+        request: BatchPlaceOrdersRequest,
+    ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
+        self.batch_place_orders_impl(request).await
+    }
+
+    async fn batch_cancel_orders(
+        &self,
+        request: BatchCancelOrdersRequest,
+    ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
+        self.batch_cancel_orders_impl(request).await
+    }
+
     async fn amend_order(
         &self,
         request: AmendOrderRequest,
@@ -318,18 +472,16 @@ impl ExchangeClient for KuCoinGatewayAdapter {
 
     async fn subscribe_public_stream(
         &self,
-        _subscription: PublicStreamSubscription,
+        subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        Err(ExchangeApiError::Unsupported {
-            operation: "kucoin.subscribe_public_stream",
-        })
+        self.subscribe_public_stream_impl(subscription).await
     }
 
     async fn subscribe_private_stream(
         &self,
-        _subscription: PrivateStreamSubscription,
+        subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        self.unsupported_private("kucoin.subscribe_private_stream")
+        self.subscribe_private_stream_impl(subscription).await
     }
 }
 

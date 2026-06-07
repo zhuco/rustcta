@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "asset": "BTC",
+      "totalBalance": "0.12",
+      "availableBalance": "0.10"
+    },
+    {
+      "asset": "USDT",
+      "totalBalance": "125",
+      "availableBalance": "120"
+    }
+  ]
+}

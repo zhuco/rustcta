@@ -4,7 +4,7 @@ use rustcta::strategies::common::application::strategy::{Strategy, StrategyInsta
 use rustcta::strategies::range_grid::application::risk as range_risk;
 use rustcta::{
     core::config::{Config, GlobalConfig},
-    cta::AccountManager,
+    cta::{AccountManager, AccountManagerConfigFile},
     strategies::common::application::deps::StrategyDepsBuilder,
     strategies::common::build_unified_risk_evaluator,
     strategies::*,
@@ -269,33 +269,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if strategy_type.as_str() == "spot_spot_taker_arbitrage" {
         log::info!("spot_spot_taker_arbitrage uses dedicated spot clients; skipping legacy account bootstrap");
     } else {
-        // 从accounts.yml加载所有账户配置
-        let accounts_to_add = vec![
-            // Binance账户
-            ("binance_main", "binance", "BINANCE_0", 10, 20),
-            ("binance_daidan", "binance", "BINANCE_2", 5, 10),
-            ("binance_hcr", "binance", "BINANCE_3", 5, 10),
-            // 其他交易所账户
-            ("bitmart_main", "bitmart", "BITMART", 10, 20),
-            ("hyperliquid_main", "hyperliquid", "HYPERLIQUID", 10, 20),
-            // ("htx_main", "htx", "HTX", 10, 20),
-        ];
-
-        // 批量添加账户
-        for (id, exchange, env_prefix, max_positions, max_orders) in accounts_to_add {
-            let account_config = rustcta::AccountConfig {
-                id: id.to_string(),
-                exchange: exchange.to_string(),
-                api_key_env: env_prefix.to_string(),
-                position_mode: None,
-                enabled: true,
-                max_positions,
-                max_orders_per_symbol: max_orders,
-            };
-
+        let accounts_to_add =
+            AccountManagerConfigFile::from_path("config/accounts.yml")?.into_account_configs();
+        for account_config in accounts_to_add {
+            let account_id = account_config.id.clone();
             match account_manager.add_account(account_config).await {
-                Ok(_) => log::info!("✅ 成功添加账户: {}", id),
-                Err(e) => log::warn!("⚠️ 添加账户 {} 失败: {}", id, e),
+                Ok(_) => log::info!("✅ 成功添加账户: {}", account_id),
+                Err(e) => log::warn!("⚠️ 添加账户 {} 失败: {}", account_id, e),
             }
         }
     }

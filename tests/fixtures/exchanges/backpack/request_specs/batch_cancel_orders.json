@@ -1,0 +1,1 @@
+{"operation":"backpack.batch_cancel_orders","method":"DELETE","path":"/api/v1/order","query":{},"body":{"symbol":"SOL_USDC_PERP","orderId":"42"},"signed":true,"notes":"First request emitted by composed sequential batch cancel."}

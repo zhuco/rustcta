@@ -8,7 +8,7 @@ are two control API entrypoints:
 
 - Legacy local console: root binary `control_api`, launched by
   `scripts/separated_control_panel.sh`. It owns the current token-protected
-  local UI workflow on `127.0.0.1:8080`.
+  local UI workflow on `127.0.0.1:8091`.
 - Workspace control API: `apps/control-api` binary `rustcta-control-api`. It is
   the migrating generic multi-strategy API surface and should be the target for
   new control-plane route/model work.
@@ -97,12 +97,12 @@ scripts/separated_control_panel.sh status
 Open:
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:8091
 ```
 
-Paste the token into the Dioxus auth token input. Port `8080` is the canonical
+Paste the token into the Dioxus auth token input. Port `8091` is the canonical
 local entrypoint for the legacy console. The `control_api` process serves both
-the Dioxus static assets and every `/api/*` route on `127.0.0.1:8080`.
+the Dioxus static assets and every `/api/*` route on `127.0.0.1:8091`.
 
 Do not use `dx serve` to run the operator control panel. `dx serve` starts a
 separate frontend-only development server on another port and is useful only for
@@ -144,7 +144,7 @@ Legacy control API on loopback:
 ```bash
 export RUSTCTA_MONITOR_TOKEN="<strong random token>"
 target/release/control_api \
-  --bind-addr 127.0.0.1:8080 \
+  --bind-addr 127.0.0.1:8091 \
   --snapshot-path data/control_api/dashboard_snapshot.json \
   --command-path data/control_api/control_commands.jsonl \
   --token-env RUSTCTA_MONITOR_TOKEN \
@@ -154,7 +154,7 @@ target/release/control_api \
 Workspace control API on loopback:
 
 ```bash
-RUSTCTA_CONTROL_API_BIND=127.0.0.1:18080 \
+RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091 \
 RUSTCTA_CONTROL_API_AGENT_ID=local-agent \
 RUSTCTA_CONTROL_API_TENANT_ID=local \
 RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=data/control_api/dashboard_snapshot.json \
@@ -166,20 +166,20 @@ cargo run -p rustcta-control-api-app --bin rustcta-control-api
 
 ## External Access
 
-Default production bind stays `127.0.0.1:8080`. Prefer one of these options.
+Default production bind stays `127.0.0.1:8091`. Prefer one of these options.
 
 ### Option A: SSH Tunnel
 
 From your workstation:
 
 ```bash
-ssh -L 8080:127.0.0.1:8080 cta@45.77.253.180
+ssh -L 8091:127.0.0.1:8091 cta@45.77.253.180
 ```
 
 Then open:
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:8091
 ```
 
 This keeps the control API off the public interface. API calls still require the monitor token.
@@ -198,7 +198,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/control.example.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:8091;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -212,7 +212,7 @@ server {
 Firewall notes:
 
 - Allow `443/tcp` to Nginx.
-- Do not expose `8080/tcp` publicly.
+- Do not expose `8091/tcp` publicly.
 - Keep exchange credential environment variables only on the strategy runtime process.
 
 ### Direct Public Bind
@@ -229,7 +229,7 @@ and the explicit runtime flag:
 
 ```bash
 target/release/control_api \
-  --bind-addr 0.0.0.0:8080 \
+  --bind-addr 0.0.0.0:8091 \
   --external-access-enabled \
   --snapshot-path data/control_api/dashboard_snapshot.json \
   --command-path data/control_api/control_commands.jsonl \
@@ -318,7 +318,7 @@ Start the legacy `control_api` on loopback, then run:
 
 ```bash
 export RUSTCTA_MONITOR_TOKEN="<same token used by control_api>"
-CONTROL_API_BASE_URL=http://127.0.0.1:8080 \
+CONTROL_API_BASE_URL=http://127.0.0.1:8091 \
 COMMAND_PATH=data/control_api/control_commands.jsonl \
 scripts/control_api_smoke_test.sh
 ```
@@ -336,10 +336,10 @@ The smoke test checks:
 ## Troubleshooting
 
 - `401 Unauthorized`: verify `RUSTCTA_MONITOR_TOKEN` in the control API process and browser token input.
-- Wrong port or blank UI: use `http://127.0.0.1:8080`. Do not use an ad-hoc `dx serve` port for operator access.
+- Wrong port or blank UI: use `http://127.0.0.1:8091`. Do not use an ad-hoc `dx serve` port for operator access.
 - Empty/default dashboard: the runtime has not written `data/control_api/dashboard_snapshot.json` yet, or `monitoring.enabled` is false.
 - Missing static UI: run `scripts/separated_control_panel.sh build` and confirm `web-ui/dioxus/dist/index.html` exists.
-- Public link unreachable over SSH tunnel: confirm `control_api` is listening on `127.0.0.1:8080` on the server and the SSH session is still open.
-- Public HTTPS unreachable: check DNS, Nginx TLS config, firewall `443/tcp`, and that Nginx can reach `127.0.0.1:8080`.
+- Public link unreachable over SSH tunnel: confirm `control_api` is listening on `127.0.0.1:8091` on the server and the SSH session is still open.
+- Public HTTPS unreachable: check DNS, Nginx TLS config, firewall `443/tcp`, and that Nginx can reach `127.0.0.1:8091`.
 - Direct public bind refused: set `--external-access-enabled` only after setting a strong `RUSTCTA_MONITOR_TOKEN`; prefer SSH tunnel or Nginx instead.
 - Commands appear not to pause the runtime: this is expected. Commands are queued unless an approved runtime command consumer is added later.

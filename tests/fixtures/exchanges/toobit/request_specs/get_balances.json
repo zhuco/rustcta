@@ -1,0 +1,18 @@
+{
+  "exchange": "toobit",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/account",
+  "auth": "signed",
+  "headers": {
+    "X-BB-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "query": {
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "timestamp": { "match": "non_empty" },
+    "signature": { "match": "non_empty" }
+  },
+  "forbid_query_values_containing": ["secret"]
+}

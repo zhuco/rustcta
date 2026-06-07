@@ -1,0 +1,14 @@
+{
+  "error": null,
+  "id": 0,
+  "result": {
+    "orderbook_p": {
+      "bids": [["61750.7", "0.001"]],
+      "asks": [["61750.8", "0.984"]]
+    },
+    "sequence": 62439824887,
+    "symbol": "BTCUSDT",
+    "timestamp": 1780836164743398111,
+    "type": "snapshot"
+  }
+}

@@ -1,0 +1,525 @@
+schema_version: 1
+exchange: weex
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway WEEX adapter implementation
+  last_reviewed: "2026-06-08"
+  notes: Spot and USDT-M perpetual REST plus WebSocket request-spec mapping for declared WEEX capabilities.
+market_types: [spot, perpetual]
+base_urls:
+  spot_rest: https://api-spot.weex.com
+  contract_rest: https://api-contract.weex.com
+  spot_public_ws: wss://ws-spot.weex.com/v3/ws/public
+  spot_private_ws: wss://ws-spot.weex.com/v3/ws/private
+  contract_public_ws: wss://ws-contract.weex.com/v3/ws/public
+  contract_private_ws: wss://ws-contract.weex.com/v3/ws/private
+auth:
+  rest:
+    mode: hmac
+    algorithm: hmac_sha256_base64
+    headers: [ACCESS-KEY, ACCESS-SIGN, ACCESS-PASSPHRASE, ACCESS-TIMESTAMP]
+    prehash: timestamp + METHOD_UPPER + requestPath + optional("?"+queryString) + body
+  websocket_private:
+    mode: hmac
+    algorithm: hmac_sha256_base64
+    headers: [ACCESS-KEY, ACCESS-SIGN, ACCESS-PASSPHRASE, ACCESS-TIMESTAMP]
+    prehash: timestamp + /v3/ws/private
+rate_limits:
+  plan: conservative_until_live_verified
+  buckets:
+    weex_public_rest:
+      scope: ip
+      capacity_per_minute: 1200
+      notes: Conservative adapter-local planning bucket; live headers are not consumed yet.
+    weex_private_rest:
+      scope: account
+      capacity_per_minute: 600
+      notes: Private order/read routes use account-scoped throttling in callers until official route weights are confirmed.
+    weex_order_write:
+      scope: account
+      capacity_per_minute: 120
+      notes: Order mutations and native batch operations should be guarded by a stricter bucket.
+pagination:
+  order_book:
+    mode: limit
+    max_limit: 200
+  recent_fills:
+    mode: time_window_limit
+    parameters: [startTime, endTime, limit]
+    max_limit: 100
+  open_orders:
+    mode: symbol_optional_full_list
+  order_history:
+    mode: order_id_or_client_order_id
+reconciliation:
+  after_place: query_order_by_exchange_or_client_id
+  after_cancel: query_order_then_open_orders_if_not_found
+  after_batch_place: query_each_acknowledged_order
+  after_batch_cancel: query_each_cancelled_order_or_open_orders
+  websocket_gap: resync_order_book_from_rest_snapshot_and_private_state_from_rest
+  live_dry_run_prerequisites:
+    - kill_switch
+    - disabled_symbol_filter
+    - max_notional_guard
+    - rest_reconciliation_after_unknown_order_state
+batch:
+  place:
+    mode: native
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    same_symbol_required: false
+  cancel:
+    mode: native
+    atomicity: partial
+    max_items: 20
+    same_market_type_required: true
+    same_symbol_required: true
+websocket:
+  public:
+    support: native
+    subscribe: '{"method":"SUBSCRIBE","params":["BTCUSDT@depth15"],"id":1}'
+    heartbeat: server ping or pong message, adapter replies with PONG helper
+    resync: REST order book snapshot on sequence gap or reconnect
+  private:
+    support: native_when_credentials_configured
+    auth: ACCESS headers during private connection setup
+    renewal: no listen key; reconnect and re-auth on stale session or disconnect
+unsupported:
+  - operation: spot_positions
+    reason: spot has no position concept
+  - operation: quote_market_order
+    reason: not exposed through the current gateway WEEX order builder
+  - operation: amend_order
+    reason: no typed amend route in this adapter pass
+  - operation: order_list
+    reason: no OCO/order-list support in this adapter pass
+  - operation: post_only_order_placement
+    reason: not normalized by the current typed order request mapping
+  - operation: reduce_only_order_placement
+    reason: not normalized by the current typed order request mapping
+  - operation: leverage_margin_position_mode_mutations
+    reason: omitted from task-15 trading surface
+endpoints:
+  - operation: weex_get_symbol_rules_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v3/exchangeInfo
+    auth: none
+    rate_limit_bucket: weex_public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/public_tests.rs
+  - operation: weex_get_symbol_rules_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/market/exchangeInfo
+    auth: none
+    rate_limit_bucket: weex_public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/public_tests.rs
+  - operation: weex_get_order_book_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v3/market/depth
+    auth: none
+    rate_limit_bucket: weex_public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/public_tests.rs
+    params:
+      - name: symbol
+        source: symbol
+        required: true
+      - name: limit
+        source: request
+        required: true
+  - operation: weex_get_order_book_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/market/depth
+    auth: none
+    rate_limit_bucket: weex_public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    request_spec:
+      status: not_required
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/public_tests.rs
+    params:
+      - name: symbol
+        source: symbol
+        required: true
+      - name: limit
+        source: request
+        required: true
+  - operation: weex_get_balances_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v2/account/assets
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_balances_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/account/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_positions_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/account/position/allPosition
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_fees_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/account/commissionRate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_place_order_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_place_order_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /capi/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_cancel_order_spot
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_cancel_order_perpetual
+    product: perpetual
+    transport: rest
+    method: DELETE
+    path: /capi/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_batch_place_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/trade/batch-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_batch_place_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /capi/v3/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_batch_cancel_spot
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/v3/order/batch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_batch_cancel_perpetual
+    product: perpetual
+    transport: rest
+    method: DELETE
+    path: /capi/v3/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_cancel_all_spot
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/v3/openOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_cancel_all_perpetual
+    product: perpetual
+    transport: rest
+    method: DELETE
+    path: /capi/v3/allOpenOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: weex_order_write
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_query_order_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_query_order_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/order
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_open_orders_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v3/openOrders
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_open_orders_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/openOrders
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_recent_fills_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v3/myTrades
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+  - operation: weex_get_recent_fills_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /capi/v3/userTrades
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: weex_private_rest
+    weight: 1
+    request_spec_required: true
+    support: native
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/weex/private_tests.rs

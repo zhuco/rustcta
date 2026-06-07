@@ -1,0 +1,13 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": [
+    {
+      "date_ms": 1700000000000,
+      "amount": "0.01",
+      "price": "65000",
+      "type": "buy",
+      "tid": "trade-1"
+    }
+  ]
+}

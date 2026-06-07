@@ -1,0 +1,17 @@
+{
+  "table": "order",
+  "action": "update",
+  "data": [
+    {
+      "orderID": "order-1",
+      "clOrdID": "client-1",
+      "symbol": "XBTUSD",
+      "side": "Buy",
+      "ordType": "Limit",
+      "ordStatus": "Filled",
+      "orderQty": 10,
+      "cumQty": 10,
+      "price": 99.5
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+# Backpack Exchange gateway example.
+#
+# REST/WS defaults:
+# - REST: https://api.backpack.exchange
+# - WS:   wss://ws.backpack.exchange
+#
+# Private REST and private WS require an Ed25519 API secret encoded as base64
+# or hex. Backpack client order IDs are numeric uint32 values.
+gateway:
+  env:
+    RUSTCTA_GATEWAY_ADAPTERS: backpack
+    RUSTCTA_BACKPACK_REST_BASE_URL: https://api.backpack.exchange
+    RUSTCTA_BACKPACK_API_KEY: ${BACKPACK_API_KEY}
+    RUSTCTA_BACKPACK_API_SECRET: ${BACKPACK_API_SECRET}
+    RUSTCTA_GATEWAY_BIND: 127.0.0.1:18081
+
+capabilities:
+  market_types:
+    - spot
+    - perpetual
+  public_rest:
+    - symbol_rules
+    - order_book_snapshot
+  private_rest:
+    - balances
+    - positions
+    - account_fee_rates
+    - place_order
+    - quote_market_order
+    - cancel_order
+    - cancel_all_orders
+    - query_order
+    - open_orders
+    - recent_fills
+    - native_batch_place_orders
+    - composed_batch_cancel_orders
+  websocket:
+    public:
+      - trade.<symbol>
+      - ticker.<symbol>
+      - depth.<symbol>
+      - bookTicker.<symbol>
+      - kline.<interval>.<symbol>
+    private:
+      - account.orderUpdate
+      - account.positionUpdate
+      # Separate private fill/balance/account streams are not enabled until
+      # an official channel name and payload schema are verified.

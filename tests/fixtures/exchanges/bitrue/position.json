@@ -1,0 +1,27 @@
+{
+  "code": 0,
+  "data": {
+    "account": [
+      {
+        "marginCoin": "USDT",
+        "accountNormal": 10,
+        "accountLock": 0,
+        "totalEquity": 10,
+        "positionVos": [
+          {
+            "contractName": "E-BTC-USDT",
+            "positions": [
+              {
+                "side": "BUY",
+                "volume": "0.5",
+                "avgPrice": "65000",
+                "indexPrice": "65100",
+                "leverageLevel": "5"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

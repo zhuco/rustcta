@@ -1,0 +1,15 @@
+[
+  {
+    "symbol": "SOL_USDC_PERP",
+    "tradeId": "9001",
+    "orderId": "42",
+    "clientId": 7,
+    "side": "Bid",
+    "price": "99.5",
+    "quantity": "0.4",
+    "fee": "0.01",
+    "feeSymbol": "USDC",
+    "isMaker": false,
+    "timestamp": 1704000000000
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "e": "orders",
+  "data": {
+    "s": "BTCUSDT",
+    "id": "1001",
+    "clientOrderId": "CLIENT1",
+    "orderSide": "BUY",
+    "type": "LIMIT",
+    "status": "FILLED",
+    "size": "0.010",
+    "cumFillSize": "0.010",
+    "price": "65000.00"
+  }
+}

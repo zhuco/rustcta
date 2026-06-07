@@ -1,0 +1,43 @@
+{
+  "exchange": "blofin",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/trade/order",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "ACCESS-TIMESTAMP": {
+      "match": "exact",
+      "value": "1700000000000"
+    },
+    "ACCESS-NONCE": {
+      "match": "exact",
+      "value": "nonce-1"
+    },
+    "ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "pass"
+    }
+  },
+  "body_contains": {
+    "instId": "BTC-USDT",
+    "marginMode": "cross",
+    "positionSide": "net",
+    "side": "buy",
+    "orderType": "limit",
+    "size": "0.01",
+    "price": "65000"
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": false,
+  "signing_vector": "blofin/rest_place_order_hex"
+}

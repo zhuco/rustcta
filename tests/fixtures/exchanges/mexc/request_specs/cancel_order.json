@@ -1,0 +1,22 @@
+{
+  "exchange": "mexc",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/v3/order",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "orderId": { "match": "exact", "value": "2001" },
+    "origClientOrderId": { "match": "exact", "value": "LIMIT1" },
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MEXC-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "forbid_query_values_containing": ["secret"],
+  "signing_vector": "mexc/place_order_limit"
+}

@@ -1,0 +1,11 @@
+{
+  "exchange": "tapbit",
+  "name": "spot-account-one",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "payload": "2022-02-23T10:10:36.304ZGET/api/v1/spot/account/one?asset=USDT",
+  "expected_signature": "3a6a1dbee37cd8adc388da6516c12602456a07cf8e657e61b44e9fd055795d8a",
+  "timestamp": "2022-02-23T10:10:36.304Z",
+  "method": "GET",
+  "request_path": "/api/v1/spot/account/one?asset=USDT"
+}

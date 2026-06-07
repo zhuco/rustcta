@@ -21,6 +21,13 @@ Use these documents as the current source of truth:
 The legacy root package `rustcta` is still present and still owns most concrete
 runtime behavior. New work should move toward the workspace boundaries below.
 
+Current workspace version: `0.3.12`. This update expands the exchange gateway
+surface with additional adapter modules, endpoint mapping fixtures, signing and
+request-spec validation assets, and refreshed gateway example configs. See
+`docs/README.md`, `docs/exchange_adapter_toolchain_completion_zh.md`, and
+`docs/exchange_api_completion_matrix.md` for the active adapter documentation
+and validation commands.
+
 ## Repository Layout
 
 ```text
@@ -52,7 +59,7 @@ cargo run -p rustcta-gateway --bin rustcta-gateway
 Control API:
 
 ```bash
-RUSTCTA_CONTROL_API_BIND=127.0.0.1:18080 \
+RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091 \
 RUSTCTA_CONTROL_API_AGENT_ID=local-agent \
 RUSTCTA_CONTROL_API_TENANT_ID=local \
 RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=run/supervisor/registry.json \
@@ -137,7 +144,7 @@ scripts/separated_control_panel.sh build
 scripts/separated_control_panel.sh start
 ```
 
-Open `http://127.0.0.1:8080` and paste the monitor token into the UI. This
+Open `http://127.0.0.1:8091` and paste the monitor token into the UI. This
 script still launches the legacy local control API path by default.
 
 The migrating workspace control API entrypoint is:

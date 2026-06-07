@@ -1,0 +1,24 @@
+{
+  "code": "0",
+  "data": {
+    "accounts": [
+      {
+        "accountType": "spot",
+        "details": [
+          {
+            "ccy": "BTC",
+            "bal": "0.12",
+            "availBal": "0.1",
+            "frozenBal": "0.02"
+          },
+          {
+            "ccy": "USDT",
+            "bal": "10",
+            "availBal": "10",
+            "frozenBal": "0"
+          }
+        ]
+      }
+    ]
+  }
+}

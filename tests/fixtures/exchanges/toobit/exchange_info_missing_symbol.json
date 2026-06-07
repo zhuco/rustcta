@@ -1,0 +1,11 @@
+{
+  "symbols": [
+    {
+      "status": "TRADING",
+      "baseAsset": "ETH",
+      "quoteAsset": "USDT",
+      "filters": []
+    }
+  ],
+  "contracts": []
+}

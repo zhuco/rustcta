@@ -1209,6 +1209,39 @@ body {
   font-size: 12px;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 15, 22, 0.62);
+  padding: 18px;
+}
+
+.error-dialog {
+  width: min(520px, 100%);
+  border: 1px solid #ef9a9a;
+  border-radius: 8px;
+  background: #fff;
+  color: #18212f;
+  box-shadow: 0 24px 60px rgba(8, 15, 22, 0.28);
+  padding: 18px;
+}
+
+.error-dialog-title {
+  color: #b42335;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.error-dialog p {
+  margin: 0 0 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
 .refresh-health {
   max-width: 260px;
   overflow: hidden;

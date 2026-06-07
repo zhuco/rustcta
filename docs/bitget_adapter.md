@@ -1,34 +1,91 @@
-# Bitget Spot Adapter
+# Bitget Gateway Adapter
 
-`src/exchanges/bitget/mod.rs` implements `ExchangeClient` for Bitget Spot v2.
+`bitget` implements the RustCTA gateway `ExchangeClient` surface for Bitget
+Spot REST in `crates/rustcta-exchange-gateway/src/adapters/bitget`.
 
 ## Scope
 
-- REST public: spot symbols and order books.
-- REST private: balances, place order, cancel order, query order, open orders, recent fills, fee rate.
-- Public WebSocket: `books5` SPOT books normalized into `OrderBookSnapshot`.
-- Safety default: `BitgetSpotConfig::default().dry_run == true`; dry-run `place_order` returns a synthetic order and does not submit.
+Supported:
 
-## Symbol Projection
+- Spot public REST: symbol rules and order book snapshots.
+- Spot private REST: balances, fees, place order, quote-sized market buy,
+  cancel order, cancel all by symbol, amend order, query order, open orders,
+  and recent fills.
+- HMAC-SHA256 Base64 signing with `ACCESS-*` headers.
 
-Bitget spot symbols are compact, for example `BTCUSDT`. The adapter stores the same value as both internal and exchange symbol unless Bitget metadata says otherwise.
+Explicitly unsupported:
 
-Loaded symbol rules include base/quote asset, tick size, step size, min quantity, min notional, max quantity, and trade status.
+- Perpetual/futures trading in this gateway adapter. Existing legacy Bitget
+  perp fixtures are not completion evidence for this Spot adapter.
+- Public/private WebSocket runtime wiring. REST snapshots and private REST
+  readbacks are the declared fallback for resync and reconciliation.
 
-## Credentials
-
-Private REST requires:
+## Environment
 
 ```bash
-export BITGET_API_KEY=...
-export BITGET_API_SECRET=...
-export BITGET_API_PASSPHRASE=...
+RUSTCTA_BITGET_REST_BASE_URL=https://api.bitget.com
+BITGET_API_KEY=...
+BITGET_API_SECRET=...
+BITGET_API_PASSPHRASE=...
 ```
 
-`BITGET_PASSPHRASE` is accepted as a fallback. Use read/trade-only keys for live dry-run; withdrawal permission must be disabled.
+Use read/trade-only keys. Withdrawal permission must be disabled.
 
-## Live-Dry-Run Use
+## Endpoint Mapping
 
-For `spot_spot_taker_arbitrage`, configure `exchanges: [gateio, bitget]`, keep `dry_run: true`, `live_trading_enabled: false`, and `live_dry_run.submit_orders: false`.
+Machine-readable mapping:
+`crates/rustcta-exchange-gateway/src/adapters/bitget/endpoint_mapping.yaml`.
 
-The adapter supports order reconciliation primitives through `get_order`, `get_recent_fills`, and `get_open_orders`.
+| Capability | Endpoint |
+| --- | --- |
+| symbol rules | `GET /api/v2/spot/public/symbols` |
+| order book | `GET /api/v2/spot/market/orderbook` |
+| balances | `GET /api/v2/spot/account/assets` |
+| fees | `GET /api/v3/account/fee-rate` |
+| place / quote market order | `POST /api/v2/spot/trade/place-order` |
+| cancel order | `POST /api/v2/spot/trade/cancel-order` |
+| cancel all by symbol | `POST /api/v2/spot/trade/cancel-symbol-order` |
+| amend order | `POST /api/v3/trade/modify-order` |
+| query order | `GET /api/v2/spot/trade/orderInfo` |
+| open orders | `GET /api/v2/spot/trade/unfilled-orders` |
+| recent fills | `GET /api/v2/spot/trade/fills` |
+
+## Capability V2
+
+- Product boundary: Spot only.
+- Public/private REST: native when credentials are configured for private REST.
+- Public/private streams: `RestFallback`; the trait methods return
+  `Unsupported`.
+- Order book: snapshot-only, max depth 50; reconnect/resync uses REST snapshot.
+- Recent fills pagination: `idLessThan`, `startTime`, `endTime`, `limit <= 100`.
+- Batch place/cancel: composed sequential planner, non-atomic, max 20, partial
+  failure possible. Native cancel-all is partial by symbol.
+
+## Runtime Policies
+
+- Heartbeat/auth renewal: no gateway WebSocket session, so no heartbeat or
+  renewal is active.
+- Reconciliation: unknown order outcomes should query order, then open orders,
+  then fills. Balances are read from private REST.
+- Rate limits: mapping declares public, private, and order buckets; runtime
+  should classify HTTP 429 and Bitget rate-limit messages as retryable.
+- Live dry-run gates: require reconciliation enabled, kill-switch, disabled
+  symbol list, and max-notional limits before enabling any live private REST
+  mutation.
+
+## Fixtures And Tests
+
+- Request-spec coverage is in `private_tests.rs` and asserts method, path,
+  query/body, auth headers, and secret-free requests.
+- Signing vector coverage is
+  `bitget_signing_should_match_known_hmac_vector`.
+- Parser fixtures live under `tests/fixtures/exchanges/bitget/toolchain/` and
+  cover success, empty response, error response, and missing required fields.
+
+## Validation
+
+```bash
+cargo test -p rustcta-exchange-gateway bitget --lib
+python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/bitget/endpoint_mapping.yaml
+python scripts/audit_gateway_adapters.py --exchange bitget
+```

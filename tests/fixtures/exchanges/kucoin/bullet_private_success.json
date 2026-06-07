@@ -1,0 +1,15 @@
+{
+  "code": "200000",
+  "data": {
+    "token": "fixture-token",
+    "instanceServers": [
+      {
+        "endpoint": "wss://ws-api-spot.kucoin.com/endpoint",
+        "protocol": "websocket",
+        "encrypt": true,
+        "pingInterval": 18000,
+        "pingTimeout": 10000
+      }
+    ]
+  }
+}

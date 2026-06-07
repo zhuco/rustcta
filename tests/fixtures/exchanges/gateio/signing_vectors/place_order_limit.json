@@ -1,0 +1,12 @@
+{
+  "exchange": "gateio",
+  "name": "place_order_limit",
+  "algorithm": "hmac_sha512_hex",
+  "secret": "gate-secret",
+  "timestamp": "1700000000",
+  "method": "POST",
+  "request_path": "/api/v4/spot/orders?currency_pair=BTC_USDT",
+  "body": "{\"currency_pair\":\"BTC_USDT\",\"side\":\"buy\",\"type\":\"limit\",\"amount\":\"0.02\",\"price\":\"65000\"}",
+  "payload": "POST\n/api/v4/spot/orders\ncurrency_pair=BTC_USDT\n5a0b107f560498d655aaaf0ad6b9bdcbf14019b311cfd9f7fa58fb220d70acfc69c49ba3a42640e6803b406e74ab31dbc2101879f1d1a79d5012b7135d68dc63\n1700000000",
+  "expected_signature": "9332e3844b59e4d1c9e1881c19514b5a988251e361d5f5f01308808af66a78093ec09f39589c7a33888dbfcc20de049477976478097d99f461896a0ad81ee828"
+}

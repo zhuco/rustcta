@@ -1,0 +1,17 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "instType": "SPOT",
+      "instId": "BTC-USDT",
+      "ordId": "1002",
+      "clOrdId": "CLIENT2",
+      "px": "70000",
+      "sz": "0.02",
+      "accFillSz": "0",
+      "state": "live",
+      "ordType": "limit",
+      "side": "sell"
+    }
+  ]
+}

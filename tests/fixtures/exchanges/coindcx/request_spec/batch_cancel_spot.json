@@ -1,0 +1,13 @@
+{
+  "operation": "coindcx.batch_cancel_orders",
+  "method": "POST",
+  "path": "/exchange/v1/orders/cancel_by_ids",
+  "auth": "hmac",
+  "native_batch": true,
+  "atomicity": "partial",
+  "expected_body": {
+    "ids": ["fixture-order-001"],
+    "client_order_ids": ["fixture-client-001"]
+  },
+  "max_items": 50
+}

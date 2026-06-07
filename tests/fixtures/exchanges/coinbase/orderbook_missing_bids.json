@@ -1,0 +1,11 @@
+{
+  "pricebook": {
+    "product_id": "BTC-USD",
+    "asks": [
+      {
+        "price": "100.5",
+        "size": "1.5"
+      }
+    ]
+  }
+}

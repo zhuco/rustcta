@@ -3,7 +3,7 @@
 use super::fees::ExchangeFeeRates;
 use crate::exchanges::config::{ExchangeRegistryConfig, ExchangeRuntimeSettings};
 use crate::exchanges::private_perp::PrivateWsRunConfig;
-use crate::market::{CanonicalSymbol, ExchangeId, RouteStatus, RuntimeMode};
+use crate::market::{CanonicalSymbol, ExchangeId, PublicBookProfileKind, RouteStatus, RuntimeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -118,6 +118,8 @@ pub struct MarketConfig {
     pub public_book_depth: u16,
     #[serde(default = "default_allow_top_of_book_only")]
     pub allow_top_of_book_only: bool,
+    #[serde(default = "default_top_of_book_capacity_ratio")]
+    pub top_of_book_capacity_ratio: f64,
 }
 
 impl Default for MarketConfig {
@@ -133,6 +135,7 @@ impl Default for MarketConfig {
             public_book_validation_profile: default_public_book_validation_profile(),
             public_book_depth: default_public_book_depth(),
             allow_top_of_book_only: default_allow_top_of_book_only(),
+            top_of_book_capacity_ratio: default_top_of_book_capacity_ratio(),
         }
     }
 }
@@ -155,6 +158,35 @@ fn default_public_book_depth() -> u16 {
 
 fn default_allow_top_of_book_only() -> bool {
     true
+}
+
+fn default_top_of_book_capacity_ratio() -> f64 {
+    0.8
+}
+
+impl MarketConfig {
+    pub fn public_book_trigger_profile_kind(&self) -> Option<PublicBookProfileKind> {
+        parse_public_book_profile_kind(&self.public_book_trigger_profile)
+    }
+
+    pub fn public_book_validation_profile_kind(&self) -> Option<PublicBookProfileKind> {
+        parse_public_book_profile_kind(&self.public_book_validation_profile)
+    }
+}
+
+pub fn parse_public_book_profile_kind(value: &str) -> Option<PublicBookProfileKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "fastest_l1" | "l1" | "book_ticker" | "bookticker" => {
+            Some(PublicBookProfileKind::FastestL1)
+        }
+        "fastest_depth" | "depth" | "depth5" | "books5" => {
+            Some(PublicBookProfileKind::FastestDepth)
+        }
+        "conservative_depth" | "conservative" | "full_depth" | "books" => {
+            Some(PublicBookProfileKind::ConservativeDepth)
+        }
+        _ => None,
+    }
 }
 
 impl CrossExchangeArbitrageConfig {
@@ -208,6 +240,11 @@ impl CrossExchangeArbitrageConfig {
             || self.market.public_book_speed.trim().is_empty()
             || self.market.public_book_trigger_profile.trim().is_empty()
             || self.market.public_book_validation_profile.trim().is_empty()
+            || self.market.public_book_trigger_profile_kind().is_none()
+            || self.market.public_book_validation_profile_kind().is_none()
+            || !self.market.top_of_book_capacity_ratio.is_finite()
+            || self.market.top_of_book_capacity_ratio <= 0.0
+            || self.market.top_of_book_capacity_ratio > 1.0
         {
             return Err(ConfigValidationError::InvalidMarket);
         }
@@ -1204,7 +1241,7 @@ impl Default for DashboardConfig {
         Self {
             enabled: true,
             bind_host: "0.0.0.0".to_string(),
-            port: 8090,
+            port: 8091,
         }
     }
 }
@@ -1413,6 +1450,19 @@ mod tests {
     }
 
     #[test]
+    fn config_validate_should_reject_invalid_top_of_book_capacity_ratio() {
+        for ratio in [0.0, -0.1, 1.1, f64::NAN] {
+            let mut config = CrossExchangeArbitrageConfig::default();
+            config.market.top_of_book_capacity_ratio = ratio;
+
+            assert_eq!(
+                config.validate().unwrap_err(),
+                ConfigValidationError::InvalidMarket
+            );
+        }
+    }
+
+    #[test]
     fn config_default_usdt_file_should_match_three_venue_400_symbol_plan() {
         let raw = std::fs::read_to_string("config/cross_exchange_arbitrage_usdt.yml").unwrap();
         let config = serde_yaml::from_str::<CrossExchangeArbitrageConfig>(&raw).unwrap();
@@ -1424,7 +1474,8 @@ mod tests {
         );
         assert_eq!(config.universe.symbols.len(), 400);
         assert_eq!(config.market.min_common_exchanges, 2);
-        assert_eq!(config.sizing.target_notional_usdt, 5.0);
+        assert_eq!(config.sizing.target_notional_usdt, 5.5);
+        assert_eq!(config.market.top_of_book_capacity_ratio, 0.8);
         assert_eq!(config.sizing.max_positions_per_exchange, 10);
         assert_eq!(config.execution.max_concurrent_maker_orders, 10);
         assert_eq!(config.risk.max_open_bundles, 10);
@@ -1620,7 +1671,7 @@ mod tests {
     }
 
     #[test]
-    fn live_small_example_should_use_three_non_okx_exchanges_and_ten_usdt_orders() {
+    fn live_small_example_should_use_three_non_okx_exchanges_and_five_point_five_usdt_orders() {
         let raw =
             include_str!("../../../config/cross_exchange_arbitrage_usdt.live-small.example.yml");
         let config: CrossExchangeArbitrageConfig =
@@ -1633,8 +1684,8 @@ mod tests {
         assert_eq!(config.mode, RuntimeMode::LiveSmall);
         assert!(config.universe.enabled_exchanges.is_empty());
         assert!(config.universe.symbols.is_empty());
-        assert_eq!(config.sizing.target_notional_usdt, 10.0);
-        assert_eq!(config.sizing.max_notional_usdt, 10.0);
+        assert_eq!(config.sizing.target_notional_usdt, 5.5);
+        assert_eq!(config.sizing.max_notional_usdt, 5.5);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.execution.dry_run);
         assert_eq!(config.market.public_book_speed, "fastest");
@@ -1645,6 +1696,7 @@ mod tests {
         );
         assert_eq!(config.market.public_book_depth, 5);
         assert!(config.market.allow_top_of_book_only);
+        assert_eq!(config.market.top_of_book_capacity_ratio, 0.8);
         assert_eq!(
             config.execution.open_execution_style,
             OpenExecutionStyle::DualTaker
@@ -1715,7 +1767,8 @@ mod tests {
             .enabled_exchanges
             .contains(&ExchangeId::Gate));
         assert!(config.fees.use_account_fee_api);
-        assert_eq!(config.sizing.target_notional_usdt, 10.0);
+        assert_eq!(config.sizing.target_notional_usdt, 5.5);
+        assert_eq!(config.market.top_of_book_capacity_ratio, 0.8);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.execution.dry_run);
         assert_eq!(
@@ -1729,7 +1782,8 @@ mod tests {
     }
 
     #[test]
-    fn three_venue_live_small_should_use_ten_usdt_orders_and_zero_point_seven_pct_edge() {
+    fn three_venue_live_small_should_use_five_point_five_usdt_orders_and_zero_point_seven_pct_edge()
+    {
         let raw = include_str!(
             "../../../config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"
         );
@@ -1744,7 +1798,8 @@ mod tests {
             vec![ExchangeId::Binance, ExchangeId::Bitget, ExchangeId::Gate]
         );
         assert_eq!(config.thresholds.min_open_maker_taker_net_edge, 0.007);
-        assert_eq!(config.sizing.target_notional_usdt, 10.0);
+        assert_eq!(config.sizing.target_notional_usdt, 5.5);
+        assert_eq!(config.market.top_of_book_capacity_ratio, 0.8);
         assert_eq!(config.sizing.max_positions_per_exchange, 50);
         assert_eq!(config.risk.max_open_bundles, 50);
         assert!(config.fees.use_account_fee_api);
@@ -1789,9 +1844,10 @@ mod tests {
         assert_eq!(config.execution.max_concurrent_maker_orders, 5);
         assert_eq!(config.execution.maker_cooldown_after_cancels, 10);
         assert_eq!(config.execution.maker_cooldown_ms, 120_000);
-        assert_eq!(config.sizing.min_notional_usdt, 6.0);
-        assert_eq!(config.sizing.target_notional_usdt, 6.0);
-        assert_eq!(config.sizing.max_notional_usdt, 6.0);
+        assert_eq!(config.sizing.min_notional_usdt, 5.5);
+        assert_eq!(config.sizing.target_notional_usdt, 5.5);
+        assert_eq!(config.sizing.max_notional_usdt, 5.5);
+        assert_eq!(config.market.top_of_book_capacity_ratio, 0.8);
         assert_eq!(config.sizing.max_positions_per_exchange, 20);
         assert_eq!(config.risk.max_open_bundles, 20);
         assert!(config.controls.start_paused_new_entries);

@@ -1,0 +1,86 @@
+{
+  "exchange": "binance",
+  "operation": "place_order_list",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/orderList/oco",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSDT"
+    },
+    "side": {
+      "match": "exact",
+      "value": "SELL"
+    },
+    "quantity": {
+      "match": "exact",
+      "value": "0.01000000"
+    },
+    "listClientOrderId": {
+      "match": "exact",
+      "value": "cli-list"
+    },
+    "aboveType": {
+      "match": "exact",
+      "value": "LIMIT_MAKER"
+    },
+    "abovePrice": {
+      "match": "exact",
+      "value": "28000.00000000"
+    },
+    "aboveClientOrderId": {
+      "match": "exact",
+      "value": "cli-above"
+    },
+    "belowType": {
+      "match": "exact",
+      "value": "STOP_LOSS_LIMIT"
+    },
+    "belowPrice": {
+      "match": "exact",
+      "value": "24000.00000000"
+    },
+    "belowStopPrice": {
+      "match": "exact",
+      "value": "24500.00000000"
+    },
+    "belowTimeInForce": {
+      "match": "exact",
+      "value": "GTC"
+    },
+    "belowClientOrderId": {
+      "match": "exact",
+      "value": "cli-below"
+    },
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "recvWindow": {
+      "match": "exact",
+      "value": "5000"
+    },
+    "signature": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "X-MBX-APIKEY": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "binance/place_order_limit"
+}

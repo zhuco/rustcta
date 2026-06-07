@@ -1,0 +1,21 @@
+{
+  "m": "order",
+  "accountId": "cash",
+  "data": {
+    "s": "BTC/USDT",
+    "orderId": "a-order-1",
+    "clientOrderId": "client-1",
+    "side": "buy",
+    "orderType": "limit",
+    "status": "Filled",
+    "price": "100",
+    "orderQty": "0.1",
+    "cumFilledQty": "0.1",
+    "lastExecPrice": "100",
+    "lastExecQty": "0.1",
+    "avgPx": "100",
+    "fee": "0.01",
+    "feeAsset": "USDT",
+    "transactTime": 1700000000000
+  }
+}

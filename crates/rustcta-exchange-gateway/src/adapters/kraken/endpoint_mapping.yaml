@@ -1,0 +1,435 @@
+schema_version: 1
+exchange: kraken
+adapter: rustcta_exchange_gateway::adapters::kraken
+metadata:
+  status: validated
+  notes: "Task 11 mapping for Kraken Spot and Futures perpetual surfaces; operation names are product-qualified where the schema requires uniqueness."
+market_types:
+  - spot
+  - perpetual
+products:
+  - spot
+  - perpetual
+base_urls:
+  spot_rest: https://api.kraken.com/0
+  futures_rest: https://futures.kraken.com/derivatives/api/v3
+  spot_public_ws: wss://ws.kraken.com/v2
+  spot_private_ws: wss://ws-auth.kraken.com/v2
+  futures_ws: wss://futures.kraken.com/ws/v1
+auth:
+  spot:
+    algorithm: "HMAC-SHA512 base64"
+    prehash: "url_path + SHA256(nonce + form_body)"
+    headers: [API-Key, API-Sign]
+  perpetual:
+    algorithm: "HMAC-SHA512 base64"
+    prehash: "form_query_or_body + nonce + /derivatives/api/v3/{endpoint}"
+    headers: [APIKey, Nonce, Authent]
+  futures_websocket:
+    algorithm: "HMAC-SHA512 base64 over SHA256(challenge)"
+rate_limits:
+  buckets:
+    spot_public:
+      scope: rest
+      interval: 1m
+      limit: 60
+    spot_private:
+      scope: account
+      interval: 3s
+      limit: 15
+    spot_order:
+      scope: orders
+      interval: 3s
+      limit: 15
+    futures_public:
+      scope: rest
+      interval: 1m
+      limit: 60
+    futures_private:
+      scope: account
+      interval: 3s
+      limit: 30
+    futures_order:
+      scope: orders
+      interval: 3s
+      limit: 30
+    ws_public:
+      scope: websocket
+      interval: 1s
+      limit: 10
+    ws_private:
+      scope: user_stream
+      interval: 1s
+      limit: 5
+pagination:
+  recent_fills:
+    spot:
+      style: count_with_offset_time_or_id_cursor
+      endpoint: "POST /0/private/TradesHistory"
+      limit_param: count
+      offset_param: ofs
+      since_param: start
+      until_param: end
+      max_limit: 1000
+    perpetual:
+      style: count_with_last_fill_time_cursor
+      endpoint: "GET /derivatives/api/v3/fills"
+      limit_param: count
+      cursor_param: lastFillTime
+      unsupported_cursors: [offset, time_range]
+      max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  triggers:
+    - place_order_timeout
+    - cancel_order_timeout
+    - batch_response_missing_item
+    - private_stream_disconnected
+    - orderbook_sequence_gap
+  unknown_order_policy: query_by_client_or_exchange_id_then_open_orders_then_recent_fills
+batch:
+  place_orders:
+    spot:
+      support: native
+      endpoint: /0/private/AddOrderBatch
+      max_items: 15
+      same_symbol_required: true
+      atomicity: partial
+      partial_failure: true
+    perpetual:
+      support: native
+      endpoint: /derivatives/api/v3/batchorder
+      atomicity: partial
+      partial_failure: true
+  cancel_orders:
+    spot:
+      support: native
+      endpoint: /0/private/CancelOrderBatch
+      max_items: 50
+      atomicity: partial
+      partial_failure: true
+    perpetual:
+      support: native
+      endpoint: /derivatives/api/v3/batchorder
+      atomicity: partial
+      partial_failure: true
+websocket:
+  public:
+    support: native
+    separate_by_product: true
+    heartbeat:
+      request: '{"method":"ping"}'
+      accepts: ['{"method":"pong"}', '{"channel":"heartbeat"}', '{"event":"heartbeat"}']
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    separate_from_public: true
+    spot_auth: websocket_token
+    futures_auth: signed_challenge
+    renewal_interval_ms: 900000
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /0/public/AssetPairs
+    auth: none
+    rate_limit_bucket: spot_public
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/kraken/asset_pairs.json
+  - operation: get_symbol_rules_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/instruments
+    auth: none
+    rate_limit_bucket: futures_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book_spot
+    product: spot
+    transport: rest
+    method: GET
+    path: /0/public/Depth
+    auth: none
+    rate_limit_bucket: spot_public
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/kraken/orderbook.json
+  - operation: get_order_book_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/orderbook
+    auth: none
+    rate_limit_bucket: futures_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/BalanceEx
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/kraken/balance.json
+    notes: "Fallback endpoint /0/private/Balance is used when BalanceEx is unavailable."
+  - operation: get_balances_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/openpositions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/TradeVolume
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private
+    weight: 1
+    request_spec_required: true
+  - operation: place_order_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/AddOrder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kraken/request_specs/spot_place_order_limit.json
+    notes: "Signing vector: tests/fixtures/exchanges/kraken/signing_vectors/spot_add_order_official.json"
+  - operation: place_order_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/sendorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+  - operation: place_quote_market_order_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/AddOrder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_order
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/CancelOrder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_order
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/cancelorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/CancelAll
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_order
+    weight: 1
+    request_spec_required: true
+    notes: "Symbol-scoped Spot cancel-all is intentionally unsupported in adapter code."
+  - operation: cancel_all_orders_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/cancelallorders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+  - operation: query_order_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/QueryOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private
+    weight: 1
+    request_spec_required: true
+  - operation: query_order_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/OpenOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/openorders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/TradesHistory
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/kraken/fills.json
+  - operation: get_recent_fills_perpetual
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+  - operation: batch_place_orders_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/AddOrderBatch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_order
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: batch_place_orders_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/batchorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec:
+      fixture: tests/fixtures/exchanges/kraken/request_specs/futures_batch_order.json
+  - operation: batch_cancel_orders_spot
+    product: spot
+    transport: rest
+    method: POST
+    path: /0/private/CancelOrderBatch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_order
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: batch_cancel_orders_perpetual
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/batchorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+streams:
+  public_spot:
+    operation: subscribe_public_stream_spot
+    product: spot
+    transport: websocket
+    url: wss://ws.kraken.com/v2
+    auth: none
+    resync:
+      endpoint_operation: get_order_book_spot
+  public_perpetual:
+    operation: subscribe_public_stream_perpetual
+    product: perpetual
+    transport: websocket
+    url: wss://futures.kraken.com/ws/v1
+    auth: none
+    resync:
+      endpoint_operation: get_order_book_perpetual
+  private_spot:
+    operation: subscribe_private_stream_spot
+    product: spot
+    transport: websocket
+    url: wss://ws-auth.kraken.com/v2
+    auth: bearer
+    auth_renewal:
+      endpoint_operation: get_websocket_token_spot
+  private_perpetual:
+    operation: subscribe_private_stream_perpetual
+    product: perpetual
+    transport: websocket
+    url: wss://futures.kraken.com/ws/v1
+    auth: signed

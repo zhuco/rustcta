@@ -33,9 +33,9 @@ The Spot path is used by:
 - `src/execution/order_reconciliation.rs`
 
 Current Spot-related venue modules include Binance, OKX, Bitget, Gate.io, MEXC,
-CoinEx, KuCoin, and Paper. Capability depth varies by venue; configs and tests
-should decide whether a venue is scan-only, paper-capable, live-dry-run capable,
-or eligible for future live submission.
+CoinEx, KuCoin, BitMEX public/private REST, and Paper. Capability depth varies by
+venue; configs and tests should decide whether a venue is scan-only,
+paper-capable, live-dry-run capable, or eligible for future live submission.
 
 ## Perpetual Support
 
@@ -47,7 +47,9 @@ The perpetual path uses:
 - private perpetual protocol adapters
 
 Current perpetual coverage includes Binance, OKX, Bitget, Gate, Bybit, MEXC,
-and HTX market-data/private-protocol paths where registered.
+HTX market-data/private-protocol paths where registered, and BitMEX public/private
+REST symbol, book, account, position, order, and fill support in
+`rustcta-exchange-gateway`.
 
 ## Compatibility Layer Cleanup
 

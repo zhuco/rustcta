@@ -1,0 +1,23 @@
+{
+  "arg": {
+    "channel": "order",
+    "instId": "BTCUSDT"
+  },
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "orderId": "w-order-1",
+      "clientOid": "client-1",
+      "side": "buy",
+      "type": "limit",
+      "status": "filled",
+      "price": "100",
+      "size": "0.1",
+      "filledSize": "0.1",
+      "avgPrice": "100",
+      "fee": "0.01",
+      "feeCoin": "USDT",
+      "cTime": "1700000000000"
+    }
+  ]
+}

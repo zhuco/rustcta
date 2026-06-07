@@ -181,6 +181,7 @@ async fn mock_gateway_should_handle_readback_gateway_operations() {
                 exchange: exchange_id(),
                 market_type: Some(MarketType::Spot),
                 symbol: Some(symbol_scope()),
+                page: None,
             }),
             requested_at: Utc::now(),
         })
@@ -255,6 +256,7 @@ async fn mock_gateway_should_handle_readback_gateway_operations() {
                 start_time: None,
                 end_time: None,
                 limit: Some(10),
+                page: None,
             }),
             requested_at: Utc::now(),
         })

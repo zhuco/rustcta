@@ -19,6 +19,7 @@ market:
   public_book_validation_profile: fastest_depth
   public_book_depth: 5
   allow_top_of_book_only: true
+  top_of_book_capacity_ratio: 0.8
 thresholds:
   min_display_raw_spread: 0.001
   min_open_raw_spread: 0.005
@@ -29,14 +30,14 @@ thresholds:
   strong_lock_profit_dual_taker_pct: 0.001
   max_close_spread_pct: 0.0005
 sizing:
-  min_notional_usdt: 5.0
-  target_notional_usdt: 5.0
-  max_notional_usdt: 10.0
+  min_notional_usdt: 5.5
+  target_notional_usdt: 5.5
+  max_notional_usdt: 5.5
   exchange_equity_usdt: 50.0
   leverage: 10.0
   max_positions_per_exchange: 10
   capital_fraction_of_smaller_equity: 1.0
-  max_symbol_notional_usdt: 10.0
+  max_symbol_notional_usdt: 5.5
   max_exchange_usage_pct: 1.0
 fees:
   default_maker_fee_rate: 0.0002
@@ -209,10 +210,10 @@ risk:
   max_taker_slippage_pct: 0.003
   maker_non_fill_penalty: 0.001
   safety_buffer: 0.001
-  max_notional_per_symbol_usdt: 10.0
+  max_notional_per_symbol_usdt: 5.5
   max_notional_per_exchange_usdt: 100.0
   max_total_notional_usdt: 300.0
-  max_single_leg_exposure_usdt: 10.0
+  max_single_leg_exposure_usdt: 5.5
   max_open_bundles: 10
   max_open_positions: 20
   max_loss_per_trade_usdt: 100.0
@@ -240,7 +241,7 @@ persistence:
 dashboard:
   enabled: true
   bind_host: 0.0.0.0
-  port: 8090
+  port: 8091
 alerts:
   enabled: true
   orphan_alert: true

@@ -1,0 +1,13 @@
+{
+  "code": 0,
+  "data": {
+    "m": "depth-snapshot",
+    "symbol": "BTC/USDT",
+    "data": {
+      "seqnum": 123,
+      "ts": 1700000000000,
+      "asks": [["100.5", "1.5"]],
+      "bids": [["99.5", "2.0"]]
+    }
+  }
+}

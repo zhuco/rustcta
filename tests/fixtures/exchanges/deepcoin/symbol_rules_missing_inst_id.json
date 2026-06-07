@@ -1,0 +1,11 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "baseCcy": "BTC",
+      "quoteCcy": "USDT",
+      "tickSz": "0.01",
+      "lotSz": "0.00001"
+    }
+  ]
+}

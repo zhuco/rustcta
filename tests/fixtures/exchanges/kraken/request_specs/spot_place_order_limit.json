@@ -1,0 +1,14 @@
+{
+  "operation": "kraken.place_order.spot",
+  "method": "POST",
+  "path": "/0/private/AddOrder",
+  "auth": "hmac",
+  "form": {
+    "pair": "XBTUSD",
+    "type": "buy",
+    "ordertype": "limit",
+    "volume": "0.01",
+    "price": "37500",
+    "cl_ord_id": "krk-client-1"
+  }
+}

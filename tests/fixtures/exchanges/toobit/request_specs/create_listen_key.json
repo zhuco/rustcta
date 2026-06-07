@@ -1,0 +1,18 @@
+{
+  "exchange": "toobit",
+  "operation": "create_listen_key",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/userDataStream",
+  "auth": "signed",
+  "headers": {
+    "X-BB-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "query": {
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "timestamp": { "match": "non_empty" },
+    "signature": { "match": "non_empty" }
+  },
+  "forbid_query_values_containing": ["secret"]
+}

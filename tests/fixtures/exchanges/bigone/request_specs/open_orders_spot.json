@@ -1,0 +1,15 @@
+{
+  "exchange": "bigone",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/viewer/orders",
+  "auth": "signed",
+  "query": {
+    "asset_pair_name": { "match": "exact", "value": "BTC-USDT" }
+  },
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  }
+}

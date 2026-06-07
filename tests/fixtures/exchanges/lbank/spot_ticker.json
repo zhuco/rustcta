@@ -1,0 +1,13 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "timestamp": "1700000000123",
+  "ticker": {
+    "change": "1.5",
+    "high": "66000",
+    "latest": "65000",
+    "low": "64000",
+    "turnover": "1000000",
+    "vol": "123.45"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "exchange": "lbank",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/orders_info_no_deal.do",
+  "auth": "md5_hmac_sha256",
+  "pagination": {
+    "mode": "page_number",
+    "current_page": "1",
+    "page_length": "100"
+  },
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "current_page": "1",
+    "page_length": "100"
+  }
+}

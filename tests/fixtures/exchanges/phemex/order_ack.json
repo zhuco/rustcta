@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "msg": "OK",
+  "data": {
+    "symbol": "BTCUSDT",
+    "orderID": "exchange-1",
+    "clOrdID": "client-1",
+    "side": "Buy",
+    "ordType": "Limit",
+    "timeInForce": "GoodTillCancel",
+    "ordStatus": "New",
+    "orderQtyRq": "0.001",
+    "priceRp": "61000"
+  }
+}

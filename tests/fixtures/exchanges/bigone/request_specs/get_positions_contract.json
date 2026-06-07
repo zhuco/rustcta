@@ -1,0 +1,12 @@
+{
+  "exchange": "bigone",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/contract/v2/positions",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  }
+}

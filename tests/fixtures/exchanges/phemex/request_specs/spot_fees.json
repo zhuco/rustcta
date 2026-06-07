@@ -1,0 +1,30 @@
+{
+  "exchange": "phemex",
+  "operation": "spot_fees",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api-data/spots/fee-rate",
+  "auth": "signed",
+  "query": {
+    "quoteCurrency": {
+      "match": "exact",
+      "value": "USDT"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

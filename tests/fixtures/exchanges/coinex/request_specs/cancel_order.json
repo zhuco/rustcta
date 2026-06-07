@@ -1,0 +1,11 @@
+{
+  "operation": "coinex.cancel_order",
+  "method": "DELETE",
+  "path": "/spot/order",
+  "auth": "hmac",
+  "body": {
+    "market": "BTCUSDT",
+    "order_id": "2001",
+    "client_id": "CLIENTLIMIT1"
+  }
+}

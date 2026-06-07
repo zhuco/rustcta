@@ -1,0 +1,15 @@
+{
+  "exchange": "woo",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v3/asset/balances",
+  "auth": "signed",
+  "headers": {
+    "x-api-key": { "match": "exact", "value": "key" },
+    "x-api-signature": { "match": "non_empty" },
+    "x-api-timestamp": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["secret"]
+}

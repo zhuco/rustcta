@@ -1,0 +1,1 @@
+{"operation":"backpack.get_open_orders","method":"GET","path":"/api/v1/orders","query":{"marketType":"PERP","symbol":"SOL_USDC_PERP"},"body":null,"signed":true}

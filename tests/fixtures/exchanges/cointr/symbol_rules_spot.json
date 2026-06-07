@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "baseCoin": "BTC",
+      "quoteCoin": "USDT",
+      "priceScale": "2",
+      "quantityScale": "6",
+      "minTradeAmount": "0.0001",
+      "minTradeUSDT": "10",
+      "status": "online"
+    }
+  ]
+}

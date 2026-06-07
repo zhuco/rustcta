@@ -1,0 +1,20 @@
+{
+  "result": "true",
+  "error_code": 0,
+  "data": {
+    "balances": [
+      {
+        "assetCode": "BTC",
+        "assetAmt": "0.12",
+        "usableAmt": "0.10",
+        "locked": "0.02"
+      },
+      {
+        "assetCode": "USDT",
+        "assetAmt": "125.00",
+        "usableAmt": "123.00",
+        "locked": "2.00"
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "rc": 0,
+  "result": {
+    "symbols": [
+      {
+        "symbol": "btc_usdt",
+        "state": "ONLINE",
+        "tradingEnabled": true,
+        "openapiEnabled": true,
+        "baseCurrency": "btc",
+        "quoteCurrency": "usdt",
+        "filters": [
+          { "filter": "PRICE", "tickSize": "0.01" },
+          { "filter": "QUANTITY", "tickSize": "0.00001", "min": "0.00001", "max": "100" },
+          { "filter": "QUOTE_QTY", "min": "5" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "code": 0,
+  "message": "OK",
+  "data": [
+    {
+      "base_ccy": "BTC",
+      "quote_ccy": "USDT",
+      "price_precision": 2,
+      "amount_precision": 6
+    }
+  ]
+}

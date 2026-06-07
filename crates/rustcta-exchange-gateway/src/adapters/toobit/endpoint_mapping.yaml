@@ -1,0 +1,53 @@
+schema_version: 1
+exchange: toobit
+adapter: ToobitGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/toobit_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Spot plus USDT-M perpetual mapping with Binance-style HMAC signing and listenKey private streams.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  rest: https://api.toobit.com
+  public_ws: wss://stream.toobit.com/quote/ws/v1
+  private_ws: wss://stream.toobit.com/quote/ws/v1
+auth:
+  private_rest: X-BB-APIKEY header + sorted query HMAC_SHA256_HEX
+  credential_scopes: [read_only, trade]
+rate_limits:
+  public: { scope: ip, interval_ms: 1000, limit: 10 }
+  private_read: { scope: api_key, interval_ms: 1000, limit: 10 }
+  trade: { scope: api_key, interval_ms: 1000, limit: 10 }
+pagination:
+  fills: { mode: time_range_from_id, start_time_param: startTime, end_time_param: endTime, from_id_param: fromId, limit_param: limit, max_limit: 1000 }
+reconciliation:
+  fallback: REST query_order + open_orders + recent_fills
+  unknown_order_policy: query_by_client_or_exchange_order_id_then_open_orders
+  live_dry_run_required_controls: [kill-switch, disabled-symbol, max-notional]
+batch:
+  place: { mode: native, atomicity: partial, max_items: 20, native: true, partial_failure: true }
+  cancel: { mode: native, atomicity: partial, max_items: 20, native: true, partial_failure: true }
+websocket:
+  public:
+    support: native
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: native
+    auth: listen_key
+    auth_renewal: { mode: listen_key_renewal, interval_ms: 3300000, endpoint_operation: keepalive_listen_key }
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: { mode: rest_recent_fills, endpoint_operation: recent_fills }
+endpoints:
+  - { operation: symbol_rules, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /api/v1/exchangeInfo, auth: none, rate_limit_bucket: toobit_public, weight: 1, request_spec_required: false, native_batch: false, atomicity: not_applicable, testnet: false, support: native, response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/public_tests.rs, fixture: tests/fixtures/exchanges/toobit/exchange_info.json } }
+  - { operation: order_book, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /quote/v1/depth, auth: none, rate_limit_bucket: toobit_public, weight: 1, request_spec_required: false, native_batch: false, atomicity: not_applicable, testnet: false, support: native, response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/public_tests.rs, fixture: tests/fixtures/exchanges/toobit/orderbook.json } }
+  - { operation: balances, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /api/v1/account, auth: signed, credential_scopes: [read_only], rate_limit_bucket: toobit_private_read, weight: 5, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/private_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/get_balances.json }, response_parser: { status: implemented, fixture: tests/fixtures/exchanges/toobit/balance.json } }
+  - { operation: place_order, product: spot, market_types: [spot, perpetual], transport: rest, method: POST, path: /api/v1/spot/order, auth: signed, credential_scopes: [trade], rate_limit_bucket: toobit_trade, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/private_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/place_order.json } }
+  - { operation: cancel_order, product: spot, market_types: [spot, perpetual], transport: rest, method: DELETE, path: /api/v1/spot/order, auth: signed, credential_scopes: [trade], rate_limit_bucket: toobit_trade, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/private_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/cancel_order.json } }
+  - { operation: batch_place_orders, product: spot, market_types: [spot, perpetual], transport: rest, method: POST, path: /api/v1/spot/batchOrders, auth: signed, credential_scopes: [trade], rate_limit_bucket: toobit_trade, weight: 5, request_spec_required: true, native_batch: true, atomicity: partial, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/private_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/batch_place_orders_spot.json, additional_fixtures: [tests/fixtures/exchanges/toobit/request_specs/batch_place_orders.json] }, notes: Native batch endpoint; max_items=20. }
+  - { operation: batch_cancel_orders, product: spot, market_types: [spot, perpetual], transport: rest, method: DELETE, path: /api/v1/spot/cancelOrderByIds, auth: signed, credential_scopes: [trade], rate_limit_bucket: toobit_trade, weight: 5, request_spec_required: true, native_batch: true, atomicity: partial, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/private_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/batch_cancel_orders_spot.json, additional_fixtures: [tests/fixtures/exchanges/toobit/request_specs/batch_cancel_orders.json] }, notes: Native batch cancel endpoint; max_items=20. }
+  - { operation: recent_fills, product: spot, market_types: [spot, perpetual], transport: rest, method: GET, path: /api/v1/account/trades, auth: signed, credential_scopes: [read_only], rate_limit_bucket: toobit_private_read, weight: 5, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/private_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/recent_fills.json }, response_parser: { status: implemented, fixture: tests/fixtures/exchanges/toobit/fills.json } }
+  - { operation: create_listen_key, product: spot, market_types: [spot, perpetual], transport: rest, method: POST, path: /api/v1/userDataStream, auth: signed, credential_scopes: [read_only], rate_limit_bucket: toobit_private_read, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/stream_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/create_listen_key.json } }
+  - { operation: keepalive_listen_key, product: spot, market_types: [spot, perpetual], transport: rest, method: PUT, path: /api/v1/userDataStream, auth: signed, credential_scopes: [read_only], rate_limit_bucket: toobit_private_read, weight: 1, request_spec_required: true, native_batch: false, atomicity: not_applicable, testnet: false, support: native, request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/toobit/stream_tests.rs, fixture: tests/fixtures/exchanges/toobit/request_specs/keepalive_listen_key.json } }

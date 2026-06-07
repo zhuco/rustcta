@@ -1,0 +1,23 @@
+{
+  "exchange": "bigone",
+  "operation": "batch_place_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/viewer/orders/multi",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "orders": [
+      {
+        "asset_pair_name": "BTC-USDT",
+        "side": "BUY",
+        "amount": "0.1",
+        "type": "LIMIT",
+        "price": "65000"
+      }
+    ]
+  }
+}

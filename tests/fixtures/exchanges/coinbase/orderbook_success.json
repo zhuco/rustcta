@@ -1,0 +1,19 @@
+{
+  "pricebook": {
+    "product_id": "BTC-USD",
+    "bids": [
+      {
+        "price": "99.5",
+        "size": "1.25"
+      }
+    ],
+    "asks": [
+      {
+        "price": "100.5",
+        "size": "1.5"
+      }
+    ],
+    "time": "2026-06-07T00:00:00Z"
+  },
+  "last": "123"
+}

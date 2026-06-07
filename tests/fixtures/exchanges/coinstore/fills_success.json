@@ -1,0 +1,18 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "tradeId": "fixture-fill-1",
+      "orderId": "fixture-order-1",
+      "clientOrderId": "fixture-client-1",
+      "symbol": "BTCUSDT",
+      "side": "BUY",
+      "price": "100",
+      "quantity": "0.01",
+      "feeAsset": "USDT",
+      "fee": "0.001",
+      "liquidity": "maker",
+      "tradeTime": 1717171717000
+    }
+  ]
+}

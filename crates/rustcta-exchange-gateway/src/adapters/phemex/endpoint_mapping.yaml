@@ -1,0 +1,341 @@
+schema_version: 1
+exchange: phemex
+adapter: rustcta_exchange_gateway::adapters::phemex
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway Phemex adapter Task 14 implementation
+  last_reviewed: "2026-06-08"
+  notes: Task 14 scope covers Spot plus USDT/USDC perpetual REST/WS. Dated futures and options are not opened. Contract specs come from /public/products. Order books are snapshot-only with REST resync. Funding history and open-interest ticker fields are adapter-specific capabilities.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+rest:
+  base_url: https://api.phemex.com
+base_urls:
+  public_ws: wss://ws.phemex.com
+  private_ws: wss://ws.phemex.com
+auth:
+  private_rest: x-phemex-access-token, x-phemex-request-expiry and x-phemex-request-signature over path + query + expiry + body
+  private_ws: user.auth signature HMAC-SHA256(secret, api_key + expiry)
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_account: { scope: api_key, retry_after: http_429_or_venue_message, default_weight: 5 }
+  private_trade: { scope: api_key, retry_after: http_429_or_venue_message, default_weight: 1 }
+pagination:
+  order_history: { mode: cursor, limit_param: limit, cursor_param: offset, max_limit: 200 }
+  fills_history: { mode: cursor, limit_param: limit, cursor_param: offset, max_limit: 200 }
+reconciliation:
+  private_state: rest_fallback
+  after_place: Query by orderID or clOrdID, then reconcile open orders and recent fills.
+  after_cancel: Query by orderID or clOrdID, then scan fills before terminal decision.
+  stream_recovery: Re-authenticate, resubscribe, then reconcile balances, positions, open orders, and recent fills through REST.
+  live_dry_run_required_controls: [kill-switch, disabled-symbol, max-notional]
+batch:
+  place_orders: { support: composed, mode: composed_sequential, atomicity: non_atomic, max_items: null, partial_failure: true }
+  cancel_orders: { support: native_perpetual, mode: native, atomicity: partial, max_items: 20, same_symbol_required: true, partial_failure: true }
+websocket:
+  public:
+    support: native
+    channels: [orderbook.subscribe, orderbook_p.subscribe, trade.subscribe, trade_p.subscribe, kline.subscribe, kline_p.subscribe, spot_market24h.subscribe, perp_market24h_pack_p.subscribe]
+    heartbeat: { mode: server_ping, interval_ms: 15000, timeout_ms: 30000 }
+    resync: { mode: rest_snapshot, endpoint_operation: perp_order_book }
+  private:
+    support: native_when_credentials_configured
+    channels: [wo.subscribe, aop_p.subscribe, ras_p.subscribe]
+    auth_renewal: { mode: relogin, renew_before_expiry_ms: 30000 }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+streams:
+  public: { support: native, heartbeat: server_ping, resync: rest_snapshot }
+  private: { support: native_when_credentials_configured, auth_renewal: relogin, resync: rest_reconciliation }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /public/products
+    auth: none
+    rate_limit_bucket: phemex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/public_tests.rs, fixture: tests/fixtures/exchanges/phemex/instruments.json }
+    notes: Contract spec boundary includes Spot rows and perpProductsV2 rows settled in USDT/USDC; options unsupported.
+  - operation: spot_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /md/orderbook
+    auth: none
+    rate_limit_bucket: phemex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: strictness=snapshot_only; max_depth=30.
+  - operation: perp_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /md/v2/orderbook
+    auth: none
+    rate_limit_bucket: phemex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/public_tests.rs, fixture: tests/fixtures/exchanges/phemex/orderbook.json }
+    notes: strictness=snapshot_only; max_depth=30; REST snapshot after reconnect.
+  - operation: spot_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /spot/wallets
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: phemex_private_account
+    weight: 5
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: perp_account_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /g-accounts/accountPositions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: phemex_private_account
+    weight: 5
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: spot_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api-data/spots/fee-rate
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: phemex_private_account
+    weight: 5
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: perp_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api-data/futures/fee-rate
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: phemex_private_account
+    weight: 5
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: spot_place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: PUT
+    path: /spot/orders/create
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/phemex/order_ack.json }
+  - operation: perp_place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PUT
+    path: /g-orders/create
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: PUT
+    path: /g-orders/create
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: composed
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+    notes: composed_sequential over spot/perp place endpoints; partial failure supported.
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /g-orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+    notes: native perpetual batch cancel; same symbol and same id type required; max_items=20.
+  - operation: spot_cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /spot/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: perp_cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /g-orders/cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: DELETE
+    path: /g-orders/all
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: phemex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+    notes: Spot cancel-all uses /spot/orders/all.
+  - operation: open_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /g-orders/activeList
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: phemex_private_account
+    weight: 5
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+    notes: Spot open orders use /spot/orders/activeList; REST reconciliation source.
+  - operation: recent_fills
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api-data/g-futures/trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: phemex_private_account
+    weight: 5
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/private_tests.rs }
+    notes: Spot fills use /api-data/spots/trades.
+  - operation: funding_history
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api-data/public/data/funding-rate-history
+    auth: none
+    rate_limit_bucket: phemex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/phemex/public_tests.rs, fixture: tests/fixtures/exchanges/phemex/funding.json }
+  - operation: funding_open_interest_ticker
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /md/v2/ticker/24hr
+    auth: none
+    rate_limit_bucket: phemex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: openInterestRv and fundingRateRr parsed as adapter-specific ticker fields.

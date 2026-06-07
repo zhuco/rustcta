@@ -1,0 +1,13 @@
+{
+  "exchange": "bitmex",
+  "name": "rest_place_order",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1700000000",
+  "method": "POST",
+  "request_path": "/api/v1/order",
+  "body": "{\"clOrdID\":\"client-1\",\"orderQty\":100,\"ordType\":\"Limit\",\"price\":99.5,\"side\":\"Buy\",\"symbol\":\"XBTUSD\"}",
+  "payload": "POST/api/v1/order1700000000{\"clOrdID\":\"client-1\",\"orderQty\":100,\"ordType\":\"Limit\",\"price\":99.5,\"side\":\"Buy\",\"symbol\":\"XBTUSD\"}",
+  "expected_signature": "b6d41836ba802019f2391af289ca8fbbb9d79b532f7a3334a0aa64cf1fd5e630",
+  "payload_format": "raw_payload"
+}

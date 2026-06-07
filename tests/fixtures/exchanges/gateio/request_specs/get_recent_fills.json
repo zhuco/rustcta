@@ -1,0 +1,22 @@
+{
+  "exchange": "gateio",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/spot/my_trades",
+  "auth": "signed",
+  "query": {
+    "currency_pair": { "match": "exact", "value": "BTC_USDT" },
+    "order_id": { "match": "exact", "value": "1001" },
+    "last_id": { "match": "exact", "value": "trade-0" },
+    "limit": { "match": "exact", "value": "50" }
+  },
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

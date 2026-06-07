@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "timestamp": 1743054548123,
+  "data": {
+    "rows": [
+      {
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "quoteTick": "0.01",
+        "baseTick": "0.000001"
+      }
+    ]
+  }
+}

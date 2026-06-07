@@ -1,0 +1,13 @@
+{
+  "returnCode": 0,
+  "result": [
+    {
+      "symbol": "btc_usdt",
+      "positionSide": "LONG",
+      "positionSize": "0.5",
+      "entryPrice": "65000",
+      "markPrice": "65100",
+      "leverage": "5"
+    }
+  ]
+}

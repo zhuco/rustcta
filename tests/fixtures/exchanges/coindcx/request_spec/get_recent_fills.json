@@ -1,0 +1,15 @@
+{
+  "operation": "coindcx.get_recent_fills",
+  "method": "POST",
+  "path": "/exchange/v1/orders/trade_history",
+  "auth": "hmac",
+  "pagination": {
+    "mode": "limit",
+    "limit_param": "limit",
+    "max_limit": 1000
+  },
+  "expected_body": {
+    "market": "BTCUSDT",
+    "limit": 1000
+  }
+}

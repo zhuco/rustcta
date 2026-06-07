@@ -185,7 +185,7 @@ validation_profile: fastest_depth
 
 - `fastest_l1` 用最快的一档 best bid/ask 推送触发机会，允许使用 `books1`、`bookTicker`、`bbo-tbt`、`orderbook.1` 这类 channel。
 - `fastest_depth` 用最快的多档盘口校验实际可成交数量、VWAP 和滑点。
-- 如果为了极致速度直接用 L1 下单，则必须满足一档数量覆盖目标 notional 和安全冗余；否则只允许 L1 触发，不允许直接开仓。
+- 如果为了极致速度直接用 L1 下单，则必须用两边最优档名义金额取较小值，再乘 `top_of_book_capacity_ratio`；默认 `0.8`，该值必须覆盖本次 `target_notional_usdt`，否则不允许直接开仓。
 
 建议新增配置：
 
@@ -196,6 +196,7 @@ market:
   public_book_validation_profile: fastest_depth
   public_book_depth: 5
   allow_top_of_book_only: true
+  top_of_book_capacity_ratio: 0.8
   max_symbols_per_ws_connection: 50
 ```
 
@@ -222,7 +223,8 @@ message_rate_note
 策略选择最快 channel 时必须满足：
 
 - 深度覆盖 `target_notional_usdt` 的 taker VWAP 计算。
-- 若只使用 top-of-book，需要强制更小 notional、更高 safety buffer，并确认 best bid/ask quantity 覆盖目标数量。
+- 双 taker 直接开仓只看一档容量：`min(long best ask price * qty, short best bid price * qty) * top_of_book_capacity_ratio >= target_notional_usdt`。
+- 若只使用 top-of-book，需要强制更小 notional、更高 safety buffer，并保留 `top_of_book_capacity_ratio` 配置，前期默认 0.8。
 - 订阅失败、消息过载、sequence gap、checksum fail 时自动降级到 close-only 或 conservative profile。
 - 每个交易所的订阅发送间隔和每连接 symbol 数量不能超过官方限制。
 - 记录实际 `book_recv_interval_ms`、gap 次数、重连次数，用真实数据判断“最快”是否稳定。
@@ -422,6 +424,7 @@ market:
   public_book_validation_profile: fastest_depth
   public_book_depth: 5
   allow_top_of_book_only: true
+  top_of_book_capacity_ratio: 0.8
 
 thresholds:
   min_display_raw_spread: 0.0002
@@ -444,15 +447,18 @@ risk:
   max_private_stream_delay_ms: 1000
 
 sizing:
-  target_notional_usdt: 10.0
-  max_notional_usdt: 10.0
-  max_symbol_notional_usdt: 10.0
+  min_notional_usdt: 5.5
+  target_notional_usdt: 5.5
+  max_notional_usdt: 5.5
+  max_symbol_notional_usdt: 5.5
 ```
 
 说明：
 
 - 第一阶段 `max_open_bundles` 建议为 1，先验证链路，不追求并发收益。
 - `dry_run=true` 跑稳定后，再进入 live-small。
+- 双 taker 机会成本先只扣两边交易所的开仓 taker 手续费和平仓 taker 手续费；平台币抵扣、返佣和后返不参与开仓准入，等真实成交流水回填后作为额外收益或成本修正。
+- 前期小额验证按 5.5U 每次对冲金额执行；一档容量按 80% 折算后必须大于等于 5.5U，才允许发双腿 taker。
 - 真实阈值不要只拍脑袋调低，要用记录数据计算：成交前 edge、成交后 edge、费用、滑点、延迟衰减。
 
 ## 八、并行 AI 开发任务
@@ -527,6 +533,7 @@ expected_net_edge
 max_slippage_pct
 trigger_book_profile
 validation_book_profile
+top_of_book_capacity_usdt
 generated_at
 ```
 
@@ -709,7 +716,7 @@ cargo fmt --check
 分派 Prompt：
 
 ```text
-你是 AI-4。完成 docs/high_frequency_perpetual_dual_taker_arbitrage_plan_zh.md 的开发任务 4：双向双 Taker Opportunity 与 L1/Depth 校验。先读取全局并行规则和共享接口约定。只修改任务 4 允许范围。目标是 dual_taker 下完整评估 A long/B short 和 B long/A short，支持最快 L1 触发和多档 depth 校验，L1 直接开仓必须检查一档数量覆盖目标。添加 focused tests。不要改真实执行、live admission 或 reservation。
+你是 AI-4。完成 docs/high_frequency_perpetual_dual_taker_arbitrage_plan_zh.md 的开发任务 4：双向双 Taker Opportunity 与 L1/Depth 校验。先读取全局并行规则和共享接口约定。只修改任务 4 允许范围。目标是 dual_taker 下完整评估 A long/B short 和 B long/A short，支持最快 L1 触发和多档 depth 校验，L1 直接开仓必须检查一档名义容量：`min(long best ask price * qty, short best bid price * qty) * top_of_book_capacity_ratio >= target_notional_usdt`，默认比例 0.8。添加 focused tests。不要改真实执行、live admission 或 reservation。
 ```
 
 ### 开发任务 5：原子风控 Reservation 与单腿恢复

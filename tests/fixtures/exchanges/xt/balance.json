@@ -1,0 +1,19 @@
+{
+  "rc": 0,
+  "result": {
+    "assets": [
+      {
+        "currency": "BTC",
+        "availableAmount": "0.1",
+        "frozenAmount": "0.02",
+        "totalAmount": "0.12"
+      },
+      {
+        "currency": "USDT",
+        "availableAmount": "10",
+        "frozenAmount": "0",
+        "totalAmount": "10"
+      }
+    ]
+  }
+}

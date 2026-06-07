@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "data": {
+    "symbol": "SPOT_BTC_USDT",
+    "makerFee": "0.0008",
+    "takerFee": "0.001"
+  }
+}

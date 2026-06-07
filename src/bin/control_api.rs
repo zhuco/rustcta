@@ -18,6 +18,8 @@ use rustcta::control::spot_control::{
     EnabledDirection, SpotControlReadModel, SpotControlService, SpotControlSnapshotBuilder,
     SpotSymbolControlConfig, SpotSymbolLifecycleState, VersionedSymbolRequest,
 };
+use rustcta::cta::AccountManagerConfigFile;
+use rustcta::exchanges::config::ExchangeRuntimeSettings;
 use rustcta::exchanges::registry as exchange_registry;
 use rustcta::market::InstrumentMeta;
 use rustcta::risk::{DisabledExchange, DisabledRegistryConfig};
@@ -25,6 +27,7 @@ use rustcta::strategies::cross_exchange_arbitrage::{
     ArbitrageMarketSnapshotRecord, CanonicalSymbol, CrossArbStorageEvent,
     CrossExchangeArbitrageConfig, ExchangeId, ExchangeOperatingMode, StoredCrossArbEvent,
 };
+use rustcta::strategies::funding_rate_arbitrage::FundingRateArbitrageConfig;
 use rustcta::strategies::spot_spot_taker_arbitrage::SpotSpotTakerArbitrageConfig;
 use rustcta::web::{
     status_from_model, ConfigSummaryView, DashboardReadModel, DisabledExchangeSymbolView,
@@ -51,7 +54,7 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[command(name = "control-api", version, about = "Separated RustCTA control API")]
 struct Args {
-    #[arg(long, default_value = "127.0.0.1:8080")]
+    #[arg(long, default_value = "127.0.0.1:8091")]
     bind_addr: String,
     #[arg(
         long,
@@ -75,6 +78,12 @@ struct Args {
         help = "Local env file used by the web console to persist exchange API credentials"
     )]
     exchange_api_key_store: PathBuf,
+    #[arg(
+        long,
+        default_value = "config/accounts.yml",
+        help = "Central account-manager YAML used by the web console and runtime account manager"
+    )]
+    accounts_config: PathBuf,
     #[arg(
         long,
         default_value = "data/control_api/balance_history.json",
@@ -132,6 +141,7 @@ struct AppState {
     snapshot_path: PathBuf,
     command_path: PathBuf,
     exchange_api_key_store: PathBuf,
+    accounts_config: PathBuf,
     balance_history_path: PathBuf,
     strategy_profit_history_path: PathBuf,
     strategy_config: PathBuf,
@@ -174,8 +184,21 @@ struct ExchangeApiKeyExchangeStatus {
     enabled: bool,
     account_id: String,
     account_label: String,
+    credential_namespace: String,
     is_default_account: bool,
     fields: Vec<ExchangeApiKeyFieldStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccountManagerAccountStatus {
+    account_id: String,
+    name: String,
+    exchange: String,
+    account_type: String,
+    description: String,
+    env_prefix: String,
+    credential_namespace: String,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -183,6 +206,7 @@ struct ExchangeApiKeyStatusResponse {
     store_path: String,
     restart_required: bool,
     enabled_exchanges: Vec<String>,
+    account_manager_accounts: Vec<AccountManagerAccountStatus>,
     supported_exchanges: Vec<ExchangeApiKeyExchangeStatus>,
     exchanges: Vec<ExchangeApiKeyExchangeStatus>,
 }
@@ -261,6 +285,8 @@ struct ExchangeApiKeyUpdateRequest {
     account_id: Option<String>,
     #[serde(default)]
     account_label: Option<String>,
+    #[serde(default)]
+    credential_namespace: Option<String>,
     #[serde(default)]
     exchange_account_id: Option<String>,
     #[serde(default)]
@@ -379,6 +405,111 @@ struct CrossArbSettingsUpdateRequest {
     restart: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct FundingArbExchangeSettingsView {
+    exchange: String,
+    enabled: bool,
+    account_id: String,
+    env_prefix: String,
+    demo_trading: bool,
+    private_ws_enabled: bool,
+    position_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FundingArbSettingsView {
+    path: String,
+    strategy_id: String,
+    config_kind: String,
+    mode: String,
+    enabled_exchanges: Vec<String>,
+    quote_asset: String,
+    contract_type: String,
+    symbol_allowlist: Vec<String>,
+    symbol_blocklist: Vec<String>,
+    per_exchange_limit: usize,
+    min_funding_rate: f64,
+    require_next_funding_time: bool,
+    max_funding_snapshot_age_ms: i64,
+    min_seconds_to_settlement_at_scan: Option<i64>,
+    max_seconds_to_settlement_at_scan: Option<i64>,
+    scan_minute: u32,
+    notional_usdt: f64,
+    open_seconds_before_settlement: i64,
+    close_seconds_after_settlement: i64,
+    order_readback_delay_secs: u64,
+    close_limit_timeout_secs: u64,
+    close_limit_max_retries: u32,
+    max_slippage_pct: f64,
+    allow_existing_symbol_position: bool,
+    position_side: String,
+    exchanges: Vec<FundingArbExchangeSettingsView>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct FundingArbExchangeSettingsRequest {
+    exchange: String,
+    enabled: bool,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    env_prefix: Option<String>,
+    #[serde(default)]
+    demo_trading: Option<bool>,
+    #[serde(default)]
+    private_ws_enabled: Option<bool>,
+    #[serde(default)]
+    position_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct FundingArbSettingsUpdateRequest {
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    enabled_exchanges: Option<Vec<String>>,
+    #[serde(default)]
+    symbol_allowlist: Option<Vec<String>>,
+    #[serde(default)]
+    symbol_blocklist: Option<Vec<String>>,
+    #[serde(default)]
+    per_exchange_limit: Option<usize>,
+    #[serde(default)]
+    min_funding_rate: Option<f64>,
+    #[serde(default)]
+    require_next_funding_time: Option<bool>,
+    #[serde(default)]
+    max_funding_snapshot_age_ms: Option<i64>,
+    #[serde(default)]
+    min_seconds_to_settlement_at_scan: Option<i64>,
+    #[serde(default)]
+    max_seconds_to_settlement_at_scan: Option<i64>,
+    #[serde(default)]
+    scan_minute: Option<u32>,
+    #[serde(default)]
+    notional_usdt: Option<f64>,
+    #[serde(default)]
+    open_seconds_before_settlement: Option<i64>,
+    #[serde(default)]
+    close_seconds_after_settlement: Option<i64>,
+    #[serde(default)]
+    order_readback_delay_secs: Option<u64>,
+    #[serde(default)]
+    close_limit_timeout_secs: Option<u64>,
+    #[serde(default)]
+    close_limit_max_retries: Option<u32>,
+    #[serde(default)]
+    max_slippage_pct: Option<f64>,
+    #[serde(default)]
+    allow_existing_symbol_position: Option<bool>,
+    #[serde(default)]
+    position_side: Option<String>,
+    #[serde(default)]
+    exchanges: Vec<FundingArbExchangeSettingsRequest>,
+    #[serde(default = "default_true_bool")]
+    restart: bool,
+}
+
 #[derive(Debug, Default)]
 struct BalanceHistoryExchangeTotal {
     total_usdt: f64,
@@ -419,6 +550,7 @@ async fn main() -> Result<()> {
         snapshot_path: args.snapshot_path,
         command_path: args.command_path,
         exchange_api_key_store: args.exchange_api_key_store,
+        accounts_config: args.accounts_config,
         balance_history_path: args.balance_history_path,
         strategy_profit_history_path: args.strategy_profit_history_path,
         strategy_config: args.strategy_config,
@@ -468,6 +600,10 @@ fn router(state: AppState, static_dir: PathBuf) -> Router {
         .route(
             "/api/cross-arb/settings",
             get(cross_arb_settings).post(update_cross_arb_settings),
+        )
+        .route(
+            "/api/funding-arb/settings",
+            get(funding_arb_settings).post(update_funding_arb_settings),
         )
         .route("/api/cross-arb/instruments", get(cross_arb_instruments))
         .route(
@@ -887,6 +1023,10 @@ fn load_legacy_supervisor(
         registry_changed = true;
         specs_changed = true;
     }
+    if migrate_funding_arb_to_live_config(&mut registry, &mut specs) {
+        registry_changed = true;
+        specs_changed = true;
+    }
 
     for preset in default_managed_strategy_presets(strategy_config) {
         if registry_contains_preset(&registry, &preset) {
@@ -941,6 +1081,13 @@ fn normalize_strategy_specs(specs: &mut [StrategyProcessSpec]) -> bool {
                 .insert(insert_at, "--skip-private-audit".to_string());
             changed = true;
         }
+        if spec.strategy_kind == "funding_arbitrage"
+            && spec.args.iter().any(|arg| arg == "funding_arb_live")
+            && !spec.args.iter().any(|arg| arg == "--confirm-live-order")
+        {
+            spec.args.push("--confirm-live-order".to_string());
+            changed = true;
+        }
     }
     changed
 }
@@ -979,6 +1126,39 @@ fn migrate_legacy_contract_arb_strategy_id(
     true
 }
 
+fn migrate_funding_arb_to_live_config(
+    registry: &mut ProcessRegistry,
+    specs: &mut [StrategyProcessSpec],
+) -> bool {
+    const STRATEGY_ID: &str = "funding-arb-local";
+    const OLD_CONFIG: &str = "config/funding_rate_arbitrage_usdt.yml";
+    const LIVE_CONFIG: &str = "config/funding_rate_arbitrage_live_usdt.yml";
+    let mut changed = false;
+
+    if let Some(mut process) = registry.get(STRATEGY_ID).cloned() {
+        if process.strategy_kind == "funding_arbitrage"
+            && normalize_strategy_path(&process.config_path) == OLD_CONFIG
+        {
+            process.config_path = LIVE_CONFIG.to_string();
+            registry.upsert(process);
+            changed = true;
+        }
+    }
+
+    for spec in specs {
+        if spec.strategy_id == STRATEGY_ID
+            && spec.strategy_kind == "funding_arbitrage"
+            && normalize_strategy_path(&spec.config_path) == OLD_CONFIG
+        {
+            spec.config_path = LIVE_CONFIG.to_string();
+            spec.args = default_strategy_args("funding_arbitrage", LIVE_CONFIG, Vec::new());
+            changed = true;
+        }
+    }
+
+    changed
+}
+
 fn default_managed_strategy_presets(strategy_config: &FsPath) -> Vec<ManagedStrategyPreset> {
     let requested_config = strategy_config.display().to_string();
     let contract_config =
@@ -1012,12 +1192,12 @@ fn default_managed_strategy_presets(strategy_config: &FsPath) -> Vec<ManagedStra
         ManagedStrategyPreset {
             strategy_id: "funding-arb-local",
             strategy_kind: "funding_arbitrage",
-            config_path: "config/funding_rate_arbitrage_usdt.yml".to_string(),
+            config_path: "config/funding_rate_arbitrage_live_usdt.yml".to_string(),
             log_path: "logs/control_panel/funding-arb-local.log",
             command: "cargo",
             args: default_strategy_args(
                 "funding_arbitrage",
-                "config/funding_rate_arbitrage_usdt.yml",
+                "config/funding_rate_arbitrage_live_usdt.yml",
                 Vec::new(),
             ),
         },
@@ -1150,10 +1330,22 @@ async fn apply_strategy_command_inner(
                 .await
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?
         }
-        LifecycleCommand::Stop => supervisor
-            .stop(&command.strategy_id)
-            .await
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+        LifecycleCommand::Stop => match supervisor.stop(&command.strategy_id).await {
+            Ok(process) => process,
+            Err(error) => {
+                if supervisor.registry().get(&command.strategy_id).is_none() {
+                    return Err(anyhow::anyhow!(error.to_string()));
+                }
+                supervisor
+                    .mark_stopped_if_registered(&command.strategy_id)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                supervisor
+                    .registry()
+                    .get(&command.strategy_id)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("strategy not found: {}", command.strategy_id))?
+            }
+        },
         LifecycleCommand::Restart => {
             if supervisor.registry().get(&command.strategy_id).is_none() {
                 anyhow::bail!("strategy not found: {}", command.strategy_id);
@@ -1387,18 +1579,25 @@ fn default_strategy_args(
             "--config".to_string(),
             config_path.to_string(),
         ],
-        "funding_arbitrage" | "funding_rate_arbitrage" => vec![
-            "run".to_string(),
-            "--bin".to_string(),
-            if config_path.contains("live") {
-                "funding_arb_live".to_string()
-            } else {
-                "funding_arb_observe".to_string()
-            },
-            "--".to_string(),
-            "--config".to_string(),
-            config_path.to_string(),
-        ],
+        "funding_arbitrage" | "funding_rate_arbitrage" => {
+            let live = config_path.contains("live");
+            let mut args = vec![
+                "run".to_string(),
+                "--bin".to_string(),
+                if live {
+                    "funding_arb_live".to_string()
+                } else {
+                    "funding_arb_observe".to_string()
+                },
+                "--".to_string(),
+                "--config".to_string(),
+                config_path.to_string(),
+            ];
+            if live {
+                args.push("--confirm-live-order".to_string());
+            }
+            args
+        }
         value => vec![
             "run".to_string(),
             "--bin".to_string(),
@@ -1616,6 +1815,38 @@ async fn update_cross_arb_settings(
         return StatusCode::UNAUTHORIZED.into_response();
     }
     match apply_cross_arb_settings_update(&state, request).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn funding_arb_settings(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match read_funding_arb_settings_view(&state).await {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn update_funding_arb_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<FundingArbSettingsUpdateRequest>,
+) -> Response {
+    if !is_authorized(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match apply_funding_arb_settings_update(&state, request).await {
         Ok(value) => Json(value).into_response(),
         Err(error) => (
             StatusCode::BAD_REQUEST,
@@ -2868,6 +3099,14 @@ fn cross_arb_credential_namespace(exchange: &str, account_id: &str, env_prefix: 
     )
 }
 
+fn credential_namespace_for_env_prefix(
+    exchange: &str,
+    account_id: &str,
+    env_prefix: &str,
+) -> String {
+    cross_arb_credential_namespace(exchange, account_id, env_prefix).to_ascii_uppercase()
+}
+
 fn cross_arb_account_credential_status(
     exchange: &str,
     account_id: &str,
@@ -2967,16 +3206,29 @@ fn expected_env_keys_for_namespace(
     credential_namespace: &str,
 ) -> Vec<String> {
     let default_prefix = env_exchange_prefix(schema.exchange);
-    if normalize_account_id(account_id) == "default"
-        || credential_namespace.eq_ignore_ascii_case(&default_prefix)
-    {
+    if credential_namespace.eq_ignore_ascii_case(&default_prefix) {
         return expected_env_keys_for_account(schema, field, account_id);
     }
-    vec![format!(
-        "{}_{}",
-        credential_namespace.trim_end_matches('_'),
-        field.field.to_ascii_uppercase()
-    )]
+    namespace_env_keys(credential_namespace, field.field)
+}
+
+fn namespace_env_keys(credential_namespace: &str, field: &str) -> Vec<String> {
+    let suffix = field.to_ascii_uppercase();
+    let mut keys = Vec::new();
+    if credential_namespace.ends_with('_') {
+        keys.push(format!("{credential_namespace}_{suffix}"));
+        keys.push(format!("{credential_namespace}{suffix}"));
+        keys.push(format!(
+            "{}_{}",
+            credential_namespace.trim_end_matches('_'),
+            suffix
+        ));
+    } else {
+        keys.push(format!("{credential_namespace}_{suffix}"));
+    }
+    let mut seen = BTreeSet::new();
+    keys.retain(|key| seen.insert(key.clone()));
+    keys
 }
 
 fn expected_env_key_parts_for_namespace(
@@ -3874,7 +4126,7 @@ async fn update_exchange_api_keys(
     if !is_authorized(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    match apply_exchange_api_key_update(&state.exchange_api_key_store, request).await {
+    match apply_exchange_api_key_update(&state, request).await {
         Ok(()) => match exchange_api_key_status(&state).await {
             Ok(status) => Json(json!({
                 "saved": true,
@@ -5247,6 +5499,15 @@ async fn apply_cross_arb_settings_update(
     if let Some(profile) = request.execution_profile.as_deref() {
         apply_cross_arb_execution_profile(&mut config, profile)?;
     }
+    let account_manager_accounts = read_account_manager_accounts(&state.accounts_config)
+        .await
+        .unwrap_or_else(|error| {
+            log::warn!(
+                "failed to read account manager config {} while saving cross-arb settings: {error:#}",
+                state.accounts_config.display()
+            );
+            Vec::new()
+        });
     let mut enabled_exchanges = Vec::new();
     for requested in request.exchanges {
         let exchange = parse_supported_cross_arb_exchange(&requested.exchange)?;
@@ -5260,8 +5521,17 @@ async fn apply_cross_arb_settings_update(
         if let Some(account_id) = requested.account_id {
             runtime.account_id = non_empty_string(account_id);
         }
-        if let Some(env_prefix) = requested.env_prefix {
-            runtime.env_prefix = non_empty_string(env_prefix);
+        let requested_env_prefix = requested.env_prefix.and_then(non_empty_string).or_else(|| {
+            runtime.account_id.as_deref().and_then(|account_id| {
+                account_manager_env_prefix_for_account(
+                    &account_manager_accounts,
+                    &exchange,
+                    account_id,
+                )
+            })
+        });
+        if let Some(env_prefix) = requested_env_prefix {
+            runtime.env_prefix = Some(env_prefix);
         }
         if let Some(value) = requested.private_rest_enabled {
             runtime.private_rest_enabled = value;
@@ -5420,6 +5690,317 @@ fn parse_supported_cross_arb_exchange(value: &str) -> Result<ExchangeId> {
     }
 }
 
+async fn funding_arb_config_path(state: &AppState) -> Result<PathBuf> {
+    let processes = strategy_processes(state).await;
+    let process = processes
+        .iter()
+        .find(|process| process.strategy_id == "funding-arb-local")
+        .or_else(|| {
+            processes
+                .iter()
+                .find(|process| process.strategy_kind == "funding_arbitrage")
+        })
+        .ok_or_else(|| anyhow::anyhow!("funding arbitrage strategy is not registered"))?;
+    Ok(PathBuf::from(&process.config_path))
+}
+
+async fn read_funding_arb_config(
+    state: &AppState,
+) -> Result<(PathBuf, FundingRateArbitrageConfig)> {
+    let path = funding_arb_config_path(state).await?;
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .with_context(|| format!("read funding-arb config {}", path.display()))?;
+    let config = serde_yaml::from_str(&content)
+        .with_context(|| format!("parse funding-arb config {}", path.display()))?;
+    Ok((path, config))
+}
+
+async fn read_funding_arb_settings_view(state: &AppState) -> Result<FundingArbSettingsView> {
+    let (path, config) = read_funding_arb_config(state).await?;
+    Ok(funding_arb_settings_view(
+        path.display().to_string(),
+        "funding-arb-local".to_string(),
+        config,
+    ))
+}
+
+fn funding_arb_settings_view(
+    path: String,
+    strategy_id: String,
+    config: FundingRateArbitrageConfig,
+) -> FundingArbSettingsView {
+    let exchanges = config
+        .universe
+        .enabled_exchanges
+        .iter()
+        .map(|exchange| {
+            let runtime = config.exchanges.get(exchange);
+            FundingArbExchangeSettingsView {
+                exchange: exchange.to_string(),
+                enabled: runtime
+                    .map(|runtime| !runtime.is_disabled())
+                    .unwrap_or(true),
+                account_id: runtime
+                    .and_then(|runtime| runtime.account_id.clone())
+                    .unwrap_or_default(),
+                env_prefix: runtime
+                    .and_then(|runtime| runtime.env_prefix.clone())
+                    .unwrap_or_default(),
+                demo_trading: runtime
+                    .map(|runtime| runtime.demo_trading)
+                    .unwrap_or_default(),
+                private_ws_enabled: runtime
+                    .map(|runtime| runtime.private_ws_enabled)
+                    .unwrap_or_default(),
+                position_mode: runtime
+                    .and_then(|runtime| runtime.position_mode.clone())
+                    .unwrap_or_default(),
+            }
+        })
+        .collect::<Vec<_>>();
+    FundingArbSettingsView {
+        path,
+        strategy_id,
+        config_kind: "funding_arbitrage".to_string(),
+        mode: config.mode,
+        enabled_exchanges: config
+            .universe
+            .enabled_exchanges
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        quote_asset: config.universe.quote_asset,
+        contract_type: config.universe.contract_type,
+        symbol_allowlist: config.universe.symbol_allowlist,
+        symbol_blocklist: config.universe.symbol_blocklist,
+        per_exchange_limit: config.selection.per_exchange_limit,
+        min_funding_rate: config.selection.min_funding_rate,
+        require_next_funding_time: config.selection.require_next_funding_time,
+        max_funding_snapshot_age_ms: config.selection.max_funding_snapshot_age_ms,
+        min_seconds_to_settlement_at_scan: config.selection.min_seconds_to_settlement_at_scan,
+        max_seconds_to_settlement_at_scan: config.selection.max_seconds_to_settlement_at_scan,
+        scan_minute: config.execution.scan_minute,
+        notional_usdt: config.execution.notional_usdt,
+        open_seconds_before_settlement: config.execution.open_seconds_before_settlement,
+        close_seconds_after_settlement: config.execution.close_seconds_after_settlement,
+        order_readback_delay_secs: config.execution.order_readback_delay_secs,
+        close_limit_timeout_secs: config.execution.close_limit_timeout_secs,
+        close_limit_max_retries: config.execution.close_limit_max_retries,
+        max_slippage_pct: config.execution.max_slippage_pct,
+        allow_existing_symbol_position: config.execution.allow_existing_symbol_position,
+        position_side: config.execution.position_side,
+        exchanges,
+    }
+}
+
+async fn apply_funding_arb_settings_update(
+    state: &AppState,
+    request: FundingArbSettingsUpdateRequest,
+) -> Result<Value> {
+    let (path, mut config) = read_funding_arb_config(state).await?;
+    if let Some(mode) = request.mode.and_then(non_empty_string) {
+        config.mode = mode;
+    }
+    if let Some(value) = request.symbol_allowlist {
+        config.universe.symbol_allowlist = normalized_symbol_texts(value);
+    }
+    if let Some(value) = request.symbol_blocklist {
+        config.universe.symbol_blocklist = normalized_symbol_texts(value);
+    }
+    if let Some(value) = positive_usize(request.per_exchange_limit, "per_exchange_limit")? {
+        config.selection.per_exchange_limit = value;
+    }
+    if let Some(value) = negative_f64(request.min_funding_rate, "min_funding_rate")? {
+        config.selection.min_funding_rate = value;
+    }
+    if let Some(value) = request.require_next_funding_time {
+        config.selection.require_next_funding_time = value;
+    }
+    if let Some(value) = positive_i64(
+        request.max_funding_snapshot_age_ms,
+        "max_funding_snapshot_age_ms",
+    )? {
+        config.selection.max_funding_snapshot_age_ms = value;
+    }
+    config.selection.min_seconds_to_settlement_at_scan = request.min_seconds_to_settlement_at_scan;
+    config.selection.max_seconds_to_settlement_at_scan = request.max_seconds_to_settlement_at_scan;
+    if let Some(value) = request.scan_minute {
+        config.execution.scan_minute = value;
+    }
+    if let Some(value) = positive_f64(request.notional_usdt, "notional_usdt")? {
+        config.execution.notional_usdt = value;
+    }
+    if let Some(value) = non_negative_i64(
+        request.open_seconds_before_settlement,
+        "open_seconds_before_settlement",
+    )? {
+        config.execution.open_seconds_before_settlement = value;
+    }
+    if let Some(value) = non_negative_i64(
+        request.close_seconds_after_settlement,
+        "close_seconds_after_settlement",
+    )? {
+        config.execution.close_seconds_after_settlement = value;
+    }
+    if let Some(value) = positive_u64(
+        request.order_readback_delay_secs,
+        "order_readback_delay_secs",
+    )? {
+        config.execution.order_readback_delay_secs = value;
+    }
+    if let Some(value) = positive_u64(request.close_limit_timeout_secs, "close_limit_timeout_secs")?
+    {
+        config.execution.close_limit_timeout_secs = value;
+    }
+    if let Some(value) = positive_u32(request.close_limit_max_retries, "close_limit_max_retries")? {
+        config.execution.close_limit_max_retries = value;
+    }
+    if let Some(value) = non_negative_f64(request.max_slippage_pct, "max_slippage_pct")? {
+        config.execution.max_slippage_pct = value;
+    }
+    if let Some(value) = request.allow_existing_symbol_position {
+        config.execution.allow_existing_symbol_position = value;
+    }
+    if let Some(value) = request.position_side.and_then(non_empty_string) {
+        config.execution.position_side = value;
+    }
+
+    let account_manager_accounts = read_account_manager_accounts(&state.accounts_config)
+        .await
+        .unwrap_or_else(|error| {
+            log::warn!(
+                "failed to read account manager config {} while saving funding-arb settings: {error:#}",
+                state.accounts_config.display()
+            );
+            Vec::new()
+        });
+    let mut enabled_exchanges = Vec::new();
+    for requested in request.exchanges {
+        let exchange = parse_supported_funding_arb_exchange(&requested.exchange)?;
+        let runtime = config.exchanges.entry(exchange.clone()).or_default();
+        runtime.enabled = Some(requested.enabled);
+        if let Some(account_id) = requested.account_id {
+            runtime.account_id = non_empty_string(account_id);
+        }
+        let requested_env_prefix = requested.env_prefix.and_then(non_empty_string).or_else(|| {
+            runtime.account_id.as_deref().and_then(|account_id| {
+                account_manager_env_prefix_for_account(
+                    &account_manager_accounts,
+                    &exchange,
+                    account_id,
+                )
+            })
+        });
+        if let Some(env_prefix) = requested_env_prefix {
+            runtime.env_prefix = Some(env_prefix);
+        }
+        if let Some(value) = requested.demo_trading {
+            runtime.demo_trading = value;
+        }
+        if let Some(value) = requested.private_ws_enabled {
+            runtime.private_ws_enabled = value;
+        }
+        if let Some(value) = requested.position_mode.and_then(non_empty_string) {
+            runtime.position_mode = Some(value);
+        }
+        if requested.enabled {
+            enabled_exchanges.push(exchange);
+        }
+    }
+    if let Some(requested_enabled_exchanges) = request.enabled_exchanges {
+        enabled_exchanges = requested_enabled_exchanges
+            .iter()
+            .map(|exchange| parse_supported_funding_arb_exchange(exchange))
+            .collect::<Result<Vec<_>>>()?;
+    }
+    if !enabled_exchanges.is_empty() {
+        config.universe.enabled_exchanges = enabled_exchanges;
+    }
+
+    config.validate().context("validate funding-arb config")?;
+    write_yaml_atomic(&path, &config, "funding-arb config").await?;
+    let restart = if request.restart {
+        restart_managed_strategy(state, "funding-arb-local").await?
+    } else {
+        json!({ "skipped": true })
+    };
+    Ok(json!({
+        "saved": true,
+        "restart": restart,
+        "settings": funding_arb_settings_view(
+            path.display().to_string(),
+            "funding-arb-local".to_string(),
+            config,
+        ),
+    }))
+}
+
+fn normalized_symbol_texts(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .filter_map(non_empty_string)
+        .map(|value| value.to_ascii_uppercase())
+        .collect()
+}
+
+fn parse_supported_funding_arb_exchange(exchange: &str) -> Result<ExchangeId> {
+    match exchange.trim().to_ascii_lowercase().as_str() {
+        "binance" => Ok(ExchangeId::Binance),
+        "bitget" => Ok(ExchangeId::Bitget),
+        "gate" | "gateio" | "gate.io" => Ok(ExchangeId::Gate),
+        other => anyhow::bail!("unsupported funding-arb exchange {other}"),
+    }
+}
+
+async fn write_yaml_atomic<T: Serialize + ?Sized>(
+    path: &PathBuf,
+    value: &T,
+    label: &str,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let content = serde_yaml::to_string(value).with_context(|| format!("serialize {label}"))?;
+    let tmp_path = path.with_extension("yml.tmp");
+    tokio::fs::write(&tmp_path, content.as_bytes())
+        .await
+        .with_context(|| format!("write {}", tmp_path.display()))?;
+    tokio::fs::rename(&tmp_path, path)
+        .await
+        .with_context(|| format!("replace {}", path.display()))?;
+    Ok(())
+}
+
+async fn restart_managed_strategy(state: &AppState, strategy_id: &str) -> Result<Value> {
+    let command_id = format!(
+        "web-restart-{}-{}",
+        strategy_id,
+        Utc::now().timestamp_millis()
+    );
+    let process = apply_strategy_command_inner(
+        state,
+        LifecycleCommandRecord {
+            schema_version: SUPERVISOR_SCHEMA_VERSION,
+            command_id: command_id.clone(),
+            strategy_id: strategy_id.to_string(),
+            run_id: Some(format!("run-{}", Utc::now().timestamp_millis())),
+            command: LifecycleCommand::Restart,
+            requested_by: Some("web".to_string()),
+            idempotency_key: command_id,
+            requested_at: Utc::now(),
+        },
+    )
+    .await?;
+    Ok(json!({
+        "requested": true,
+        "strategy_status": process.status,
+        "process": strategy_process_view(process),
+    }))
+}
+
 fn positive_usize(value: Option<usize>, field: &str) -> Result<Option<usize>> {
     match value {
         Some(0) => anyhow::bail!("{field} must be positive"),
@@ -5436,10 +6017,50 @@ fn positive_f64(value: Option<f64>, field: &str) -> Result<Option<f64>> {
     }
 }
 
+fn negative_f64(value: Option<f64>, field: &str) -> Result<Option<f64>> {
+    match value {
+        Some(value) if value.is_finite() && value < 0.0 => Ok(Some(value)),
+        Some(_) => anyhow::bail!("{field} must be negative"),
+        None => Ok(None),
+    }
+}
+
 fn non_negative_f64(value: Option<f64>, field: &str) -> Result<Option<f64>> {
     match value {
         Some(value) if value.is_finite() && value >= 0.0 => Ok(Some(value)),
         Some(_) => anyhow::bail!("{field} must be non-negative"),
+        None => Ok(None),
+    }
+}
+
+fn positive_i64(value: Option<i64>, field: &str) -> Result<Option<i64>> {
+    match value {
+        Some(value) if value > 0 => Ok(Some(value)),
+        Some(_) => anyhow::bail!("{field} must be positive"),
+        None => Ok(None),
+    }
+}
+
+fn non_negative_i64(value: Option<i64>, field: &str) -> Result<Option<i64>> {
+    match value {
+        Some(value) if value >= 0 => Ok(Some(value)),
+        Some(_) => anyhow::bail!("{field} must be non-negative"),
+        None => Ok(None),
+    }
+}
+
+fn positive_u64(value: Option<u64>, field: &str) -> Result<Option<u64>> {
+    match value {
+        Some(0) => anyhow::bail!("{field} must be positive"),
+        Some(value) => Ok(Some(value)),
+        None => Ok(None),
+    }
+}
+
+fn positive_u32(value: Option<u32>, field: &str) -> Result<Option<u32>> {
+    match value {
+        Some(0) => anyhow::bail!("{field} must be positive"),
+        Some(value) => Ok(Some(value)),
         None => Ok(None),
     }
 }
@@ -5750,6 +6371,8 @@ fn is_noisy_strategy_log_line(line: &str) -> bool {
 async fn exchange_api_key_status(state: &AppState) -> Result<ExchangeApiKeyStatusResponse> {
     let values = read_env_store(&state.exchange_api_key_store).await?;
     let enabled_exchanges = enabled_exchange_names_for_key_status(state).await;
+    let account_manager_accounts =
+        account_manager_accounts_for_status(&state.accounts_config).await;
     let supported_schemas = exchange_api_key_schemas().iter().collect::<Vec<_>>();
     let supported_exchanges = supported_schemas
         .iter()
@@ -5765,34 +6388,116 @@ async fn exchange_api_key_status(state: &AppState) -> Result<ExchangeApiKeyStatu
         .collect::<Vec<_>>();
     let mut exchanges = Vec::new();
     for schema in supported_schemas {
-        if schema_account_has_value(&values, schema, "default") {
-            exchanges.push(exchange_schema_status(
+        for account in account_manager_accounts
+            .iter()
+            .filter(|account| account.exchange.eq_ignore_ascii_case(schema.exchange))
+        {
+            exchanges.push(exchange_schema_status_for_namespace(
                 &values,
                 schema,
-                "default",
+                &account.account_id,
+                &account.credential_namespace,
                 true,
-                schema_enabled_for_strategy(schema, &enabled_exchanges),
+                account.enabled && schema_enabled_for_strategy(schema, &enabled_exchanges),
             ));
-        }
-        for account_id in stored_account_ids(&values, schema) {
-            if account_id != "default" && schema_account_has_value(&values, schema, &account_id) {
-                exchanges.push(exchange_schema_status(
-                    &values,
-                    schema,
-                    &account_id,
-                    true,
-                    schema_enabled_for_strategy(schema, &enabled_exchanges),
-                ));
-            }
         }
     }
     Ok(ExchangeApiKeyStatusResponse {
         store_path: state.exchange_api_key_store.display().to_string(),
-        restart_required: true,
+        restart_required: false,
         enabled_exchanges,
+        account_manager_accounts,
         supported_exchanges,
         exchanges,
     })
+}
+
+async fn account_manager_accounts_for_status(path: &PathBuf) -> Vec<AccountManagerAccountStatus> {
+    match read_account_manager_accounts(path).await {
+        Ok(accounts) => accounts
+            .into_iter()
+            .map(|mut account| {
+                account.credential_namespace = credential_namespace_for_env_prefix(
+                    &account.exchange,
+                    &account.account_id,
+                    &account.env_prefix,
+                );
+                account
+            })
+            .collect(),
+        Err(error) => {
+            log::warn!(
+                "failed to read account manager config {}: {error:#}",
+                path.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+async fn read_account_manager_accounts(path: &PathBuf) -> Result<Vec<AccountManagerAccountStatus>> {
+    let path = path.clone();
+    tokio::task::spawn_blocking(move || {
+        let config = AccountManagerConfigFile::from_path(&path)?;
+        let mut accounts = config
+            .accounts
+            .into_iter()
+            .map(|(account_id, account)| {
+                let name = account
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(account_id.as_str())
+                    .to_string();
+                let exchange = account.exchange.trim().to_ascii_lowercase();
+                let env_prefix = account.env_prefix.trim().to_ascii_uppercase();
+                AccountManagerAccountStatus {
+                    credential_namespace: credential_namespace_for_env_prefix(
+                        &exchange,
+                        &account_id,
+                        &env_prefix,
+                    ),
+                    account_id,
+                    name,
+                    exchange,
+                    account_type: account.account_type.unwrap_or_default(),
+                    description: account.description.unwrap_or_default(),
+                    env_prefix,
+                    enabled: account.enabled,
+                }
+            })
+            .collect::<Vec<_>>();
+        accounts.sort_by(|left, right| {
+            left.exchange
+                .cmp(&right.exchange)
+                .then_with(|| left.account_id.cmp(&right.account_id))
+        });
+        Ok(accounts)
+    })
+    .await
+    .context("join account manager config reader")?
+}
+
+fn account_manager_env_prefix_for_account(
+    accounts: &[AccountManagerAccountStatus],
+    exchange: &ExchangeId,
+    account_id: &str,
+) -> Option<String> {
+    let exchange_name = exchange.as_str();
+    let requested = account_id.trim();
+    if requested.is_empty() {
+        return None;
+    }
+    accounts
+        .iter()
+        .find(|account| {
+            account.exchange.eq_ignore_ascii_case(exchange_name)
+                && (account.account_id.eq_ignore_ascii_case(requested)
+                    || account.name.eq_ignore_ascii_case(requested))
+        })
+        .map(|account| account.env_prefix.clone())
+        .filter(|prefix| !prefix.trim().is_empty())
 }
 
 async fn enabled_exchange_names_for_key_status(state: &AppState) -> Vec<String> {
@@ -5839,23 +6544,45 @@ fn exchange_schema_status(
     enabled: bool,
 ) -> ExchangeApiKeyExchangeStatus {
     let normalized_account_id = normalize_account_id(account_id);
+    let credential_namespace =
+        credential_namespace_for_account(schema, &normalized_account_id, None);
+    exchange_schema_status_for_namespace(
+        values,
+        schema,
+        &normalized_account_id,
+        &credential_namespace,
+        include_values,
+        enabled,
+    )
+}
+
+fn exchange_schema_status_for_namespace(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: &str,
+    include_values: bool,
+    enabled: bool,
+) -> ExchangeApiKeyExchangeStatus {
+    let normalized_account_id = normalize_account_id(account_id);
     ExchangeApiKeyExchangeStatus {
         exchange: schema.exchange.to_string(),
         label: schema.label.to_string(),
         enabled,
         account_id: normalized_account_id.clone(),
-        account_label: stored_account_label(values, schema, &normalized_account_id)
-            .unwrap_or_else(|| account_label(&normalized_account_id)),
+        account_label: account_label(&normalized_account_id),
+        credential_namespace: credential_namespace.to_string(),
         is_default_account: normalized_account_id == "default",
         fields: schema
             .fields
             .iter()
             .map(|field| {
-                api_key_field_status(
+                api_key_field_status_for_namespace(
                     values,
                     schema,
                     field,
                     &normalized_account_id,
+                    credential_namespace,
                     include_values,
                 )
             })
@@ -5863,25 +6590,21 @@ fn exchange_schema_status(
     }
 }
 
-fn schema_account_has_value(
-    values: &BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-    account_id: &str,
-) -> bool {
-    schema
-        .fields
-        .iter()
-        .any(|field| field_value_present_for_account(values, schema, field, account_id))
-}
-
-fn api_key_field_status(
+fn api_key_field_status_for_namespace(
     values: &BTreeMap<String, String>,
     exchange_schema: &ExchangeApiKeySchema,
     field_schema: &ExchangeApiFieldSchema,
     account_id: &str,
+    credential_namespace: &str,
     include_values: bool,
 ) -> ExchangeApiKeyFieldStatus {
-    let configured = configured_field_value(values, exchange_schema, field_schema, account_id);
+    let configured = configured_field_value_for_namespace(
+        values,
+        exchange_schema,
+        field_schema,
+        account_id,
+        credential_namespace,
+    );
     ExchangeApiKeyFieldStatus {
         field: field_schema.field.to_string(),
         label: field_schema.label.to_string(),
@@ -5901,40 +6624,67 @@ fn api_key_field_status(
 }
 
 async fn apply_exchange_api_key_update(
-    path: &PathBuf,
+    state: &AppState,
     request: ExchangeApiKeyUpdateRequest,
 ) -> Result<()> {
     let exchange = request.exchange.trim().to_ascii_lowercase();
-    let account_id = normalize_account_id(request.account_id.as_deref().unwrap_or("default"));
+    let raw_account_id = request.account_id.as_deref().unwrap_or("default").trim();
+    validate_account_identifier(raw_account_id)?;
+    let account_id = normalize_account_id(raw_account_id);
+    let credential_namespace_input = request.credential_namespace.as_deref();
     reject_multiline_secret("account_label", request.account_label.as_deref())?;
+    reject_multiline_secret("credential_namespace", credential_namespace_input)?;
     reject_multiline_secret("account_id", request.exchange_account_id.as_deref())?;
     reject_multiline_secret("api_key", request.api_key.as_deref())?;
     reject_multiline_secret("api_secret", request.api_secret.as_deref())?;
     reject_multiline_secret("passphrase", request.passphrase.as_deref())?;
-    let mut values = read_env_store(path).await?;
+    let mut values = read_env_store(&state.exchange_api_key_store).await?;
     let schema = exchange_api_key_schema(&exchange)
         .ok_or_else(|| anyhow::anyhow!("unsupported exchange {}", request.exchange))?;
-    if request.clear {
-        clear_exchange_values(&mut values, schema, &account_id);
-    } else {
-        if let Some(label) = request
-            .account_label
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            values.insert(
-                account_label_env_key(schema, &account_id),
-                label.to_string(),
+    let account_manager_accounts = read_account_manager_accounts(&state.accounts_config)
+        .await
+        .unwrap_or_else(|error| {
+            log::warn!(
+                "failed to read account manager config {} while saving exchange credentials: {error:#}",
+                state.accounts_config.display()
             );
-        }
+            Vec::new()
+        });
+    let credential_namespace = credential_namespace_for_update(
+        schema,
+        &account_manager_accounts,
+        &account_id,
+        credential_namespace_input,
+    )?;
+    validate_credential_namespace(&credential_namespace)?;
+    if request.clear {
+        clear_exchange_values_for_namespace(
+            &mut values,
+            schema,
+            &account_id,
+            &credential_namespace,
+        );
+    } else {
         for field in schema.fields {
             if let Some(value) = request_secret_value(&request, field.field) {
-                set_account_field_value(&mut values, schema, field, &account_id, value);
+                set_account_field_value_for_namespace(
+                    &mut values,
+                    schema,
+                    field,
+                    &account_id,
+                    &credential_namespace,
+                    value,
+                );
             }
         }
         for field in schema.fields.iter().filter(|field| field.required) {
-            if !field_value_present_for_account(&values, schema, field, &account_id) {
+            if !field_value_present_for_namespace(
+                &values,
+                schema,
+                field,
+                &account_id,
+                &credential_namespace,
+            ) {
                 return Err(anyhow::anyhow!(
                     "{} {} requires {}",
                     schema.label,
@@ -5944,7 +6694,7 @@ async fn apply_exchange_api_key_update(
             }
         }
     }
-    write_env_store(path, &values).await
+    write_env_store(&state.exchange_api_key_store, &values).await
 }
 
 async fn clear_exchange_api_keys(path: &PathBuf, exchange: &str) -> Result<()> {
@@ -5961,16 +6711,45 @@ fn clear_exchange_values(
     schema: &ExchangeApiKeySchema,
     account_id: &str,
 ) {
-    for field in schema.fields {
-        if account_id == "default" {
-            for alias in field.aliases {
-                values.remove(*alias);
-            }
+    let credential_namespace = credential_namespace_for_account(schema, account_id, None);
+    clear_exchange_values_for_namespace(values, schema, account_id, &credential_namespace);
+}
+
+fn clear_exchange_values_for_namespace(
+    values: &mut BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: &str,
+) {
+    if account_id == "default" {
+        if credential_namespace.eq_ignore_ascii_case(&env_exchange_prefix(schema.exchange)) {
+            clear_all_exchange_values(values, schema);
         } else {
-            values.remove(&account_env_key(schema, account_id, field.field));
+            for field in schema.fields {
+                for key in namespace_env_keys(credential_namespace, field.field) {
+                    values.remove(&key);
+                }
+            }
+        }
+        return;
+    }
+    for field in schema.fields {
+        for key in namespace_env_keys(credential_namespace, field.field) {
+            values.remove(&key);
         }
     }
     values.remove(&account_label_env_key(schema, account_id));
+}
+
+fn clear_all_exchange_values(values: &mut BTreeMap<String, String>, schema: &ExchangeApiKeySchema) {
+    for field in schema.fields {
+        for alias in field.aliases {
+            values.remove(*alias);
+        }
+    }
+    values.remove(&account_label_env_key(schema, "default"));
+    let prefix = account_env_prefix(schema.exchange);
+    values.retain(|key, _| !key.starts_with(&prefix));
 }
 
 fn request_secret_value<'a>(
@@ -6029,45 +6808,61 @@ fn configured_field_value_for_namespace(
     account_id: &str,
     credential_namespace: &str,
 ) -> Option<(String, String)> {
+    if field.field == "account_id" {
+        let account_id = normalize_account_id(account_id);
+        if account_id != "default" {
+            return Some(("strategy_config".to_string(), account_id));
+        }
+    }
     let default_prefix = env_exchange_prefix(schema.exchange);
-    if normalize_account_id(account_id) == "default"
-        || credential_namespace.eq_ignore_ascii_case(&default_prefix)
-    {
+    if credential_namespace.eq_ignore_ascii_case(&default_prefix) {
         return configured_field_value(values, schema, field, account_id);
     }
-    let key = format!(
-        "{}_{}",
-        credential_namespace.trim_end_matches('_'),
-        field.field.to_ascii_uppercase()
-    );
-    values
-        .get(&key)
-        .filter(|value| !value.is_empty())
-        .map(|value| ("key_store".to_string(), value.clone()))
-        .or_else(|| {
-            std::env::var(&key)
-                .ok()
+    namespace_env_keys(credential_namespace, field.field)
+        .into_iter()
+        .find_map(|key| {
+            values
+                .get(&key)
                 .filter(|value| !value.is_empty())
-                .map(|value| ("process_env".to_string(), value))
+                .map(|value| ("key_store".to_string(), value.clone()))
+                .or_else(|| {
+                    std::env::var(&key)
+                        .ok()
+                        .filter(|value| !value.is_empty())
+                        .map(|value| ("process_env".to_string(), value))
+                })
         })
 }
 
-fn field_value_present_for_account(
+fn field_value_present_for_namespace(
     values: &BTreeMap<String, String>,
     schema: &ExchangeApiKeySchema,
     field: &ExchangeApiFieldSchema,
     account_id: &str,
+    credential_namespace: &str,
 ) -> bool {
-    configured_field_value(values, schema, field, account_id).is_some()
+    configured_field_value_for_namespace(values, schema, field, account_id, credential_namespace)
+        .is_some()
 }
 
-fn set_account_field_value(
+fn set_account_field_value_for_namespace(
     values: &mut BTreeMap<String, String>,
     schema: &ExchangeApiKeySchema,
     field: &ExchangeApiFieldSchema,
     account_id: &str,
+    credential_namespace: &str,
     value: &str,
 ) {
+    let default_prefix = env_exchange_prefix(schema.exchange);
+    if !credential_namespace.eq_ignore_ascii_case(&default_prefix) {
+        if let Some(key) = namespace_env_keys(credential_namespace, field.field)
+            .into_iter()
+            .next()
+        {
+            set_if_present(values, &key, Some(value));
+        }
+        return;
+    }
     if account_id == "default" {
         for alias in field.aliases {
             set_if_present(values, alias, Some(value));
@@ -6078,37 +6873,99 @@ fn set_account_field_value(
     }
 }
 
-fn stored_account_ids(
-    values: &BTreeMap<String, String>,
-    schema: &ExchangeApiKeySchema,
-) -> Vec<String> {
-    let prefix = format!("{}__", env_exchange_prefix(schema.exchange));
-    let mut accounts = BTreeSet::new();
-    for key in values.keys() {
-        if let Some(rest) = key.strip_prefix(&prefix) {
-            if let Some((account, _field)) = rest.split_once("__") {
-                accounts.insert(account.to_ascii_lowercase());
-            }
-        }
-    }
-    accounts.into_iter().collect()
-}
-
-fn stored_account_label(
-    values: &BTreeMap<String, String>,
+fn credential_namespace_for_account(
     schema: &ExchangeApiKeySchema,
     account_id: &str,
-) -> Option<String> {
-    let key = account_label_env_key(schema, account_id);
-    values
-        .get(&key)
-        .filter(|value| !value.trim().is_empty())
-        .cloned()
-        .or_else(|| {
-            std::env::var(&key)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
+    credential_namespace: Option<&str>,
+) -> String {
+    let configured = credential_namespace
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase());
+    if let Some(namespace) = configured {
+        return namespace;
+    }
+    let account_id = normalize_account_id(account_id);
+    if account_id == "default" {
+        env_exchange_prefix(schema.exchange)
+    } else {
+        format!(
+            "{}__{}_",
+            env_exchange_prefix(schema.exchange),
+            account_id.to_ascii_uppercase().replace('-', "_")
+        )
+    }
+}
+
+fn credential_namespace_for_update(
+    schema: &ExchangeApiKeySchema,
+    account_manager_accounts: &[AccountManagerAccountStatus],
+    account_id: &str,
+    credential_namespace: Option<&str>,
+) -> Result<String> {
+    let account = account_manager_accounts
+        .iter()
+        .find(|account| {
+            account.exchange.eq_ignore_ascii_case(schema.exchange)
+                && account.account_id.eq_ignore_ascii_case(account_id)
         })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} account {} is not configured in account manager; update config/accounts.yml first",
+                schema.label,
+                account_id
+            )
+        })?;
+    let namespace = account.credential_namespace.trim().to_ascii_uppercase();
+    if namespace.is_empty() {
+        anyhow::bail!(
+            "{} account {} has empty env_prefix in account manager",
+            schema.label,
+            account_id
+        );
+    }
+    if let Some(requested) = credential_namespace
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let requested = requested.to_ascii_uppercase();
+        if requested != namespace {
+            anyhow::bail!(
+                "{} account {} env_prefix mismatch: account manager uses {}, request used {}",
+                schema.label,
+                account_id,
+                namespace,
+                requested
+            );
+        }
+    }
+    Ok(namespace)
+}
+
+fn validate_account_identifier(account_id: &str) -> Result<()> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return Ok(());
+    }
+    if account_id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("account_id must contain only ASCII letters, digits, and _")
+    }
+}
+
+fn validate_credential_namespace(credential_namespace: &str) -> Result<()> {
+    if credential_namespace.is_empty()
+        || credential_namespace
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))
+    {
+        anyhow::bail!("credential_namespace must contain only ASCII letters, digits, and _");
+    }
+    Ok(())
 }
 
 fn normalize_account_id(value: &str) -> String {
@@ -6153,8 +7010,8 @@ fn parse_exchange_account_path(exchange: &str) -> (String, String) {
 
 fn account_env_key(schema: &ExchangeApiKeySchema, account_id: &str, field: &str) -> String {
     format!(
-        "{}__{}__{}",
-        env_exchange_prefix(schema.exchange),
+        "{}{}__{}",
+        account_env_prefix(schema.exchange),
         account_id.to_ascii_uppercase().replace('-', "_"),
         field.to_ascii_uppercase()
     )
@@ -6165,6 +7022,15 @@ fn account_label_env_key(schema: &ExchangeApiKeySchema, account_id: &str) -> Str
         format!("{}_ACCOUNT_LABEL", env_exchange_prefix(schema.exchange))
     } else {
         account_env_key(schema, account_id, "account_label")
+    }
+}
+
+fn account_env_prefix(exchange: &str) -> String {
+    let prefix = env_exchange_prefix(exchange);
+    if prefix.ends_with('_') {
+        format!("{prefix}_")
+    } else {
+        format!("{prefix}__")
     }
 }
 
@@ -8061,6 +8927,7 @@ mod tests {
             snapshot_path: dir.join("snapshot.json"),
             command_path: dir.join("commands.jsonl"),
             exchange_api_key_store: dir.join("exchange_api_keys.env"),
+            accounts_config: dir.join("accounts.yml"),
             balance_history_path: dir.join("balance_history.json"),
             strategy_profit_history_path: dir.join("strategy_profit_history.json"),
             strategy_config: config_path,
@@ -8080,12 +8947,81 @@ mod tests {
         std::fs::write(path, serde_yaml::to_string(&config).unwrap()).unwrap();
     }
 
+    fn write_accounts_config(path: &PathBuf) {
+        std::fs::write(
+            path,
+            r#"
+accounts:
+  binance_hcr:
+    name: binance_hcr
+    exchange: binance
+    type: futures
+    description: HCR account
+    env_prefix: BINANCE_3
+    enabled: true
+    settings:
+      max_positions: 5
+      max_orders_per_symbol: 10
+  market_maker:
+    name: market_maker
+    exchange: bitget
+    type: futures
+    description: Market maker account
+    env_prefix: BITGET_MM
+    enabled: true
+    settings:
+      max_positions: 5
+      max_orders_per_symbol: 10
+  hedge:
+    name: hedge
+    exchange: bitget
+    type: futures
+    description: Hedge account
+    env_prefix: BITGET_HEDGE
+    enabled: true
+    settings:
+      max_positions: 5
+      max_orders_per_symbol: 10
+"#,
+        )
+        .unwrap();
+    }
+
+    async fn register_funding_strategy(state: &AppState, config_path: &PathBuf) {
+        let mut supervisor = state.supervisor.write().await;
+        let mut process = StrategyProcess::new(
+            "funding-arb-local",
+            "funding_arbitrage",
+            "local",
+            "local",
+            config_path.to_string_lossy().to_string(),
+        );
+        process.status = ProcessStatus::Stopped;
+        let spec = StrategyProcessSpec::new(
+            "funding-arb-local",
+            "funding_arbitrage",
+            "local",
+            "local",
+            config_path.to_string_lossy().to_string(),
+            "cargo",
+        )
+        .with_args(default_strategy_args(
+            "funding_arbitrage",
+            &config_path.to_string_lossy(),
+            Vec::new(),
+        ))
+        .with_working_dir(".");
+        supervisor.register(process).unwrap();
+        supervisor.remember_spec(spec);
+    }
+
     #[tokio::test]
     async fn exchange_api_key_status_should_list_all_supported_exchanges() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("strategy.yml");
         write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Bitget]);
         let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
 
         let status = exchange_api_key_status(&state).await.unwrap();
         let supported = status
@@ -8109,18 +9045,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exchange_api_key_update_should_persist_multiple_account_labels() {
+    async fn exchange_api_key_status_should_include_account_manager_accounts() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
+
+        let status = exchange_api_key_status(&state).await.unwrap();
+        let account = status
+            .account_manager_accounts
+            .iter()
+            .find(|account| account.account_id == "binance_hcr")
+            .expect("account manager account should be exposed");
+
+        assert_eq!(account.exchange, "binance");
+        assert_eq!(account.env_prefix, "BINANCE_3");
+        assert_eq!(account.credential_namespace, "BINANCE_3");
+        assert!(status
+            .exchanges
+            .iter()
+            .any(|row| row.exchange == "binance" && row.account_id == "binance_hcr"));
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_status_should_not_resurrect_deleted_process_env_keys() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+        write_env_store(
+            &state.exchange_api_key_store,
+            &BTreeMap::from([
+                ("BINANCE_API_KEY".to_string(), "deleted-key".to_string()),
+                (
+                    "BINANCE_API_SECRET".to_string(),
+                    "deleted-secret".to_string(),
+                ),
+            ]),
+        )
+        .await
+        .unwrap();
+        clear_exchange_api_keys(&state.exchange_api_key_store, "binance")
+            .await
+            .unwrap();
+
+        let status = exchange_api_key_status(&state).await.unwrap();
+
+        assert!(status.exchanges.is_empty());
+        assert!(status
+            .supported_exchanges
+            .iter()
+            .filter(|row| row.exchange == "binance")
+            .flat_map(|row| row.fields.iter())
+            .all(|field| !field.configured));
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_update_should_persist_multiple_account_ids() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("strategy.yml");
         write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Bitget]);
         let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
 
         apply_exchange_api_key_update(
-            &state.exchange_api_key_store,
+            &state,
             ExchangeApiKeyUpdateRequest {
                 exchange: "bitget".to_string(),
                 account_id: Some("market_maker".to_string()),
-                account_label: Some("Market Making".to_string()),
+                account_label: Some("ignored_label_a".to_string()),
+                credential_namespace: None,
                 exchange_account_id: None,
                 api_key: Some("key".to_string()),
                 api_secret: Some("secret".to_string()),
@@ -8132,11 +9127,12 @@ mod tests {
         .unwrap();
 
         apply_exchange_api_key_update(
-            &state.exchange_api_key_store,
+            &state,
             ExchangeApiKeyUpdateRequest {
                 exchange: "bitget".to_string(),
                 account_id: Some("hedge".to_string()),
-                account_label: Some("Hedge Account".to_string()),
+                account_label: Some("ignored_label_b".to_string()),
+                credential_namespace: None,
                 exchange_account_id: None,
                 api_key: Some("key2".to_string()),
                 api_secret: Some("secret2".to_string()),
@@ -8155,13 +9151,195 @@ mod tests {
             .map(|row| (row.account_id.as_str(), row.account_label.as_str()))
             .collect::<BTreeMap<_, _>>();
 
-        assert_eq!(labels.get("market_maker"), Some(&"Market Making"));
-        assert_eq!(labels.get("hedge"), Some(&"Hedge Account"));
+        assert_eq!(labels.get("market_maker"), Some(&"market_maker"));
+        assert_eq!(labels.get("hedge"), Some(&"hedge"));
         assert!(status
             .exchanges
             .iter()
             .filter(|row| row.exchange == "bitget")
             .all(|row| row.fields.iter().all(|field| field.configured)));
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_update_should_persist_runtime_env_prefix_namespace() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
+
+        apply_exchange_api_key_update(
+            &state,
+            ExchangeApiKeyUpdateRequest {
+                exchange: "binance".to_string(),
+                account_id: Some("binance_hcr".to_string()),
+                account_label: Some("HCR".to_string()),
+                credential_namespace: Some("BINANCE_3".to_string()),
+                exchange_account_id: None,
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                passphrase: None,
+                clear: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let values = read_env_store(&state.exchange_api_key_store).await.unwrap();
+        assert_eq!(values.get("BINANCE_3_API_KEY"), Some(&"key".to_string()));
+        assert_eq!(
+            values.get("BINANCE_3_API_SECRET"),
+            Some(&"secret".to_string())
+        );
+
+        let status = exchange_api_key_status(&state).await.unwrap();
+        let row = status
+            .exchanges
+            .iter()
+            .find(|row| row.credential_namespace == "BINANCE_3")
+            .expect("runtime namespace should be listed");
+        assert_eq!(row.exchange, "binance");
+        assert_eq!(row.account_id, "binance_hcr");
+        assert!(row.fields.iter().all(|field| field.configured));
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_update_should_use_account_manager_env_prefix() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
+
+        apply_exchange_api_key_update(
+            &state,
+            ExchangeApiKeyUpdateRequest {
+                exchange: "binance".to_string(),
+                account_id: Some("binance_hcr".to_string()),
+                account_label: None,
+                credential_namespace: None,
+                exchange_account_id: None,
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                passphrase: None,
+                clear: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let values = read_env_store(&state.exchange_api_key_store).await.unwrap();
+        assert_eq!(values.get("BINANCE_3_API_KEY"), Some(&"key".to_string()));
+        assert_eq!(
+            values.get("BINANCE_3_API_SECRET"),
+            Some(&"secret".to_string())
+        );
+
+        let status = exchange_api_key_status(&state).await.unwrap();
+        let row = status
+            .exchanges
+            .iter()
+            .find(|row| row.account_id == "binance_hcr")
+            .expect("account manager credential row should be listed");
+        assert_eq!(row.credential_namespace, "BINANCE_3");
+        assert!(row.fields.iter().all(|field| field.configured));
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_update_should_reject_invalid_account_identifier() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+
+        let error = apply_exchange_api_key_update(
+            &state,
+            ExchangeApiKeyUpdateRequest {
+                exchange: "binance".to_string(),
+                account_id: Some("main-account".to_string()),
+                account_label: None,
+                credential_namespace: None,
+                exchange_account_id: None,
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                passphrase: None,
+                clear: false,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("account_id must contain only ASCII letters, digits, and _"));
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_update_should_reject_account_missing_from_manager() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
+
+        let error = apply_exchange_api_key_update(
+            &state,
+            ExchangeApiKeyUpdateRequest {
+                exchange: "binance".to_string(),
+                account_id: Some("unknown_account".to_string()),
+                account_label: None,
+                credential_namespace: None,
+                exchange_account_id: None,
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                passphrase: None,
+                clear: false,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("is not configured in account manager"));
+    }
+
+    #[tokio::test]
+    async fn delete_default_exchange_keys_should_clear_aliases_and_subaccounts() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("keys.env");
+        write_env_store(
+            &path,
+            &BTreeMap::from([
+                ("BINANCE_API_KEY".to_string(), "key".to_string()),
+                ("BINANCE_API_SECRET".to_string(), "secret".to_string()),
+                ("BINANCE_SPOT_API_KEY".to_string(), "spot-key".to_string()),
+                (
+                    "BINANCE_SPOT_API_SECRET".to_string(),
+                    "spot-secret".to_string(),
+                ),
+                (
+                    "BINANCE__HEDGE__API_KEY".to_string(),
+                    "hedge-key".to_string(),
+                ),
+                (
+                    "BINANCE__HEDGE__API_SECRET".to_string(),
+                    "hedge-secret".to_string(),
+                ),
+                ("BITGET_API_KEY".to_string(), "bitget-key".to_string()),
+            ]),
+        )
+        .await
+        .unwrap();
+
+        clear_exchange_api_keys(&path, "binance").await.unwrap();
+
+        let values = read_env_store(&path).await.unwrap();
+        assert!(!values.keys().any(|key| key.starts_with("BINANCE")));
+        assert_eq!(
+            values.get("BITGET_API_KEY"),
+            Some(&"bitget-key".to_string())
+        );
     }
 
     fn test_symbol_rule() -> SymbolRule {
@@ -8923,6 +10101,60 @@ mod tests {
     }
 
     #[test]
+    fn cross_arb_account_console_should_accept_custom_default_prefix_and_config_account_id() {
+        let settings = json!({
+            "exchanges": [
+                {
+                    "exchange": "binance",
+                    "enabled": true,
+                    "account_id": "",
+                    "env_prefix": "BINANCE_0",
+                    "private_rest_enabled": true,
+                    "private_ws_enabled": true
+                },
+                {
+                    "exchange": "gate",
+                    "enabled": true,
+                    "account_id": "16076371",
+                    "env_prefix": "GATE",
+                    "private_rest_enabled": true,
+                    "private_ws_enabled": true
+                }
+            ]
+        });
+        let api_key_values = BTreeMap::from([
+            ("BINANCE_0_API_KEY".to_string(), "binance-key".to_string()),
+            (
+                "BINANCE_0_API_SECRET".to_string(),
+                "binance-secret".to_string(),
+            ),
+            (
+                "GATE__16076371__API_KEY".to_string(),
+                "gate-key".to_string(),
+            ),
+            (
+                "GATE__16076371__API_SECRET".to_string(),
+                "gate-secret".to_string(),
+            ),
+        ]);
+
+        let rows = cross_arb_account_console(&settings, &[], &api_key_values);
+
+        assert_eq!(rows[0]["credential_namespace"], "BINANCE_0");
+        assert_eq!(rows[0]["credentials"]["configured"], json!(2));
+        assert_eq!(
+            rows[0]["credentials"]["configured_all_required"],
+            json!(true)
+        );
+        assert_eq!(rows[1]["credential_namespace"], "GATE__16076371_");
+        assert_eq!(rows[1]["credentials"]["configured"], json!(3));
+        assert_eq!(
+            rows[1]["credentials"]["configured_all_required"],
+            json!(true)
+        );
+    }
+
+    #[test]
     fn cross_arb_account_readiness_should_summarize_missing_credentials() {
         let account_console = vec![
             json!({
@@ -9261,6 +10493,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn funding_arb_settings_update_should_save_live_parameters_and_account_prefix() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("funding_live.yml");
+        let accounts_path = dir.path().join("accounts.yml");
+        let mut config = FundingRateArbitrageConfig::default();
+        config.mode = "live".to_string();
+        config.universe.enabled_exchanges = vec![ExchangeId::Binance, ExchangeId::Bitget];
+        config.selection.max_seconds_to_settlement_at_scan = Some(600);
+        config.execution.notional_usdt = 6.0;
+        std::fs::write(&config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+        std::fs::write(
+            &accounts_path,
+            r#"
+accounts:
+  binance_hcr:
+    name: binance_hcr
+    exchange: binance
+    type: futures
+    env_prefix: BINANCE_3
+    enabled: true
+"#,
+        )
+        .unwrap();
+        let mut state = test_app_state(dir.path(), dir.path().join("unused.yml"));
+        state.accounts_config = accounts_path;
+        register_funding_strategy(&state, &config_path).await;
+
+        let response = apply_funding_arb_settings_update(
+            &state,
+            FundingArbSettingsUpdateRequest {
+                mode: Some("live".to_string()),
+                per_exchange_limit: Some(2),
+                min_funding_rate: Some(-0.007),
+                max_funding_snapshot_age_ms: Some(7000),
+                min_seconds_to_settlement_at_scan: Some(3),
+                max_seconds_to_settlement_at_scan: Some(900),
+                notional_usdt: Some(8.5),
+                exchanges: vec![
+                    FundingArbExchangeSettingsRequest {
+                        exchange: "binance".to_string(),
+                        enabled: true,
+                        account_id: Some("binance_hcr".to_string()),
+                        ..FundingArbExchangeSettingsRequest::default()
+                    },
+                    FundingArbExchangeSettingsRequest {
+                        exchange: "bitget".to_string(),
+                        enabled: false,
+                        account_id: Some("default".to_string()),
+                        env_prefix: Some("BITGET".to_string()),
+                        ..FundingArbExchangeSettingsRequest::default()
+                    },
+                ],
+                restart: false,
+                ..FundingArbSettingsUpdateRequest::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["saved"], json!(true));
+        assert_eq!(response["restart"]["skipped"], json!(true));
+        let saved: FundingRateArbitrageConfig =
+            serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(saved.selection.per_exchange_limit, 2);
+        assert_eq!(saved.selection.min_funding_rate, -0.007);
+        assert_eq!(saved.execution.notional_usdt, 8.5);
+        assert_eq!(
+            saved.exchanges[&ExchangeId::Binance].account_id.as_deref(),
+            Some("binance_hcr")
+        );
+        assert_eq!(
+            saved.exchanges[&ExchangeId::Binance].env_prefix.as_deref(),
+            Some("BINANCE_3")
+        );
+        assert_eq!(saved.exchanges[&ExchangeId::Bitget].enabled, Some(false));
+    }
+
+    #[tokio::test]
     async fn read_cross_arb_events_should_keep_full_market_snapshot_universe() {
         let dir = tempdir().unwrap();
         let event_dir = dir.path().join("cross-arb-events");
@@ -9476,6 +10786,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cross_arb_settings_update_should_fill_env_prefix_from_account_manager() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("cross_exchange_arbitrage_usdt.yml");
+        std::fs::write(
+            &config_path,
+            serde_yaml::to_string(&CrossExchangeArbitrageConfig::default()).unwrap(),
+        )
+        .unwrap();
+        let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
+        let request = CrossArbSettingsUpdateRequest {
+            exchanges: vec![CrossArbExchangeSettingsRequest {
+                exchange: "binance".to_string(),
+                enabled: true,
+                account_id: Some("binance_hcr".to_string()),
+                env_prefix: None,
+                private_rest_enabled: Some(true),
+                private_ws_enabled: Some(true),
+            }],
+            restart: false,
+            ..CrossArbSettingsUpdateRequest::default()
+        };
+
+        apply_cross_arb_settings_update(&state, request)
+            .await
+            .unwrap();
+        let saved = read_cross_arb_config(&state).await.unwrap();
+        let runtime = saved.exchanges.get(&ExchangeId::Binance).unwrap();
+
+        assert_eq!(runtime.account_id.as_deref(), Some("binance_hcr"));
+        assert_eq!(runtime.env_prefix.as_deref(), Some("BINANCE_3"));
+    }
+
+    #[tokio::test]
     async fn cross_arb_settings_update_should_reject_unsupported_exchange() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("cross_exchange_arbitrage_usdt.yml");
@@ -9533,6 +10877,7 @@ mod tests {
             snapshot_path: dir.path().join("snapshot.json"),
             command_path: dir.path().join("commands.jsonl"),
             exchange_api_key_store: dir.path().join("exchange_api_keys.env"),
+            accounts_config: dir.path().join("accounts.yml"),
             balance_history_path: dir.path().join("balance_history.json"),
             strategy_profit_history_path: dir.path().join("strategy_profit_history.json"),
             strategy_config: config_path.clone(),

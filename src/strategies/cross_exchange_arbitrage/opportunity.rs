@@ -5,7 +5,7 @@ use super::config::OpenExecutionStyle;
 use super::fees::FeeModel;
 use super::funding::FundingModel;
 use super::risk::{book_age_ms, RejectReason, RiskGate};
-use super::simulation::{best_level_covers_base_quantity, calculate_taker_vwap};
+use super::simulation::calculate_taker_vwap;
 use super::sizing::{
     size_dual_taker_pair_for_notional, size_hedge_pair_for_notional, ExchangeLegSize,
 };
@@ -122,6 +122,8 @@ pub struct Opportunity {
     pub expected_funding_usdt: f64,
     pub slippage_pct: f64,
     pub depth_notional_usdt: f64,
+    #[serde(default)]
+    pub top_of_book_capacity_usdt: f64,
     pub book_age_ms: i64,
     pub route_status: RouteStatus,
     pub can_open: bool,
@@ -206,6 +208,7 @@ fn build_opportunity(
         config.sizing.min_notional_usdt,
         config.sizing.max_notional_usdt,
     );
+    let dual_taker = config.execution.open_execution_style == OpenExecutionStyle::DualTaker;
     let (
         maker_snapshot,
         taker_snapshot,
@@ -259,7 +262,7 @@ fn build_opportunity(
         maker_snapshot.instrument.as_ref(),
         maker_side,
         config.execution.maker_price_offset_ticks,
-        config.execution.open_execution_style == OpenExecutionStyle::DualTaker,
+        dual_taker,
     )
     .unwrap_or(0.0);
     let maker_price_tick = maker_snapshot
@@ -272,7 +275,7 @@ fn build_opportunity(
         OrderSide::Sell => maker_book.best_bid().map(|level| level.price),
     };
     let maker_book_spread_pct = book_spread_pct(maker_book);
-    let sized_pair = if config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
+    let sized_pair = if dual_taker {
         match (&long_snapshot.instrument, &short_snapshot.instrument) {
             (Some(long_instrument), Some(short_instrument)) => {
                 Some(size_dual_taker_pair_for_notional(
@@ -325,7 +328,7 @@ fn build_opportunity(
     });
     let maker_entry_price = (maker_price > 0.0).then_some(maker_price);
     let (effective_long_entry_price, effective_short_entry_price, effective_slippage_pct) =
-        if config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
+        if dual_taker {
             (
                 long_taker_vwap.vwap_price,
                 short_taker_vwap.vwap_price,
@@ -359,7 +362,7 @@ fn build_opportunity(
         now,
         config.funding.no_open_before_funding_mins,
     );
-    let fees = if config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
+    let fees = if dual_taker {
         fee_model.estimate_dual_taker_round_trip(
             &long_snapshot.book.exchange,
             &short_snapshot.book.exchange,
@@ -372,12 +375,11 @@ fn build_opportunity(
             executable_notional,
         )
     };
-    let maker_non_fill_penalty =
-        if config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
-            0.0
-        } else {
-            config.risk.maker_non_fill_penalty
-        };
+    let maker_non_fill_penalty = if dual_taker {
+        0.0
+    } else {
+        config.risk.maker_non_fill_penalty
+    };
     let maker_taker_net_edge = raw_open_spread
         - fees.total_normal_fee() / executable_notional.max(1.0)
         + funding.net_funding_rate
@@ -400,27 +402,26 @@ fn build_opportunity(
     if maker_snapshot.instrument.is_none() || taker_snapshot.instrument.is_none() {
         reject_reasons.push(RejectReason::PrecisionInvalid);
     }
-    if config.execution.open_execution_style == OpenExecutionStyle::DualTaker {
+    let top_of_book_capacity = if dual_taker {
+        dual_taker_top_of_book_capacity_usdt(
+            &long_snapshot.book,
+            &short_snapshot.book,
+            config.market.top_of_book_capacity_ratio,
+        )
+        .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    if dual_taker {
         if !long_taker_vwap.depth_enough || !short_taker_vwap.depth_enough {
             reject_reasons.push(RejectReason::DepthInsufficient);
         }
         if effective_slippage_pct > config.risk.max_taker_slippage_pct {
             reject_reasons.push(RejectReason::SlippageTooHigh);
         }
-        if let Some(base_quantity) = normalized_base_qty {
-            if requires_l1_base_quantity_check(long_snapshot, short_snapshot)
-                && (!best_level_covers_base_quantity(
-                    &long_snapshot.book,
-                    OrderSide::Buy,
-                    base_quantity,
-                ) || !best_level_covers_base_quantity(
-                    &short_snapshot.book,
-                    OrderSide::Sell,
-                    base_quantity,
-                ))
-            {
-                reject_reasons.push(RejectReason::DepthInsufficient);
-            }
+        let required_capacity = target_notional.max(executable_notional);
+        if top_of_book_capacity <= required_capacity + f64::EPSILON {
+            reject_reasons.push(RejectReason::DepthInsufficient);
         }
     }
     if sized_pair
@@ -483,8 +484,6 @@ fn build_opportunity(
         common_book_profile(long_trigger_book_profile, short_trigger_book_profile);
     let validation_book_profile =
         common_book_profile(long_validation_book_profile, short_validation_book_profile);
-    let dual_taker = config.execution.open_execution_style == OpenExecutionStyle::DualTaker;
-
     Opportunity {
         opportunity_id: opportunity_id.clone(),
         bundle_id: opportunity_id,
@@ -535,6 +534,7 @@ fn build_opportunity(
         } else {
             taker_vwap.filled_notional_usdt
         },
+        top_of_book_capacity_usdt: top_of_book_capacity,
         book_age_ms: book_age_ms(maker_book, now).max(book_age_ms(taker_book, now)),
         route_status,
         can_open: reject_reasons.is_empty(),
@@ -553,19 +553,6 @@ fn common_book_profile(
         (Some(profile), None) | (None, Some(profile)) => Some(profile),
         _ => None,
     }
-}
-
-fn requires_l1_base_quantity_check(
-    long_snapshot: &MarketSnapshot,
-    short_snapshot: &MarketSnapshot,
-) -> bool {
-    matches!(
-        (
-            validation_book_profile(long_snapshot),
-            validation_book_profile(short_snapshot)
-        ),
-        (Some(PublicBookProfileKind::FastestL1), _) | (_, Some(PublicBookProfileKind::FastestL1))
-    ) || (long_snapshot.book.asks.len() <= 1 && short_snapshot.book.bids.len() <= 1)
 }
 
 fn trigger_book_profile(snapshot: &MarketSnapshot) -> Option<PublicBookProfileKind> {
@@ -699,6 +686,28 @@ fn executable_notional_usdt(
         _ => target_notional,
     }
     .max(0.0)
+}
+
+fn dual_taker_top_of_book_capacity_usdt(
+    long_book: &OrderBook5,
+    short_book: &OrderBook5,
+    capacity_ratio: f64,
+) -> Option<f64> {
+    if !capacity_ratio.is_finite() || capacity_ratio <= 0.0 {
+        return None;
+    }
+    let long_capacity = best_level_notional_usdt(long_book, OrderSide::Buy)?;
+    let short_capacity = best_level_notional_usdt(short_book, OrderSide::Sell)?;
+    Some(long_capacity.min(short_capacity) * capacity_ratio.min(1.0))
+}
+
+fn best_level_notional_usdt(book: &OrderBook5, side: OrderSide) -> Option<f64> {
+    let level = match side {
+        OrderSide::Buy => book.best_ask(),
+        OrderSide::Sell => book.best_bid(),
+    }?;
+    let notional = level.price * level.quantity;
+    (notional.is_finite() && notional > 0.0).then_some(notional)
 }
 
 fn min_route_status(a: RouteStatus, b: RouteStatus) -> RouteStatus {
@@ -1105,6 +1114,7 @@ mod tests {
         assert_eq!(route.short_limit_price, Some(104.0));
         assert!(route.normalized_base_qty.unwrap_or(0.0) > 0.0);
         assert_eq!(route.expected_net_edge, route.maker_taker_net_edge);
+        assert_eq!(route.top_of_book_capacity_usdt, 800.0);
         assert_eq!(
             route.max_slippage_pct,
             Some(config.execution.taker_ioc_slippage_limit_pct)
@@ -1161,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_exchange_arbitrage_opportunity_dual_taker_depth_should_accept_when_multilevel_depth_enough(
+    fn cross_exchange_arbitrage_opportunity_dual_taker_should_reject_when_l1_capacity_short_even_if_multilevel_depth_enough(
     ) {
         let now = Utc::now();
         let symbol = CanonicalSymbol::new("BTC", "USDT");
@@ -1195,9 +1205,125 @@ mod tests {
             })
             .expect("dual taker route");
 
-        assert!(route.can_open, "{:?}", route.reject_reasons);
+        assert!(!route.can_open);
         assert!(route.depth_notional_usdt >= 100.0);
+        assert!(route.top_of_book_capacity_usdt < 100.0);
         assert!(route.slippage_pct > 0.0);
+        assert!(route
+            .reject_reasons
+            .contains(&RejectReason::DepthInsufficient));
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_opportunity_dual_taker_should_accept_when_l1_capacity_ratio_covers_target(
+    ) {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let config = dual_taker_config();
+        let long_snapshot = MarketSnapshot::healthy(depth_book(
+            ExchangeId::Binance,
+            &[(99.0, 10.0)],
+            &[(100.0, 1.26), (100.1, 10.0)],
+        ))
+        .with_instrument(instrument(ExchangeId::Binance, &symbol, 1.0, 0.001, 5.0))
+        .with_book_profiles(
+            PublicBookProfileKind::FastestL1,
+            PublicBookProfileKind::FastestDepth,
+        );
+        let short_snapshot = MarketSnapshot::healthy(depth_book(
+            ExchangeId::Okx,
+            &[(104.0, 1.25), (103.9, 10.0)],
+            &[(105.0, 10.0)],
+        ))
+        .with_instrument(instrument(ExchangeId::Okx, &symbol, 1.0, 0.001, 5.0))
+        .with_book_profiles(
+            PublicBookProfileKind::FastestL1,
+            PublicBookProfileKind::FastestDepth,
+        );
+
+        let route = scan_opportunities(&symbol, &[long_snapshot, short_snapshot], &config, now)
+            .into_iter()
+            .find(|opportunity| {
+                opportunity.long_exchange == ExchangeId::Binance
+                    && opportunity.short_exchange == ExchangeId::Okx
+            })
+            .expect("dual taker route");
+
+        assert!(route.can_open, "{:?}", route.reject_reasons);
+        assert!(route.top_of_book_capacity_usdt > 100.0);
+        assert!(route.depth_notional_usdt >= 100.0);
+    }
+
+    #[test]
+    fn cross_exchange_arbitrage_opportunity_dual_taker_should_gate_five_point_five_usdt_by_l1_capacity(
+    ) {
+        let now = Utc::now();
+        let symbol = CanonicalSymbol::new("BTC", "USDT");
+        let mut config = dual_taker_config();
+        config.sizing.min_notional_usdt = 5.5;
+        config.sizing.target_notional_usdt = 5.5;
+        config.sizing.max_notional_usdt = 5.5;
+
+        let long_snapshot = MarketSnapshot::healthy(depth_book(
+            ExchangeId::Binance,
+            &[(9.9, 10.0)],
+            &[(10.0, 0.70), (10.1, 10.0)],
+        ))
+        .with_instrument(instrument(ExchangeId::Binance, &symbol, 1.0, 0.001, 5.0))
+        .with_book_profiles(
+            PublicBookProfileKind::FastestL1,
+            PublicBookProfileKind::FastestDepth,
+        );
+        let short_snapshot = MarketSnapshot::healthy(depth_book(
+            ExchangeId::Bitget,
+            &[(11.0, 0.64), (10.9, 10.0)],
+            &[(11.1, 10.0)],
+        ))
+        .with_instrument(instrument(ExchangeId::Bitget, &symbol, 1.0, 0.001, 5.0))
+        .with_book_profiles(
+            PublicBookProfileKind::FastestL1,
+            PublicBookProfileKind::FastestDepth,
+        );
+
+        let route = scan_opportunities(
+            &symbol,
+            &[long_snapshot.clone(), short_snapshot],
+            &config,
+            now,
+        )
+        .into_iter()
+        .find(|opportunity| {
+            opportunity.long_exchange == ExchangeId::Binance
+                && opportunity.short_exchange == ExchangeId::Bitget
+        })
+        .expect("dual taker route");
+
+        assert!(route.can_open, "{:?}", route.reject_reasons);
+        assert!(route.top_of_book_capacity_usdt > 5.5);
+
+        let short_snapshot = MarketSnapshot::healthy(depth_book(
+            ExchangeId::Bitget,
+            &[(11.0, 0.62), (10.9, 10.0)],
+            &[(11.1, 10.0)],
+        ))
+        .with_instrument(instrument(ExchangeId::Bitget, &symbol, 1.0, 0.001, 5.0))
+        .with_book_profiles(
+            PublicBookProfileKind::FastestL1,
+            PublicBookProfileKind::FastestDepth,
+        );
+        let route = scan_opportunities(&symbol, &[long_snapshot, short_snapshot], &config, now)
+            .into_iter()
+            .find(|opportunity| {
+                opportunity.long_exchange == ExchangeId::Binance
+                    && opportunity.short_exchange == ExchangeId::Bitget
+            })
+            .expect("dual taker route");
+
+        assert!(!route.can_open);
+        assert!(route.top_of_book_capacity_usdt < 5.5);
+        assert!(route
+            .reject_reasons
+            .contains(&RejectReason::DepthInsufficient));
     }
 
     #[test]

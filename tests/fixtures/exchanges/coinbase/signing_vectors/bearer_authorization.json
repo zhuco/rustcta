@@ -1,0 +1,9 @@
+{
+  "exchange": "coinbase",
+  "name": "bearer_authorization",
+  "algorithm": "bearer_header",
+  "input_token": " test.jwt ",
+  "expected_authorization": "Bearer test.jwt",
+  "already_prefixed_token": "Bearer existing.jwt",
+  "expected_already_prefixed_authorization": "Bearer existing.jwt"
+}

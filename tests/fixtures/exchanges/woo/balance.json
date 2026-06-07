@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "data": {
+    "holding": [
+      {
+        "token": "BTC",
+        "holding": "0.6",
+        "availableBalance": "0.5",
+        "frozen": "0.1"
+      },
+      {
+        "token": "ETH",
+        "holding": "0",
+        "availableBalance": "0",
+        "frozen": "0"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "data": {
+    "balances": [
+      {
+        "asset": "BTC",
+        "free": "1.2",
+        "locked": "0.3"
+      }
+    ],
+    "makerCommission": "0.001",
+    "takerCommission": "0.0015"
+  }
+}

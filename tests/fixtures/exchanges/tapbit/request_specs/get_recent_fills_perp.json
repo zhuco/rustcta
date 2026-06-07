@@ -1,0 +1,19 @@
+{
+  "exchange": "tapbit",
+  "operation": "get_recent_fills",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/usdt/fills",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "query": {
+    "order_id": {"match": "exact", "value": "P3001"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

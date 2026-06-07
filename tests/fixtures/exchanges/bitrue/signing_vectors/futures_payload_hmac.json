@@ -1,0 +1,13 @@
+{
+  "exchange": "bitrue",
+  "name": "futures_payload_hmac",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1649404670162",
+  "method": "POST",
+  "request_path": "/fapi/v2/order",
+  "body": "{\"contractName\":\"E-BTC-USDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"volume\":\"0.01\",\"price\":\"65000\",\"recvWindow\":5000}",
+  "payload": "1649404670162POST/fapi/v2/order{\"contractName\":\"E-BTC-USDT\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"volume\":\"0.01\",\"price\":\"65000\",\"recvWindow\":5000}",
+  "expected_signature": "fb2fd2a036366564942f76ec1960d912d41f7f888e1065eb85e29eb86c0677cc",
+  "payload_format": "raw_payload"
+}

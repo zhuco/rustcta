@@ -1,0 +1,12 @@
+{
+  "code": 0,
+  "data": {
+    "balances": [
+      {
+        "asset": "USDT",
+        "free": "100.0",
+        "locked": "5.0"
+      }
+    ]
+  }
+}

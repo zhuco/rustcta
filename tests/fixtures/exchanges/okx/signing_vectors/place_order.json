@@ -1,0 +1,13 @@
+{
+  "exchange": "okx",
+  "name": "place_order",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "timestamp": "2024-01-02T03:04:05.678Z",
+  "method": "POST",
+  "request_path": "/api/v5/trade/order",
+  "body": "{\"clOrdId\":\"LIMIT1\",\"instId\":\"BTC-USDT\",\"ordType\":\"limit\",\"px\":\"65000\",\"side\":\"buy\",\"sz\":\"0.02\",\"tdMode\":\"cash\"}",
+  "payload": "2024-01-02T03:04:05.678ZPOST/api/v5/trade/order{\"clOrdId\":\"LIMIT1\",\"instId\":\"BTC-USDT\",\"ordType\":\"limit\",\"px\":\"65000\",\"side\":\"buy\",\"sz\":\"0.02\",\"tdMode\":\"cash\"}",
+  "expected_signature": "agFbSG/WUO5xRh3DyF9Jy0sx4mcplsuNgYveXWZD6EE=",
+  "payload_format": "timestamp_method_path_body"
+}

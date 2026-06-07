@@ -7,11 +7,25 @@ use rustcta_exchange_api::{
 use rustcta_types::{LiquidityRole, MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
+use crate::request_spec::RequestSpec;
+use crate::signing_spec::SigningVector;
+
 use super::test_support::{
     assert_signed_okx_request, assert_signed_okx_request_method, context, exchange_id,
     private_config, spawn_rest_server, symbol_scope,
 };
 use super::{OkxGatewayAdapter, OkxGatewayConfig};
+
+#[test]
+fn okx_signing_vector_fixtures_should_verify() {
+    for path in [
+        "okx/signing_vectors/place_order.json",
+        "okx/signing_vectors/query_order.json",
+    ] {
+        let vector = load_signing_vector(path);
+        vector.verify().expect("fixture signature");
+    }
+}
 
 #[tokio::test]
 async fn okx_adapter_should_keep_private_operations_and_streams_unsupported() {
@@ -152,6 +166,7 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
             exchange: exchange_id(),
             market_type: Some(MarketType::Spot),
             symbol: Some(symbol_scope()),
+            page: None,
         })
         .await
         .expect("open orders");
@@ -187,6 +202,7 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
             start_time: None,
             end_time: None,
             limit: Some(50),
+            page: None,
         })
         .await
         .expect("fills");
@@ -201,10 +217,16 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
 
     let requests = seen.lock().unwrap().clone();
     assert_eq!(requests.len(), 5);
+    load_request_spec("okx/request_specs/get_balances.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("request spec");
     assert_signed_okx_request(&requests[0], "/api/v5/account/balance");
     assert!(requests[0].query.is_empty());
 
     assert_signed_okx_request(&requests[1], "/api/v5/trade/order");
+    load_request_spec("okx/request_specs/query_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("request spec");
     assert_eq!(
         requests[1].query.get("instId").map(String::as_str),
         Some("BTC-USDT")
@@ -215,6 +237,9 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
     );
 
     assert_signed_okx_request(&requests[2], "/api/v5/trade/orders-pending");
+    load_request_spec("okx/request_specs/get_open_orders.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("request spec");
     assert_eq!(
         requests[2].query.get("instType").map(String::as_str),
         Some("SPOT")
@@ -225,6 +250,9 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
     );
 
     assert_signed_okx_request(&requests[3], "/api/v5/account/trade-fee");
+    load_request_spec("okx/request_specs/get_fees.json")
+        .assert_matches(&requests[3].actual_http_request())
+        .expect("request spec");
     assert_eq!(
         requests[3].query.get("instType").map(String::as_str),
         Some("SPOT")
@@ -235,6 +263,9 @@ async fn okx_adapter_should_sign_private_readback_requests_and_parse_responses()
     );
 
     assert_signed_okx_request(&requests[4], "/api/v5/trade/fills-history");
+    load_request_spec("okx/request_specs/get_recent_fills.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("request spec");
     assert_eq!(
         requests[4].query.get("instType").map(String::as_str),
         Some("SPOT")
@@ -387,6 +418,9 @@ async fn okx_adapter_should_route_private_order_mutations() {
     assert_eq!(requests.len(), 6);
 
     assert_signed_okx_request_method(&requests[0], "POST", "/api/v5/trade/order");
+    load_request_spec("okx/request_specs/place_order.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("request spec");
     let body = requests[0].body.as_ref().expect("place body");
     assert_eq!(body["instId"], "BTC-USDT");
     assert_eq!(body["tdMode"], "cash");
@@ -397,6 +431,9 @@ async fn okx_adapter_should_route_private_order_mutations() {
     assert_eq!(body["clOrdId"], "LIMIT1");
 
     assert_signed_okx_request_method(&requests[1], "POST", "/api/v5/trade/order");
+    load_request_spec("okx/request_specs/place_quote_market_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("request spec");
     let body = requests[1].body.as_ref().expect("quote body");
     assert_eq!(body["ordType"], "market");
     assert_eq!(body["sz"], "125.5");
@@ -404,6 +441,9 @@ async fn okx_adapter_should_route_private_order_mutations() {
     assert_eq!(body["clOrdId"], "QUOTE1");
 
     assert_signed_okx_request_method(&requests[2], "POST", "/api/v5/trade/cancel-order");
+    load_request_spec("okx/request_specs/cancel_order.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("request spec");
     let body = requests[2].body.as_ref().expect("cancel body");
     assert_eq!(body["instId"], "BTC-USDT");
     assert_eq!(body["ordId"], "2001");
@@ -416,18 +456,42 @@ async fn okx_adapter_should_route_private_order_mutations() {
     );
 
     assert_signed_okx_request_method(&requests[4], "POST", "/api/v5/trade/cancel-batch-orders");
+    load_request_spec("okx/request_specs/cancel_all_orders.json")
+        .assert_matches(&requests[4].actual_http_request())
+        .expect("request spec");
     let body = requests[4].body.as_ref().unwrap().as_array().unwrap();
     assert_eq!(body.len(), 1);
     assert_eq!(body[0]["instId"], "BTC-USDT");
     assert_eq!(body[0]["ordId"], "2003");
 
     assert_signed_okx_request_method(&requests[5], "POST", "/api/v5/trade/amend-order");
+    load_request_spec("okx/request_specs/amend_order.json")
+        .assert_matches(&requests[5].actual_http_request())
+        .expect("request spec");
     let body = requests[5].body.as_ref().expect("amend body");
     assert_eq!(body["instId"], "BTC-USDT");
     assert_eq!(body["ordId"], "2004");
     assert_eq!(body["clOrdId"], "AMENDOLD");
     assert_eq!(body["newClOrdId"], "AMENDNEW");
     assert_eq!(body["newSz"], "0.015");
+}
+
+fn load_request_spec(path: &str) -> RequestSpec {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("request spec fixture");
+    serde_json::from_str(&text).expect("request spec fixture")
+}
+
+fn load_signing_vector(path: &str) -> SigningVector {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("signing vector fixture");
+    serde_json::from_str(&text).expect("signing vector fixture")
 }
 
 #[tokio::test]

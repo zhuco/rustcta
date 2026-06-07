@@ -1,0 +1,16 @@
+{
+  "exchange": "coinbase",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/accounts",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer test.jwt" }
+  },
+  "query": {
+    "limit": { "match": "exact", "value": "250" }
+  },
+  "forbid_header_values_containing": ["secret"]
+}

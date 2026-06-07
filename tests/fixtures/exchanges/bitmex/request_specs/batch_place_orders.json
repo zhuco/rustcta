@@ -1,0 +1,33 @@
+{
+  "exchange": "bitmex",
+  "operation": "batch_place_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/order/bulk",
+  "auth": "signed",
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "api-expires": {
+      "match": "non_empty"
+    },
+    "api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "body_contains": {
+    "orders": [
+      {
+        "symbol": "XBTUSD",
+        "clOrdID": "batch-place-1"
+      }
+    ]
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": false,
+  "signing_vector": "bitmex/rest_place_order"
+}

@@ -1,0 +1,55 @@
+# BitKan conservative gateway adapter example.
+# The adapter is registered, but all unverified REST/WS trading capabilities
+# stay disabled until official OpenAPI, signing and channel specs are confirmed.
+
+exchange: bitkan
+adapter: bitkan
+enabled: false
+
+market_types:
+  - spot
+  - perpetual
+
+api_key: ${BITKAN_API_KEY}
+api_secret: ${BITKAN_API_SECRET}
+
+rest_base_url: https://bitkan.com
+public_ws_url: wss://bitkan.com/ws
+testnet: false
+sandbox: false
+
+# Keep these disabled. The current adapter returns bitkan.*_unverified
+# Unsupported for public/private REST, order lifecycle, batch and real WS.
+enabled_public_rest: false
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT
+    - ETH-USDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 1
+
+permissions:
+  required: []
+  optional:
+    - read_account
+    - spot_trading
+    - futures_trading
+
+notes:
+  - BitKan is currently a conservative registered shell, not a production trading adapter.
+  - Do not enable private REST or real WebSocket routing until official BitKan API docs are verified.
+  - Batch place/cancel, cancel-all, balances, positions, fees, fills and order lifecycle all return explicit Unsupported today.
+  - Replace placeholder URLs only with official REST/WS API hosts, not browser application endpoints.

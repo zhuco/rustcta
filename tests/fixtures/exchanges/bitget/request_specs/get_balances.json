@@ -1,0 +1,17 @@
+{
+  "exchange": "bitget",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v2/spot/account/assets",
+  "auth": "signed",
+  "headers": {
+    "ACCESS-KEY": { "match": "exact", "value": "key" },
+    "ACCESS-SIGN": { "match": "non_empty" },
+    "ACCESS-TIMESTAMP": { "match": "non_empty" },
+    "ACCESS-PASSPHRASE": { "match": "exact", "value": "passphrase" }
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "bitget/place_order_limit"
+}

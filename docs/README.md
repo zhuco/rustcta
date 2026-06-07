@@ -63,6 +63,16 @@ cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
 - `exchange_adapter_interface_status.md` - current adapter layout after
   compatibility cleanup.
 - `exchange_api_completion_matrix.md` - code-first adapter capability matrix.
+- `exchange_adapter_toolchain_completion_zh.md` - endpoint mapping, request
+  spec, stream runtime, reconciliation, and adapter migration task split.
+- `exchange_gateway_expansion_30_venues_zh.md` - three-batch plan for 30 new
+  exchange gateway adapters and Binance-parity interface checklist.
+- `exchange_gateway_next_40_parallel_tasks_zh.md` - next 40-exchange gateway
+  expansion split into 20 two-exchange AI task packets.
+- `bitkan_adapter.md` - BitKan conservative gateway registration, capability
+  boundaries, and OpenAPI upgrade gate.
+- `blofin_adapter.md` - BloFin USDT perpetual gateway adapter endpoint mapping,
+  signing, WS heartbeat, and unsupported Spot trading boundary.
 - `api_key_security.md` - read-only key requirements and validation safety.
 - `control_plane_security.md` - control-plane write and audit rules.
 - `kill_switch.md` - kill-switch state and safety semantics.
@@ -86,9 +96,14 @@ cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
 ## Exchange References
 
 - `spot_exchange_adapters.md` - Spot adapter architecture notes.
+- `ascendex_adapter.md` - AscendEX Spot/Cash and futures gateway adapter reference.
 - `bitget_adapter.md` - Bitget Spot adapter reference.
+- `bitkan_adapter.md` - BitKan conservative gateway adapter reference.
 - `gateio_adapter.md` - Gate.io Spot adapter reference.
+- `hashkey_global_adapter.md` - HashKey Global Spot and futures gateway adapter reference.
 - `hyperliquid_api.md` - Hyperliquid API and strategy integration notes.
+- `mexc_adapter.md` - MEXC Spot adapter reference.
+- `xt_adapter.md` - XT.com Spot and USDT-M gateway adapter reference.
 
 ## Cleanup Policy
 
@@ -100,3 +115,17 @@ superseded by the active index above and by the migration status file.
 Do not add new root-level runbooks without linking them here. Do not restore
 deleted historical docs as active documentation unless the commands, package
 names, safety assumptions, and workspace ownership are updated first.
+
+## Exchange Mapping Validation
+
+Endpoint mapping files live beside each gateway adapter as
+`crates/rustcta-exchange-gateway/src/adapters/<exchange>/endpoint_mapping.yaml`.
+They are validated by the shared schema in
+`format_schemas/exchange_endpoint_mapping.schema.json`. The default command
+validates the Binance and OKX baseline mappings for the shared toolchain task;
+pass explicit paths to validate additional adapter mappings as they are migrated.
+
+```bash
+python3 scripts/validate_exchange_endpoint_mapping.py
+python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/binance/endpoint_mapping.yaml
+```

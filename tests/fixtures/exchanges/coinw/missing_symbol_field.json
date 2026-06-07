@@ -1,0 +1,14 @@
+{
+  "code": "200",
+  "data": [
+    {
+      "currencyBase": "BTC",
+      "currencyQuote": "USDT",
+      "pricePrecision": 2,
+      "countPrecision": 4,
+      "state": 1
+    }
+  ],
+  "msg": "SUCCESS",
+  "failed": false
+}

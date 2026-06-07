@@ -1,0 +1,16 @@
+{
+  "exchange": "coinbase",
+  "operation": "batch_place_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer test.jwt" }
+  },
+  "body_contains": {
+    "product_id": "BTC-USD"
+  },
+  "forbid_header_values_containing": ["secret"]
+}

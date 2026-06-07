@@ -1,0 +1,11 @@
+{
+  "exchange": "deepcoin",
+  "name": "rest-get-verify",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "payload": "2020-12-08T09:08:57.715ZGET/users/self/verify",
+  "expected_signature": "LSLbxnPWM7dl4oMFFC9S1qW7yJS7ab8VgnW7y7FoEiQ=",
+  "timestamp": "2020-12-08T09:08:57.715Z",
+  "method": "GET",
+  "request_path": "/users/self/verify"
+}

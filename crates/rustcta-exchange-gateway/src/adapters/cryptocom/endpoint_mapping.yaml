@@ -1,0 +1,287 @@
+schema_version: 1
+exchange: cryptocom
+adapter: rustcta_exchange_gateway::adapters::cryptocom
+market_types: [spot, linear_perp]
+metadata:
+  status: validated
+  source: Crypto.com Exchange JSON-RPC docs plus adapter tests.
+rate_limits:
+  buckets:
+    ip: { scope: ip, plan: fixed_window }
+    key: { scope: api_key, plan: fixed_window }
+    stream: { scope: connection, plan: server_ping }
+pagination:
+  query_order: { style: by_id }
+  get_open_orders: { style: limit }
+  get_recent_fills: { style: limit_and_time }
+reconciliation:
+  ambiguous_mutation: query_order_then_open_orders_then_recent_fills
+  private_stream_fallback: rest
+batch:
+  place_orders:
+    support: native
+    atomicity: partial
+    max_items: 10
+    partial_failure: per-item errors normalize to rejected order states when returned.
+  cancel_orders:
+    support: native
+    atomicity: partial
+    max_items: 10
+    partial_failure: per-item errors normalize to rejected/cancelled states when returned.
+websocket:
+  public:
+    support: native
+    channels: [book, trade, ticker, candlestick]
+    heartbeat: { required: true, direction: server_ping, timeout_ms: 10000 }
+    resync: rest_order_book_snapshot_after_reconnect
+  private:
+    support: native
+    auth: hmac
+    channels: [user.order, user.trade, user.balance]
+    renewal: relogin_on_reconnect
+    reconciliation: query_order_then_open_orders_then_recent_fills
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /public/get-instruments
+    auth: none
+    rate_limit_bucket: ip
+    weight: 1
+    request_spec_required: false
+    request_spec: { status: not_required }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/cryptocom/parser/symbol_rules_success.json }
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange public/get-instruments.
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /public/get-book
+    auth: none
+    rate_limit_bucket: ip
+    weight: 1
+    request_spec_required: false
+    request_spec: { status: not_required }
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange public/get-book.
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/user-balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange private/user-balance.
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /private/get-positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange private/get-positions.
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/get-fee-rate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange private/get-fee-rate.
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/create-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/cryptocom/request_specs/private_create_order_limit.json }
+    native_batch: false
+    atomicity: atomic
+    testnet: true
+    official_doc: Crypto.com Exchange private/create-order.
+  - operation: place_quote_market_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/create-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: true
+    official_doc: Crypto.com Exchange private/create-order with notional.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /private/cancel-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: true
+    official_doc: Crypto.com Exchange private/cancel-order.
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/cancel-all-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    official_doc: Crypto.com Exchange private/cancel-all-orders.
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/amend-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: atomic
+    testnet: true
+    official_doc: Crypto.com Exchange private/amend-order.
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/get-order-detail
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange private/get-order-detail.
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/get-open-orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange private/get-open-orders.
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/get-trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    official_doc: Crypto.com Exchange private/get-trades.
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/create-order-list
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    official_doc: Crypto.com Exchange private/create-order-list.
+    notes: Adapter capability caps native batch create at 10 items.
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/cancel-order-list
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    official_doc: Crypto.com Exchange private/cancel-order-list.
+    notes: Adapter capability caps native batch cancel at 10 items.
+  - operation: place_order_list
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /private/advanced/create-oco | /private/advanced/create-oto
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    official_doc: Crypto.com advanced OCO/OTO JSON-RPC methods used by adapter tests.

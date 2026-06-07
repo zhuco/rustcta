@@ -1,0 +1,13 @@
+{
+  "event": "match",
+  "data": {
+    "orderId": "1",
+    "clientOrderId": "cid-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "ordType": "LIMIT",
+    "status": "FILLED",
+    "fillQty": "0.01",
+    "fillPrice": "100"
+  }
+}

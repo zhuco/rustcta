@@ -1,0 +1,15 @@
+{
+  "exchange": "tapbit",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/spot/batch_cancel_order",
+  "auth": "signed",
+  "headers": {
+    "access-key": {"match": "exact", "value": "key"},
+    "access-sign": {"match": "non_empty"},
+    "access-timestamp": {"match": "non_empty"}
+  },
+  "forbid_header_values_containing": ["secret"]
+}

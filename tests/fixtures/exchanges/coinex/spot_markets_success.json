@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "message": "OK",
+  "data": [
+    {
+      "market": "BTCUSDT",
+      "base_ccy": "BTC",
+      "quote_ccy": "USDT",
+      "price_precision": 2,
+      "amount_precision": 6,
+      "min_amount": "0.0001",
+      "min_notional": "1",
+      "is_trading_available": true
+    }
+  ]
+}

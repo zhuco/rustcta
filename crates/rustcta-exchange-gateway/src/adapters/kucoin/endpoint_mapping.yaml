@@ -1,0 +1,207 @@
+schema_version: 1
+exchange: kucoin
+adapter: rustcta_exchange_gateway::adapters::kucoin
+metadata:
+  status: validated
+  notes: "Task 11 Spot-only mapping; REST and WS symbols use dashed uppercase BASE-QUOTE."
+market_types:
+  - spot
+products:
+  - spot
+rest:
+  base_url: https://api.kucoin.com
+rate_limits:
+  buckets:
+    spot_public:
+      scope: rest
+      interval: 3s
+      limit: 30
+    spot_private_hf:
+      scope: account
+      interval: 3s
+      limit: 45
+    spot_orders:
+      scope: orders
+      interval: 3s
+      limit: 45
+    websocket:
+      scope: websocket
+      interval: 1m
+      limit: 100
+pagination:
+  open_orders:
+    style: currentPage_pageSize
+    cursor: offset_or_page_number_token
+    limit_param: pageSize
+    page_param: currentPage
+    max_limit: 500
+  recent_fills:
+    style: currentPage_pageSize_with_time_window
+    cursor: offset_or_page_number_token
+    since_param: startAt
+    until_param: endAt
+    limit_param: pageSize
+    page_param: currentPage
+    max_limit: 500
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+websocket:
+  public:
+    support: native
+    url: wss://ws-api-spot.kucoin.com/endpoint
+    heartbeat:
+      direction: client_ping
+      interval_ms: 20000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    token_endpoint: /api/v1/bullet-private
+    auth: rest_bullet_token
+    renewal: refresh_before_expiry
+    renew_before_expiry_ms: 3600000
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v2/symbols
+    auth: none
+    rate_limit_bucket: spot_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/market/orderbook/level2_20
+    auth: none
+    rate_limit_bucket: spot_public
+    weight: 1
+    request_spec_required: false
+    notes: "Depth <= 20 uses level2_20; deeper snapshots use level2_100 in code."
+  - operation: get_order_book_deep
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/market/orderbook/level2_100
+    auth: none
+    rate_limit_bucket: spot_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private_hf
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/hf/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoin/request_specs/place_order_limit.json
+    notes: "Signing vector: tests/fixtures/exchanges/kucoin/signing_vectors/private_get_accounts.json"
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/v1/hf/orders/{orderId}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoin/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/v1/hf/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_orders
+    weight: 1
+    request_spec_required: true
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/hf/orders/alter
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: spot_orders
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/hf/orders/{orderId}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private_hf
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/hf/orders/active
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private_hf
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/hf/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: spot_private_hf
+    weight: 1
+    request_spec_required: true
+  - operation: get_private_bullet_token
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/bullet-private
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: spot_private_hf
+    weight: 1
+    request_spec_required: true

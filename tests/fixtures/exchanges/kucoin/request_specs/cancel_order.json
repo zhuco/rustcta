@@ -1,0 +1,9 @@
+{
+  "operation": "kucoin.cancel_order",
+  "method": "DELETE",
+  "path": "/api/v1/hf/orders/2001",
+  "auth": "hmac",
+  "query": {
+    "symbol": "BTC-USDT"
+  }
+}

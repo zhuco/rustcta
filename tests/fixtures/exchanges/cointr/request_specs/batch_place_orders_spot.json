@@ -1,0 +1,29 @@
+{
+  "exchange": "cointr",
+  "operation": "cointr.batch_place_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v2/spot/trade/batch-orders",
+  "auth": "signed",
+  "headers": {
+    "access-key": { "match": "exact", "value": "key" },
+    "access-sign": { "match": "non_empty" },
+    "access-timestamp": { "match": "non_empty" },
+    "access-passphrase": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "orderList": [
+      {
+        "symbol": "BTCUSDT",
+        "side": "buy",
+        "orderType": "limit",
+        "force": "gtc",
+        "size": "0.01",
+        "price": "65000",
+        "clientOid": "B1"
+      }
+    ],
+    "recvWindow": 5000
+  }
+}

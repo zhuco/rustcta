@@ -1,0 +1,424 @@
+schema_version: 1
+exchange: bingx
+adapter: rustcta_exchange_gateway::adapters::bingx
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway BingX spot + linear perpetual adapter implementation
+  last_reviewed: "2026-06-08"
+  notes: |
+    Spot and swap REST/WS mapping for currently declared ExchangeClient capabilities.
+    rate_limit_plan: rate_limits
+    pagination_plan: pagination
+    reconciliation_plan: reconciliation
+    batch_capability: batch
+    websocket_runtime: websocket
+market_types:
+  - spot
+  - linear_perp
+rest:
+  base_url: https://open-api.bingx.com
+base_urls:
+  spot_ws: wss://open-api-ws.bingx.com/market
+  swap_ws: wss://open-api-swap.bingx.com/swap-market
+auth:
+  private_rest: hmac_sha256_query
+  listen_key_endpoint: generate_listen_key
+rate_limits:
+  plan_name: rate_limit_plan
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: null
+    private_uid:
+      scope: account
+      interval: 1m
+      limit: null
+    order_count:
+      scope: account
+      interval: 1m
+      limit: null
+pagination:
+  plan_name: pagination_plan
+  get_open_orders:
+    style: limit
+    limit_param: limit
+    max_limit: 500
+  get_recent_fills:
+    style: time_window
+    since_param: startTime
+    until_param: endTime
+    limit_param: limit
+    max_limit: 1000
+reconciliation:
+  plan_name: reconciliation_plan
+  private_stream_fallback: rest
+  readbacks:
+    - get_open_orders
+    - query_order
+    - get_recent_fills
+    - get_balances
+    - get_positions
+  unknown_order_policy: query_order_then_open_orders
+  cancel_uncertain_policy: query_order_then_open_orders
+  triggers:
+    - place_order
+    - cancel_order
+    - batch_place_orders
+    - batch_cancel_orders
+    - websocket_gap
+    - websocket_reconnect
+    - listen_key_renewal_failure
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  plan_name: batch_capability
+  place_orders:
+    support: native
+    atomicity: partial
+    max_items: 20
+    partial_failure: true
+    partial_failure_policy: reconcile_each_requested_order
+  cancel_orders:
+    support: native
+    atomicity: partial
+    max_items: 20
+    partial_failure: true
+    partial_failure_policy: reconcile_each_requested_order
+  cancel_all_orders:
+    support: native
+    atomicity: partial
+    max_items: symbol_scoped
+    partial_failure: true
+websocket:
+  plan_name: websocket_runtime
+  public:
+    support: parser_only
+    channels: [trades, ticker, order_book_delta, order_book_snapshot, candles]
+    heartbeat:
+      required: true
+      direction: server_ping
+      inbound_text: [Ping, ping]
+      outbound_text: Pong
+      response: Pong
+      interval_ms: 30000
+      timeout_ms: 60000
+    resync: snapshot_on_connect_or_gap
+    reconnect: resubscribe_then_refresh_snapshot
+  private:
+    support: parser_only
+    auth: listen_key
+    auth_renewal: listen_key_renewal
+    renew_before_ms: 1800000
+    fallback: rest_reconciliation
+    channels: [orders, fills, balances, positions, account]
+    heartbeat:
+      required: true
+      direction: server_ping
+      inbound_text: [Ping, ping]
+      outbound_text: Pong
+      response: Pong
+endpoints:
+  - operation: bingx.get_symbol_rules
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/common/symbols
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/public_tests.rs
+      fixture: tests/fixtures/exchanges/bingx/spot_symbols.json
+    notes: Perpetual requests use /openApi/swap/v2/quote/contracts.
+  - operation: bingx.get_order_book
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/market/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/public_tests.rs
+      fixture: tests/fixtures/exchanges/bingx/orderbook.json
+    notes: Perpetual requests use /openApi/swap/v2/quote/depth.
+  - operation: bingx.get_balances
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/account/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+      fixture: tests/fixtures/exchanges/bingx/balance.json
+    notes: Perpetual requests use /openApi/swap/v2/user/balance.
+  - operation: bingx.get_positions
+    transport: rest
+    product: linear_perp
+    method: GET
+    path: /openApi/swap/v2/user/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+      fixture: tests/fixtures/exchanges/bingx/position.json
+    notes: Spot positions are unsupported.
+  - operation: bingx.get_fees
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/user/commissionRate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use /openApi/swap/v2/user/commissionRate.
+  - operation: bingx.place_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/spot/v1/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+      fixture: tests/fixtures/exchanges/bingx/order_ack.json
+    notes: Perpetual requests use /openApi/swap/v2/trade/order.
+  - operation: bingx.place_quote_market_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/spot/v1/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bingx/request_specs.json
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Rust operation delegates to place_order with MARKET and quote quantity where supported.
+  - operation: bingx.cancel_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/spot/v1/trade/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use DELETE /openApi/swap/v2/trade/order.
+  - operation: bingx.cancel_all_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/spot/v1/trade/cancelOpenOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use DELETE /openApi/swap/v2/trade/allOpenOrders.
+  - operation: bingx.amend_order
+    transport: rest
+    product: linear_perp
+    method: POST
+    path: /openApi/swap/v1/trade/amend
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Spot amend is unsupported by this adapter.
+  - operation: bingx.place_order_list
+    transport: rest
+    product: spot
+    method: POST
+    path: /openApi/spot/v1/oco/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Spot OCO only.
+  - operation: bingx.batch_place_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/spot/v1/trade/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use /openApi/swap/v2/trade/batchOrders.
+  - operation: bingx.batch_cancel_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/spot/v1/trade/cancelOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use DELETE /openApi/swap/v2/trade/batchOrders.
+  - operation: bingx.query_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/trade/query
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use /openApi/swap/v2/trade/order.
+  - operation: bingx.get_open_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/trade/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    notes: Perpetual requests use /openApi/swap/v2/trade/openOrders.
+  - operation: bingx.get_recent_fills
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /openApi/spot/v1/trade/myTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/private_tests.rs
+      fixture: tests/fixtures/exchanges/bingx/fill.json
+    notes: Perpetual requests use /openApi/swap/v2/trade/allFillOrders.
+  - operation: bingx.generate_listen_key
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /openApi/user/auth/userDataStream
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/stream_tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/bingx/stream_tests.rs

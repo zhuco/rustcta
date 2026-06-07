@@ -1,0 +1,16 @@
+{
+  "exchange": "xt",
+  "operation": "amend_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/v4/order/1001",
+  "auth": "signed",
+  "headers": {
+    "validate-appkey": {"match": "exact", "value": "key"},
+    "validate-timestamp": {"match": "non_empty"},
+    "validate-signature": {"match": "non_empty"}
+  },
+  "body_contains": {"quantity": "0.005"},
+  "forbid_header_values_containing": ["secret"]
+}

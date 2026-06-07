@@ -1,0 +1,38 @@
+{
+  "exchange": "blofin",
+  "operation": "positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v1/account/positions",
+  "auth": "signed",
+  "query": {
+    "instId": {
+      "match": "exact",
+      "value": "BTC-USDT"
+    }
+  },
+  "headers": {
+    "ACCESS-KEY": {
+      "match": "exact",
+      "value": "key"
+    },
+    "ACCESS-SIGN": {
+      "match": "non_empty"
+    },
+    "ACCESS-TIMESTAMP": {
+      "match": "non_empty"
+    },
+    "ACCESS-NONCE": {
+      "match": "non_empty"
+    },
+    "ACCESS-PASSPHRASE": {
+      "match": "exact",
+      "value": "pass"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null,
+  "signing_vector": "blofin/rest_place_order_hex"
+}

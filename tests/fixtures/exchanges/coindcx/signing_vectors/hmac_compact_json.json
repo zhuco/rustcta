@@ -1,0 +1,13 @@
+{
+  "exchange": "coindcx",
+  "name": "hmac_compact_json",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "fixture-secret",
+  "payload": "{\"timestamp\":1725000000000,\"market\":\"BTCUSDT\",\"side\":\"buy\"}",
+  "expected_signature": "d179545c87874b81c22f66758a810d288700530d7e469ed8d7b7b4828e4c9039",
+  "timestamp": "1725000000000",
+  "method": "POST",
+  "request_path": "/exchange/v1/orders/create",
+  "body": "{\"timestamp\":1725000000000,\"market\":\"BTCUSDT\",\"side\":\"buy\"}",
+  "payload_format": "raw_payload"
+}

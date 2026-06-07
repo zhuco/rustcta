@@ -430,6 +430,7 @@ impl MockExchangeGateway {
                 ..ResponseMetadata::new(exchange, Utc::now())
             },
             orders,
+            report: None,
         })
     }
 
@@ -453,6 +454,7 @@ impl MockExchangeGateway {
             },
             orders,
             cancelled_count,
+            report: None,
         })
     }
 

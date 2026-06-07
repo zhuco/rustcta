@@ -1,0 +1,17 @@
+{
+  "data": {
+    "orders": [
+      {
+        "id": "order-1",
+        "asset_pair_name": "BTC-USDT",
+        "client_id": "client-1",
+        "side": "BUY",
+        "type": "LIMIT",
+        "state": "OPEN",
+        "amount": "0.1",
+        "price": "65000",
+        "filled_amount": "0"
+      }
+    ]
+  }
+}

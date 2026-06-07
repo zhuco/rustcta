@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "exchange": "bingx",
+  "private_rest": [
+    {
+      "operation": "bingx.get_balances.spot",
+      "method": "GET",
+      "path": "/openApi/spot/v1/account/balance",
+      "required_params": ["timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.get_balances.perpetual",
+      "method": "GET",
+      "path": "/openApi/swap/v2/user/balance",
+      "required_params": ["timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.get_positions.perpetual",
+      "method": "GET",
+      "path": "/openApi/swap/v2/user/positions",
+      "required_params": ["symbol", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.get_fees.spot",
+      "method": "GET",
+      "path": "/openApi/spot/v1/user/commissionRate",
+      "required_params": ["symbol", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.get_fees.perpetual",
+      "method": "GET",
+      "path": "/openApi/swap/v2/user/commissionRate",
+      "required_params": ["timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.place_order.perpetual",
+      "method": "POST",
+      "path": "/openApi/swap/v2/trade/order",
+      "required_params": ["symbol", "side", "type", "quantity", "positionSide", "clientOrderId", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.place_order.spot",
+      "method": "POST",
+      "path": "/openApi/spot/v1/trade/order",
+      "required_params": ["symbol", "side", "type", "quantity", "clientOrderId", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.place_quote_market_order.spot",
+      "method": "POST",
+      "path": "/openApi/spot/v1/trade/order",
+      "required_params": ["symbol", "side", "type", "quoteOrderQty", "clientOrderId", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.cancel_order.perpetual",
+      "method": "DELETE",
+      "path": "/openApi/swap/v2/trade/order",
+      "required_params": ["symbol", "orderId", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.cancel_order.spot",
+      "method": "POST",
+      "path": "/openApi/spot/v1/trade/cancel",
+      "required_params": ["symbol", "orderId", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.amend_order.perpetual",
+      "method": "POST",
+      "path": "/openApi/swap/v1/trade/amend",
+      "required_params": ["symbol", "orderId", "quantity", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.place_order_list.spot_oco",
+      "method": "POST",
+      "path": "/openApi/spot/v1/oco/order",
+      "required_params": ["symbol", "side", "quantity", "limitPrice", "orderPrice", "triggerPrice", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.batch_place_orders.spot",
+      "method": "POST",
+      "path": "/openApi/spot/v1/trade/batchOrders",
+      "required_params": ["data", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.batch_place_orders.perpetual",
+      "method": "POST",
+      "path": "/openApi/swap/v2/trade/batchOrders",
+      "required_params": ["batchOrders", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.batch_cancel_orders.spot",
+      "method": "POST",
+      "path": "/openApi/spot/v1/trade/cancelOrders",
+      "required_params": ["orderIds", "process", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.batch_cancel_orders.perpetual",
+      "method": "DELETE",
+      "path": "/openApi/swap/v2/trade/batchOrders",
+      "required_params": ["orderIdList", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.cancel_all_orders.perpetual",
+      "method": "DELETE",
+      "path": "/openApi/swap/v2/trade/allOpenOrders",
+      "required_params": ["symbol", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.query_order.spot",
+      "method": "GET",
+      "path": "/openApi/spot/v1/trade/query",
+      "required_params": ["symbol", "orderId", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.get_open_orders.spot",
+      "method": "GET",
+      "path": "/openApi/spot/v1/trade/openOrders",
+      "required_params": ["symbol", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.get_recent_fills.spot",
+      "method": "GET",
+      "path": "/openApi/spot/v1/trade/myTrades",
+      "required_params": ["symbol", "limit", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.generate_listen_key",
+      "method": "POST",
+      "path": "/openApi/user/auth/userDataStream",
+      "required_params": ["timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.set_perpetual_leverage",
+      "method": "POST",
+      "path": "/openApi/swap/v2/trade/leverage",
+      "required_params": ["symbol", "side", "leverage", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.set_position_mode",
+      "method": "POST",
+      "path": "/openApi/swap/v1/positionSide/dual",
+      "required_params": ["dualSidePosition", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.query_position_mode",
+      "method": "GET",
+      "path": "/openApi/swap/v1/positionSide/dual",
+      "required_params": ["timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.switch_multi_assets_mode",
+      "method": "POST",
+      "path": "/openApi/swap/v1/trade/assetMode",
+      "required_params": ["assetMode", "timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.query_multi_assets_mode",
+      "method": "GET",
+      "path": "/openApi/swap/v1/trade/assetMode",
+      "required_params": ["timestamp", "recvWindow", "signature"]
+    },
+    {
+      "operation": "bingx.change_perpetual_margin_type",
+      "method": "POST",
+      "path": "/openApi/swap/v2/trade/marginType",
+      "required_params": ["symbol", "marginType", "timestamp", "recvWindow", "signature"]
+    }
+  ]
+}

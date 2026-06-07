@@ -1,0 +1,7 @@
+{
+  "exchange": "bitkan",
+  "operation": "private_rest_signing",
+  "supported": false,
+  "reason": "BitKan private REST signing is unverified; adapter must not synthesize authenticated requests.",
+  "expected_error": "bitkan.private_rest_unverified"
+}

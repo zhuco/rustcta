@@ -1,0 +1,19 @@
+{
+  "result": true,
+  "error_code": 0,
+  "data": {
+    "asset": "USDT",
+    "balance": "150.5",
+    "available": "120.25",
+    "positions": [
+      {
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "volume": "0.02",
+        "entryPrice": "65000",
+        "markPrice": "65100",
+        "leverage": "5"
+      }
+    ]
+  }
+}

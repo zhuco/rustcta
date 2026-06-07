@@ -1,0 +1,18 @@
+{
+  "exchange": "woo",
+  "operation": "listen_key",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v3/account/listenKey",
+  "auth": "signed",
+  "headers": {
+    "x-api-key": { "match": "exact", "value": "key" },
+    "x-api-signature": { "match": "non_empty" },
+    "x-api-timestamp": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "type": "WEBSOCKET"
+  },
+  "forbid_header_values_containing": ["secret"]
+}

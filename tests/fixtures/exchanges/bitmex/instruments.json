@@ -1,0 +1,26 @@
+[
+  {
+    "symbol": "XBT_USDT",
+    "typ": "IFXXXP",
+    "state": "Open",
+    "underlying": "XBT",
+    "quoteCurrency": "USDT",
+    "tickSize": 0.1,
+    "lotSize": 100,
+    "maxOrderQty": 100000000,
+    "makerFee": -0.0001,
+    "takerFee": 0.00075
+  },
+  {
+    "symbol": "XBTUSD",
+    "typ": "FFWCSX",
+    "state": "Open",
+    "underlying": "XBT",
+    "quoteCurrency": "USD",
+    "tickSize": 0.5,
+    "lotSize": 1,
+    "maxOrderQty": 10000000,
+    "makerFee": -0.0001,
+    "takerFee": 0.00075
+  }
+]

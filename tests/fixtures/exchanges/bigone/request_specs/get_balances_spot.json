@@ -1,0 +1,13 @@
+{
+  "exchange": "bigone",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/viewer/accounts",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["test-secret"]
+}

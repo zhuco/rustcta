@@ -1,0 +1,15 @@
+{
+  "exchange": "xt",
+  "operation": "batch_place_orders_futures",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/future/trade/v2/order/atomic-create-batch",
+  "auth": "signed",
+  "headers": {
+    "validate-appkey": {"match": "exact", "value": "key"},
+    "validate-timestamp": {"match": "non_empty"},
+    "validate-signature": {"match": "non_empty"}
+  },
+  "forbid_header_values_containing": ["secret"]
+}

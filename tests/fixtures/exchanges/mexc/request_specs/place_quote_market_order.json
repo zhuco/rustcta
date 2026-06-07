@@ -1,0 +1,24 @@
+{
+  "exchange": "mexc",
+  "operation": "place_quote_market_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v3/order",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "side": { "match": "exact", "value": "BUY" },
+    "type": { "match": "exact", "value": "MARKET" },
+    "quoteOrderQty": { "match": "exact", "value": "25.5" },
+    "newClientOrderId": { "match": "exact", "value": "QUOTE1" },
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MEXC-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "forbid_query_values_containing": ["secret"],
+  "signing_vector": "mexc/place_order_limit"
+}

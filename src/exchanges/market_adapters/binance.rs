@@ -4,9 +4,9 @@ use super::{
     MarketCapabilities,
 };
 use crate::market::{
-    CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta, InstrumentStatus,
-    MarketDataAdapter, MarketEvent, MarketFundingSnapshot, OrderBook5, OrderBookSnapshot,
-    PublicBookProfile, PublicBookProfileKind, WsSubscription,
+    BookLevel, CanonicalSymbol, ContractType, ExchangeId, ExchangeSymbol, InstrumentMeta,
+    InstrumentStatus, MarketDataAdapter, MarketEvent, MarketFundingSnapshot, OrderBook5,
+    OrderBookSnapshot, PublicBookProfile, PublicBookProfileKind, WsSubscription,
 };
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
@@ -295,8 +295,8 @@ fn parse_binance_book(
         .or(fallback_symbol)?;
     let canonical = compact_symbol_to_canonical(symbol)?;
     let exchange_symbol = ExchangeSymbol::new(ExchangeId::Binance, symbol);
-    let bids = parse_levels(value.get("b").or_else(|| value.get("bids"))?);
-    let asks = parse_levels(value.get("a").or_else(|| value.get("asks"))?);
+    let bids = parse_binance_side_levels(value, "b", "B", "bids")?;
+    let asks = parse_binance_side_levels(value, "a", "A", "asks")?;
     let exchange_ts = datetime_from_millis(
         value
             .get("E")
@@ -322,7 +322,26 @@ fn parse_binance_book(
     ))
 }
 
-fn parse_levels(value: &Value) -> Vec<crate::market::BookLevel> {
+fn parse_binance_side_levels(
+    value: &Value,
+    price_key: &str,
+    quantity_key: &str,
+    array_key: &str,
+) -> Option<Vec<BookLevel>> {
+    if let Some(array_value) = value.get(array_key).or_else(|| {
+        value
+            .get(price_key)
+            .filter(|candidate| candidate.as_array().is_some())
+    }) {
+        return Some(parse_levels(array_value));
+    }
+
+    let price = value.get(price_key).and_then(parse_json_f64)?;
+    let quantity = value.get(quantity_key).and_then(parse_json_f64)?;
+    Some(vec![BookLevel::new(price, quantity)])
+}
+
+fn parse_levels(value: &Value) -> Vec<BookLevel> {
     value
         .as_array()
         .into_iter()
@@ -510,6 +529,36 @@ mod tests {
         };
         assert_eq!(book.canonical_symbol, CanonicalSymbol::new("BTC", "USDT"));
         assert_eq!(book.sequence, Some(105));
+        assert!(book.is_usable());
+    }
+
+    #[test]
+    fn adapters_should_parse_binance_combined_book_ticker_event_to_orderbook() {
+        let raw = r#"{
+            "stream":"btcusdt@bookTicker",
+            "data":{
+                "e":"bookTicker",
+                "u":54321,
+                "s":"BTCUSDT",
+                "b":"65000.1",
+                "B":"0.2",
+                "a":"65000.2",
+                "A":"0.3"
+            }
+        }"#;
+
+        let events = BinanceMarketAdapter
+            .parse_public_ws_message(raw, Utc::now())
+            .expect("parse ws");
+
+        assert_eq!(events.len(), 1);
+        let MarketEvent::OrderBook(book) = &events[0] else {
+            panic!("expected orderbook event");
+        };
+        assert_eq!(book.canonical_symbol, CanonicalSymbol::new("BTC", "USDT"));
+        assert_eq!(book.sequence, Some(54321));
+        assert_eq!(book.best_bid().map(|level| level.price), Some(65000.1));
+        assert_eq!(book.best_ask().map(|level| level.price), Some(65000.2));
         assert!(book.is_usable());
     }
 

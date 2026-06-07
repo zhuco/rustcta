@@ -1,0 +1,12 @@
+{
+  "code": 0,
+  "data": {
+    "orderId": "1",
+    "symbol": "BTCUSDT",
+    "clientOrderId": "cid-1",
+    "side": "BUY",
+    "ordType": "LIMIT",
+    "price": "100",
+    "quantity": "0.01"
+  }
+}

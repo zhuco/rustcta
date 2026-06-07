@@ -1,0 +1,20 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTC-PERP",
+      "underlying": "BTC",
+      "settlementAsset": "USDT",
+      "priceFilter": {
+        "minPrice": "1",
+        "maxPrice": "1000000",
+        "tickSize": "0.1"
+      },
+      "lotSizeFilter": {
+        "minQty": "0.001",
+        "maxQty": "100",
+        "lotSize": "0.001"
+      }
+    }
+  ]
+}

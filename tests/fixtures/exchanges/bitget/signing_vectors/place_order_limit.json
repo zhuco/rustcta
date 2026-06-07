@@ -1,0 +1,12 @@
+{
+  "exchange": "bitget",
+  "name": "place_order_limit",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/api/v2/spot/trade/place-order",
+  "body": "{\"symbol\":\"BTCUSDT\",\"side\":\"buy\",\"orderType\":\"limit\",\"force\":\"gtc\",\"size\":\"0.02\",\"price\":\"65000\",\"clientOid\":\"LIMIT1\"}",
+  "payload": "1700000000000POST/api/v2/spot/trade/place-order{\"symbol\":\"BTCUSDT\",\"side\":\"buy\",\"orderType\":\"limit\",\"force\":\"gtc\",\"size\":\"0.02\",\"price\":\"65000\",\"clientOid\":\"LIMIT1\"}",
+  "expected_signature": "VwnQ8mHwnkEvxBkXh+yea1iWkgy0V2sS76T8X9AHR2k="
+}

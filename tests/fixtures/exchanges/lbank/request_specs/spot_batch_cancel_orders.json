@@ -1,0 +1,19 @@
+{
+  "exchange": "lbank",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "method": "COMPOSED_POST",
+  "path": "/v2/supplement/cancel_order.do",
+  "auth": "md5_hmac_sha256",
+  "native_batch": false,
+  "atomicity": "non_atomic",
+  "max_items": 50,
+  "item_form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "orderId": "3001",
+    "origClientOrderId": "BATCH1"
+  },
+  "partial_failure_policy": "return successful item count and reconcile remaining order ids"
+}

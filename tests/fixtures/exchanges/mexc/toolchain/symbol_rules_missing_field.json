@@ -1,0 +1,9 @@
+{
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "baseAsset": "BTC",
+      "filters": []
+    }
+  ]
+}

@@ -1,0 +1,304 @@
+schema_version: 1
+exchange: bitmex
+adapter: rustcta_exchange_gateway::adapters::bitmex
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway BitMEX adapter Task 14 implementation
+  last_reviewed: "2026-06-08"
+  notes: Task 14 scope covers Spot plus perpetual REST/WS. Dated futures and options remain unsupported. Contract spec fields come from /api/v1/instrument/active. Orderbook strictness is snapshot-only with REST resync. Funding/open-interest fields are candidate instrument data but unsupported by typed gateway methods.
+  task14_notes:
+    - dated futures and options remain unsupported
+    - "Contract spec fields: typ, tickSize, lotSize, maxOrderQty, makerFee, takerFee, isInverse"
+    - Snapshot-only orderbook state uses REST snapshot resync.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+rest:
+  base_url: https://www.bitmex.com
+base_urls:
+  public_ws: wss://ws.bitmex.com/realtime
+  private_ws: wss://ws.bitmex.com/realtime
+auth:
+  private_rest: api-key, api-expires and api-signature using lowercase HMAC-SHA256 over METHOD + path + expires + body
+  private_ws: authKeyExpires with HMAC-SHA256 over GET/realtime + expires
+rate_limits:
+  rest_public: { scope: ip, interval_ms: 300000, limit: 300, headers: [x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset] }
+  rest_private_read: { scope: api_key, interval_ms: 300000, limit: 300 }
+  orders: { scope: account, interval_ms: 60000, limit: 60 }
+  cancels: { scope: account, interval_ms: 60000, limit: 60 }
+pagination:
+  open_orders: { mode: limit, limit_param: count, max_limit: 100, cursor: unsupported }
+  recent_fills: { mode: time_range, limit_param: count, max_limit: 500, since_param: startTime, until_param: endTime }
+reconciliation:
+  private_state: rest_fallback
+  query_order: GET /api/v1/order filtered by orderID or clOrdID
+  open_orders: GET /api/v1/order filtered by open=true
+  recent_fills: GET /api/v1/execution/tradeHistory
+  unknown_order_policy: query_order_then_open_orders_then_fills
+  replay_policy: do_not_replay_place_after_unknown_ack
+  live_dry_run_gates:
+    kill_switch: required_before_trading
+    disabled_symbol: required_before_trading
+    max_notional: required_before_trading
+batch:
+  place_orders: { support: native, endpoint: /api/v1/order/bulk, atomicity: partial, max_items: 20, partial_failure: true }
+  cancel_orders: { support: native, endpoint: /api/v1/order, atomicity: partial, max_items: 20, partial_failure: true }
+websocket:
+  public:
+    support: native
+    channels: [orderBookL2, trade, quote, tradeBin1m, tradeBin5m, tradeBin1h, tradeBin1d]
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: native_when_credentials_configured
+    channels: [order, execution, margin, position, wallet]
+    auth_renewal: { mode: relogin, interval_ms: 45000 }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+streams:
+  public: { support: native, heartbeat: client_ping, resync: rest_snapshot }
+  private: { support: native_when_credentials_configured, auth_renewal: relogin, resync: rest_reconciliation }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/instrument/active
+    auth: none
+    rate_limit_bucket: bitmex_rest_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/public_tests.rs, fixture: tests/fixtures/exchanges/bitmex/instruments.json }
+    notes: Contract spec fields include typ, tickSize, lotSize, maxOrderQty, makerFee, takerFee, and isInverse. Futures/options unsupported.
+  - operation: order_book
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/orderBook/L2
+    auth: none
+    rate_limit_bucket: bitmex_rest_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/public_tests.rs, fixture: tests/fixtures/exchanges/bitmex/orderbook_l2.json }
+    notes: strictness=snapshot_only; max_depth=100; checksum unsupported; REST snapshot after reconnect.
+  - operation: balances
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/user/margin
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmex_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitmex/margin.json }
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/position
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmex_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitmex/position.json }
+  - operation: fees
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/instrument/active
+    auth: none
+    rate_limit_bucket: bitmex_rest_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: place_order
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitmex/order_ack.json }
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/order/bulk
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_orders
+    weight: 2
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+    notes: max_items=20; partial failure supported.
+  - operation: amend_order
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: PUT
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+  - operation: cancel_order
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: DELETE
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_cancels
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: DELETE
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_cancels
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+    notes: max_items=20; partial failure supported.
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: DELETE
+    path: /api/v1/order/all
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmex_cancels
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+  - operation: query_order
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmex_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+  - operation: open_orders
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmex_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+  - operation: recent_fills
+    product: perpetual
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/execution/tradeHistory
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmex_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bitmex/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bitmex/fill.json }
+  - operation: funding_open_interest
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/instrument
+    auth: none
+    rate_limit_bucket: bitmex_rest_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported
+    reason: No typed shared gateway method yet; candidate instrument fields only.
+    response_parser: { status: unsupported, reason: funding/open-interest not wired to shared gateway surface }

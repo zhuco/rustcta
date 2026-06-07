@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "BTC-USDT",
+      "id": 2001,
+      "orderId": 1001,
+      "clientOrderId": "CLIENT1",
+      "price": "64950",
+      "qty": "0.004",
+      "commission": "0.2598",
+      "commissionAsset": "USDT",
+      "side": "BUY",
+      "time": 1700000001000
+    }
+  ]
+}

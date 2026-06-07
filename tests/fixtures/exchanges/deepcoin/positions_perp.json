@@ -1,0 +1,14 @@
+{
+  "code": "0",
+  "data": [
+    {
+      "instType": "SWAP",
+      "instId": "BTC-USDT-SWAP",
+      "posSide": "long",
+      "pos": "2",
+      "avgPx": "65000",
+      "lastPx": "65100",
+      "lever": "5"
+    }
+  ]
+}

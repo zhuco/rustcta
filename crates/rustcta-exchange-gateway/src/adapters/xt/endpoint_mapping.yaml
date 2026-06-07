@@ -1,0 +1,368 @@
+schema_version: 1
+exchange: xt
+adapter: crates/rustcta-exchange-gateway/src/adapters/xt
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway XT spot and USDT-M adapter implementation
+  last_reviewed: '2026-06-08'
+  notes: Dual-product REST mapping. Spot and USDT-M futures use separate base URLs
+    and signing payloads.
+market_types:
+- spot
+- linear_perp
+base_urls:
+  spot_rest: https://sapi.xt.com
+  futures_rest: https://fapi.xt.com
+  spot_public_ws: wss://stream.xt.com/public
+  spot_private_ws: wss://stream.xt.com/private
+  futures_public_ws: wss://fstream.xt.com/ws/market
+  futures_private_ws: wss://fstream.xt.com/ws/user
+auth:
+  spot: HMAC-SHA256 validate-* payload
+  futures: HMAC-SHA256 validate-appkey/timestamp path payload
+rate_limits:
+  public: conservative weight 1 per mapped public REST request
+  private: conservative weight 1 per mapped signed REST request
+  orders: conservative weight 1 per mapped order request
+pagination:
+  open_orders: limit only, max 100
+  fills: limit only, max 100
+batch:
+  place: native spot /v4/batch-order; native futures /future/trade/v2/order/atomic-create-batch
+  cancel: native spot /v4/batch-order; native futures /future/trade/v1/order/cancel-batch
+  atomicity: partial
+  max_items: 20
+reconciliation:
+  private_state: REST fallback via query_order, get_open_orders, and get_recent_fills
+    before live-dry-run promotion
+websocket:
+  support: request-spec/parser/session helpers; shared supervisor/live validation
+    remains required
+  heartbeat: ping/pong or server ping per adapter stream helpers
+  private_auth: listen-key or signed private subscription where supported
+endpoints:
+- operation: get_symbol_rules
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/public/symbol
+  auth: none
+  rate_limit_bucket: public
+  weight: 1
+  request_spec_required: false
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/spot_symbols.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/public_tests.rs
+- operation: get_symbol_rules_futures
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/market/v3/public/symbol/list
+  auth: none
+  rate_limit_bucket: public
+  weight: 1
+  request_spec_required: false
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/public_tests.rs
+- operation: get_order_book
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/public/depth
+  auth: none
+  rate_limit_bucket: public
+  weight: 1
+  request_spec_required: false
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/public_tests.rs
+- operation: get_order_book_futures
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/market/v1/public/q/depth
+  auth: none
+  rate_limit_bucket: public
+  weight: 1
+  request_spec_required: false
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/perp_orderbook.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/public_tests.rs
+- operation: get_balances
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/balances
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/balance.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/private_tests.rs
+- operation: get_balances_futures
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/user/v1/balance/list
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: get_positions
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/user/v1/position/list
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/positions.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/private_tests.rs
+- operation: get_fees
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/public/symbol
+  auth: none
+  rate_limit_bucket: public
+  weight: 1
+  request_spec_required: false
+- operation: get_fees_futures
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/market/v3/public/symbol/list
+  auth: none
+  rate_limit_bucket: public
+  weight: 1
+  request_spec_required: false
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/fees.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/private_tests.rs
+- operation: place_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /v4/order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: place_order_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v1/order/create
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: place_quote_market_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /v4/order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: amend_order
+  product: spot
+  transport: rest
+  method: PUT
+  path: /v4/order/{orderId}
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: amend_order_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v1/order/update
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: cancel_order
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /v4/order/{orderId}
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: cancel_order_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v1/order/cancel
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: batch_place_orders
+  product: spot
+  transport: rest
+  method: POST
+  path: /v4/batch-order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  native_batch: true
+  atomicity: partial
+- operation: batch_place_orders_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v2/order/atomic-create-batch
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  native_batch: true
+  atomicity: partial
+- operation: batch_cancel_orders
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /v4/batch-order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  native_batch: true
+  atomicity: partial
+- operation: batch_cancel_orders_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v1/order/cancel-batch
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  native_batch: true
+  atomicity: partial
+- operation: cancel_all_orders
+  product: spot
+  transport: rest
+  method: DELETE
+  path: /v4/open-order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: cancel_all_orders_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v1/order/cancel-all
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: query_order
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/order/{orderId}
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/order.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/private_tests.rs
+- operation: query_order_futures
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/trade/v1/order/detail
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: get_open_orders
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/open-order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/open_orders.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/private_tests.rs
+- operation: get_open_orders_futures
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /future/trade/v1/order/list-open-order
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: get_recent_fills
+  product: spot
+  transport: rest
+  method: GET
+  path: /v4/trade
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+  response_parser:
+    status: implemented
+    fixture: tests/fixtures/exchanges/xt/fills.json
+    test: crates/rustcta-exchange-gateway/src/adapters/xt/private_tests.rs
+- operation: get_recent_fills_futures
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/trade/v1/order/trade-list
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: spot_ws_token
+  product: spot
+  transport: rest
+  method: POST
+  path: /v4/ws-token
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: futures_listen_key
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /future/user/v1/user/listen-key
+  auth: hmac
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: true
+- operation: place_order_list
+  product: spot
+  transport: rest
+  method: POST
+  path: unsupported:xt_order_list
+  auth: unsupported
+  rate_limit_bucket: private
+  weight: 1
+  request_spec_required: false

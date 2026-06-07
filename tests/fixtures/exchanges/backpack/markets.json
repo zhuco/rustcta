@@ -1,0 +1,24 @@
+[
+  {
+    "symbol": "SOL_USDC",
+    "baseSymbol": "SOL",
+    "quoteSymbol": "USDC",
+    "marketType": "SPOT",
+    "visible": true,
+    "filters": {
+      "price": {"tickSize": "0.01"},
+      "quantity": {"minQuantity": "0.001", "stepSize": "0.001", "minNotional": "5"}
+    }
+  },
+  {
+    "symbol": "SOL_USDC_PERP",
+    "baseSymbol": "SOL",
+    "quoteSymbol": "USDC",
+    "marketType": "PERP",
+    "visible": true,
+    "filters": {
+      "price": {"tickSize": "0.1"},
+      "quantity": {"minQuantity": "0.01", "stepSize": "0.01"}
+    }
+  }
+]

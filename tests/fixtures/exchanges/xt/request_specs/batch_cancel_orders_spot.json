@@ -1,0 +1,16 @@
+{
+  "exchange": "xt",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/v4/batch-order",
+  "auth": "signed",
+  "headers": {
+    "validate-appkey": {"match": "exact", "value": "key"},
+    "validate-timestamp": {"match": "non_empty"},
+    "validate-signature": {"match": "non_empty"}
+  },
+  "body_contains": {"orderIds": ["1002"]},
+  "forbid_header_values_containing": ["secret"]
+}

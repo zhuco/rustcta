@@ -1,0 +1,7 @@
+{
+  "operation": "coindcx.get_positions",
+  "method": "POST",
+  "path": "/exchange/v1/derivatives/futures/positions",
+  "auth": "hmac",
+  "expected_body": {}
+}

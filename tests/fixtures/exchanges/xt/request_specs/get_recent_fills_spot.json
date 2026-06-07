@@ -1,0 +1,16 @@
+{
+  "exchange": "xt",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v4/trade",
+  "auth": "signed",
+  "headers": {
+    "validate-appkey": {"match": "exact", "value": "key"},
+    "validate-timestamp": {"match": "non_empty"},
+    "validate-signature": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["secret"],
+  "forbid_header_values_containing": ["secret"]
+}

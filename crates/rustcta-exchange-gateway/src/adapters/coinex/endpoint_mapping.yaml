@@ -1,0 +1,209 @@
+schema_version: 1
+exchange: coinex
+adapter: rustcta_exchange_gateway::adapters::coinex
+metadata:
+  status: validated
+  notes: "Task 11 Spot-only mapping; symbols are uppercase compact BASEQUOTE."
+market_types:
+  - spot
+products:
+  - spot
+rest:
+  base_url: https://api.coinex.com/v2
+rate_limits:
+  buckets:
+    coinex_rest:
+      scope: rest
+      interval: 1m
+      limit: 400
+      burst: 40
+    coinex_orders:
+      scope: orders
+      interval: 1m
+      limit: 120
+      burst: 20
+    coinex_ws:
+      scope: websocket
+      interval: 1m
+      limit: 100
+      burst: 20
+pagination:
+  get_recent_fills:
+    style: limit_with_time_or_id_cursor
+    limit_param: limit
+    max_limit: 1000
+    since_param: start_time
+    until_param: end_time
+    cursor_param: last_id
+    unsupported_cursors:
+      - offset
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  unknown_order_policy: query_by_client_order_id_then_open_orders_then_recent_fills
+  live_dry_run_requires:
+    - kill_switch
+    - disabled_symbol_gate
+    - max_notional_gate
+batch:
+  place_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: partial
+    max_items: 10
+    partial_failure: true
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: partial
+    max_items: 10
+    partial_failure: true
+websocket:
+  public:
+    support: native
+    url: wss://socket.coinex.com/v2/spot
+    separate_connection: true
+    heartbeat:
+      method: server.ping
+      direction: client_ping
+      interval_ms: 30000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://socket.coinex.com/v2/spot
+    separate_connection: true
+    auth: server.sign
+    renewal: relogin
+    renewal_interval_ms: 1800000
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/market
+    auth: none
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/depth
+    auth: none
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: false
+    params:
+      - name: market
+      - name: limit
+      - name: interval
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /assets/spot/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/market
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinex/request_specs/place_order_limit.json
+    notes: "Signing vector: tests/fixtures/exchanges/coinex/signing_vectors/private_post_order.json"
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinex/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /spot/cancel-all-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 5
+    request_spec_required: true
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /spot/modify-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinex_orders
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/order-status
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: true
+    params:
+      - any_of: [order_id, client_id]
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/pending-order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/finished-order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinex_rest
+    weight: 1
+    request_spec_required: true
+    params:
+      - name: market
+      - name: order_id
+      - name: start_time
+      - name: end_time
+      - name: last_id
+      - name: limit

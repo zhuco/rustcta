@@ -1,0 +1,194 @@
+schema_version: 1
+exchange: binance
+adapter: rustcta_exchange_gateway::adapters::binance
+market_types:
+  - spot
+rest:
+  base_url: https://api.binance.com
+  testnet_base_url: https://testnet.binance.vision
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: 1200
+    signed_uid:
+      scope: uid
+      interval: 1m
+      limit: 1200
+    order_count:
+      scope: account
+      interval: 10s
+      limit: 50
+pagination:
+  get_recent_fills:
+    style: from_id_or_time_window
+    since_param: startTime
+    until_param: endTime
+    cursor_param: fromId
+    limit_param: limit
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_balances
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: unsupported
+    reason: batch place order is not implemented
+  cancel_orders:
+    support: unsupported
+    reason: batch cancel order is not implemented
+  cancel_all_orders:
+    support: native
+    atomicity: partial
+    max_items: null
+    partial_failure: true
+websocket:
+  public:
+    support: unsupported
+    heartbeat:
+      required: true
+      direction: server_ping
+      interval_ms: 180000
+      timeout_ms: 600000
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    auth: listen_key
+    renewal_ms: 1800000
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/exchangeInfo
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 10
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 5
+    request_spec_required: false
+  - operation: get_balances
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/account
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/account/commission
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: place_quote_market_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /api/v3/openOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: amend_order
+    transport: rest
+    product: spot
+    method: PUT
+    path: /api/v3/order/amend/keepPriority
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 4
+    request_spec_required: true
+  - operation: place_order_list
+    transport: rest
+    product: spot
+    method: POST
+    path: /api/v3/orderList/oco
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 4
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 6
+    request_spec_required: true
+  - operation: get_recent_fills
+    transport: rest
+    product: spot
+    method: GET
+    path: /api/v3/myTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true

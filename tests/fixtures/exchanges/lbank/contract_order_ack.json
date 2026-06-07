@@ -1,0 +1,15 @@
+{
+  "result": true,
+  "error_code": 0,
+  "data": {
+    "orderId": "9001",
+    "clientOrderId": "PERP1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "orderPriceType": 4,
+    "offsetFlag": 0,
+    "price": "65000",
+    "volume": "0.02",
+    "status": 0
+  }
+}

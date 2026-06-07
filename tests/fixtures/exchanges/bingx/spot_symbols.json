@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "data": {
+    "symbols": [
+      {
+        "symbol": "BTC-USDT",
+        "tickSize": "0.01",
+        "stepSize": "0.00001",
+        "minQty": "0.00001",
+        "maxQty": "100",
+        "minNotional": "5"
+      }
+    ]
+  }
+}

@@ -2,12 +2,13 @@ use async_trait::async_trait;
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse, CancelOrderRequest,
-    CancelOrderResponse, ExchangeApiError, ExchangeApiResult, ExchangeClient,
-    ExchangeClientCapabilities, FeesRequest, FeesResponse, OpenOrdersRequest, OpenOrdersResponse,
-    OrderBookRequest, OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
-    PositionsResponse, PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    SymbolRulesRequest, SymbolRulesResponse, TimeInForce,
+    CancelOrderResponse, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeApiResult,
+    ExchangeClient, ExchangeClientCapabilities, FeesRequest, FeesResponse, HeartbeatDirection,
+    HeartbeatPolicy, HistoryCapability, OpenOrdersRequest, OpenOrdersResponse, OrderBookRequest,
+    OrderBookResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    PrivateStreamSubscription, PublicStreamSubscription, QueryOrderRequest, QueryOrderResponse,
+    QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse, SymbolRulesRequest,
+    SymbolRulesResponse, TimeInForce,
 };
 use rustcta_types::{ExchangeId, MarketType, OrderType};
 
@@ -116,22 +117,23 @@ impl ExchangeClient for BitgetGatewayAdapter {
     }
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
+        let private = self.config.private_rest_available();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
         capabilities.market_types = vec![MarketType::Spot];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = self.config.private_rest_available();
+        capabilities.supports_private_rest = private;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
-        capabilities.supports_balances = self.config.private_rest_available();
-        capabilities.supports_fees = self.config.private_rest_available();
-        capabilities.supports_place_order = self.config.private_rest_available();
-        capabilities.supports_cancel_order = self.config.private_rest_available();
-        capabilities.supports_query_order = self.config.private_rest_available();
-        capabilities.supports_open_orders = self.config.private_rest_available();
-        capabilities.supports_recent_fills = self.config.private_rest_available();
-        capabilities.supports_cancel_all_orders = self.config.private_rest_available();
-        capabilities.supports_quote_market_order = self.config.private_rest_available();
-        capabilities.supports_amend_order = self.config.private_rest_available();
+        capabilities.supports_balances = private;
+        capabilities.supports_fees = private;
+        capabilities.supports_place_order = private;
+        capabilities.supports_cancel_order = private;
+        capabilities.supports_query_order = private;
+        capabilities.supports_open_orders = private;
+        capabilities.supports_recent_fills = private;
+        capabilities.supports_cancel_all_orders = private;
+        capabilities.supports_quote_market_order = private;
+        capabilities.supports_amend_order = private;
         capabilities.supports_client_order_id = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
@@ -150,6 +152,89 @@ impl ExchangeClient for BitgetGatewayAdapter {
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(50));
         capabilities.max_recent_fill_limit = Some(100);
+        capabilities.refresh_v2_from_legacy_flags();
+        capabilities.capabilities_v2.public_streams = CapabilitySupport::rest_fallback(
+            "public WebSocket is not wired in this gateway adapter; REST order-book snapshots provide resync",
+        );
+        capabilities.capabilities_v2.private_streams = CapabilitySupport::rest_fallback(
+            "private WebSocket is not wired; reconciliation uses private REST readbacks",
+        );
+        capabilities.capabilities_v2.stream_runtime.heartbeat_policy = HeartbeatPolicy::disabled();
+        capabilities.capabilities_v2.stream_runtime.public =
+            capabilities.capabilities_v2.public_streams.clone();
+        capabilities.capabilities_v2.stream_runtime.private =
+            capabilities.capabilities_v2.private_streams.clone();
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .resync
+            .order_book = true;
+        capabilities.capabilities_v2.stream_runtime.resync.balances = private;
+        capabilities.capabilities_v2.stream_runtime.resync.orders = private;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .direction = rustcta_exchange_api::StreamHeartbeatDirection::None;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat
+            .required = false;
+        capabilities
+            .capabilities_v2
+            .stream_runtime
+            .heartbeat_policy
+            .direction = HeartbeatDirection::None;
+        capabilities.capabilities_v2.batch_place_orders = rustcta_exchange_api::BatchCapability {
+            support: CapabilitySupport::composed(
+                "planner may compose sequential single-order REST calls",
+            ),
+            mode: rustcta_exchange_api::BatchExecutionMode::ComposedSequential,
+            atomicity: rustcta_exchange_api::BatchAtomicity::NonAtomic,
+            max_items: Some(20),
+            same_symbol_required: false,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+        };
+        capabilities.capabilities_v2.batch_cancel_orders = rustcta_exchange_api::BatchCapability {
+            support: CapabilitySupport::composed(
+                "planner may compose sequential single-cancel REST calls",
+            ),
+            mode: rustcta_exchange_api::BatchExecutionMode::ComposedSequential,
+            atomicity: rustcta_exchange_api::BatchAtomicity::NonAtomic,
+            max_items: Some(20),
+            same_symbol_required: false,
+            same_market_type_required: true,
+            supports_client_order_id: true,
+            supports_partial_failure: true,
+        };
+        capabilities.capabilities_v2.order_history = HistoryCapability {
+            support: CapabilitySupport::native(),
+            supports_since: false,
+            supports_until: false,
+            supports_limit: false,
+            supports_cursor: false,
+            supports_from_id: false,
+            max_limit: None,
+            max_window_ms: None,
+        };
+        capabilities.capabilities_v2.fills_history = HistoryCapability {
+            support: CapabilitySupport::native(),
+            supports_since: true,
+            supports_until: true,
+            supports_limit: true,
+            supports_cursor: true,
+            supports_from_id: true,
+            max_limit: Some(100),
+            max_window_ms: None,
+        };
+        capabilities.capabilities_v2.credential_scopes = if private {
+            vec![CredentialScope::ReadOnly, CredentialScope::Trade]
+        } else {
+            Vec::new()
+        };
         capabilities
     }
 

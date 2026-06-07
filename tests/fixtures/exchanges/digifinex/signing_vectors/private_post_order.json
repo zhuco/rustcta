@@ -1,0 +1,12 @@
+{
+  "exchange": "digifinex",
+  "name": "private-post-order",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": 1700000000000,
+  "method": "POST",
+  "request_path": "/v3/spot/order/new",
+  "body": "{\"symbol\":\"btc_usdt\",\"price\":\"65000\",\"amount\":\"0.01\"}",
+  "payload": "1700000000000POST/v3/spot/order/new{\"symbol\":\"btc_usdt\",\"price\":\"65000\",\"amount\":\"0.01\"}",
+  "expected_signature": "719fd57ecf057f4301b878d7c19857c38c98b776cc2e5a8aa76b36905446f732"
+}

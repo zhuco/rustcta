@@ -1,0 +1,164 @@
+schema_version: 1
+exchange: coinstore
+adapter: rustcta_exchange_gateway::adapters::coinstore
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway Coinstore adapter implementation and task-24 fixtures
+  last_reviewed: "2026-06-08"
+  notes: Spot + futures REST, Spot public WebSocket, and futures Socket.IO private stream specs.
+market_types: [spot, linear_perp]
+rest:
+  base_url: https://api.coinstore.com/api
+base_urls:
+  futures_rest: https://futures.coinstore.com/api
+  spot_public_ws: wss://ws.coinstore.com/s/ws
+  futures_socketio: wss://ws-futures.coinstore.com/socket.io/?EIO=3&transport=websocket
+auth:
+  private_rest: X-CS-APIKEY/X-CS-EXPIRES/X-CS-SIGN two-stage HMAC-SHA256
+rate_limits:
+  buckets:
+    public_ip: { scope: ip, interval: 1m, limit: null }
+    private_key: { scope: api_key, interval: 1m, limit: null }
+    order_count: { scope: api_key, interval: 1m, limit: null }
+pagination:
+  order_book: { style: limit, limit_param: depth, max_limit: 100 }
+  open_orders: { style: id, cursor: unsupported }
+  recent_fills: { style: limit, max_limit: 100 }
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_balances, get_positions, query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders: { support: native, atomicity: partial, max_items: 20, partial_failure: true }
+  cancel_orders: { support: native, atomicity: partial, max_items: 20, partial_failure: true }
+websocket:
+  public:
+    transport: websocket
+    support: parser_only
+    heartbeat: { required: true, direction: bidirectional, interval_ms: 30000, timeout_ms: 90000 }
+    resync: rest_order_book_snapshot
+  private:
+    transport: socket_io
+    support: parser_only
+    auth: signed_auth_frame
+    renewal: relogin_on_reconnect
+    auth_renewal: { mode: relogin, renewal_interval_ms: 25000, renew_before_expiry_ms: 30000, reconnect_on_failure: true, resubscribe_after_renewal: true }
+    native_topics: [match]
+    standard_events: [orders, fills]
+    unsupported_events: [balances, positions, account]
+    fallback: rest_reconciliation
+streams:
+  public_books:
+    transport: websocket
+    subscription_fixture: tests/fixtures/exchanges/coinstore/public_ws_book.json
+    parser_test: crates/rustcta-exchange-gateway/src/adapters/coinstore/stream_tests.rs
+  private_events:
+    transport: socket_io
+    topic: match
+    standard_events: [order_update, fill]
+    balance_position_source: rest_reconciliation
+    subscription_fixture: tests/fixtures/exchanges/coinstore/private_ws_match.json
+    parser_test: crates/rustcta-exchange-gateway/src/adapters/coinstore/stream_tests.rs
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /v2/public/config/spot/symbols
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/public_tests.rs, fixture: tests/fixtures/exchanges/coinstore/spot_symbols_success.json }
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /v1/market/depth/{symbol}
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/public_tests.rs, fixture: tests/fixtures/exchanges/coinstore/orderbook_success.json }
+  - operation: get_balances
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /spot/accountList
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_key
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinstore/balances_success.json }
+  - operation: place_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /trade/order/place
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinstore/order_success.json }
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /trade/order/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /trade/order/placeBatch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
+    notes: Futures route uses /api/trade/order/placeBatch.
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /trade/order/cancelBatch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /api/v2/trade/order/active
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_key
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinstore/private_tests.rs }

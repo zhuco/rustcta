@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": "fixture-trade-001",
+      "order_id": "fixture-order-001",
+      "market": "BTCUSDT",
+      "side": "buy",
+      "price": "64000",
+      "quantity": "0.01",
+      "fee_amount": "0.1",
+      "fee_currency": "USDT",
+      "timestamp": 1725000000000
+    }
+  ]
+}

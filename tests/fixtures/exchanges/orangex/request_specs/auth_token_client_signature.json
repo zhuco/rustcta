@@ -1,0 +1,18 @@
+{
+  "exchange": "orangex",
+  "operation": "auth_token",
+  "product": "account",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "body_contains": {
+    "method": "/public/auth",
+    "params": {
+      "grant_type": "client_signature",
+      "client_id": "client"
+    }
+  },
+  "forbid_header_values_containing": ["secret"],
+  "signing_vector": "auth-client-signature"
+}

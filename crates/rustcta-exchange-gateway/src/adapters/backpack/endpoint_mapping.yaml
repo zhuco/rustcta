@@ -1,0 +1,341 @@
+schema_version: 1
+exchange: backpack
+adapter: rustcta_exchange_gateway::adapters::backpack
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway Backpack spot + perpetual adapter implementation
+  last_reviewed: "2026-06-08"
+  notes: Spot and USDC perpetual REST/WS mapping for currently declared ExchangeClient capabilities.
+market_types:
+  - spot
+  - linear_perp
+rest:
+  base_url: https://api.backpack.exchange
+auth:
+  private_rest: ed25519
+  payload: instruction=<instruction>&sorted_fields&timestamp=<ms>&window=<ms>
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: null
+    private_uid:
+      scope: account
+      interval: 1m
+      limit: null
+    order_count:
+      scope: account
+      interval: 1m
+      limit: null
+pagination:
+  get_recent_fills:
+    style: time_window
+    since_param: from
+    until_param: to
+    limit_param: limit
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_open_orders
+    - query_order
+    - get_recent_fills
+    - get_balances
+    - get_positions
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: native
+    atomicity: partial
+    max_items: null
+    partial_failure: true
+  cancel_orders:
+    support: composed
+    atomicity: partial
+    max_items: null
+    partial_failure: true
+  cancel_all_orders:
+    support: native
+    atomicity: partial
+    max_items: null
+    partial_failure: true
+websocket:
+  public:
+    support: parser_only
+    channels: [trade, ticker, depth, bookTicker, kline]
+    heartbeat:
+      required: true
+      direction: client_ping
+      interval_ms: 15000
+      timeout_ms: 30000
+    resync: rest_order_book_snapshot
+  private:
+    support: parser_only
+    auth: signed_subscribe
+    renewal: relogin
+    fallback: rest_reconciliation
+    channels: [account.orderUpdate, account.positionUpdate]
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /api/v1/markets
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+  - operation: get_order_book
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /api/v1/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    params:
+      - name: symbol
+        source: symbol
+        required: true
+      - name: limit
+        source: request
+        required: false
+  - operation: get_balances
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /api/v1/capital
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=balanceQuery.
+  - operation: get_positions
+    transport: rest
+    product: linear_perp
+    method: GET
+    path: /api/v1/position
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    params:
+      - name: marketType
+        source: static
+        required: true
+        value: PERP
+      - name: symbol
+        source: symbol
+        required: false
+    notes: Signed with instruction=positionQuery; spot positions are unsupported.
+  - operation: get_fees
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /api/v1/account
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=accountQuery.
+  - operation: place_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=orderExecute; clientId must be numeric uint32.
+  - operation: place_quote_market_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=orderExecute.
+  - operation: cancel_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: DELETE
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=orderCancel; exactly one of orderId/clientId is accepted.
+  - operation: cancel_all_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: DELETE
+    path: /api/v1/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=orderCancelAll; adapter requires a symbol.
+  - operation: batch_place_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: POST
+    path: /api/v1/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Native batch signing repeats instruction=orderExecute for each order.
+  - operation: batch_cancel_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: DELETE
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+      reason: Adapter composes this from individual cancel_order calls.
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Composed sequential batch cancel; partial failures surface through per-item order state.
+  - operation: query_order
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /api/v1/order
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=orderQuery; clientId must be numeric uint32.
+  - operation: get_open_orders
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /api/v1/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=orderQueryAll.
+  - operation: get_recent_fills
+    transport: rest
+    product: spot
+    market_types: [spot, linear_perp]
+    method: GET
+    path: /wapi/v1/history/fills
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    response_parser:
+      status: implemented
+      test: crates/rustcta-exchange-gateway/src/adapters/backpack/tests.rs
+    notes: Signed with instruction=fillHistoryQueryAll; used for REST reconciliation.

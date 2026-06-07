@@ -3,6 +3,7 @@ mod api_keys;
 mod app;
 mod cross_arb;
 mod dashboard_panels;
+mod funding_arb;
 mod i18n;
 mod overview;
 mod spot_arb;

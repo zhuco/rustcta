@@ -1,0 +1,9 @@
+{
+  "exchange": "orangex",
+  "name": "auth-client-signature",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "payload": "client\n1700000000000\nnonce\n",
+  "expected_signature": "d1d00486bfe1c1cf571ee5170a39f6e9b4eba1e072e890160ee078057f6a1253",
+  "timestamp": "1700000000000"
+}

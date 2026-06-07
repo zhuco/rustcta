@@ -1,0 +1,10 @@
+{
+  "data": [
+    {
+      "asset": "USDT",
+      "available": "10",
+      "locked": "2",
+      "balance": "12"
+    }
+  ]
+}

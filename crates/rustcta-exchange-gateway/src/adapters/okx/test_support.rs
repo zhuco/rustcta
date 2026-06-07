@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+use crate::request_spec::ActualHttpRequest;
+
 use super::OkxGatewayConfig;
 
 #[derive(Debug, Clone)]
@@ -16,6 +18,15 @@ pub(super) struct SeenRequest {
     pub(super) query: HashMap<String, String>,
     pub(super) headers: HashMap<String, String>,
     pub(super) body: Option<Value>,
+}
+
+impl SeenRequest {
+    pub(super) fn actual_http_request(&self) -> ActualHttpRequest {
+        ActualHttpRequest::new(self.method.clone(), self.path.clone())
+            .with_query(self.query.clone())
+            .with_headers(self.headers.clone())
+            .with_body(self.body.clone())
+    }
 }
 
 pub(super) async fn spawn_rest_server(

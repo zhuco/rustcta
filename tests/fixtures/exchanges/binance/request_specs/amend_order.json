@@ -1,0 +1,54 @@
+{
+  "exchange": "binance",
+  "operation": "amend_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/api/v3/order/amend/keepPriority",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSDT"
+    },
+    "orderId": {
+      "match": "exact",
+      "value": "33"
+    },
+    "quantity": {
+      "match": "exact",
+      "value": "0.00500000"
+    },
+    "newClientOrderId": {
+      "match": "exact",
+      "value": "cli-amend"
+    },
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "recvWindow": {
+      "match": "exact",
+      "value": "5000"
+    },
+    "signature": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "X-MBX-APIKEY": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "binance/place_order_limit"
+}

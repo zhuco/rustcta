@@ -1,0 +1,72 @@
+exchange: kucoin
+schema_version: 2
+market_types: [spot]
+public_rest:
+  mode: native
+private_rest:
+  mode: native_when_credentials_present
+credential_scopes:
+  - read_only
+  - trade
+public_streams:
+  mode: native
+  policy: bullet websocket topics with REST orderbook resync
+private_streams:
+  mode: native_when_credentials_present
+  auth: POST /api/v1/bullet-private
+  token_renewal:
+    kind: token_refresh
+    renew_before_expiry_ms: 3600000
+    renewal_interval_ms: 72000000
+    reconnect_on_failure: true
+    resubscribe_after_renewal: true
+stream_runtime:
+  separate_public_private_connections: true
+  heartbeat:
+    direction: server_ping_application_pong
+    interval_ms: 20000
+    timeout_ms: 10000
+    stale_message_ms: 30000
+  reconnect:
+    supported: true
+    requires_new_private_token: true
+    requires_resubscribe: true
+  resync:
+    order_book: REST level2_100 snapshot after reconnect or sequence gap
+    orders: REST open-orders/query-order sweep
+    balances: REST accounts sweep
+    positions: unsupported
+history:
+  orders:
+    support: native
+    endpoint: /api/v1/hf/orders/active
+  fills:
+    support: native
+    endpoint: /api/v1/hf/fills
+    pagination:
+      style: page_number
+      limit_param: pageSize
+      cursor_param: currentPage
+      max_limit: 500
+batch:
+  place:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    same_market_type_required: true
+    supports_client_order_id: true
+    supports_partial_failure: false
+  cancel:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    same_market_type_required: true
+    supports_client_order_id: true
+    supports_partial_failure: false
+unsupported:
+  - positions
+  - reduce_only
+  - stop_order
+  - private_positions_stream

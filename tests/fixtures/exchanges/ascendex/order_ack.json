@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": {
+    "status": "ACCEPT",
+    "info": {
+      "id": "CID1",
+      "orderId": "OID1",
+      "symbol": "BTC/USDT",
+      "orderType": "Limit",
+      "side": "Buy",
+      "status": "New",
+      "orderQty": "0.01",
+      "price": "65000"
+    }
+  }
+}

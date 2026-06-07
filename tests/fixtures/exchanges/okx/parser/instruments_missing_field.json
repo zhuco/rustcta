@@ -1,0 +1,9 @@
+[
+  {
+    "instType": "SPOT",
+    "instId": "BTC-USDT",
+    "quoteCcy": "USDT",
+    "tickSz": "0.01",
+    "lotSz": "0.00000001"
+  }
+]

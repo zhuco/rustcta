@@ -1,0 +1,12 @@
+{
+  "exchange": "bitunix",
+  "name": "rest-double-sha256",
+  "algorithm": "sha256_hex_then_sha256_hex_with_secret",
+  "api_key": "yourApiKey",
+  "secret": "yourSecretKey",
+  "nonce": "123456",
+  "timestamp": "20241120123045",
+  "query_params": "id1uid200",
+  "body": "{\"uid\":\"2899\"}",
+  "expected_signature": "018fe88fda21ec2c852b0f83750c4054c3ae4751a2af67f68d1c7c66fcd76736"
+}

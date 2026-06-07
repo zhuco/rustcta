@@ -131,7 +131,7 @@ persistence:
 dashboard:
   enabled: false
   bind_host: 127.0.0.1
-  port: 8090
+  port: 8091
 
 alerts:
   enabled: false

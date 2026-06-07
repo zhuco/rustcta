@@ -1,0 +1,26 @@
+{
+  "exchange": "hashkey_global",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/v1/order",
+  "auth": "signed",
+  "headers": {
+    "X-HK-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "query_contains": {
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": "5000",
+    "signature": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "quantity": "0.01",
+    "price": "65000"
+  },
+  "forbid_query_values_containing": ["secret"],
+  "signing_vector": "hashkey_global/query_hmac_sha256"
+}

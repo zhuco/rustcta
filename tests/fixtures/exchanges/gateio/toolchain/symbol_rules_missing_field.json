@@ -1,0 +1,8 @@
+[
+  {
+    "id": "BTC_USDT",
+    "base": "BTC",
+    "precision": 2,
+    "amount_precision": 5
+  }
+]

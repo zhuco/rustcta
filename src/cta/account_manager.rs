@@ -16,6 +16,7 @@ use crate::Exchange;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -30,6 +31,68 @@ pub struct AccountConfig {
     pub position_mode: Option<String>,
     pub max_positions: u32,
     pub max_orders_per_symbol: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountManagerConfigFile {
+    #[serde(default)]
+    pub accounts: HashMap<String, AccountManagerFileAccount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountManagerFileAccount {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub exchange: String,
+    #[serde(rename = "type", default)]
+    pub account_type: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, alias = "api_key_env")]
+    pub env_prefix: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub settings: AccountManagerFileAccountSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AccountManagerFileAccountSettings {
+    pub max_positions: Option<u32>,
+    pub max_orders_per_symbol: Option<u32>,
+    pub leverage: Option<u32>,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl AccountManagerConfigFile {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            ExchangeError::ConfigError(format!("读取账户配置文件 {} 失败: {}", path.display(), err))
+        })?;
+        serde_yaml::from_str(&content).map_err(ExchangeError::from)
+    }
+
+    pub fn into_account_configs(self) -> Vec<AccountConfig> {
+        let mut accounts = self
+            .accounts
+            .into_iter()
+            .map(|(id, account)| AccountConfig {
+                id,
+                exchange: account.exchange,
+                enabled: account.enabled,
+                api_key_env: account.env_prefix,
+                position_mode: None,
+                max_positions: account.settings.max_positions.unwrap_or(10),
+                max_orders_per_symbol: account.settings.max_orders_per_symbol.unwrap_or(20),
+            })
+            .collect::<Vec<_>>();
+        accounts.sort_by(|left, right| left.id.cmp(&right.id));
+        accounts
+    }
 }
 
 /// 账户信息

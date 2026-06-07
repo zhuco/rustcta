@@ -1,10 +1,93 @@
 use rustcta_exchange_api::{
-    ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
+    CapabilitySupport, ExchangeClient, OrderBookRequest, SymbolRulesRequest,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use serde_json::json;
 
+use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
 use super::test_support::{context, spawn_rest_server, symbol_scope};
 use super::{OkxGatewayAdapter, OkxGatewayConfig};
+
+fn fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/okx/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("fixture");
+    serde_json::from_str(&text).expect("fixture json")
+}
+
+#[tokio::test]
+async fn okx_adapter_should_declare_task9_toolchain_capabilities() {
+    let adapter = OkxGatewayAdapter::new(OkxGatewayConfig {
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..OkxGatewayConfig::default()
+    })
+    .expect("adapter");
+    let capabilities = adapter.capabilities();
+
+    assert!(matches!(
+        capabilities.capabilities_v2.public_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        capabilities.capabilities_v2.private_rest,
+        CapabilitySupport::Native
+    ));
+    assert!(matches!(
+        capabilities.capabilities_v2.public_streams,
+        CapabilitySupport::Unsupported { .. }
+    ));
+    assert!(matches!(
+        capabilities.capabilities_v2.private_streams,
+        CapabilitySupport::Unsupported { .. }
+    ));
+    assert!(!capabilities.supports_public_streams);
+    assert!(!capabilities.supports_private_streams);
+    assert!(!capabilities.supports_batch_place_order);
+    assert!(!capabilities.supports_batch_cancel_order);
+    assert_eq!(
+        capabilities.capabilities_v2.fills_history.max_limit,
+        Some(100)
+    );
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
+        .any(|endpoint| endpoint.operation == "place_order"
+            && endpoint.path.as_deref() == Some("/api/v5/trade/order")));
+    assert!(capabilities
+        .capabilities_v2
+        .endpoints
+        .iter()
+        .any(|endpoint| endpoint.operation == "get_recent_fills"
+            && endpoint.path.as_deref() == Some("/api/v5/trade/fills-history")));
+}
+
+#[test]
+fn okx_parser_fixtures_should_cover_success_empty_and_error_shapes() {
+    let exchange = super::test_support::exchange_id();
+    let rules =
+        parse_symbol_rules(&exchange, &fixture("parser/instruments_success.json")).expect("rules");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].base_asset, "BTC");
+
+    let empty =
+        parse_symbol_rules(&exchange, &fixture("parser/instruments_empty.json")).expect("empty");
+    assert!(empty.is_empty());
+    assert!(
+        parse_symbol_rules(&exchange, &fixture("parser/instruments_missing_field.json")).is_err()
+    );
+    assert!(parse_orderbook_snapshot(
+        &exchange,
+        symbol_scope(),
+        &fixture("parser/orderbook_error.json")
+    )
+    .is_err());
+}
 
 #[tokio::test]
 async fn okx_adapter_should_load_symbol_rules_from_public_rest() {

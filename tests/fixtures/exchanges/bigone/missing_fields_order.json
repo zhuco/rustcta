@@ -1,0 +1,9 @@
+{
+  "data": {
+    "id": "order-missing-symbol",
+    "side": "BUY",
+    "type": "LIMIT",
+    "state": "OPEN",
+    "amount": "0.1"
+  }
+}

@@ -4,7 +4,7 @@
   "strategy_kind": "funding_arbitrage",
   "run_id": "local",
   "tenant_id": "local",
-  "config_path": "config/funding_rate_arbitrage_usdt.yml",
+  "config_path": "config/funding_rate_arbitrage_live_usdt.yml",
   "command": "cargo",
   "args": [
     "run",
@@ -12,7 +12,8 @@
     "funding_arb_live",
     "--",
     "--config",
-    "config/funding_rate_arbitrage_usdt.yml"
+    "config/funding_rate_arbitrage_live_usdt.yml",
+    "--confirm-live-order"
   ],
   "working_dir": ".",
   "log_path": "logs/supervisor/funding_arb_live.log",

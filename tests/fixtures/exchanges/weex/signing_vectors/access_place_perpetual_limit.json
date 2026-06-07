@@ -1,0 +1,12 @@
+{
+  "exchange": "weex",
+  "name": "access-place-perpetual-limit",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "secret",
+  "payload": "1591089508404POST/capi/v3/order{\"positionSide\":\"LONG\",\"price\":\"65000\",\"quantity\":\"0.02\",\"side\":\"BUY\",\"symbol\":\"BTCUSDT\",\"timeInForce\":\"GTC\",\"type\":\"LIMIT\"}",
+  "expected_signature": "rozxMnMTnQ8hvhR3M+MGZpdLscEDZv/mryj9faIxTk8=",
+  "timestamp": "1591089508404",
+  "method": "POST",
+  "request_path": "/capi/v3/order",
+  "body": "{\"positionSide\":\"LONG\",\"price\":\"65000\",\"quantity\":\"0.02\",\"side\":\"BUY\",\"symbol\":\"BTCUSDT\",\"timeInForce\":\"GTC\",\"type\":\"LIMIT\"}"
+}

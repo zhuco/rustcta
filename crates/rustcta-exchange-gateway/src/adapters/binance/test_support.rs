@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+use crate::request_spec::ActualHttpRequest;
+
 use super::BinanceGatewayConfig;
 
 #[derive(Debug, Clone)]
@@ -22,6 +24,12 @@ impl SeenRequest {
         self.headers
             .get(&key.to_ascii_lowercase())
             .map(String::as_str)
+    }
+
+    pub(super) fn actual_http_request(&self) -> ActualHttpRequest {
+        ActualHttpRequest::new(self.method.clone(), self.path.clone())
+            .with_query(self.query.clone())
+            .with_headers(self.headers.clone())
     }
 }
 

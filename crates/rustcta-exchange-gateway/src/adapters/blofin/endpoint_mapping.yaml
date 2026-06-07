@@ -1,0 +1,311 @@
+schema_version: 1
+exchange: blofin
+adapter: rustcta_exchange_gateway::adapters::blofin
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway BloFin adapter Task 14 implementation
+  last_reviewed: "2026-06-08"
+  notes: Task 14 scope covers BloFin USDT linear perpetual REST/WS only. Spot, dated futures, and options are explicitly unsupported. Contract specs come from /api/v1/market/instruments. Orderbook strictness is snapshot-only with REST resync. Funding is supported; open interest is documented unsupported by the verified OpenAPI mapping.
+market_types: [perpetual]
+products: [perpetual]
+rest:
+  base_url: https://openapi.blofin.com
+  testnet_base_url: https://demo-trading-openapi.blofin.com
+base_urls:
+  public_ws: wss://openapi.blofin.com/ws/public
+  private_ws: wss://openapi.blofin.com/ws/private
+auth:
+  private_rest: ACCESS-KEY, ACCESS-SIGN, ACCESS-TIMESTAMP, ACCESS-NONCE and ACCESS-PASSPHRASE using HMAC-SHA256 hex-then-Base64
+  private_ws: login payload with ACCESS-style signature
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_account: { scope: api_key, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_trade: { scope: api_key, retry_after: http_429_or_venue_message, default_weight: 1 }
+pagination:
+  open_orders: { mode: cursor, limit_param: limit, cursor_param: after, max_limit: 100 }
+  recent_fills: { mode: time_range, limit_param: limit, since_param: begin, until_param: end, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  after_place: Query by orderId or clientOrderId, then reconcile open orders and recent fills.
+  after_cancel: Query by orderId or clientOrderId, then scan fills before terminal decision.
+  stream_recovery: Re-login, resubscribe, then reconcile balances, positions, open orders, and fills through REST.
+  live_dry_run_required_controls: [kill-switch, disabled-symbol, max-notional]
+batch:
+  place_orders: { support: native, endpoint: /api/v1/trade/batch-orders, atomicity: partial, max_items: 20, partial_failure: true }
+  cancel_orders: { support: native, endpoint: /api/v1/trade/cancel-batch-orders, atomicity: partial, max_items: 20, partial_failure: true }
+websocket:
+  public:
+    support: native
+    channels: [books, books5, trades, tickers, candle, funding-rate]
+    heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 30000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: native_when_credentials_configured
+    channels: [orders, orders-algo, positions, account]
+    auth_renewal: { mode: relogin, interval_ms: 600000 }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+streams:
+  public: { support: native, heartbeat: client_ping, resync: rest_snapshot }
+  private: { support: native_when_credentials_configured, auth_renewal: relogin, resync: rest_reconciliation }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/market/instruments
+    auth: none
+    rate_limit_bucket: blofin_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/public_tests.rs, fixture: tests/fixtures/exchanges/blofin/instruments.json }
+    notes: Contract boundary filters contractType=linear; spot/futures/options unsupported.
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/market/books
+    auth: none
+    rate_limit_bucket: blofin_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/public_tests.rs, fixture: tests/fixtures/exchanges/blofin/orderbook.json }
+    notes: strictness=snapshot_only; max_depth=100; checksum unsupported; REST snapshot after reconnect.
+  - operation: balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/account/balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: blofin_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/blofin/balance.json }
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/account/positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: blofin_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/blofin/position.json }
+  - operation: fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/market/instruments
+    auth: none
+    rate_limit_bucket: blofin_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: Shared fee readback uses adapter defaults/instrument metadata; no private tier endpoint is claimed.
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/trade/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/blofin/order_ack.json }
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/trade/batch-orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    notes: max_items=20; partial failure supported; client order id supported.
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/trade/cancel-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/trade/cancel-batch-orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    notes: max_items=20; partial failure supported.
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/trade/cancel-batch-orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: blofin_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: composed
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    notes: Adapter composes cancel-all by reading open orders then using batch cancel.
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/trade/order-detail
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: blofin_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/trade/orders-pending
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: blofin_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/trade/fills-history
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: blofin_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/blofin/private_tests.rs }
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/blofin/fill.json }
+  - operation: funding_rate
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/market/funding-rate
+    auth: none
+    rate_limit_bucket: blofin_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/blofin/funding.json }
+  - operation: funding_history
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/market/funding-rate-history
+    auth: none
+    rate_limit_bucket: blofin_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/blofin/funding.json }
+  - operation: open_interest
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/market/open-interest
+    auth: none
+    rate_limit_bucket: blofin_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported
+    reason: No verified BloFin OpenAPI open-interest endpoint is claimed by this adapter.
+    response_parser: { status: unsupported, fixture: tests/fixtures/exchanges/blofin/open_interest.json }

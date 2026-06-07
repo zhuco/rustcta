@@ -1,0 +1,14 @@
+{
+  "exchange": "blofin",
+  "name": "rest_place_order_access_sign",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/api/v1/trade/order",
+  "body": "{\"instId\":\"BTC-USDT\",\"marginMode\":\"cross\",\"orderType\":\"limit\",\"positionSide\":\"net\",\"price\":\"65000\",\"reduceOnly\":\"false\",\"side\":\"buy\",\"size\":\"0.01\"}",
+  "payload": "/api/v1/trade/orderPOST1700000000000nonce-1{\"instId\":\"BTC-USDT\",\"marginMode\":\"cross\",\"orderType\":\"limit\",\"positionSide\":\"net\",\"price\":\"65000\",\"reduceOnly\":\"false\",\"side\":\"buy\",\"size\":\"0.01\"}",
+  "expected_signature": "46f5ccd39d35aa1269a6d0bc5da780d4b38f0cbe343ce636b6ac7cef562ad6bc",
+  "payload_format": "raw_payload",
+  "access_sign_base64_hex": "NDZmNWNjZDM5ZDM1YWExMjY5YTZkMGJjNWRhNzgwZDRiMzhmMGNiZTM0M2NlNjM2YjZhYzdjZWY1NjJhZDZiYw=="
+}

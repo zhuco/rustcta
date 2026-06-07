@@ -1,0 +1,13 @@
+{
+  "action": "snapshot",
+  "arg": { "instType": "SPOT", "channel": "books5", "instId": "BTCUSDT" },
+  "data": [
+    {
+      "bids": [["65000", "1"]],
+      "asks": [["65001", "1"]],
+      "checksum": 0,
+      "ts": "1695710946294"
+    }
+  ],
+  "ts": "1695710946294"
+}

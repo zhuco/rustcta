@@ -1,0 +1,38 @@
+{
+  "exchange": "phemex",
+  "operation": "perp_cancel_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/g-orders/cancel",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSDT"
+    },
+    "clOrdID": {
+      "match": "exact",
+      "value": "client-1"
+    },
+    "posSide": {
+      "match": "exact",
+      "value": "Merged"
+    }
+  },
+  "headers": {
+    "x-phemex-access-token": {
+      "match": "exact",
+      "value": "key"
+    },
+    "x-phemex-request-expiry": {
+      "match": "non_empty"
+    },
+    "x-phemex-request-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null
+}

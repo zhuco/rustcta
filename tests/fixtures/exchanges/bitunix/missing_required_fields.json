@@ -1,0 +1,11 @@
+{
+  "code": 0,
+  "data": {
+    "list": [
+      {
+        "base": "BTC",
+        "quote": "USDT"
+      }
+    ]
+  }
+}

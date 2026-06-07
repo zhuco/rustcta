@@ -1,0 +1,18 @@
+{
+  "data": {
+    "fills": [
+      {
+        "id": "fill-1",
+        "order_id": "order-1",
+        "asset_pair_name": "BTC-USDT",
+        "side": "BUY",
+        "price": "65000",
+        "amount": "0.01",
+        "fee": "0.65",
+        "fee_asset": "USDT",
+        "is_maker": false,
+        "created_at": "2026-06-08T00:00:01Z"
+      }
+    ]
+  }
+}

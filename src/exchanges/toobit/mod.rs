@@ -94,6 +94,24 @@ pub struct ToobitPerpClient {
     http: reqwest::Client,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToobitBatchPlaceOrdersResponse {
+    pub exchange: String,
+    pub market_type: MarketType,
+    pub orders: Vec<OrderResponse>,
+    pub accepted: bool,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToobitBatchCancelOrdersResponse {
+    pub exchange: String,
+    pub market_type: MarketType,
+    pub cancelled_orders: Vec<CancelOrderResponse>,
+    pub accepted: bool,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
 impl ToobitSpotClient {
     pub fn new(config: ToobitConfig) -> Self {
         Self {
@@ -125,6 +143,142 @@ impl ToobitSpotClient {
 
     fn dry_run_order_response(&self, request: &OrderRequest, symbol: &str) -> OrderResponse {
         dry_run_order_response("toobit", MarketType::Spot, request, symbol)
+    }
+
+    pub async fn batch_place_orders(
+        &self,
+        mut requests: Vec<OrderRequest>,
+    ) -> ExchangeClientResult<ToobitBatchPlaceOrdersResponse> {
+        if requests.is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "orders",
+                reason: "Toobit Spot batch_place_orders requires at least one order".to_string(),
+            });
+        }
+        if requests.len() > 20 {
+            return Err(ExchangeClientError::Validation {
+                field: "orders",
+                reason: "Toobit Spot batch_place_orders supports at most 20 orders".to_string(),
+            });
+        }
+        let first_symbol = self.normalize_symbol(&requests[0].symbol)?;
+        let mut order_items = Vec::with_capacity(requests.len());
+        for request in &mut requests {
+            request.validate()?;
+            if request.market_type != MarketType::Spot {
+                return Err(ExchangeClientError::Validation {
+                    field: "market_type",
+                    reason: "Toobit Spot batch_place_orders only supports MarketType::Spot"
+                        .to_string(),
+                });
+            }
+            let symbol = self.normalize_symbol(&request.symbol)?;
+            if symbol != first_symbol {
+                return Err(ExchangeClientError::Validation {
+                    field: "symbol",
+                    reason: "Toobit Spot batch_place_orders requires one symbol per request"
+                        .to_string(),
+                });
+            }
+            request.symbol = symbol.clone();
+            ensure_order_client_id(request, "toobit")?;
+            order_items.push(toobit_order_value(request, &symbol)?);
+        }
+        if self.config.dry_run {
+            return Ok(ToobitBatchPlaceOrdersResponse {
+                exchange: "toobit".to_string(),
+                market_type: MarketType::Spot,
+                orders: requests
+                    .iter()
+                    .map(|request| self.dry_run_order_response(request, &request.symbol))
+                    .collect(),
+                accepted: false,
+                acknowledged_at: Utc::now(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert("symbol".to_string(), first_symbol);
+        params.insert("orders".to_string(), Value::Array(order_items).to_string());
+        let value = self
+            .send_signed_request(Method::POST, "/api/v1/spot/batchOrders", params)
+            .await?;
+        Ok(ToobitBatchPlaceOrdersResponse {
+            exchange: "toobit".to_string(),
+            market_type: MarketType::Spot,
+            orders: parse_order_list(&value, MarketType::Spot)?,
+            accepted: true,
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    pub async fn batch_cancel_orders(
+        &self,
+        requests: Vec<CancelOrderRequest>,
+    ) -> ExchangeClientResult<ToobitBatchCancelOrdersResponse> {
+        if requests.is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "cancels",
+                reason: "Toobit Spot batch_cancel_orders requires at least one cancel".to_string(),
+            });
+        }
+        let first_symbol = self.normalize_symbol(&requests[0].symbol)?;
+        let mut ids = Vec::with_capacity(requests.len());
+        for request in &requests {
+            request.validate()?;
+            if request.market_type != MarketType::Spot {
+                return Err(ExchangeClientError::Validation {
+                    field: "market_type",
+                    reason: "Toobit Spot batch_cancel_orders only supports MarketType::Spot"
+                        .to_string(),
+                });
+            }
+            let symbol = self.normalize_symbol(&request.symbol)?;
+            if symbol != first_symbol {
+                return Err(ExchangeClientError::Validation {
+                    field: "symbol",
+                    reason: "Toobit Spot batch_cancel_orders requires one symbol per request"
+                        .to_string(),
+                });
+            }
+            let order_id = request
+                .order_id()
+                .ok_or_else(|| ExchangeClientError::Validation {
+                    field: "order_id",
+                    reason: "Toobit Spot cancelOrderByIds requires exchange order_id".to_string(),
+                })?;
+            ids.push(order_id.to_string());
+        }
+        if self.config.dry_run {
+            return Ok(ToobitBatchCancelOrdersResponse {
+                exchange: "toobit".to_string(),
+                market_type: MarketType::Spot,
+                cancelled_orders: requests
+                    .iter()
+                    .map(|request| {
+                        cancel_response(
+                            MarketType::Spot,
+                            &first_symbol,
+                            request.order_id(),
+                            request.client_order_id(),
+                        )
+                    })
+                    .collect(),
+                accepted: false,
+                acknowledged_at: Utc::now(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert("ids".to_string(), ids.join(","));
+        let value = self
+            .send_signed_request(Method::DELETE, "/api/v1/spot/cancelOrderByIds", params)
+            .await?;
+        Ok(ToobitBatchCancelOrdersResponse {
+            exchange: "toobit".to_string(),
+            market_type: MarketType::Spot,
+            cancelled_orders: parse_cancel_list(&value, MarketType::Spot, &first_symbol),
+            accepted: true,
+            acknowledged_at: Utc::now(),
+        })
     }
 }
 
@@ -159,6 +313,132 @@ impl ToobitPerpClient {
 
     fn dry_run_order_response(&self, request: &OrderRequest, symbol: &str) -> OrderResponse {
         dry_run_order_response("toobit", MarketType::Perpetual, request, symbol)
+    }
+
+    pub async fn batch_place_orders(
+        &self,
+        mut requests: Vec<OrderRequest>,
+    ) -> ExchangeClientResult<ToobitBatchPlaceOrdersResponse> {
+        if requests.is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "orders",
+                reason: "Toobit USDT-M batch_place_orders requires at least one order".to_string(),
+            });
+        }
+        let mut order_items = Vec::with_capacity(requests.len());
+        for request in &mut requests {
+            request.validate()?;
+            if request.market_type != MarketType::Perpetual {
+                return Err(ExchangeClientError::Validation {
+                    field: "market_type",
+                    reason: "Toobit USDT-M batch_place_orders only supports MarketType::Perpetual"
+                        .to_string(),
+                });
+            }
+            let symbol = self.normalize_symbol(&request.symbol)?;
+            request.symbol = symbol.clone();
+            if request.client_order_id.is_none() {
+                request.client_order_id = Some(Self::generate_client_order_id());
+            }
+            if let Some(client_order_id) = &request.client_order_id {
+                validate_client_order_id("toobit", MarketType::Perpetual, client_order_id)
+                    .map_err(|error| ExchangeClientError::Validation {
+                        field: "client_order_id",
+                        reason: error.to_string(),
+                    })?;
+            }
+            order_items.push(toobit_perp_order_value(request, &symbol)?);
+        }
+        if self.config.dry_run {
+            return Ok(ToobitBatchPlaceOrdersResponse {
+                exchange: "toobit".to_string(),
+                market_type: MarketType::Perpetual,
+                orders: requests
+                    .iter()
+                    .map(|request| self.dry_run_order_response(request, &request.symbol))
+                    .collect(),
+                accepted: false,
+                acknowledged_at: Utc::now(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert("orders".to_string(), Value::Array(order_items).to_string());
+        let value = self
+            .send_signed_request(Method::POST, "/api/v2/futures/batch-orders", params)
+            .await?;
+        Ok(ToobitBatchPlaceOrdersResponse {
+            exchange: "toobit".to_string(),
+            market_type: MarketType::Perpetual,
+            orders: parse_order_list(&value, MarketType::Perpetual)?,
+            accepted: true,
+            acknowledged_at: Utc::now(),
+        })
+    }
+
+    pub async fn batch_cancel_orders(
+        &self,
+        requests: Vec<CancelOrderRequest>,
+    ) -> ExchangeClientResult<ToobitBatchCancelOrdersResponse> {
+        if requests.is_empty() {
+            return Err(ExchangeClientError::Validation {
+                field: "cancels",
+                reason: "Toobit USDT-M batch_cancel_orders requires at least one cancel"
+                    .to_string(),
+            });
+        }
+        let mut ids = Vec::with_capacity(requests.len());
+        for request in &requests {
+            request.validate()?;
+            if request.market_type != MarketType::Perpetual {
+                return Err(ExchangeClientError::Validation {
+                    field: "market_type",
+                    reason: "Toobit USDT-M batch_cancel_orders only supports MarketType::Perpetual"
+                        .to_string(),
+                });
+            }
+            self.normalize_symbol(&request.symbol)?;
+            let order_id = request
+                .order_id()
+                .ok_or_else(|| ExchangeClientError::Validation {
+                    field: "order_id",
+                    reason: "Toobit USDT-M cancelOrderByIds requires exchange order_id".to_string(),
+                })?;
+            ids.push(order_id.to_string());
+        }
+        if self.config.dry_run {
+            return Ok(ToobitBatchCancelOrdersResponse {
+                exchange: "toobit".to_string(),
+                market_type: MarketType::Perpetual,
+                cancelled_orders: requests
+                    .iter()
+                    .map(|request| {
+                        let symbol = self
+                            .normalize_symbol(&request.symbol)
+                            .unwrap_or_else(|_| request.symbol.clone());
+                        cancel_response(
+                            MarketType::Perpetual,
+                            &symbol,
+                            request.order_id(),
+                            request.client_order_id(),
+                        )
+                    })
+                    .collect(),
+                accepted: false,
+                acknowledged_at: Utc::now(),
+            });
+        }
+        let mut params = HashMap::new();
+        params.insert("ids".to_string(), ids.join(","));
+        let value = self
+            .send_signed_request(Method::DELETE, "/api/v1/futures/cancelOrderByIds", params)
+            .await?;
+        Ok(ToobitBatchCancelOrdersResponse {
+            exchange: "toobit".to_string(),
+            market_type: MarketType::Perpetual,
+            cancelled_orders: parse_cancel_list(&value, MarketType::Perpetual, ""),
+            accepted: true,
+            acknowledged_at: Utc::now(),
+        })
     }
 }
 
@@ -1159,6 +1439,33 @@ pub fn parse_order_list(
         .collect()
 }
 
+pub fn parse_cancel_list(
+    value: &Value,
+    market_type: MarketType,
+    fallback_symbol: &str,
+) -> Vec<CancelOrderResponse> {
+    data_value(value)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|item| {
+            let symbol = value_as_string(item.get("symbol"))
+                .or_else(|| value_as_string(item.get("symbolName")))
+                .unwrap_or_else(|| fallback_symbol.to_string());
+            cancel_response(
+                market_type,
+                &symbol,
+                value_as_string(item.get("orderId"))
+                    .or_else(|| value_as_string(item.get("id")))
+                    .as_deref(),
+                value_as_string(item.get("clientOrderId"))
+                    .or_else(|| value_as_string(item.get("origClientOrderId")))
+                    .as_deref(),
+            )
+        })
+        .collect()
+}
+
 pub fn parse_fills(value: &Value, market_type: MarketType) -> ExchangeClientResult<Vec<TradeFill>> {
     data_value(value)
         .as_array()
@@ -1375,6 +1682,16 @@ fn toobit_order_params(
     Ok(params)
 }
 
+fn toobit_order_value(request: &OrderRequest, symbol: &str) -> ExchangeClientResult<Value> {
+    let params = toobit_order_params(request, symbol)?;
+    Ok(Value::Object(
+        params
+            .into_iter()
+            .map(|(key, value)| (key, Value::String(value)))
+            .collect(),
+    ))
+}
+
 fn toobit_perp_order_params(
     request: &OrderRequest,
     symbol: &str,
@@ -1396,6 +1713,16 @@ fn toobit_perp_order_params(
         params.insert("reduceOnly".to_string(), "true".to_string());
     }
     Ok(params)
+}
+
+fn toobit_perp_order_value(request: &OrderRequest, symbol: &str) -> ExchangeClientResult<Value> {
+    let params = toobit_perp_order_params(request, symbol)?;
+    Ok(Value::Object(
+        params
+            .into_iter()
+            .map(|(key, value)| (key, Value::String(value)))
+            .collect(),
+    ))
 }
 
 fn toobit_order_type(request: &OrderRequest) -> &'static str {
@@ -2066,6 +2393,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn toobit_spot_client_should_route_native_batch_orders_and_cancels() {
+        let (base_url, seen) = spawn_rest_server(vec![
+            json!([
+                {"symbol":"BTCUSDT","orderId":"2101","clientOrderId":"LDRY_TOOBIT_BATCH_1","price":"65000","origQty":"0.01","executedQty":"0","status":"NEW","timeInForce":"GTC","type":"LIMIT","side":"BUY","transactTime":"1700000000000"},
+                {"symbol":"BTCUSDT","orderId":"2102","clientOrderId":"LDRY_TOOBIT_BATCH_2","price":"66000","origQty":"0.02","executedQty":"0","status":"NEW","timeInForce":"GTC","type":"LIMIT","side":"SELL","transactTime":"1700000000001"}
+            ]),
+            json!([
+                {"symbol":"BTCUSDT","orderId":"2101","clientOrderId":"LDRY_TOOBIT_BATCH_1"},
+                {"symbol":"BTCUSDT","orderId":"2102","clientOrderId":"LDRY_TOOBIT_BATCH_2"}
+            ]),
+        ])
+        .await;
+        let client = ToobitSpotClient::new(ToobitConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url,
+            dry_run: false,
+            ..ToobitConfig::default()
+        });
+
+        let batch = client
+            .batch_place_orders(vec![
+                OrderRequest {
+                    market_type: MarketType::Spot,
+                    symbol: "BTCUSDT".to_string(),
+                    side: OrderSide::Buy,
+                    position_side: PositionSide::None,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: 0.01,
+                    price: Some(65_000.0),
+                    client_order_id: Some("LDRY_TOOBIT_BATCH_1".to_string()),
+                    reduce_only: false,
+                },
+                OrderRequest {
+                    market_type: MarketType::Spot,
+                    symbol: "BTCUSDT".to_string(),
+                    side: OrderSide::Sell,
+                    position_side: PositionSide::None,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: 0.02,
+                    price: Some(66_000.0),
+                    client_order_id: Some("LDRY_TOOBIT_BATCH_2".to_string()),
+                    reduce_only: false,
+                },
+            ])
+            .await
+            .unwrap();
+        assert!(batch.accepted);
+        assert_eq!(batch.orders.len(), 2);
+
+        let cancelled = client
+            .batch_cancel_orders(vec![
+                CancelOrderRequest {
+                    market_type: MarketType::Spot,
+                    symbol: "BTCUSDT".to_string(),
+                    order_id: Some("2101".to_string()),
+                    client_order_id: None,
+                },
+                CancelOrderRequest {
+                    market_type: MarketType::Spot,
+                    symbol: "BTCUSDT".to_string(),
+                    order_id: Some("2102".to_string()),
+                    client_order_id: None,
+                },
+            ])
+            .await
+            .unwrap();
+        assert_eq!(cancelled.cancelled_orders.len(), 2);
+
+        let requests = seen.lock().unwrap().clone();
+        assert_signed_request(&requests[0], "POST", "/api/v1/spot/batchOrders");
+        assert_eq!(
+            requests[0].query.get("symbol").map(String::as_str),
+            Some("BTCUSDT")
+        );
+        assert!(requests[0].query.get("orders").is_some());
+        assert_signed_request(&requests[1], "DELETE", "/api/v1/spot/cancelOrderByIds");
+        assert_eq!(
+            requests[1].query.get("ids").map(String::as_str),
+            Some("2101%2C2102")
+        );
+    }
+
+    #[tokio::test]
     async fn toobit_perp_client_should_route_private_rest_surface() {
         let (base_url, seen) = spawn_rest_server(vec![
             json!({"code":0,"data":[{"asset":"USDT","balance":"100","availableBalance":"80","locked":"20"}]}),
@@ -2150,6 +2563,87 @@ mod tests {
         assert_signed_request(&requests[5], "GET", "/api/v2/futures/open-orders");
         assert_signed_request(&requests[6], "GET", "/api/v1/futures/commissionRate");
         assert_signed_request(&requests[7], "GET", "/api/v2/futures/user-trades");
+    }
+
+    #[tokio::test]
+    async fn toobit_perp_client_should_route_native_batch_orders_and_cancels() {
+        let (base_url, seen) = spawn_rest_server(vec![
+            json!({"code":0,"data":[
+                {"symbol":"BTC-SWAP-USDT","orderId":"3101","clientOrderId":"LDRY_TOOBIT_PBATCH_1","price":"65000","origQty":"0.01","executedQty":"0","status":"NEW","timeInForce":"GTC","type":"LIMIT","side":"BUY","positionSide":"LONG","transactTime":"1700000000000"},
+                {"symbol":"BTC-SWAP-USDT","orderId":"3102","clientOrderId":"LDRY_TOOBIT_PBATCH_2","price":"66000","origQty":"0.02","executedQty":"0","status":"NEW","timeInForce":"GTC","type":"LIMIT","side":"SELL","positionSide":"SHORT","transactTime":"1700000000001"}
+            ]}),
+            json!({"code":0,"data":[
+                {"symbol":"BTC-SWAP-USDT","orderId":"3101"},
+                {"symbol":"BTC-SWAP-USDT","orderId":"3102"}
+            ]}),
+        ])
+        .await;
+        let client = ToobitPerpClient::new(ToobitConfig {
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url,
+            dry_run: false,
+            ..ToobitConfig::default()
+        });
+
+        let batch = client
+            .batch_place_orders(vec![
+                OrderRequest {
+                    market_type: MarketType::Perpetual,
+                    symbol: "BTCUSDT".to_string(),
+                    side: OrderSide::Buy,
+                    position_side: PositionSide::Long,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: 0.01,
+                    price: Some(65_000.0),
+                    client_order_id: Some("LDRY_TOOBIT_PBATCH_1".to_string()),
+                    reduce_only: false,
+                },
+                OrderRequest {
+                    market_type: MarketType::Perpetual,
+                    symbol: "BTCUSDT".to_string(),
+                    side: OrderSide::Sell,
+                    position_side: PositionSide::Short,
+                    order_type: OrderType::Limit,
+                    time_in_force: Some(TimeInForce::GTC),
+                    quantity: 0.02,
+                    price: Some(66_000.0),
+                    client_order_id: Some("LDRY_TOOBIT_PBATCH_2".to_string()),
+                    reduce_only: false,
+                },
+            ])
+            .await
+            .unwrap();
+        assert_eq!(batch.orders.len(), 2);
+
+        let cancelled = client
+            .batch_cancel_orders(vec![
+                CancelOrderRequest {
+                    market_type: MarketType::Perpetual,
+                    symbol: "BTCUSDT".to_string(),
+                    order_id: Some("3101".to_string()),
+                    client_order_id: None,
+                },
+                CancelOrderRequest {
+                    market_type: MarketType::Perpetual,
+                    symbol: "BTCUSDT".to_string(),
+                    order_id: Some("3102".to_string()),
+                    client_order_id: None,
+                },
+            ])
+            .await
+            .unwrap();
+        assert_eq!(cancelled.cancelled_orders.len(), 2);
+
+        let requests = seen.lock().unwrap().clone();
+        assert_signed_request(&requests[0], "POST", "/api/v2/futures/batch-orders");
+        assert!(requests[0].query.get("orders").is_some());
+        assert_signed_request(&requests[1], "DELETE", "/api/v1/futures/cancelOrderByIds");
+        assert_eq!(
+            requests[1].query.get("ids").map(String::as_str),
+            Some("3101%2C3102")
+        );
     }
 
     #[tokio::test]

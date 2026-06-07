@@ -1,0 +1,30 @@
+{
+  "exchange": "bitmex",
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/v1/order",
+  "auth": "signed",
+  "query": {
+    "orderID": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "key"
+    },
+    "api-expires": {
+      "match": "non_empty"
+    },
+    "api-signature": {
+      "match": "non_empty"
+    }
+  },
+  "strict_query": false,
+  "strict_headers": false,
+  "body": null,
+  "signing_vector": "bitmex/rest_get_instrument"
+}

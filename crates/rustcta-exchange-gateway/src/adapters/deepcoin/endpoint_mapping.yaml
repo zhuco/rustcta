@@ -1,0 +1,276 @@
+schema_version: 1
+exchange: deepcoin
+adapter: rustcta_exchange_gateway::adapters::deepcoin
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway Deepcoin adapter implementation and Deepcoin API docs
+  last_reviewed: "2026-06-08"
+  notes: Spot plus USDT perpetual REST and WebSocket mapping, including listenkey private stream renewal.
+market_types:
+  - spot
+  - linear_perp
+rest:
+  base_url: https://api.deepcoin.com
+base_urls:
+  public_spot_ws: wss://stream.deepcoin.com/streamlet/trade/public/spot?platform=api&version=v2
+  public_swap_ws: wss://stream.deepcoin.com/streamlet/trade/public/swap?platform=api&version=v2
+  private_ws: wss://stream.deepcoin.com/v1/private
+auth:
+  private_rest:
+    mode: hmac
+    headers: [DC-ACCESS-KEY, DC-ACCESS-SIGN, DC-ACCESS-TIMESTAMP, DC-ACCESS-PASSPHRASE]
+    prehash: timestamp + method + request_path + body
+    signature_encoding: base64
+    signing_vector_test: crates/rustcta-exchange-gateway/src/adapters/deepcoin/private_tests.rs
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: unknown
+    account:
+      scope: account
+      interval: 1m
+      limit: unknown
+    trade:
+      scope: account
+      interval: 1m
+      limit: unknown
+pagination:
+  get_recent_fills:
+    style: time_window
+    since_param: begin
+    until_param: end
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_balances, get_positions, query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: native
+    atomicity: partial
+    max_items: 5
+    partial_failure: true
+  cancel_orders:
+    support: native
+    atomicity: partial
+    max_items: 50
+    partial_failure: true
+websocket:
+  public:
+    support: spec_only
+    heartbeat:
+      direction: client_ping
+      interval_ms: 20000
+      timeout_ms: 60000
+      payload: ping
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    auth: listen_key
+    acquire_operation: acquire_listen_key
+    renewal_operation: extend_listen_key
+    renewal_ms: 3300000
+    heartbeat:
+      direction: client_ping
+      interval_ms: 20000
+      timeout_ms: 60000
+      payload: ping
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /deepcoin/market/instruments
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_symbol_rules_perp
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /deepcoin/market/instruments
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /deepcoin/market/books
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book_perp
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /deepcoin/market/books
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /deepcoin/account/all-balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: account
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /deepcoin/account/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: account
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: linear_perp
+    transport: rest
+    method: GET
+    path: /deepcoin/account/trade-fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: account
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: place_order_perp
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: amend_order
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/replace-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/cancel-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/swap/cancel-all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+    support: native
+    reason: Perpetual-only; Spot cancel-all is unsupported.
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /deepcoin/trade/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /deepcoin/trade/v2/orders-pending
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /deepcoin/trade/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+  - operation: batch_place_orders
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/batch-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: batch_cancel_orders
+    product: linear_perp
+    transport: rest
+    method: POST
+    path: /deepcoin/trade/batch-cancel-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: acquire_listen_key
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /deepcoin/listenkey/acquire
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: account
+    weight: 1
+    request_spec_required: true
+  - operation: extend_listen_key
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /deepcoin/listenkey/extend
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: account
+    weight: 1
+    request_spec_required: true

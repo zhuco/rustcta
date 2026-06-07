@@ -1,5 +1,7 @@
 # Rust build artifacts
 target/
+.codex-targets/
+.task*_target/
 Cargo.lock
 !web-ui/dioxus/Cargo.lock
 .cargo/config.toml

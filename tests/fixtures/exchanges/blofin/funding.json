@@ -1,0 +1,11 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": [
+    {
+      "instId": "BTC-USDT",
+      "fundingRate": "0.0001",
+      "fundingTime": "1700000000000"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "exchange": "woo",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/v3/trade/order",
+  "auth": "signed",
+  "headers": {
+    "x-api-key": { "match": "exact", "value": "key" },
+    "x-api-signature": { "match": "non_empty" },
+    "x-api-timestamp": { "match": "non_empty" }
+  },
+  "query": {
+    "symbol": { "match": "exact", "value": "SPOT_BTC_USDT" },
+    "orderId": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["secret"]
+}

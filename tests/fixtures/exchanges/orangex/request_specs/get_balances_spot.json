@@ -1,0 +1,17 @@
+{
+  "exchange": "orangex",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "headers": {
+    "authorization": {"match": "exact", "value": "bearer token"}
+  },
+  "body_contains": {
+    "method": "/private/get_assets_info",
+    "params": {"asset_type": ["SPOT"]}
+  },
+  "forbid_header_values_containing": ["secret"]
+}

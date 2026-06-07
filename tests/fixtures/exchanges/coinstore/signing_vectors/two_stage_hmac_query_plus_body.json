@@ -1,0 +1,14 @@
+{
+  "exchange": "coinstore",
+  "name": "two-stage-hmac-query-plus-body",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "b1fdd49232848231137d46bb2ac808fd549722d988874003e7dd06e1499776c3",
+  "coinstore_api_secret": "test-secret",
+  "payload": "symbol=BTCUSDT{\"price\":\"100\",\"quantity\":\"0.01\"}",
+  "expected_signature": "c7809f64f79937ee7eb5be1a1a084315f05bdf5a065e608a7438cd787f3a755f",
+  "timestamp": "1717171717171",
+  "method": "POST",
+  "request_path": "/trade/order/place",
+  "body": "{\"price\":\"100\",\"quantity\":\"0.01\"}",
+  "payload_format": "raw_payload"
+}

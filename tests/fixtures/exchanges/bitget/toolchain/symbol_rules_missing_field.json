@@ -1,0 +1,10 @@
+{
+  "code": "00000",
+  "data": [
+    {
+      "baseCoin": "BTC",
+      "quoteCoin": "USDT",
+      "status": "online"
+    }
+  ]
+}

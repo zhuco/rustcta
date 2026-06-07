@@ -1,0 +1,22 @@
+{
+  "exchange": "bigone",
+  "operation": "place_contract_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/contract/v2/orders",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "instrument_id": "BTC-USDT",
+    "side": "BUY",
+    "amount": "0.1",
+    "type": "LIMIT",
+    "price": "100",
+    "client_id": "client-1",
+    "reduce_only": true
+  },
+  "forbid_header_values_containing": ["test-secret"]
+}

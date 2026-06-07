@@ -1,0 +1,11 @@
+{
+  "products": [
+    {
+      "base_currency_id": "BTC",
+      "quote_currency_id": "USD",
+      "base_increment": "0.00000001",
+      "price_increment": "0.01",
+      "product_type": "SPOT"
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+schema_version: 1
+exchange: coinbase
+adapter: CoinbaseGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/coinbase_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Advanced Trade spot and INTX perpetual adapter. Private REST uses externally minted bearer/JWT.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  rest: https://api.coinbase.com/api/v3/brokerage
+  public_ws: wss://advanced-trade-ws.coinbase.com
+  private_ws: wss://advanced-trade-ws-user.coinbase.com
+auth:
+  private_rest: bearer_or_jwt
+  credential_scopes: [read_only, trade]
+  portfolio_scope: COINBASE_INTX_PORTFOLIO_UUID required for INTX private state
+rate_limits:
+  public: { scope: ip, interval_ms: 1000, limit: 10 }
+  private_read: { scope: api_key, interval_ms: 1000, limit: 10 }
+  orders: { scope: api_key, interval_ms: 1000, limit: 10 }
+pagination:
+  products: { mode: cursor, limit_param: limit, cursor_param: cursor, max_limit: 100 }
+  accounts: { mode: cursor, limit_param: limit, cursor_param: cursor, max_limit: 250 }
+  fills: { mode: cursor_time_range, limit_param: limit, cursor_param: cursor, max_limit: 100 }
+reconciliation:
+  fallback: REST query_order + open_orders + recent_fills
+  unknown_order_policy: query_by_client_or_exchange_order_id_then_open_orders
+  reconnect_resync: orderbook_snapshot_and_private_recent_fills
+  live_dry_run_required_controls: [kill-switch, disabled-symbol, max-notional]
+batch:
+  place:
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    native: false
+    partial_failure: false
+  cancel:
+    mode: native
+    atomicity: partial
+    max_items: 100
+    native: true
+    partial_failure: true
+websocket:
+  public:
+    support: native
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: native
+    auth: jwt
+    auth_renewal: { mode: token_refresh, notes: externally minted token }
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: { mode: rest_recent_fills, endpoint_operation: recent_fills }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /products
+    auth: none
+    rate_limit_bucket: coinbase_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/public_tests.rs, fixture: tests/fixtures/exchanges/coinbase/products_success.json }
+  - operation: order_book
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /product_book
+    auth: none
+    rate_limit_bucket: coinbase_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/public_tests.rs, fixture: tests/fixtures/exchanges/coinbase/orderbook_success.json }
+  - operation: balances
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /accounts
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinbase_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/get_balances.json }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/balances_success.json }
+  - operation: place_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: coinbase_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/place_order.json }
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders/batch_cancel
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: coinbase_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/cancel_order.json }
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: coinbase_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: composed
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/batch_place_orders.json }
+    notes: Composed sequential single-order placement; max_items=20.
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders/batch_cancel
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: coinbase_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/batch_cancel_orders.json }
+  - operation: recent_fills
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /orders/historical/fills
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinbase_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/recent_fills.json }

@@ -1,0 +1,9 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "price_precision": 2,
+      "amount_precision": 4
+    }
+  ]
+}

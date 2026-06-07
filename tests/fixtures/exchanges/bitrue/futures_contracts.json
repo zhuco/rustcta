@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": [
+    {
+      "symbol": "E-BTC-USDT",
+      "baseCoin": "BTC",
+      "quoteCoin": "USDT",
+      "pricePrecision": 2,
+      "quantityPrecision": 3,
+      "minTradeQty": "0.001",
+      "maxTradeQty": "100",
+      "tickSize": "0.01",
+      "stepSize": "0.001",
+      "state": "TRADING"
+    }
+  ]
+}

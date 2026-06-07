@@ -1,0 +1,14 @@
+{
+  "arg": { "channel": "user.orders" },
+  "data": {
+    "orderId": "1001",
+    "clientOrderId": "CID1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "status": "NEW",
+    "origQty": "0.01",
+    "executedQty": "0",
+    "price": "65000"
+  }
+}

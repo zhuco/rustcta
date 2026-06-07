@@ -1,0 +1,15 @@
+{
+  "exchange": "lbank",
+  "operation": "query_order",
+  "product": "spot",
+  "method": "POST",
+  "path": "/v2/supplement/orders_info.do",
+  "auth": "md5_hmac_sha256",
+  "form": {
+    "api_key": "<api-key>",
+    "sign": "<signature>",
+    "symbol": "btc_usdt",
+    "orderId": "2001",
+    "origClientOrderId": "LIMIT1"
+  }
+}

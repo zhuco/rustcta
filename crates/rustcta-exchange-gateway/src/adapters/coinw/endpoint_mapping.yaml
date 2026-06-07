@@ -1,0 +1,375 @@
+schema_version: 1
+exchange: coinw
+adapter: crates/rustcta-exchange-gateway/src/adapters/coinw
+metadata:
+  status: validated
+  source: rustcta-exchange-gateway CoinW spot and USDT perpetual adapter implementation
+  last_reviewed: '2026-06-08'
+  notes: Dual-product REST/WS mapping with split Spot MD5 and Futures HMAC-SHA256
+    signing.
+market_types:
+- spot
+- linear_perp
+base_urls:
+  rest: https://api.coinw.com
+  spot_public_ws: wss://ws.futurescw.com/spot
+  spot_private_ws: wss://ws.futurescw.com/spot
+  futures_public_ws: wss://ws.futurescw.com/websocket
+  futures_private_ws: wss://ws.futurescw.com/websocket
+auth:
+  spot: sorted params + secret_key MD5 uppercase
+  futures: base64 HMAC-SHA256 timestamp + method + path/body
+rate_limits:
+  spot_public: conservative weight 1
+  spot_private: conservative weight 1
+  futures_public: conservative weight 1
+  futures_private: conservative weight 1
+pagination:
+  order_history:
+    mode: none
+    notes: Query/open-order reconciliation is symbol/order scoped.
+  fills_history:
+    mode: limit
+    limit_param: limit_or_pageSize
+    max_limit: 100
+    cursor: unsupported
+batch:
+  place:
+    mode: composed_sequential
+    native: false
+    atomicity: non_atomic
+    max_items: 20
+    supports_partial_failure: true
+    notes: Sends standard single place_order calls; no cross-product atomicity.
+  cancel:
+    mode: composed_sequential
+    native: partial
+    atomicity: partial
+    max_items: 20
+    supports_partial_failure: true
+    notes: Spot uses single cancel fallback; perpetual calls native batchOrders for
+      plan/execute/PostOnly/IOC/FOK.
+reconciliation:
+  source_of_truth: rest
+  order_status:
+  - query_order
+  - get_open_orders
+  - get_recent_fills
+  account_state:
+  - get_balances
+  - get_positions
+  reconnect: resubscribe_then_rest_resync
+  kill_switch_required_before_live_dry_run: true
+  disabled_symbol_required_before_live_dry_run: true
+  max_notional_required_before_live_dry_run: true
+websocket:
+  support: request-spec/parser/session helpers; shared supervisor/live validation
+    remains required
+  heartbeat: ping/pong helpers
+  private_auth: signed private subscription specs
+endpoints:
+- operation: get_symbol_rules
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v1/public
+  auth: none
+  rate_limit_bucket: coinw_spot_public
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/public_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/spot_symbol_rules_success.json
+- operation: get_order_book
+  product: spot
+  transport: rest
+  method: GET
+  path: /api/v1/public
+  auth: none
+  rate_limit_bucket: coinw_spot_public
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/public_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/spot_order_book_success.json
+- operation: get_symbol_rules_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/instruments
+  auth: none
+  rate_limit_bucket: coinw_futures_public
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/public_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/perp_symbol_rules_success.json
+- operation: get_order_book_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpumPublic/depth
+  auth: none
+  rate_limit_bucket: coinw_futures_public
+  weight: 1
+  request_spec_required: false
+  request_spec:
+    status: not_required
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/public_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/perp_order_book_success.json
+- operation: get_balances
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=returnCompleteBalances
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/spot_balances_success.json
+- operation: get_balances_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/account/getUserAssets
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/perp_balances_success.json
+- operation: get_positions
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/positions
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+    fixture: tests/fixtures/exchanges/coinw/perp_positions_success.json
+- operation: get_fees
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/account/fees
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: place_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=doTrade
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: place_order_perp
+  product: linear_perp
+  transport: rest
+  method: POST
+  path: /v1/perpum/order
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: place_quote_market_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=doTrade
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: cancel_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=cancelOrder
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: cancel_order_perp
+  product: linear_perp
+  transport: rest
+  method: DELETE
+  path: /v1/perpum/order
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: batch_cancel_orders
+  product: linear_perp
+  transport: rest
+  method: DELETE
+  path: /v1/perpum/batchOrders
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  native_batch: false
+  atomicity: partial
+- operation: query_order
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=returnOrderStatus
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: query_order_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/order
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: get_open_orders
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=returnOpenOrders
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: get_open_orders_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/orders/open
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: get_recent_fills
+  product: spot
+  transport: rest
+  method: POST
+  path: /api/v1/private?command=returnUTradeHistory
+  auth: hmac
+  rate_limit_bucket: coinw_spot_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+- operation: get_recent_fills_perp
+  product: linear_perp
+  transport: rest
+  method: GET
+  path: /v1/perpum/orders/deals
+  auth: hmac
+  rate_limit_bucket: coinw_futures_private
+  weight: 1
+  request_spec_required: true
+  request_spec:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs
+  response_parser:
+    status: implemented
+    test: crates/rustcta-exchange-gateway/src/adapters/coinw/private_tests.rs

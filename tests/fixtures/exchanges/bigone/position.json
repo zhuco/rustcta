@@ -1,0 +1,12 @@
+{
+  "data": [
+    {
+      "instrument_id": "BTC-USDT",
+      "size": "0.2",
+      "entry_price": "64000",
+      "mark_price": "65000",
+      "unrealized_pnl": "200",
+      "leverage": "5"
+    }
+  ]
+}

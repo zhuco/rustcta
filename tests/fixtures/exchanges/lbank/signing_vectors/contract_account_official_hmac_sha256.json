@@ -1,0 +1,17 @@
+{
+  "exchange": "lbank",
+  "name": "contract_account_placeholder_hmac_sha256",
+  "algorithm": "md5_uppercase_prehash_then_hmac_sha256_hex",
+  "secret": "<lbank-api-secret>",
+  "params": {
+    "api_key": "<lbank-api-key>",
+    "asset": "USDT",
+    "echostr": "rustcta-lbank-test-echostr-00000001",
+    "productGroup": "SwapU",
+    "signature_method": "HmacSHA256",
+    "timestamp": "1665990154559"
+  },
+  "canonical_string": "api_key=<lbank-api-key>&asset=USDT&echostr=rustcta-lbank-test-echostr-00000001&productGroup=SwapU&signature_method=HmacSHA256&timestamp=1665990154559",
+  "md5_uppercase": "4F820C953D088FD3C6367E5EA6878B3D",
+  "expected_signature": "5f756201e24da3656f4a721359356c40dd7b41fc211c24ae54d70ac556752362"
+}

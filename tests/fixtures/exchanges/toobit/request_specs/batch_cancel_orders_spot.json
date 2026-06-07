@@ -1,0 +1,19 @@
+{
+  "exchange": "toobit",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/v1/spot/cancelOrderByIds",
+  "auth": "signed",
+  "headers": {
+    "X-BB-APIKEY": { "match": "exact", "value": "key" }
+  },
+  "query": {
+    "ids": { "match": "exact", "value": "1001%2C1002" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "timestamp": { "match": "non_empty" },
+    "signature": { "match": "non_empty" }
+  },
+  "forbid_query_values_containing": ["secret"]
+}

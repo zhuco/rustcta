@@ -1,0 +1,6 @@
+{
+  "algorithm": "ed25519",
+  "secret_base64": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+  "payload": "instruction=orderCancel&orderId=28&symbol=BTC_USDT&timestamp=1614550000000&window=5000",
+  "signature_base64": "XhRUJtSVD+f0huHv3X/VpfNefAt+d3Weyzh+CV1njJwdFtlQ04RQ8dv+DYLZKQq7xJ1RB2k/KINvh7EuMwXqDQ=="
+}

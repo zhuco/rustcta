@@ -1,0 +1,22 @@
+{
+  "code": "200",
+  "data": [
+    {
+      "currencyBase": "BTC",
+      "currencyQuote": "USDT",
+      "currencyPair": "BTC_USDT",
+      "pricePrecision": 2,
+      "countPrecision": 4,
+      "minBuyPrice": "0.001",
+      "maxBuyPrice": "99999999",
+      "minBuyCount": "0.0001",
+      "maxBuyCount": "9999999",
+      "minBuyAmount": "5",
+      "maxBuyAmount": "99999999",
+      "state": 1
+    }
+  ],
+  "msg": "SUCCESS",
+  "success": true,
+  "failed": false
+}

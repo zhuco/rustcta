@@ -1,0 +1,17 @@
+{
+  "exchange": "deepcoin",
+  "operation": "amend_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/deepcoin/trade/replace-order",
+  "auth": "signed",
+  "headers": {
+    "dc-access-key": {"match": "exact", "value": "key"},
+    "dc-access-sign": {"match": "non_empty"},
+    "dc-access-timestamp": {"match": "non_empty"},
+    "dc-access-passphrase": {"match": "exact", "value": "pass"}
+  },
+  "body_contains": {"OrderSysID": "2001", "volume": "3"},
+  "forbid_header_values_containing": ["secret"]
+}

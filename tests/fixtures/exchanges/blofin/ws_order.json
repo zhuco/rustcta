@@ -1,0 +1,21 @@
+{
+  "arg": {
+    "channel": "orders"
+  },
+  "data": [
+    {
+      "instId": "BTC-USDT",
+      "orderId": "ord_fixture_1",
+      "clientOrderId": "cid_fixture_1",
+      "side": "buy",
+      "orderType": "limit",
+      "state": "filled",
+      "size": "0.01",
+      "filledSize": "0.01",
+      "averagePrice": "65000",
+      "price": "65000",
+      "positionSide": "net",
+      "updateTime": "1700000000000"
+    }
+  ]
+}

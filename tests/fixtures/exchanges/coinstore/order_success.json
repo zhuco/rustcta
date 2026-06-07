@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "data": {
+    "orderId": "fixture-order-1",
+    "clientOrderId": "fixture-client-1",
+    "symbol": "BTCUSDT",
+    "side": "BUY",
+    "orderType": "LIMIT",
+    "status": "open",
+    "quantity": "0.01",
+    "price": "100",
+    "filledQuantity": "0"
+  }
+}

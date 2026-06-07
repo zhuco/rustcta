@@ -1,0 +1,16 @@
+{
+  "code": "0",
+  "success": true,
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "base": "BTC",
+      "quote": "USDT",
+      "basePrecision": 6,
+      "quotePrecision": 2,
+      "minPrice": "0.01",
+      "minVolume": "0.00001",
+      "isOpen": true
+    }
+  ]
+}

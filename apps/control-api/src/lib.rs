@@ -8,7 +8,7 @@ use rustcta_event_ledger::JsonlLedger;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-const DEFAULT_BIND_ADDR: &str = "127.0.0.1:18080";
+const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8091";
 const DEFAULT_TENANT_ID: &str = "local";
 const DEFAULT_SUPERVISOR_REGISTRY_PATH: &str = "run/supervisor/registry.json";
 const DEFAULT_STRATEGY_LOG_TAIL_LINES: usize = 800;
