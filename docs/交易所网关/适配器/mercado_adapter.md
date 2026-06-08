@@ -21,6 +21,12 @@ Task 16 adds a conservative Mercado Bitcoin gateway adapter for Brazil and Latin
 - Private streams are not promoted; private state should reconcile through REST request specs.
 - Fixtures use redacted bearer placeholders and synthetic IDs only.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Mercado Bitcoin API v4 官方页说明有 WebSocket API，项目已有 `orderbook` payload helper；本批公开资料只稳定核到 REST `/api/v4/{symbol}/orderbook`，`limit` max 1000。
+
+本批未核到 WebSocket 固定推流毫秒、depth、sequence 或 checksum。当前只能写成 payload/helper 级结构化缺口，实盘前必须取得 WebSocket API 页并用 REST orderbook 做 snapshot fallback。
+
 ## Verification
 
 Allowed checks:

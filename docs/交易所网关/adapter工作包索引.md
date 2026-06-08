@@ -11,7 +11,7 @@
 | 项目 | 数量 |
 | --- | ---: |
 | adapter 总数 | 125 |
-| 已有明确补全任务的 adapter | 119 |
+| 已有明确补全任务的 adapter | 120 |
 | 仍有剩余核验项的 adapter | 124 |
 | workload_score >= 100 的 adapter | 27 |
 
@@ -36,16 +36,16 @@
 | d8x | perpetual | 2/9 | spec_only/缺推流间隔；缺档位 | 缺推流间隔证据 | 2 | 5 | 123 | 先查官方下单/撤单接口 |
 | derive_chain_perps | perpetual | 0/9 | 未声明/公共WS未声明 | 公共WS未接入/未声明 | 2 | 5 | 123 | 先查官方下单/撤单接口 |
 | equation | perpetual | 0/9 | 未声明/公共WS未声明 | 公共WS未接入/未声明 | 2 | 5 | 123 | 先查官方下单/撤单接口 |
+| mango_markets | margin,perpetual | 0/9 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 2 | 5 | 123 | 先查官方下单/撤单接口 |
 | zeta_markets | perpetual | 2/9 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 2 | 5 | 123 | 先查官方下单/撤单接口 |
 | bybit | futures,perpetual,spot | 9/9 | spec_only/缺推流间隔 | 缺推流间隔证据 | 1 | 2 | 113 | 先做已确认 P0 公共订单簿 WS 补全 |
 | aark | perpetual | 1/9 | spec_only/缺档位 | 慢速盘口/需评估 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
 | aftermath | perpetual | 2/9 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
 | bitbns | spot | 2/8 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 3 | 4 | 108 | 先查官方下单/撤单接口 |
 | bsx | perpetual | 2/9 | spec_only/缺档位 | 百毫秒盘口候选 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
-| grvt | option,perpetual | 0/9 | parser_only/缺推流间隔；缺档位 | 缺推流间隔证据 | 1 | 6 | 108 | 先查官方下单/撤单接口 |
-| hibachi | perpetual | 2/9 | parser_only/缺推流间隔；缺档位 | 缺推流间隔证据 | 1 | 6 | 108 | 先查官方下单/撤单接口 |
+| grvt | option,perpetual | 0/9 | parser_only/缺推流间隔；缺档位 | 缺推流间隔证据 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
+| hibachi | perpetual | 2/9 | parser_only/缺推流间隔；缺档位 | 缺推流间隔证据 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
 | lighter | perpetual | 0/9 | parser_only/缺推流间隔；缺档位 | 缺推流间隔证据 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
-| mango_markets | margin,perpetual | 0/9 | spec_only/缺订单簿channel；缺推流间隔；缺档位 | 缺推流间隔证据 | 1 | 6 | 108 | 先查官方下单/撤单接口 |
 | modetrade | perpetual | 1/9 | spec_only/缺档位 | 慢速盘口/需评估 | 2 | 5 | 108 | 先查官方下单/撤单接口 |
 | coinw | perpetual,spot | 9/9 | parser_only/缺订单簿channel；缺推流间隔 | 缺推流间隔证据 | 1 | 1 | 103 | 先做已确认 P0 公共订单簿 WS 补全 |
 | htx | perpetual,spot,spot | linear_perp | 9/9 | declared/缺推流间隔；缺档位 | 缺推流间隔证据 | 1 | 1 | 103 | 先做已确认 P0 公共订单簿 WS 补全 |
@@ -61,8 +61,8 @@
 | zebpay | spot | 2/8 | unsupported/公共WS不支持/未接入 | 公共WS未接入/未声明 | 2 | 4 | 98 | 先查官方下单/撤单接口 |
 | indodax | spot | 7/8 | 未声明/公共WS未声明 | 公共WS未接入/未声明 | 2 | 3 | 88 | 先查官方下单/撤单接口 |
 | bybiteu | futures,perpetual,spot | 2/9 | spec_only/已记录核心细项 | 极速L1候选 | 1 | 5 | 83 | 先查官方下单/撤单接口 |
-| fmfwio | spot | 2/8 | spec_only/缺订单簿channel | 慢速盘口/需评估 | 1 | 5 | 83 | 先查官方下单/撤单接口 |
-| hitbtc | spot | 2/8 | spec_only/缺订单簿channel | 慢速盘口/需评估 | 1 | 5 | 83 | 先查官方下单/撤单接口 |
+| fmfwio | spot | 2/8 | spec_only/缺订单簿channel | 慢速盘口/需评估 | 2 | 4 | 83 | 先查官方下单/撤单接口 |
+| hitbtc | spot | 2/8 | spec_only/缺订单簿channel | 慢速盘口/需评估 | 2 | 4 | 83 | 先查官方下单/撤单接口 |
 
 ## 使用方式
 

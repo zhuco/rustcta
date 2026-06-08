@@ -72,6 +72,12 @@ The SDK exposes market/account/trade WS clients. This adapter only builds determ
 
 Production WS runtime, sequence-gap handling, checksum validation, auth renewal, and private reconciliation are follow-up work.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Hibachi SDK/公开资料有 market WS `orderbook/{symbol}` payload，market WS URL 为 `wss://data-api.hibachi.xyz/ws/market`。
+
+本批未核到固定推流毫秒、WS depth 参数、sequence 或 checksum。REST `/market/data/orderbook` 支持 `depth` 和 `granularity`，应作为断线/异常重建源；当前 adapter 不提升生产 WS runtime。
+
 ## Capabilities
 
 | Capability | Status | Notes |

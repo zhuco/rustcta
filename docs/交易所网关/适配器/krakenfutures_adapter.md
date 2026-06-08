@@ -27,6 +27,12 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/krakenfu
 | Recent fills | `GET /fills` | Implemented |
 | Public/private WS | Futures v1 feeds with signed challenge auth | Subscription/auth/parser fixtures |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Kraken Futures public WS `book` feed 使用 `wss://futures.kraken.com/ws/v1`，订阅 payload 为 `{"event":"subscribe","feed":"book","product_ids":["PI_XBTUSD"]}`。
+
+订阅后有 `book_snapshot`，后续 `book` delta；snapshot 和 delta 都有 `seq`，官方未给固定推流毫秒、depth 参数或 checksum。`seq` 不连续时必须重订阅并以 REST/orderbook snapshot 重建。
+
 ## Boundaries
 
 Spot remains in `kraken`; this adapter advertises `MarketType::Perpetual` only. Quote-sized spot market orders, spot balances/fees, spot WS token auth, transfers, withdrawals, portfolio margin mutations, and option-style metadata are outside this adapter and remain `Unsupported` or adapter-specific documentation only.

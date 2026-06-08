@@ -27,6 +27,12 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/kucoinfu
 | Public WS | `/contractMarket/ticker`, `/contractMarket/level2`, `/contractMarket/execution` | Subscription specs |
 | Private WS | `/contractMarket/tradeOrders`, `/contractAccount/wallet`, `/contract/position` | Token/session specs |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。KuCoin Futures classic WS 支持 `/contractMarket/level2:{symbol}` increment、`/contractMarket/level2Depth5:{symbol}` 和 `/contractMarket/level2Depth50:{symbol}`；public token endpoint 返回 futures WS server。
+
+increment 是 real-time，5/50 档是 100ms；payload 有 `sequence` 或 `sequenceStart/sequenceEnd`。新 UTA `obu` 也支持 futures BBO real-time、5/50 档 100ms、increment real-time。断档用 REST `/api/v1/level2/snapshot` 缓存回放重建；未见 checksum。
+
 ## Boundaries
 
 Spot remains in `kucoin`; this adapter advertises `MarketType::Perpetual` only. Gateway order quantity is sent to KuCoin Futures as contract `size`; callers must use contract-size semantics until a shared quantity conversion model exists. Quote-sized market orders, fiat funding operations, transfers, withdrawals, and unverified position/margin-mode mutations are not exposed.

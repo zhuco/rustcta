@@ -68,6 +68,12 @@ phone, email or real user account id.
 | Public WS | Solana `accountSubscribe` payload shape | Payload fixture only; no runtime subscription or resync. |
 | Private WS | Wallet-owned account subscriptions | Unsupported. |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。当前 adapter 只确认 Solana RPC `accountSubscribe`，这不是统一交易所公共订单簿 WS；它只通知链上账户变化，带 slot/context，不提供交易所级 orderbook sequence/checksum。
+
+因此单交易所文档写 `交易所不支持当前公共订单簿 WS runtime`。如后续要接 Mango/OpenBook/Serum 盘口，需要单独链上 indexer、account decoding、slot/reorg/replay 和 REST/RPC reconciliation 设计。
+
 ## Capability Contract
 
 Default `capabilities()` returns:

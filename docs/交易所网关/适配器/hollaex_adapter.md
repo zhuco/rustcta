@@ -48,6 +48,12 @@ WebSocket boundary:
 - REST `get_order_book` is the public order book resync fallback.
 - Private WS auth URL construction is covered by an offline fixture, but no production private stream is enabled.
 
+Official WebSocket order book detail:
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。HollaEx public WS 支持 `orderbook` channel，也可按 symbol 订阅 `orderbook:xht-usdt`；实际 endpoint 是对应白标 exchange 的 `wss://<exchange>/stream`。
+
+官方公开资料未给固定推流毫秒、固定 depth、sequence 或 checksum。HollaEx 是白标框架，任意具体 venue 的实时盘口质量需要单独核验；当前 adapter 以 REST `/v2/orderbook` 作为重建源。
+
 Validation:
 
 ```bash
