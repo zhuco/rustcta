@@ -50,6 +50,12 @@ offline request-spec fixtures.
 
 官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。当前 BtcTurk 官方 API 资料未见标准 futures/perpetual/options，单交易所文档写 `交易所不支持合约`。
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。BtcTurk public WS endpoint 是 `wss://ws-feed-pro.btcturk.com`，订阅消息为 `[151,{"type":151,"channel":"orderbook","event":"BTCTRY","join":true}]`；差量订单簿使用 `channel=obdiff`。
+
+官方未给固定推流毫秒和固定 WS depth。`orderbook` 推全量模型，`obdiff` 推变化模型；两者都有 `CS` ChangeSet 顺序值，但官方说明当前没有服务端连续性控制。套利 book-cache 应以 REST `GET /api/v2/orderbook` 初始化，收到差量异常或 `CS` 不连续时重订阅/REST 重建。
+
 ## Validation
 
 ```bash

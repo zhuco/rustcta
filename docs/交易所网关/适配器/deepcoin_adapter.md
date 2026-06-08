@@ -65,6 +65,12 @@ The adapter signs GET requests with the sorted query string included in
 | private WebSocket | `GET /deepcoin/listenkey/acquire`, `GET /deepcoin/listenkey/extend`, `wss://stream.deepcoin.com/v1/private?listenKey=...` | signed listenkey acquisition/one-hour sliding-window extension; session helper handles heartbeat, renewal due checks, and order/trade/account/position push events |
 | trigger/strategy orders | `POST /deepcoin/trade/trigger-order`, `POST /deepcoin/trade/dsl-trigger-order` | Not exposed by the current standard trait |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。DeepCoin public WS V2 的订单簿 topic 是 `book25`，官方描述为 25Level Incremental Market Data；Spot 和 swap public WS URL 分开。
+
+订阅 payload 使用 V2 `Action/Symbol/LocalNo/ResumeNo/Topic` 结构。官方未给固定推流毫秒，也未见 checksum；`LocalNo`/`ResumeNo` 应作为会话连续性字段记录。断线或 gap 时用 REST `GET /deepcoin/market/books`，`sz` 1..400，重建 snapshot。
+
 ## Validation
 
 Offline request-spec tests cover public Spot rules, public perpetual order book,

@@ -62,6 +62,12 @@ GRVT public order-book WS sequence rule is recorded in fixtures: snapshots use
 sequence `0`; deltas are expected to increase by one, and gaps require
 reconnect/resubscribe. This task does not claim production low-latency runtime.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。GRVT market data WS 支持 `v1.book.s` snapshot-style 和 `v1.book.d` delta-style orderbook。官方示例 selector `BTC_USDT_Perp@500-50` 表示 500ms、50 档。
+
+public WS endpoint 可用 `wss://market-data.grvt.io/ws/full` 或 `/ws/lite`。payload 有 `sequence_number` 和 `prev_sequence_number`，未见 checksum；断档要重新订阅或回 REST market data snapshot。
+
 ## Unsupported Boundary
 
 The following are explicitly not enabled:

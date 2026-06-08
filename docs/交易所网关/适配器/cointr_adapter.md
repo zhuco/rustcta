@@ -63,6 +63,12 @@ Base64 HMAC-SHA256 helper and sends `op=login` before channel subscription.
 - `cancel_all_orders` is implemented as a symbol-scoped open-order sweep rather than an unverified native account-wide endpoint.
 - Use read-only private REST preflight and live-dry-run before enabling credentials for production trading.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。CoinTR depth channel 支持 `books` full data、`books1`、`books5`、`books15`，官方推流频率为 200-300ms。订阅示例为 `{"op":"subscribe","args":[{"instType":"SPOT","channel":"books5","instId":"BTCUSDT"}]}`。
+
+首包为 snapshot，之后 `books` 推 update，`books1/5/15` 推 snapshot。payload 有 CRC32 checksum，按本地前 25 档 bid/ask 交错字符串计算；没有独立 sequence id。实盘 book-cache 必须补 checksum 校验和 REST snapshot 重建。
+
 ## Validation
 
 ```bash

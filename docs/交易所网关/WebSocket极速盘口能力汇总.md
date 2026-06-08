@@ -10,6 +10,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | OKX | Spot/Swap/Futures/Option | `bbo-tbt` 10ms；`books-l2-tbt`/`books50-l2-tbt` 10ms 有登录/VIP 限制 | BBO、50、全量增量 | JSON subscribe | 需补 seq/checksum 细节 | `okx` 当前 public WS unsupported，先补 BBO/5 档；VIP 通道单独标限制。 |
 | Bybit | Spot/Linear/Inverse | `orderbook.1` 10ms；50 档 20ms；200 档 100ms；1000 档 200ms | 1/50/200/1000 | JSON topic `orderbook.{depth}.{symbol}` | 有 `u` 和 cross `seq`；L1 snapshot-only | 当前 spec_only，优先补 1 档 10ms 和 50 档 20ms。 |
+| Bybit EU | Spot/Linear/Inverse | 沿用 Bybit V5：`orderbook.1` 10ms；50 档 20ms；200 档 100ms；1000 档 200ms | 1/50/200/1000 | EU host + JSON topic `orderbook.{depth}.{symbol}` | 有 `u`、cross `seq`、`cts`；L1 snapshot-only | `bybiteu` 当前 spec_only，补 EU host 下 10ms L1 和 20ms 50 档。 |
 | Bitget | Spot | `books1` 10ms；`books`/`books5`/`books15` 200ms | 1/5/15/全量 | JSON subscribe `channel=books1/books5/...` | 有 `seq` 和 CRC32 | 当前 public WS unsupported，优先补 `books1`。 |
 | MEXC | Spot | aggregated depth 和 bookTicker 可选 10ms/100ms | L1 bookTicker；partial 5/10/20；REST snapshot 1000 | JSON `SUBSCRIPTION` stream 字符串 | 有 `fromVersion`/`toVersion`，断档重建 | 当前 public WS unsupported，优先补 10ms bookTicker 和 aggregated depth。 |
 | WOO X | Spot/Perpetual | `bbo` 10ms；`orderbookupdate` 200ms；`orderbook` 1s | BBO、100 levels | JSON topic `{symbol}@bbo`/`@orderbookupdate` | 示例有 `prevTs`，未见强 sequence/checksum | 当前 native 但缺结构化字段，补 10ms BBO 和 200ms update。 |
@@ -28,6 +29,11 @@
 | BloFin | Perpetual | `books` 增量 100ms；`books5` 有变化时 100ms | `books` 初始 200 depth；`books5` 5 depth | JSON subscribe `channel=books/books5` | `prevSeqId/seqId`；未见 checksum | 当前 native，补 100ms、200/5 档和断档重建。 |
 | Orderly profile | Perpetual | `orderbookupdate` 每 200ms | public update 未给固定 depth；request orderbook 取 snapshot | `{symbol}@orderbookupdate` | `prevTs`；未见 checksum | `aark`/`modetrade`/`woofipro` 共享，补 endpoint/account_id 和 snapshot fallback。 |
 | ApolloX DEX/APX | Perpetual | bookTicker real-time；partial/diff depth 可 100ms/250ms/500ms | partial 5/10/20；REST snapshot 5/10/20/50/100/500/1000 | Binance-style stream `<symbol>@depth20@100ms` / `<symbol>@bookTicker` | `U/u/pu` + REST `lastUpdateId` | 当前 spec_only，补 100ms、5/10/20 档和重建规则。 |
+| BYDFi | Perpetual | depth/limited depth 可选 100ms 或 1000ms | incremental depth；limited depth 10/50/100 | path stream 或 JSON SUBSCRIBE，如 `BTC-USDT@depth10@100ms` | 未见 sequence/checksum；REST snapshot fallback | 当前 native 但缺结构化字段，补 100ms 和 10/50/100 档。 |
+| Delta Exchange | Futures/Option/Perpetual | `ob_l1` 100ms；`ob_updates` 100ms；`ob_l2` 500ms | L1、15 档、全量增量 | JSON subscribe `ob_l1`/`ob_l2`/`ob_updates` | `ob_updates` 有 `seq` 和 CRC32 `cs`；断档 resubscribe | 当前 descriptor only，补新 public endpoint 和 checksum/sequence。 |
+| Gemini | Spot | bookTicker real-time；partial/diff depth 可选 100ms 或 1s | BBO、partial 5/10/20、diff depth | `{symbol}@bookTicker`、`{symbol}@depth10@100ms`、`{symbol}@depth@100ms` | `lastUpdateId`、`U/u`；未见 checksum | 当前 native 但缺结构化字段，补 100ms、5/10/20 和 `U/u`。 |
+| HitBTC / FMFW.io | Spot | `orderbook/top/100ms` BBO；`orderbook/D5-D20/100ms` partial | BBO、D5/D10/D20 | JSON-RPC `subscribe` channel `orderbook/top/100ms` 或 `orderbook/D5/100ms` | partial 有 sequence `s`；未见 checksum | 当前 spec_only，补 100ms BBO/partial 和 REST snapshot fallback。 |
+| KuCoin Futures | Perpetual | increment real-time；5/50 档 100ms；UTA BBO real-time | increment、1/5/50 | classic `/contractMarket/level2*` 或 UTA `channel=obu` | `sequence`/`sequenceStart`/`sequenceEnd`；未见 checksum | 当前 native，补 channels、100ms 和 REST snapshot replay。 |
 
 ## 高速但官方未给固定毫秒
 
@@ -50,6 +56,12 @@
 | Bitunix | Spot/Perpetual | Futures 1/5/15 档 depth，官方未给固定毫秒 | `book1`/`book5`/`book15`/changed book | `depth_book1`/`depth_book5`/`depth_book15` | spec/parser ready，补无 sequence/checksum 和 REST depth fallback。 |
 | Blockchain.com Exchange | Spot | L2/L3 order book，官方未给固定毫秒 | L2 聚合；L3 单订单级别 | `l2`/`l3` subscribe | spec_only，补 `seqnum`、snapshot/update 和断档重建。 |
 | BigONE | Spot/Perpetual | MarketDepth real-time，官方未给固定毫秒 | 聚合 price levels；未给固定 depth 参数 | `subscribeMarketDepthRequest` | parser_only，补 `changeId/prevId` 和 protobuf 选项。 |
+| BSX | Perpetual | `book` channel 每 25ms 推有变化的增量，每分钟 snapshot | 官方未给固定 depth 参数 | JSON `{"op":"sub","channel":"book","product":"BTC-PERP"}` | 有 `gsn`，未见 checksum | spec_only，补 25ms、`gsn`、snapshot/update 和 REST snapshot。 |
+| CoinTR | Spot/Perpetual | depth channel 200-300ms | `books` full、`books1`/`books5`/`books15` | JSON subscribe `channel=books5` | CRC32 checksum；snapshot 后 update | declared，补 200-300ms、1/5/15/full 和 checksum。 |
+| Coinstore | Spot/Perpetual | Spot depth stream 最小推送间隔 100ms | Spot depth；Futures `future_snapshot_depth` | Spot `SUB` depth channel；Futures Socket.IO subscribe | Spot session 序号 `S`，未见 checksum | parser_only，补 100ms、session seq 和 REST snapshot fallback。 |
+| HashKey Global | Spot/Perpetual | depth topic 300ms | 最多 200 档 | JSON `topic=depth,event=sub` | 未见 sequence/checksum | spec/parser ready，补 300ms、200 档和 REST depth fallback。 |
+| GRVT | Perpetual/Option | selector 示例 500ms | 示例 50 档 | JSON-RPC `stream=v1.book.s`, selector `instrument@500-50` | `sequence_number`/`prev_sequence_number`；未见 checksum | parser_only，补 selector、sequence 和 gap resubscribe。 |
+| Kraken Futures | Perpetual | `book` feed snapshot+delta，官方未给固定毫秒 | 官方未给固定 depth | JSON `feed=book` | 有 `seq`；未见 checksum | native，补 `seq` 连续性和 snapshot/delta。 |
 
 ## 落地字段
 
@@ -100,3 +112,21 @@ websocket:
 | Bitunix | <https://www.bitunix.com/api-docs/futures/websocket/public/depth%20channel.html> |
 | Blockchain.com Exchange | <https://exchange.blockchain.com/api> |
 | BigONE | <https://open.bigone.com/docs/spot/pusher> |
+| BSX | <https://api-docs.bsx.exchange/reference/ws-orderbook> |
+| BtcTurk | <https://docs.btcturk.com/docs/websocket-feed/models/> |
+| Bybit EU | <https://bybit-exchange.github.io/docs/v5/websocket/public/orderbook> |
+| BYDFi | <https://developers.bydfi.com/en/futures/websocket-market> |
+| Coinstore | <https://coinstore-openapi.github.io/en/index.html> |
+| CoinTR | <https://www.cointr.com/api-doc/spot/websocket/public/depth-channel> |
+| Cryptomus | <https://doc.cryptomus.com/methods/exchange/websockets> |
+| DeepCoin | <https://www.deepcoin.com/docs/publicWS/public> |
+| Delta Exchange | <https://docs.delta.exchange/> |
+| DigiFinex | <https://docs.digifinex.com/en-ww/spot/v1/websocket.html> |
+| EXMO | <https://support.exmo.com/hc/en-us/articles/14338305227676-Websocket-API> |
+| Gemini | <https://developer.gemini.com/websocket/streams> |
+| HitBTC | <https://api.hitbtc.com/> |
+| FMFW.io | <https://api.fmfw.io/> |
+| KuCoin Futures | <https://www.kucoin.com/docs-new/3470082w0>、<https://www.kucoin.com/docs-new/3470097w0>、<https://www.kucoin.com/docs-new/3470221w0> |
+| HashKey Global | <https://hashkeyglobal-apidoc.readme.io/reference/websocket-api> |
+| GRVT | <https://api-docs.grvt.io/market_data_streams/> |
+| Kraken Futures | <https://docs.kraken.com/api/docs/futures-api/websocket/book/> |

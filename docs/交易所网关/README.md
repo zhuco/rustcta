@@ -24,7 +24,7 @@
 | 看剩余区域现货 CEX 是否应补合约或写不支持合约 | [产品线官方核验 P6 剩余区域现货 CEX](产品线官方核验_P6_剩余区域现货_CEX.md)。 |
 | 看下一步应该优先查哪些官方资料 | [官方核验优先级](官方核验优先级.md)。 |
 | 看哪些交易所有 10ms/20ms L1/BBO 或高速订单簿 | [WebSocket 极速盘口能力汇总](WebSocket极速盘口能力汇总.md)。 |
-| 看主流和区域现货 WebSocket 官方结果 | [WebSocket 官方核验 P0 第一批](WebSocket官方核验_P0_第一批.md)，[第二批](WebSocket官方核验_P0_第二批.md)，[P1 第三批](WebSocket官方核验_P1_第三批.md)，[P2 区域现货](WebSocket官方核验_P2_区域现货交易所.md)，[P3 P2 公共 WS 缺口](WebSocket官方核验_P3_P2公共WS缺口交易所.md)，[P4 CEX 盘口细项](WebSocket官方核验_P4_CEX盘口细项.md)，[P5 衍生品/链上盘口细项](WebSocket官方核验_P5_衍生品链上盘口细项.md)，[P6 补充交易所盘口细项](WebSocket官方核验_P6_补充交易所盘口细项.md)。 |
+| 看主流和区域现货 WebSocket 官方结果 | [WebSocket 官方核验 P0 第一批](WebSocket官方核验_P0_第一批.md)，[第二批](WebSocket官方核验_P0_第二批.md)，[P1 第三批](WebSocket官方核验_P1_第三批.md)，[P2 区域现货](WebSocket官方核验_P2_区域现货交易所.md)，[P3 P2 公共 WS 缺口](WebSocket官方核验_P3_P2公共WS缺口交易所.md)，[P4 CEX 盘口细项](WebSocket官方核验_P4_CEX盘口细项.md)，[P5 衍生品/链上盘口细项](WebSocket官方核验_P5_衍生品链上盘口细项.md)，[P6 补充交易所盘口细项](WebSocket官方核验_P6_补充交易所盘口细项.md)，[P7 补充交易所盘口细项二](WebSocket官方核验_P7_补充交易所盘口细项二.md)，[P8 补充交易所盘口细项三](WebSocket官方核验_P8_补充交易所盘口细项三.md)。 |
 | 看不懂英文 adapter 文件名 | [适配器索引](适配器索引.md)。 |
 | 看全局完成度和 Binance 对照目标 | [总览/exchange_api_completion_matrix.md](总览/exchange_api_completion_matrix.md)。 |
 | 看网关支持哪些交易所 | [总览/exchange_support_matrix.md](总览/exchange_support_matrix.md)。 |
@@ -65,6 +65,8 @@ docs/交易所网关/
   WebSocket官方核验_P4_CEX盘口细项.md  CEX 订单簿 WS 细项
   WebSocket官方核验_P5_衍生品链上盘口细项.md  衍生品/链上订单簿 WS 细项
   WebSocket官方核验_P6_补充交易所盘口细项.md  补充交易所订单簿 WS 细项
+  WebSocket官方核验_P7_补充交易所盘口细项二.md  第二批补充交易所订单簿 WS 细项
+  WebSocket官方核验_P8_补充交易所盘口细项三.md  第三批补充交易所订单簿 WS 细项
   总览/                        全局矩阵、扩展计划、架构说明
   通用机制/                    密钥、订单 id、费率、对账、symbol、WS
   适配器/                      每个交易所一份 adapter 文档
@@ -105,7 +107,7 @@ config/binance_spot_example.yml
 
 第一批主流产品线核验已经确认：Binance USD-M/Options、OKX Swap/Futures/Options、Bitget Futures、Gate.io Futures/Options、MEXC Contract 是 `项目未实现`，不是交易所不支持；`binancecoinm`/`kucoinfutures`/`krakenfutures` 的现货、`coinbaseexchange` 的合约按 adapter 口径写 `交易所不支持`。
 
-当前可执行补全任务已经整理到 [交易所网关补全任务清单](交易所网关补全任务清单.md)：P0 公共订单簿 WebSocket 13 项，P0 产品线项目未实现 6 项，P1 已有 WS 结构化细项 9 项，P2 产品线项目未实现 35 项，P2 明确交易所不支持 56 项，P2 公共订单簿 WebSocket 5 项，P2 已有 WS 结构化细项 1 项，P2 明确公共 WS 不支持 12 项，P3 区域现货 WS 结构化细项 10 项，P3 CEX WS 结构化细项 12 项，P3 衍生品/链上 WS 结构化细项 12 项，P3 补充交易所 WS 结构化细项 11 项，共 182 项。尚未转成明确任务的官方资料缺口见 [剩余官方核验队列](剩余官方核验队列.md)，当前还有 346 项。
+当前可执行补全任务已经整理到 [交易所网关补全任务清单](交易所网关补全任务清单.md)：P0 公共订单簿 WebSocket 13 项，P0 产品线项目未实现 6 项，P1 已有 WS 结构化细项 9 项，P2 产品线项目未实现 35 项，P2 明确交易所不支持 56 项，P2 公共订单簿 WebSocket 5 项，P2 已有 WS 结构化细项 1 项，P2 明确公共 WS 不支持 14 项，P3 区域现货 WS 结构化细项 10 项，P3 CEX WS 结构化细项 12 项，P3 衍生品/链上 WS 结构化细项 12 项，P3 补充交易所 WS 结构化细项 11 项，P3 补充交易所 WS 结构化细项二 11 项，P3 补充交易所 WS 结构化细项三 11 项，共 206 项。尚未转成明确任务的官方资料缺口见 [剩余官方核验队列](剩余官方核验队列.md)，当前还有 322 项。
 
 按 adapter 聚合的开工入口见 [adapter 工作包索引](adapter工作包索引.md)，它会把当前实现、明确任务和剩余核验项合并到一行。
 

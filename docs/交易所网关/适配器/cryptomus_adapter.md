@@ -40,6 +40,12 @@ Official documentation used for this task:
 - https://doc.cryptomus.com/methods/exchange/wallet-balances
 - https://doc.cryptomus.com/methods/exchange/websockets
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。Cryptomus public WS depth 订阅方法是 `depth_subscribe`，参数形如 `BTC_USDT:0`，其中冒号后是 market scale index；也支持 `all`。
+
+`depth_update` payload 有 `full_reload`：false 表示 partial update，true 表示全量订单簿刷新。官方未给固定推流毫秒、固定档位、sequence 或 checksum。实现时应把 `scale_index` 和 `full_reload` 写进 mapping，并用 REST orderbook 作为断线/异常重建源。
+
 ## Fixtures
 
 Fixtures live under `tests/fixtures/exchanges/cryptomus/`:

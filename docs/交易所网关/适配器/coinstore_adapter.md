@@ -36,6 +36,12 @@ Machine-readable mapping: `crates/rustcta-exchange-gateway/src/adapters/coinstor
 | Spot public WebSocket | `{"op":"SUB","channel":["<symbol>@depth@20"],"id":1}` | Supports trade, ticker, depth and kline channel specs plus pong helper; depth messages convert to standard `OrderBookSnapshot` stream events. |
 | Futures public/private WebSocket | Socket.IO event text frames such as `42["subscribe", ...]` and `42["auth", ...]` | Supports public topics `future_tick`, `future_kline`, `future_snapshot_depth`, `indicator`; private `match` orders/fills standard event parsing. |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。Coinstore Spot public WS 为 `wss://ws.coinstore.com/s/ws`，depth 订阅使用 `{"op":"SUB","channel":["btcusdt@depth"],"id":1}`；项目已有 `<symbol>@depth@20` fixture 可以作为 20 档变体继续核验。Futures Socket.IO public topic 包括 `future_snapshot_depth`。
+
+Spot 官方写有变化才推，最小推送间隔 100ms。server message 有 session 级序号 `S`，可用于发现漏消息；官方未见 checksum。Spot/Futures 断线或序号异常时用 REST depth/snapshot 重建。
+
 ## Authentication
 
 Signed REST requests use:

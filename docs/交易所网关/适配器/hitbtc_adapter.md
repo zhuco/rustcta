@@ -46,6 +46,12 @@ WebSocket boundary:
 - REST `get_order_book` is the order book resync fallback.
 - Private WS login payload is covered, but no production private stream is enabled.
 
+Official WebSocket order book detail:
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。HitBTC v3 public WS 支持 `orderbook/full`、`orderbook/D5|D10|D20/{100ms|500ms|1000ms}` 和 `orderbook/top/{100ms|500ms|1000ms}`。
+
+Partial orderbook 有 sequence `s`，top 是 L1/BBO；未见 checksum。当前 adapter 只保留 spec/parser 边界，实盘 book-cache 要补 100ms channel、sequence 校验和 REST `/public/orderbook/{symbol}` 重建。
+
 Validation:
 
 ```bash

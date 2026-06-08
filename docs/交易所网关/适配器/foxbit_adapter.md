@@ -55,6 +55,12 @@ Machine-readable mapping is in:
 It marks public market/orderbook endpoints as spec-only verified fixtures and
 private REST/WS as offline specs or auth-payload-only.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Foxbit REST/WS v3 有 public orderbook subscribe payload，public WS URL 为 `wss://api.foxbit.com.br/ws/v3/public`。
+
+本批未在公开资料核到固定推流毫秒、固定 sequence 或 checksum。项目已有 `orderbook-100/250/500/1000` payload 证据，但这些参数需要继续确认是档位还是其他模式；实盘前必须用 REST `/markets/{market_symbol}/orderbook` 做 snapshot fallback。
+
 ## Verification
 
 Allowed checks:

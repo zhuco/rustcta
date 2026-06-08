@@ -38,6 +38,12 @@ The authoritative mapping lives in
 | `cancel_order` | `DELETE /orders/{order_id}` | request-spec-only / Unsupported runtime | `tests/fixtures/exchanges/bsx/request_specs/cancel_order_unsupported.json` |
 | private write/batch/cancel-all | account scoped REST | Unsupported runtime | `tests/fixtures/exchanges/bsx/unsupported_boundary.json` |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。BSX public WS 主网为 `wss://ws.bsx.exchange/ws`，订单簿 channel 是 `book`，订阅 payload 为 `{"op":"sub","channel":"book","product":"BTC-PERP"}`。
+
+`book` 订阅后先推 snapshot，之后有变化时每 25ms 推增量，并且每分钟重新推 snapshot。payload 有 `timestamp` 和 `gsn`，未见 checksum；断线、乱序或 gap 时应重新订阅并用 REST `GET /products/{product_id}/book` 重建。
+
 ## Authentication And Signing
 
 Public REST is unauthenticated. Private/account endpoints use BSX account headers such as

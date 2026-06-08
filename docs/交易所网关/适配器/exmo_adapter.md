@@ -50,6 +50,12 @@ The machine-readable mapping is at `crates/rustcta-exchange-gateway/src/adapters
 | Public WS | `spot/trades`, `spot/ticker`, `spot/order_book_snapshots`, `spot/order_book_updates` | Subscription payload specs |
 | Private WS | `spot/user_trades`, `spot/wallet`, `spot/orders` | Login/subscription payload specs |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。EXMO public WS URL 是 `wss://ws-api.exmo.com/v1/public`，订单簿相关 stream 是 `spot/order_book_snapshots` 和 `spot/order_book_updates`。
+
+官方摘要说明 public WS 提供 top-25 positions 和 top-400 order book changes；未给固定推流毫秒、sequence 或 checksum。断线、错包或 missed ping 后必须回 REST `POST /v1.1/order_book` 重建，本 adapter 的 private WS 仍只作为低延迟提示通道。
+
 ## Unsupported Boundary
 
 The adapter does not expose margin, futures, perpetuals, positions, native batch place/cancel, cancel-all, amend, OCO/OTO order lists, EX-CODE, wallet withdrawal/deposit, transfers, or P2P flows. These are either outside the Spot gateway contract, require high-risk wallet permissions/support approval, or have no lossless shared mapping in EXMO Spot REST v1.1.

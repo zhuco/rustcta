@@ -36,6 +36,12 @@ liquidations, liquidity provision and private streams remain `Unsupported`.
 | Testnet chain id | `2442` (`cardona`, SDK config) |
 | Public WS | Unsupported/runtime unverified |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。本批未找到 D8X 稳定官方公共订单簿 WebSocket 文档；当前可核验的是 CoinGecko-compatible REST `GET /coingecko/orderbook/{ticker_id}`。
+
+因此单交易所文档写 `交易所不支持当前公共 WS runtime`。已有 `ws/public_orderbook_subscribe.json` 只能作为 payload fixture 或后续重核线索，不能进入套利实盘 runtime；行情重建以 REST snapshot 为准。
+
 ## Capabilities
 
 | Capability | Status | Notes |

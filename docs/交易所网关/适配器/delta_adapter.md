@@ -20,6 +20,12 @@ Delta-only files.
   `wss://socket.india.delta.exchange`. Full typed WS parser integration remains
   future work.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。Delta 新公共 WS endpoint 支持 `ob_l1`、`ob_l2` 和 `ob_updates`；legacy `l2_orderbook`/`l2_updates` 已映射到新 channel。
+
+`ob_l1` 是 L1，100ms；`ob_l2` 是 top 15 levels，500ms；`ob_updates` 首包 snapshot 后推全量 orderbook incremental update，100ms，有 `seq` 和 CRC32 `cs`。`seq` 必须 +1，不连续时 resubscribe 并从 snapshot 重建。
+
 ## Endpoint Notes
 
 The implementation follows Delta v2 docs for:

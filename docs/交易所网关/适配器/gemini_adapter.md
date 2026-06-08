@@ -30,6 +30,12 @@ handled separately before implementation.
 | Batch | not advertised; composed batch behavior is not exposed as a capability |
 | Fees/positions/reduce-only | Unsupported |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。Gemini public WS stream host 是 `wss://ws.gemini.com`，支持 `{symbol}@bookTicker`、`{symbol}@depth5/10/20`、`{symbol}@depth5/10/20@100ms`、`{symbol}@depth` 和 `{symbol}@depth@100ms`。
+
+`bookTicker` 是 real-time L1/BBO；partial depth 支持 5/10/20 档，1s 或 100ms；diff depth 支持 1s 或 100ms，可用 snapshot 参数获取初始全量或 top N。partial 有 `lastUpdateId`，diff 有 `U/u`，未见 checksum；断档后用 REST order book 或 snapshot 连接参数重建。
+
 ## Endpoint Mapping
 
 `crates/rustcta-exchange-gateway/src/adapters/gemini/endpoint_mapping.yaml` maps:

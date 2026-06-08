@@ -43,6 +43,12 @@ The V5 integration guidance lists `https://api.bybit.eu` for EEA users and state
 - Private account/order/fills endpoints as explicit `Unsupported`.
 - REST reconciliation fallback only for public stream resync; private reconciliation remains unsupported.
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。Bybit EU 按 Bybit V5 public orderbook 语义处理，EU public WS host 使用 `wss://stream.bybit.eu/v5/public/{category}`，topic 为 `orderbook.{depth}.{symbol}`。
+
+Linear/inverse/spot 支持 1/50/200/1000 档，对应 10ms/20ms/100ms/200ms；option 支持 25/100 档，对应 20ms/100ms。消息有 `u`、cross `seq` 和 `cts`；snapshot 后推 delta，收到新 snapshot 必须 reset 本地 book。L1 是 snapshot-only，3 秒无变化会重复 snapshot。
+
 ## Validation
 
 ```bash

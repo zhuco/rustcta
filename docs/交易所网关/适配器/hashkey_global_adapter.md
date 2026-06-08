@@ -32,6 +32,12 @@ Status: `rustcta-exchange-gateway` Spot + futures REST adapter with WebSocket re
 | Public WebSocket | `wss://stream-glb.hashkey.com/quote/ws/v1` | Subscription specs and parsers cover order book, trades, ticker, candles, ack and ping/pong heartbeat. |
 | Private WebSocket | `POST/PUT/DELETE /api/v1/userDataStream`, `wss://stream-glb.hashkey.com/api/v1/ws` | Listen-key URL helpers, private subscription specs and parsers cover order, fill, balance/account and position events. |
 
+## Official WebSocket Order Book Detail
+
+官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。HashKey Global public stream URL 是 `wss://stream-glb.hashkey.com/quote/ws/v1`，depth 订阅 payload 使用 `topic=depth,event=sub`，symbol 可为 spot 或 perpetual。
+
+官方 depth 更新频率为 300ms，最多 200 档；REST `/quote/v1/depth` 的 `limit` max 200 可作为 snapshot fallback。公开页未见 sequence/checksum，心跳建议客户端每 10s ping。
+
 ## Authentication
 
 Signed REST requests use `X-HK-APIKEY` plus `timestamp`, `recvWindow` and `signature` query parameters:

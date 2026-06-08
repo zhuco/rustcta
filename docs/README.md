@@ -122,6 +122,14 @@ WebSocket market-data rules now live under `交易所网关/`.
 - `交易所网关/WebSocket官方核验_P6_补充交易所盘口细项.md` - official
   WebSocket order-book details for supplemental CEX, broker, and hybrid
   profiles, including unsupported public-WS markers and sequence/rebuild risks.
+- `交易所网关/WebSocket官方核验_P7_补充交易所盘口细项二.md` - official
+  WebSocket order-book details for the second supplemental batch, including
+  10ms/20ms/25ms/100ms candidates, checksum/sequence fields, and unsupported
+  runtime boundaries.
+- `交易所网关/WebSocket官方核验_P8_补充交易所盘口细项三.md` - official
+  WebSocket order-book details for the third supplemental batch, including
+  HitBTC-family 100ms feeds, Gemini/KuCoin Futures low-latency feeds, and
+  chain/profile runtime boundaries.
 - `交易所网关/剩余官方核验队列.md` - generated queue of official docs still
   needing verification before more adapter tasks can be declared.
 - `交易所网关/适配器索引.md` - Chinese index for adapter file names.
