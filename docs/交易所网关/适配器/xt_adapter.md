@@ -158,6 +158,12 @@ intervals in capability metadata and endpoint mapping; reconnect requires
 re-authentication and resubscription. If private credentials are absent,
 private REST and private streams are declared `Unsupported`.
 
+P9 official verification adds the public order book rebuild rule: subscribe to
+`depth_update@btc_usdt`, buffer events, fetch a REST snapshot with limit 500,
+drop stale updates, and enforce continuity. Spot uses `fi/i`; Futures uses
+`fu/u`. The project already has 1000ms interval evidence; no faster fixed
+official interval or checksum was confirmed in this batch.
+
 ## Configuration
 
 `config/xt_gateway_example.yml` provides a disabled-private-REST example.

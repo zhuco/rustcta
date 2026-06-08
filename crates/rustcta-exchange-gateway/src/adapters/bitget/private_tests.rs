@@ -1,15 +1,15 @@
 use rustcta_exchange_api::{
     AmendOrderRequest, BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest,
     CancelOrderRequest, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient,
-    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
-    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, PositionsRequest, QueryOrderRequest,
+    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
 
 use super::test_support::{
     assert_signed_bitget_request, assert_signed_bitget_request_method, context, exchange_id,
-    spawn_rest_server, symbol_scope,
+    perpetual_symbol_scope, spawn_rest_server, symbol_scope,
 };
 use super::{BitgetGatewayAdapter, BitgetGatewayConfig};
 use crate::request_spec::RequestSpec;
@@ -50,6 +50,19 @@ fn bitget_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     })
     .expect("adapter");
     let capabilities = adapter.capabilities();
+    assert_eq!(
+        capabilities.market_types,
+        vec![MarketType::Spot, MarketType::Perpetual]
+    );
+    assert!(capabilities.supports_positions);
+    assert!(capabilities.supports_reduce_only);
+    assert!(capabilities.supports_post_only);
+    assert!(capabilities
+        .supports_time_in_force
+        .contains(&TimeInForce::IOC));
+    assert!(capabilities
+        .supports_time_in_force
+        .contains(&TimeInForce::FOK));
     assert!(matches!(
         &capabilities.capabilities_v2.public_rest,
         CapabilitySupport::Native
@@ -86,6 +99,121 @@ fn bitget_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
         vec![CredentialScope::ReadOnly, CredentialScope::Trade]
     );
     assert!(capabilities.capabilities_v2.stream_runtime.resync.orders);
+}
+
+#[tokio::test]
+async fn bitget_adapter_should_route_perpetual_place_cancel_and_positions() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({"code": "00000", "data": {"orderId": "P1001", "clientOid": "PERP1"}}),
+        json!({"code": "00000", "data": {"orderId": "P1001", "clientOid": "PERP1"}}),
+        json!({
+            "code": "00000",
+            "data": [{
+                "symbol": "BTCUSDT",
+                "holdSide": "long",
+                "total": "0.02",
+                "openPriceAvg": "65000",
+                "markPrice": "65100",
+                "unrealizedPL": "2.0",
+                "leverage": "5"
+            }]
+        }),
+    ])
+    .await;
+    let adapter = BitgetGatewayAdapter::new(BitgetGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        passphrase: Some("passphrase".to_string()),
+        enabled_private_rest: true,
+        ..BitgetGatewayConfig::default()
+    })
+    .expect("adapter");
+    let symbol = perpetual_symbol_scope();
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-place"),
+            symbol: symbol.clone(),
+            client_order_id: Some("PERP1".to_string()),
+            side: OrderSide::Buy,
+            position_side: Some(PositionSide::Net),
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::IOC),
+            quantity: "0.02".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        })
+        .await
+        .expect("perpetual place");
+    assert_eq!(placed.order.market_type, MarketType::Perpetual);
+    assert_eq!(placed.order.exchange_order_id.as_deref(), Some("P1001"));
+    assert!(placed.order.reduce_only);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-cancel"),
+            symbol: symbol.clone(),
+            client_order_id: Some("PERP1".to_string()),
+            exchange_order_id: Some("P1001".to_string()),
+        })
+        .await
+        .expect("perpetual cancel");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.market_type, MarketType::Perpetual);
+
+    let positions = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![symbol.exchange_symbol.clone()],
+        })
+        .await
+        .expect("perpetual positions");
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].market_type, MarketType::Perpetual);
+    assert_eq!(positions.positions[0].side, PositionSide::Long);
+    assert_eq!(positions.positions[0].quantity, 0.02);
+    assert_eq!(positions.positions[0].entry_price, Some(65000.0));
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert_signed_bitget_request_method(&requests[0], "POST", "/api/v2/mix/order/place-order");
+    let body = requests[0].body.as_ref().expect("place body");
+    assert_eq!(body["productType"], "USDT-FUTURES");
+    assert_eq!(body["marginMode"], "crossed");
+    assert_eq!(body["marginCoin"], "USDT");
+    assert_eq!(body["symbol"], "BTCUSDT");
+    assert_eq!(body["orderType"], "limit");
+    assert_eq!(body["force"], "ioc");
+    assert_eq!(body["reduceOnly"], "yes");
+
+    assert_signed_bitget_request_method(&requests[1], "POST", "/api/v2/mix/order/cancel-order");
+    let body = requests[1].body.as_ref().expect("cancel body");
+    assert_eq!(body["productType"], "USDT-FUTURES");
+    assert_eq!(body["marginCoin"], "USDT");
+    assert_eq!(body["orderId"], "P1001");
+    assert_eq!(body["clientOid"], "PERP1");
+
+    assert_signed_bitget_request(&requests[2], "/api/v2/mix/position/all-position");
+    assert_eq!(
+        requests[2].query.get("productType").map(String::as_str),
+        Some("USDT-FUTURES")
+    );
+    assert_eq!(
+        requests[2].query.get("marginCoin").map(String::as_str),
+        Some("USDT")
+    );
+    assert_eq!(
+        requests[2].query.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
+    );
 }
 
 #[test]

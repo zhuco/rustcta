@@ -1,0 +1,17 @@
+{
+  "exchange": "gateio",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/futures/usdt/positions/BTC_USDT",
+  "auth": "signed",
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" },
+    "X-Gate-Size-Decimal": { "match": "exact", "value": "1" }
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

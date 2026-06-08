@@ -130,6 +130,16 @@ pub(super) fn symbol_scope() -> SymbolScope {
     }
 }
 
+pub(super) fn perpetual_symbol_scope() -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, "BTC-USDT-SWAP")
+            .expect("symbol"),
+    }
+}
+
 pub(super) fn private_config(base_url: String) -> OkxGatewayConfig {
     OkxGatewayConfig {
         rest_base_url: base_url,

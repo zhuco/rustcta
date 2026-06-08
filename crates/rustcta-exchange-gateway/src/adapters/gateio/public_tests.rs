@@ -1,10 +1,11 @@
 use rustcta_exchange_api::{
     ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::MarketType;
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
-use super::test_support::{context, spawn_rest_server, symbol_scope};
+use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{GateIoGatewayAdapter, GateIoGatewayConfig};
 
 fn fixture(path: &str) -> serde_json::Value {
@@ -14,6 +15,15 @@ fn fixture(path: &str) -> serde_json::Value {
     );
     let text = std::fs::read_to_string(path).expect("fixture");
     serde_json::from_str(&text).expect("fixture json")
+}
+
+fn gate_fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/gate/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("gate fixture");
+    serde_json::from_str(&text).expect("gate fixture json")
 }
 
 #[test]
@@ -101,4 +111,63 @@ async fn gateio_adapter_should_load_depth_limited_order_book_from_public_rest() 
         Some("BTC_USDT")
     );
     assert_eq!(request.query.get("limit").map(String::as_str), Some("50"));
+}
+
+#[tokio::test]
+async fn gateio_adapter_should_load_perpetual_rules_and_order_book_from_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        gate_fixture("contracts.json"),
+        gate_fixture("orderbook.json"),
+    ])
+    .await;
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        rest_base_url: base_url,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+    let symbol = perpetual_symbol_scope("BTCUSDT");
+
+    let rules = adapter
+        .get_symbol_rules(SymbolRulesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-rules"),
+            symbols: vec![symbol.clone()],
+        })
+        .await
+        .expect("perpetual rules");
+    assert_eq!(rules.rules.len(), 1);
+    assert_eq!(rules.rules[0].symbol.market_type, MarketType::Perpetual);
+    assert_eq!(rules.rules[0].price_increment.as_deref(), Some("0.1"));
+    assert_eq!(rules.rules[0].quantity_increment.as_deref(), Some("1"));
+    assert!(rules.rules[0].supports_reduce_only);
+
+    let book = adapter
+        .get_order_book(OrderBookRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-book"),
+            symbol,
+            depth: Some(20),
+        })
+        .await
+        .expect("perpetual order book");
+    assert_eq!(book.order_book.market_type, MarketType::Perpetual);
+    assert_eq!(book.order_book.sequence, Some(742839102937));
+    assert_eq!(book.order_book.bids[0].price, 65000.1);
+    assert_eq!(book.order_book.asks[0].quantity, 9.0);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests[0].path, "/futures/usdt/contracts");
+    assert_eq!(requests[1].path, "/futures/usdt/order_book");
+    assert_eq!(
+        requests[1].query.get("contract").map(String::as_str),
+        Some("BTC_USDT")
+    );
+    assert_eq!(
+        requests[1].query.get("limit").map(String::as_str),
+        Some("20")
+    );
+    assert_eq!(
+        requests[1].query.get("with_id").map(String::as_str),
+        Some("true")
+    );
 }

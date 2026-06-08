@@ -76,6 +76,16 @@ deterministic zkLink/L2 order signing vectors exist in Rust.
 Native amend and batch place/cancel endpoints were not found in the audited
 docs and remain unsupported.
 
+## Official Core Trading Detail
+
+P0 core-trading verification confirms ApeX Omni officially supports
+`POST /v3/order`, `POST /v3/delete-order`, `GET /v3/order`, and
+`GET /v3/open-orders`. Supported TIF values include `GOOD_TIL_CANCEL`,
+`FILL_OR_KILL`, and `IMMEDIATE_OR_CANCEL`; `clientOrderId` is supported.
+Market orders still require a price or worst-price because the order payload is
+part of the zkLink signature. Therefore current `place_order` is `项目未实现`
+pending a deterministic Rust zkLink/L2 signer, not `交易所不支持下单`.
+
 ## WebSocket
 
 Public WS uses payloads such as:

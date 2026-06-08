@@ -84,7 +84,17 @@ pub struct ExchangeConnectionView {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SystemResourceSnapshot {
+    pub cpu_usage_pct: Option<f64>,
+    pub memory_used_bytes: Option<u64>,
+    pub memory_total_bytes: Option<u64>,
+    pub memory_usage_pct: Option<f64>,
+    pub process_cpu_usage_pct: Option<f64>,
+    pub process_memory_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceSummary {
     pub schema_version: u16,
     pub generated_at: DateTime<Utc>,
@@ -95,6 +105,8 @@ pub struct WorkspaceSummary {
     pub risk_status: RiskStatus,
     pub active_risk_event_count: usize,
     pub log_event_count: usize,
+    #[serde(default)]
+    pub system: SystemResourceSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

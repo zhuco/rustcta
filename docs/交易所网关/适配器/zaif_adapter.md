@@ -25,6 +25,15 @@ withdrawal, or ledger write operations.
 | Private WS | Unsupported; use REST reconciliation after dedicated validation |
 | Fixtures | Parser fixtures, private request specs, HMAC signing vector, and WS policy fixture live under `tests/fixtures/exchanges/zaif/` |
 
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms Zaif WebSocket provides real-time board data
+and last price at `wss://ws.zaif.jp/stream?currency_pair={currency_pair}`.
+Payloads include `asks`, `bids`, `trades`, `timestamp`, `last_price`, and
+`currency_pair`. The official page does not state a fixed push interval, depth
+limit, sequence, or checksum. Reconnect should treat the next payload or REST
+depth as the fresh book state.
+
 ## Runtime Notes
 
 The adapter supports Spot public REST only at runtime. Private balances, open

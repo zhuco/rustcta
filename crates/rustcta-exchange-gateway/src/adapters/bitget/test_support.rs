@@ -126,6 +126,16 @@ pub(super) fn symbol_scope() -> SymbolScope {
     }
 }
 
+pub(super) fn perpetual_symbol_scope() -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, "BTCUSDT")
+            .expect("symbol"),
+    }
+}
+
 pub(super) fn assert_signed_bitget_request(request: &SeenRequest, path: &str) {
     assert_signed_bitget_request_method(request, "GET", path);
 }

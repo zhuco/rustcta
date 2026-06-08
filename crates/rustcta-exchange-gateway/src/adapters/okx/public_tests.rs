@@ -2,10 +2,11 @@ use rustcta_exchange_api::{
     CapabilitySupport, ExchangeClient, OrderBookRequest, SymbolRulesRequest,
     EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::MarketType;
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
-use super::test_support::{context, spawn_rest_server, symbol_scope};
+use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{OkxGatewayAdapter, OkxGatewayConfig};
 
 fn fixture(path: &str) -> serde_json::Value {
@@ -70,17 +71,28 @@ async fn okx_adapter_should_declare_task9_toolchain_capabilities() {
 #[test]
 fn okx_parser_fixtures_should_cover_success_empty_and_error_shapes() {
     let exchange = super::test_support::exchange_id();
-    let rules =
-        parse_symbol_rules(&exchange, &fixture("parser/instruments_success.json")).expect("rules");
+    let rules = parse_symbol_rules(
+        &exchange,
+        MarketType::Spot,
+        &fixture("parser/instruments_success.json"),
+    )
+    .expect("rules");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].base_asset, "BTC");
 
-    let empty =
-        parse_symbol_rules(&exchange, &fixture("parser/instruments_empty.json")).expect("empty");
+    let empty = parse_symbol_rules(
+        &exchange,
+        MarketType::Spot,
+        &fixture("parser/instruments_empty.json"),
+    )
+    .expect("empty");
     assert!(empty.is_empty());
-    assert!(
-        parse_symbol_rules(&exchange, &fixture("parser/instruments_missing_field.json")).is_err()
-    );
+    assert!(parse_symbol_rules(
+        &exchange,
+        MarketType::Spot,
+        &fixture("parser/instruments_missing_field.json")
+    )
+    .is_err());
     assert!(parse_orderbook_snapshot(
         &exchange,
         symbol_scope(),
@@ -137,6 +149,48 @@ async fn okx_adapter_should_load_symbol_rules_from_public_rest() {
     assert_eq!(
         request.query.get("instType").map(String::as_str),
         Some("SPOT")
+    );
+}
+
+#[tokio::test]
+async fn okx_adapter_should_load_perpetual_symbol_rules_from_swap_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "0",
+        "msg": "",
+        "data": [{
+            "instType": "SWAP",
+            "instId": "BTC-USDT-SWAP",
+            "ctValCcy": "BTC",
+            "settleCcy": "USDT",
+            "tickSz": "0.1",
+            "lotSz": "0.01",
+            "minSz": "0.01",
+            "state": "live"
+        }]
+    })])
+    .await;
+    let adapter = OkxGatewayAdapter::new(OkxGatewayConfig {
+        rest_base_url: base_url,
+        ..OkxGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_symbol_rules(SymbolRulesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-rules"),
+            symbols: vec![perpetual_symbol_scope()],
+        })
+        .await
+        .expect("rules");
+
+    assert_eq!(response.rules.len(), 1);
+    assert_eq!(response.rules[0].symbol.market_type, MarketType::Perpetual);
+    assert!(response.rules[0].supports_reduce_only);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(
+        request.query.get("instType").map(String::as_str),
+        Some("SWAP")
     );
 }
 

@@ -63,6 +63,12 @@ Indexer private readback uses only wallet address plus subaccount number. That
 does not prove order placement permission and must not be treated as trade
 authorization.
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。dYdX Chain 官方 client 示例覆盖 placing、replacing、canceling orders；Indexer 可查 subaccount orders、order、fills 和 positions。
+
+当前 private writes 是 Node/validator wallet transaction signing 边界，不是普通 REST API key HMAC。项目未实现 account sequence、chain id、subaccount signing、order/cancel transaction broadcast 和 parser 前，必须保持 `Unsupported`；这应写 `项目未实现链上下单/撤单`，不能写成 `交易所不支持下单/撤单`。
+
 ## Unsupported / Follow-Ups
 
 - Place/cancel/batch/cancel-all/amend/order-list are `Unsupported` until Node

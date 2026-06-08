@@ -90,6 +90,16 @@ Payload helpers cover:
 Private streams remain disabled. Private state reconciliation is documented as
 REST fallback only after a separate live-dry-run promotion.
 
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms NDAX WSGateway supports `SubscribeLevel1`,
+`SubscribeLevel2`, and `GetL2Snapshot` through
+`wss://api.ndax.io/WSGateway/`. Level 1 is BBO, Level 2 snapshot accepts a
+user-selected `Depth`, and the public docs do not state a fixed push interval or
+checksum. Mapping should record the WSGateway envelope, Level1/Level2 channels,
+Depth parameter, no-fixed-ms/no-checksum risk, and resync by requesting a fresh
+L2 snapshot.
+
 ## Unsupported Boundary
 
 Unsupported runtime surfaces:

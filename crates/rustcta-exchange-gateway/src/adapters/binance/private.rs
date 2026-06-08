@@ -5,16 +5,16 @@ use rustcta_exchange_api::{
     CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
     ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
     OpenOrdersResponse, OrderListConditionalLeg, OrderListLegType, OrderListOrderLeg,
-    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    OrderListRequest, OrderListResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest,
+    PositionsResponse, QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest,
+    RecentFillsRequest, RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderType};
+use rustcta_types::{MarketType, OrderSide, OrderType, PositionSide};
 
 use super::parser::normalize_binance_symbol;
 use super::private_parser::{
     parse_account_balances, parse_binance_cancel_all_orders, parse_fee_snapshots,
-    parse_open_orders, parse_order_state, parse_recent_fills,
+    parse_open_orders, parse_order_state, parse_positions, parse_recent_fills,
 };
 use super::BinanceGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -26,14 +26,24 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
         let mut params = binance_place_order_params(&request)?;
         params.insert(
             "symbol".to_string(),
             normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
         );
+        let endpoint = match request.symbol.market_type {
+            MarketType::Spot => "/api/v3/order",
+            MarketType::Perpetual => "/fapi/v1/order",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_post("binance.place_order", "/api/v3/order", &params)
+            .send_signed_post_for_market(
+                "binance.place_order",
+                request.symbol.market_type,
+                endpoint,
+                &params,
+            )
             .await?;
         let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
         Ok(PlaceOrderResponse {
@@ -78,7 +88,7 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<CancelOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
         let mut params = HashMap::new();
         params.insert(
             "symbol".to_string(),
@@ -90,8 +100,18 @@ impl BinanceGatewayAdapter {
             request.client_order_id.as_deref(),
             "cancel_order",
         )?;
+        let endpoint = match request.symbol.market_type {
+            MarketType::Spot => "/api/v3/order",
+            MarketType::Perpetual => "/fapi/v1/order",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_delete("binance.cancel_order", "/api/v3/order", &params)
+            .send_signed_delete_for_market(
+                "binance.cancel_order",
+                request.symbol.market_type,
+                endpoint,
+                &params,
+            )
             .await?;
         let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
         Ok(CancelOrderResponse {
@@ -108,9 +128,6 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        if let Some(market_type) = request.market_type {
-            self.ensure_spot(market_type)?;
-        }
         let symbol = request
             .symbol
             .as_ref()
@@ -118,14 +135,30 @@ impl BinanceGatewayAdapter {
                 message: "binance cancel_all_orders requires symbol".to_string(),
             })?;
         self.ensure_exchange(&symbol.exchange)?;
-        self.ensure_spot(symbol.market_type)?;
+        let market_type = request.market_type.unwrap_or(symbol.market_type);
+        self.ensure_supported_market(market_type)?;
+        if market_type != symbol.market_type {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "binance cancel_all_orders market_type must match symbol".to_string(),
+            });
+        }
         let mut params = HashMap::new();
         params.insert(
             "symbol".to_string(),
             normalize_binance_symbol(&symbol.exchange_symbol.symbol)?,
         );
+        let endpoint = match market_type {
+            MarketType::Spot => "/api/v3/openOrders",
+            MarketType::Perpetual => "/fapi/v1/allOpenOrders",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_delete("binance.cancel_all_orders", "/api/v3/openOrders", &params)
+            .send_signed_delete_for_market(
+                "binance.cancel_all_orders",
+                market_type,
+                endpoint,
+                &params,
+            )
             .await?;
         let orders = parse_binance_cancel_all_orders(&self.exchange_id, symbol, &value)?;
         let cancelled_count = orders.len() as u32;
@@ -143,7 +176,7 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
         let mut params = HashMap::new();
         params.insert(
             "symbol".to_string(),
@@ -205,18 +238,27 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        if let Some(market_type) = request.market_type {
-            self.ensure_spot(market_type)?;
-        }
+        let market_type = request.market_type.unwrap_or(MarketType::Spot);
+        self.ensure_supported_market(market_type)?;
         let (tenant_id, account_id) = self.context_account(&request.context)?;
+        let endpoint = match market_type {
+            MarketType::Spot => "/api/v3/account",
+            MarketType::Perpetual => "/fapi/v2/balance",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_get("binance.get_balances", "/api/v3/account", &HashMap::new())
+            .send_signed_get_for_market(
+                "binance.get_balances",
+                market_type,
+                endpoint,
+                &HashMap::new(),
+            )
             .await?;
         let balances = parse_account_balances(
             &self.exchange_id,
             tenant_id,
             account_id,
-            MarketType::Spot,
+            market_type,
             &request.assets,
             &value,
         )?;
@@ -224,6 +266,55 @@ impl BinanceGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
             balances,
+        })
+    }
+
+    pub(super) async fn get_positions_impl(
+        &self,
+        request: PositionsRequest,
+    ) -> ExchangeApiResult<PositionsResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        let market_type = request.market_type.unwrap_or(MarketType::Perpetual);
+        if market_type != MarketType::Perpetual {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "binance.spot_positions",
+            });
+        }
+        for symbol in &request.symbols {
+            self.ensure_exchange(&symbol.exchange_id)?;
+            if symbol.market_type != MarketType::Perpetual {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "binance get_positions symbols must be perpetual".to_string(),
+                });
+            }
+        }
+        let (tenant_id, account_id) = self.context_account(&request.context)?;
+        let mut params = HashMap::new();
+        if request.symbols.len() == 1 {
+            params.insert(
+                "symbol".to_string(),
+                normalize_binance_symbol(&request.symbols[0].symbol)?,
+            );
+        }
+        let value = self
+            .send_signed_get_for_market(
+                "binance.get_positions",
+                MarketType::Perpetual,
+                "/fapi/v2/positionRisk",
+                &params,
+            )
+            .await?;
+        Ok(PositionsResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            positions: parse_positions(
+                &self.exchange_id,
+                tenant_id,
+                account_id,
+                &request.symbols,
+                &value,
+            )?,
         })
     }
 
@@ -240,14 +331,24 @@ impl BinanceGatewayAdapter {
         let mut fees = Vec::new();
         for symbol in &request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_supported_market(symbol.market_type)?;
             let mut params = HashMap::new();
             params.insert(
                 "symbol".to_string(),
                 normalize_binance_symbol(&symbol.exchange_symbol.symbol)?,
             );
+            let endpoint = match symbol.market_type {
+                MarketType::Spot => "/api/v3/account/commission",
+                MarketType::Perpetual => "/fapi/v1/commissionRate",
+                _ => unreachable!("checked by ensure_supported_market"),
+            };
             let value = self
-                .send_signed_get("binance.get_fees", "/api/v3/account/commission", &params)
+                .send_signed_get_for_market(
+                    "binance.get_fees",
+                    symbol.market_type,
+                    endpoint,
+                    &params,
+                )
                 .await?;
             fees.extend(parse_fee_snapshots(
                 &self.exchange_id,
@@ -268,7 +369,7 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
         let mut params = HashMap::new();
         params.insert(
             "symbol".to_string(),
@@ -286,8 +387,18 @@ impl BinanceGatewayAdapter {
                     .to_string(),
             });
         }
+        let endpoint = match request.symbol.market_type {
+            MarketType::Spot => "/api/v3/order",
+            MarketType::Perpetual => "/fapi/v1/order",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_get("binance.query_order", "/api/v3/order", &params)
+            .send_signed_get_for_market(
+                "binance.query_order",
+                request.symbol.market_type,
+                endpoint,
+                &params,
+            )
             .await?;
         let order = parse_order_state(&self.exchange_id, Some(&request.symbol), &value)?;
         Ok(QueryOrderResponse {
@@ -303,22 +414,35 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        if let Some(market_type) = request.market_type {
-            self.ensure_spot(market_type)?;
-        }
+        let market_type = request.market_type.unwrap_or(MarketType::Spot);
+        self.ensure_supported_market(market_type)?;
         let mut params = HashMap::new();
         if let Some(symbol) = &request.symbol {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            if symbol.market_type != market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "binance get_open_orders market_type must match symbol".to_string(),
+                });
+            }
             params.insert(
                 "symbol".to_string(),
                 normalize_binance_symbol(&symbol.exchange_symbol.symbol)?,
             );
         }
+        let endpoint = match market_type {
+            MarketType::Spot => "/api/v3/openOrders",
+            MarketType::Perpetual => "/fapi/v1/openOrders",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_get("binance.get_open_orders", "/api/v3/openOrders", &params)
+            .send_signed_get_for_market("binance.get_open_orders", market_type, endpoint, &params)
             .await?;
-        let orders = parse_open_orders(&self.exchange_id, request.symbol.as_ref(), &value)?;
+        let orders = parse_open_orders(
+            &self.exchange_id,
+            request.symbol.as_ref(),
+            market_type,
+            &value,
+        )?;
         Ok(OpenOrdersResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
@@ -332,9 +456,8 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<RecentFillsResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        if let Some(market_type) = request.market_type {
-            self.ensure_spot(market_type)?;
-        }
+        let market_type = request.market_type.unwrap_or(MarketType::Spot);
+        self.ensure_supported_market(market_type)?;
         let symbol = request
             .symbol
             .as_ref()
@@ -342,7 +465,11 @@ impl BinanceGatewayAdapter {
                 message: "binance get_recent_fills requires symbol".to_string(),
             })?;
         self.ensure_exchange(&symbol.exchange)?;
-        self.ensure_spot(symbol.market_type)?;
+        if symbol.market_type != market_type {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "binance get_recent_fills market_type must match symbol".to_string(),
+            });
+        }
         let (tenant_id, account_id) = self.context_account(&request.context)?;
         let mut params = HashMap::new();
         params.insert(
@@ -372,8 +499,13 @@ impl BinanceGatewayAdapter {
         } else {
             params.insert("limit".to_string(), "1000".to_string());
         }
+        let endpoint = match market_type {
+            MarketType::Spot => "/api/v3/myTrades",
+            MarketType::Perpetual => "/fapi/v1/userTrades",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_get("binance.get_recent_fills", "/api/v3/myTrades", &params)
+            .send_signed_get_for_market("binance.get_recent_fills", market_type, endpoint, &params)
             .await?;
         let fills = parse_recent_fills(&self.exchange_id, tenant_id, account_id, symbol, &value)?;
         Ok(RecentFillsResponse {
@@ -387,11 +519,26 @@ impl BinanceGatewayAdapter {
 fn binance_place_order_params(
     request: &PlaceOrderRequest,
 ) -> ExchangeApiResult<HashMap<String, String>> {
+    if request.symbol.market_type == MarketType::Spot && request.reduce_only {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "binance spot order does not support reduce_only".to_string(),
+        });
+    }
+    if request.symbol.market_type == MarketType::Perpetual && request.quote_quantity.is_some() {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "binance.futures_quote_sized_order",
+        });
+    }
     let mut params = HashMap::new();
     params.insert("side".to_string(), binance_side(request.side).to_string());
     params.insert(
         "type".to_string(),
-        binance_order_type(request.order_type, request.post_only).to_string(),
+        binance_order_type(
+            request.order_type,
+            request.post_only,
+            request.symbol.market_type,
+        )
+        .to_string(),
     );
     if request.order_type == OrderType::Market {
         if let Some(quote_quantity) = request.quote_quantity.as_deref() {
@@ -410,16 +557,20 @@ fn binance_place_order_params(
         insert_non_empty(&mut params, "price", price)?;
         params.insert(
             "timeInForce".to_string(),
-            binance_time_in_force(request.order_type, request.time_in_force).to_string(),
+            binance_time_in_force(request.order_type, request.time_in_force, request.post_only)
+                .to_string(),
         );
     }
     if let Some(client_order_id) = request.client_order_id.as_deref() {
         insert_non_empty(&mut params, "newClientOrderId", client_order_id)?;
     }
-    if request.reduce_only {
-        return Err(ExchangeApiError::InvalidRequest {
-            message: "binance spot order does not support reduce_only".to_string(),
-        });
+    if request.symbol.market_type == MarketType::Perpetual {
+        if request.reduce_only {
+            params.insert("reduceOnly".to_string(), "true".to_string());
+        }
+        if let Some(position_side) = binance_position_side(request.position_side) {
+            params.insert("positionSide".to_string(), position_side.to_string());
+        }
     }
     Ok(params)
 }
@@ -597,9 +748,19 @@ fn binance_side(side: OrderSide) -> &'static str {
     }
 }
 
-fn binance_order_type(order_type: OrderType, post_only: bool) -> &'static str {
+fn binance_order_type(
+    order_type: OrderType,
+    post_only: bool,
+    market_type: MarketType,
+) -> &'static str {
     match order_type {
         OrderType::Market => "MARKET",
+        OrderType::PostOnly | OrderType::IOC | OrderType::FOK
+            if market_type == MarketType::Perpetual =>
+        {
+            "LIMIT"
+        }
+        OrderType::Limit if post_only && market_type == MarketType::Perpetual => "LIMIT",
         OrderType::Limit if post_only => "LIMIT_MAKER",
         OrderType::Limit => "LIMIT",
         OrderType::PostOnly => "LIMIT_MAKER",
@@ -608,7 +769,14 @@ fn binance_order_type(order_type: OrderType, post_only: bool) -> &'static str {
     }
 }
 
-fn binance_time_in_force(order_type: OrderType, tif: Option<TimeInForce>) -> &'static str {
+fn binance_time_in_force(
+    order_type: OrderType,
+    tif: Option<TimeInForce>,
+    post_only: bool,
+) -> &'static str {
+    if post_only || order_type == OrderType::PostOnly {
+        return "GTX";
+    }
     if order_type == OrderType::IOC {
         return "IOC";
     }
@@ -616,6 +784,14 @@ fn binance_time_in_force(order_type: OrderType, tif: Option<TimeInForce>) -> &'s
         return "FOK";
     }
     tif.map(binance_time_in_force_from_tif).unwrap_or("GTC")
+}
+
+fn binance_position_side(position_side: Option<PositionSide>) -> Option<&'static str> {
+    match position_side {
+        Some(PositionSide::Long) => Some("LONG"),
+        Some(PositionSide::Short) => Some("SHORT"),
+        _ => None,
+    }
 }
 
 fn binance_time_in_force_from_tif(tif: TimeInForce) -> &'static str {

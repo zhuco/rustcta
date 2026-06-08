@@ -101,6 +101,18 @@ The adapter must not enable the following without a separate validation task:
 - public WebSocket runtime, sequence gap detection and signed REST resync
 - private WebSocket auth, auth renewal and reconciliation fallback
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Mode Trade 是 Orderly EVM profile；Orderly signed account endpoints 支持订单生命周期，但 ModeTrade profile 的账户 onboarding、key 权限、region/KYC 和 profile 语义未在本项目审计。
+
+因此这里不能写成 `交易所不支持下单/撤单`。正确写法是：官方支持，项目未实现/未启用。补交易接口前必须先完成 ModeTrade/Orderly account audit、Ed25519 signing、order/cancel/query/open/fills parser、private read-only reconciliation 和 live-dry-run guard。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。ModeTrade 是 Orderly EVM profile，同源 Orderly `GET /v1/positions` 可作为账户仓位来源。
+
+因此 ModeTrade 仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成 ModeTrade/Orderly account audit、signed request spec、Ed25519 signing、positions parser、margin mode/position side 映射和 read-only reconciliation。
+
 ## Official WebSocket Order Book Detail
 
 Official Orderly public WS supports `{symbol}@orderbookupdate` every 200ms for

@@ -1,10 +1,11 @@
 use rustcta_exchange_api::{
     ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::MarketType;
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
-use super::test_support::{context, spawn_rest_server, symbol_scope};
+use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{MexcGatewayAdapter, MexcGatewayConfig};
 
 fn fixture(path: &str) -> serde_json::Value {
@@ -19,14 +20,28 @@ fn fixture(path: &str) -> serde_json::Value {
 #[test]
 fn mexc_parser_fixtures_should_cover_success_empty_and_error_shapes() {
     let exchange = super::test_support::exchange_id();
-    let rules =
-        parse_symbol_rules(&exchange, &fixture("symbol_rules_success.json")).expect("symbol rules");
+    let rules = parse_symbol_rules(
+        &exchange,
+        MarketType::Spot,
+        &fixture("symbol_rules_success.json"),
+    )
+    .expect("symbol rules");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].base_asset, "BTC");
 
-    let empty = parse_symbol_rules(&exchange, &fixture("symbol_rules_empty.json")).expect("empty");
+    let empty = parse_symbol_rules(
+        &exchange,
+        MarketType::Spot,
+        &fixture("symbol_rules_empty.json"),
+    )
+    .expect("empty");
     assert!(empty.is_empty());
-    assert!(parse_symbol_rules(&exchange, &fixture("symbol_rules_missing_field.json")).is_err());
+    assert!(parse_symbol_rules(
+        &exchange,
+        MarketType::Spot,
+        &fixture("symbol_rules_missing_field.json")
+    )
+    .is_err());
     assert!(
         parse_orderbook_snapshot(&exchange, symbol_scope(), &fixture("orderbook_error.json"))
             .is_err()
@@ -58,6 +73,44 @@ async fn mexc_adapter_should_load_symbol_rules_from_public_rest() {
         seen.lock().unwrap()[0].path,
         "/api/v3/exchangeInfo".to_string()
     );
+}
+
+#[tokio::test]
+async fn mexc_adapter_should_load_perpetual_symbol_rules_from_contract_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "success": true,
+        "code": 0,
+        "data": [{
+            "symbol": "BTC_USDT",
+            "baseCoin": "BTC",
+            "quoteCoin": "USDT",
+            "priceUnit": "0.1",
+            "volUnit": "1",
+            "minVol": "1",
+            "state": 0
+        }]
+    })])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_symbol_rules(SymbolRulesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-rules"),
+            symbols: vec![perpetual_symbol_scope()],
+        })
+        .await
+        .expect("rules");
+
+    assert_eq!(response.rules.len(), 1);
+    assert_eq!(response.rules[0].symbol.market_type, MarketType::Perpetual);
+    assert!(response.rules[0].supports_reduce_only);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.path, "/api/v1/contract/detail");
 }
 
 #[tokio::test]

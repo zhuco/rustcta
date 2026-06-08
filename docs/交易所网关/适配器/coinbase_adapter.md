@@ -48,6 +48,10 @@ are not required and must not be enabled for live dry-run.
   enabled, kill-switch active, disabled-symbol filtering, and max-notional
   limits.
 
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。Coinbase INTX perpetual positions 已由当前项目 `get_positions` runtime 覆盖；调用需要 `COINBASE_INTX_PORTFOLIO_UUID`。
+
 ## Validation
 
 Targeted local validation:

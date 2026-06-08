@@ -23,6 +23,16 @@ Runtime boundary:
 - Orders/cancels/batch: unsupported unverified
 - Account model: Derive Chain wallet profile, not API key/HMAC
 
+Core trading official detail:
+- Source: [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)
+- 写法：`交易所不支持当前 profile 交易/私有接口 runtime`。
+- 原因：本 profile 只记录 Derive Chain settlement/profile boundary；Derive Exchange REST/WS/order runtime 归 `derive` adapter，不在这里重复实现。
+
+Position official detail:
+- Source: [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)
+- 写法：`交易所不支持当前仓位接口 runtime`。
+- 原因：本 profile 不重复承接 Derive Exchange account/position runtime；仓位能力看 `derive` adapter。
+
 Non-compile validation:
 - `python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/derive_chain_perps/endpoint_mapping.yaml`
 - JSON fixture parse for `tests/fixtures/exchanges/derive_chain_perps/**/*.json`

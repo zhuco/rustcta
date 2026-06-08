@@ -1,10 +1,10 @@
 use rustcta_exchange_api::{
     AmendOrderRequest, BalancesRequest, CancelAllOrdersRequest, CancelOrderRequest,
     ExchangeApiError, ExchangeClient, FeesRequest, OpenOrdersRequest, OrderListConditionalLeg,
-    OrderListLegType, OrderListRequest, PlaceOrderRequest, QueryOrderRequest,
+    OrderListLegType, OrderListRequest, PlaceOrderRequest, PositionsRequest, QueryOrderRequest,
     QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
+use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
 
 use crate::request_spec::RequestSpec;
@@ -12,8 +12,8 @@ use crate::signing_spec::SigningVector;
 
 use super::signing::sign_raw_query;
 use super::test_support::{
-    assert_signed_request, assert_signed_request_method, context, exchange_id, private_config,
-    spawn_rest_server, symbol_scope,
+    assert_signed_request, assert_signed_request_method, context, exchange_id,
+    perpetual_symbol_scope, private_config, spawn_rest_server, symbol_scope,
 };
 use super::BinanceGatewayAdapter;
 
@@ -430,6 +430,123 @@ async fn binance_adapter_should_route_private_order_mutations() {
     assert_eq!(
         seen[5].query.get("belowStopPrice").map(String::as_str),
         Some("24500.00000000")
+    );
+}
+
+#[tokio::test]
+async fn binance_adapter_should_route_perpetual_place_cancel_and_positions() {
+    let place_ack = json!({
+        "symbol": "BTCUSDT",
+        "orderId": 91,
+        "clientOrderId": "perp-place",
+        "price": "65000.00000000",
+        "origQty": "0.01000000",
+        "executedQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "IOC",
+        "type": "LIMIT",
+        "side": "SELL",
+        "positionSide": "SHORT",
+        "reduceOnly": true,
+        "updateTime": 1700000000000_i64
+    });
+    let cancel_ack = json!({
+        "symbol": "BTCUSDT",
+        "orderId": 91,
+        "clientOrderId": "perp-place",
+        "price": "65000.00000000",
+        "origQty": "0.01000000",
+        "executedQty": "0.00000000",
+        "status": "CANCELED",
+        "timeInForce": "IOC",
+        "type": "LIMIT",
+        "side": "SELL",
+        "positionSide": "SHORT",
+        "reduceOnly": true,
+        "updateTime": 1700000000100_i64
+    });
+    let positions = json!([{
+        "symbol": "BTCUSDT",
+        "positionAmt": "-0.02000000",
+        "entryPrice": "64000.00000000",
+        "markPrice": "65000.00000000",
+        "unRealizedProfit": "20.00000000",
+        "positionSide": "SHORT",
+        "leverage": "10",
+        "updateTime": 1700000000200_i64
+    }]);
+    let (base_url, seen) = spawn_rest_server(vec![place_ack, cancel_ack, positions]).await;
+    let adapter = BinanceGatewayAdapter::new(private_config(base_url)).expect("adapter");
+    let symbol = perpetual_symbol_scope("BTCUSDT");
+
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-place"),
+            symbol: symbol.clone(),
+            client_order_id: Some("perp-place".to_string()),
+            side: OrderSide::Sell,
+            position_side: Some(PositionSide::Short),
+            order_type: OrderType::IOC,
+            time_in_force: None,
+            quantity: "0.01000000".to_string(),
+            price: Some("65000.00000000".to_string()),
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        })
+        .await
+        .expect("place perpetual order");
+    assert_eq!(placed.order.market_type, MarketType::Perpetual);
+    assert_eq!(placed.order.position_side, Some(PositionSide::Short));
+    assert!(placed.order.reduce_only);
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-cancel"),
+            symbol: symbol.clone(),
+            client_order_id: Some("perp-place".to_string()),
+            exchange_order_id: Some("91".to_string()),
+        })
+        .await
+        .expect("cancel perpetual order");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.market_type, MarketType::Perpetual);
+
+    let positions = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![symbol.exchange_symbol.clone()],
+        })
+        .await
+        .expect("positions");
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].market_type, MarketType::Perpetual);
+    assert_eq!(positions.positions[0].side, PositionSide::Short);
+    assert_eq!(positions.positions[0].quantity, 0.02);
+    assert_eq!(positions.positions[0].entry_price, Some(64000.0));
+
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen[0].path, "/fapi/v1/order");
+    load_request_spec("binance/request_specs/futures_place_order_ioc_reduce_only.json")
+        .assert_matches(&seen[0].actual_http_request())
+        .expect("request spec");
+    assert_signed_request_method(&seen[0], "POST");
+    assert_eq!(seen[1].path, "/fapi/v1/order");
+    assert_signed_request_method(&seen[1], "DELETE");
+    assert_eq!(
+        seen[1].query.get("origClientOrderId").map(String::as_str),
+        Some("perp-place")
+    );
+    assert_eq!(seen[2].path, "/fapi/v2/positionRisk");
+    assert_signed_request(&seen[2]);
+    assert_eq!(
+        seen[2].query.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
     );
 }
 

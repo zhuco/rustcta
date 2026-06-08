@@ -41,6 +41,12 @@ Endpoint mapping:
   - `GET /public/orderbook/{symbol}`
 - Private endpoints are mapped for request-spec and reconciliation boundaries but remain runtime `Unsupported`.
 
+Official Core Trading Detail:
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。FMFW.io 使用 HitBTC v3 family API，Spot order create/cancel/query/history 和 `client_order_id` 官方支持。
+
+当前项目 private trading runtime 仍是 request-spec/offline 边界，所以这是 `项目未实现下单/撤单`，不是 `交易所不支持下单/撤单`。后续优先复用 HitBTC v3 family mapping，补 Spot order/cancel/query/open/fills request specs、auth、parser 和 private runtime。
+
 WebSocket boundary:
 
 - Public order book subscribe/unsubscribe payloads are covered by tests.

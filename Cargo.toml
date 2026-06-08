@@ -9,6 +9,7 @@ members = [
     "crates/rustcta-strategy-sdk",
     "crates/rustcta-supervisor",
     "crates/rustcta-control-api",
+    "crates/rustcta-cross-arb-live-runner",
     "crates/rustcta-reporting",
     "crates/rustcta-smart-money",
     "crates/rustcta-runtime-control",
@@ -31,7 +32,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.16"
+version = "0.3.17"
 edition = "2021"
 license = "UNLICENSED"
 publish = false

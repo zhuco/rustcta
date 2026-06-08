@@ -4,8 +4,23 @@ Status date: 2026-06-07
 
 This document covers the local Dioxus control panel path after the workspace
 control API migration. The default entrypoint is `apps/control-api` binary
-`rustcta-control-api`; the root `control_api` binary is a compatibility path and
-must not be used for new control-panel work.
+`rustcta-control-api`.
+
+## Active Entry
+
+`web-ui/dioxus/` is the single frontend source tree. In this checkout it is
+served by the workspace control API app:
+
+- `apps/control-api` owns local process wiring, static asset serving, local
+  side-effect routes, and the local exchange credential env-store bridge.
+- `crates/rustcta-control-api` owns the public workspace/read-model contract.
+- Removed root `src/` entrypoints are historical migration context only and are
+  not valid run commands.
+
+The exchange configuration page uses `/api/exchange-api-keys` from
+`apps/control-api`. That route reads `config/accounts.yml`, writes the local
+env-store configured by `RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE`, and returns
+only redacted field status.
 
 ## Process Boundary
 
@@ -88,6 +103,8 @@ export RUSTCTA_CONTROL_API_AGENT_ID=local-agent
 export RUSTCTA_CONTROL_API_TENANT_ID=local
 export RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=run/supervisor/registry.json
 export RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=data/control_api/audit.jsonl
+export RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE=data/control_api/exchange_api_keys.env
+export RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG=config/accounts.yml
 export RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist
 cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```

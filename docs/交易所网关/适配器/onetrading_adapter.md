@@ -68,6 +68,15 @@ by default.
 | Private WS | Unsupported until auth/resync validation |
 | Batch order APIs | Unsupported |
 
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms One Trading public WS supports `ORDER_BOOK`
+snapshot/update and `BOOK_TICKER` BBO on `wss://streams.fast.onetrading.com`.
+The public docs do not publish a fixed push interval, depth limit, sequence, or
+checksum for these channels. Mapping should record `ORDER_BOOK`,
+`BOOK_TICKER`, BBO availability, no-fixed-ms/no-checksum risk, and resync by
+re-subscribing to receive a fresh `ORDER_BOOK_SNAPSHOT`.
+
 ## Files
 
 | Artifact | Path |

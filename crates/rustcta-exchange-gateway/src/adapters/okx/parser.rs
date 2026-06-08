@@ -10,6 +10,7 @@ use serde_json::Value;
 
 pub fn parse_symbol_rules(
     exchange_id: &ExchangeId,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<SymbolRules>> {
     let instruments = value.as_array().ok_or_else(|| {
@@ -21,26 +22,53 @@ pub fn parse_symbol_rules(
     })?;
     instruments
         .iter()
-        .map(|value| parse_symbol_rule(exchange_id, value))
+        .map(|value| parse_symbol_rule(exchange_id, market_type, value))
         .collect()
 }
 
-fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
+fn parse_symbol_rule(
+    exchange_id: &ExchangeId,
+    market_type: MarketType,
+    value: &Value,
+) -> ExchangeApiResult<SymbolRules> {
     let exchange_symbol = required_str(exchange_id, value, "instId")?.to_ascii_uppercase();
-    let base_asset = required_str(exchange_id, value, "baseCcy")?.to_ascii_uppercase();
-    let quote_asset = required_str(exchange_id, value, "quoteCcy")?.to_ascii_uppercase();
+    let (base_asset, quote_asset) = if market_type == MarketType::Spot {
+        (
+            required_str(exchange_id, value, "baseCcy")?.to_ascii_uppercase(),
+            required_str(exchange_id, value, "quoteCcy")?.to_ascii_uppercase(),
+        )
+    } else {
+        let (fallback_base, fallback_quote) =
+            split_okx_inst_id(&exchange_symbol).unwrap_or_default();
+        let base_asset = value
+            .get("baseCcy")
+            .or_else(|| value.get("ctValCcy"))
+            .and_then(Value::as_str)
+            .map(str::to_ascii_uppercase)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(fallback_base);
+        let quote_asset = value
+            .get("quoteCcy")
+            .or_else(|| value.get("settleCcy"))
+            .and_then(Value::as_str)
+            .map(str::to_ascii_uppercase)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(fallback_quote);
+        if base_asset.is_empty() || quote_asset.is_empty() {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: format!("OKX instrument missing base/quote assets: {value}"),
+            });
+        }
+        (base_asset, quote_asset)
+    };
     let canonical_symbol =
         CanonicalSymbol::new(&base_asset, &quote_asset).map_err(validation_error)?;
     let symbol = rustcta_exchange_api::SymbolScope {
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol: Some(canonical_symbol),
-        exchange_symbol: ExchangeSymbol::new(
-            exchange_id.clone(),
-            MarketType::Spot,
-            exchange_symbol,
-        )
-        .map_err(validation_error)?,
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, exchange_symbol)
+            .map_err(validation_error)?,
     };
     let tradable = value
         .get("state")
@@ -69,7 +97,7 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         supports_market_orders: tradable,
         supports_limit_orders: tradable,
         supports_post_only: tradable,
-        supports_reduce_only: false,
+        supports_reduce_only: market_type == MarketType::Perpetual,
         updated_at: Utc::now(),
     })
 }
@@ -94,7 +122,7 @@ pub fn parse_orderbook_snapshot(
             })?;
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
-        MarketType::Spot,
+        symbol.market_type,
         canonical_symbol,
         bids,
         asks,
@@ -110,6 +138,13 @@ pub fn parse_orderbook_snapshot(
 }
 
 pub fn normalize_okx_symbol(symbol: &str) -> ExchangeApiResult<String> {
+    normalize_okx_symbol_for_market(symbol, MarketType::Spot)
+}
+
+pub fn normalize_okx_symbol_for_market(
+    symbol: &str,
+    market_type: MarketType,
+) -> ExchangeApiResult<String> {
     let trimmed = symbol.trim();
     if trimmed.is_empty() {
         return Err(ExchangeApiError::InvalidRequest {
@@ -118,12 +153,48 @@ pub fn normalize_okx_symbol(symbol: &str) -> ExchangeApiResult<String> {
     }
     let normalized_key = trimmed.replace(['-', '/', '_'], "").to_ascii_uppercase();
     let upper = trimmed.replace(['/', '_'], "-").to_ascii_uppercase();
-    if upper.contains('-') {
+    if market_type == MarketType::Perpetual && upper.ends_with("-SWAP") {
         return Ok(upper);
     }
-    split_compact_symbol(&normalized_key).ok_or_else(|| ExchangeApiError::InvalidRequest {
-        message: format!("cannot infer OKX Spot instId from {symbol}"),
-    })
+    if upper.contains('-') {
+        if market_type == MarketType::Perpetual {
+            return Ok(format!("{upper}-SWAP"));
+        }
+        return Ok(upper);
+    }
+    let normalized =
+        split_compact_symbol(&normalized_key).ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: format!("cannot infer OKX instId from {symbol}"),
+        })?;
+    if market_type == MarketType::Perpetual {
+        Ok(format!("{normalized}-SWAP"))
+    } else {
+        Ok(normalized)
+    }
+}
+
+pub fn okx_inst_type(market_type: MarketType) -> ExchangeApiResult<&'static str> {
+    match market_type {
+        MarketType::Spot => Ok("SPOT"),
+        MarketType::Perpetual => Ok("SWAP"),
+        _ => Err(ExchangeApiError::Unsupported {
+            operation: "okx.unsupported_market_type",
+        }),
+    }
+}
+
+pub fn okx_td_mode(market_type: MarketType) -> &'static str {
+    match market_type {
+        MarketType::Perpetual => "cross",
+        _ => "cash",
+    }
+}
+
+pub fn split_okx_inst_id(symbol: &str) -> Option<(String, String)> {
+    let mut parts = symbol.split('-').filter(|part| !part.is_empty());
+    let base = parts.next()?.to_ascii_uppercase();
+    let quote = parts.next()?.to_ascii_uppercase();
+    Some((base, quote))
 }
 
 pub fn normalize_depth(depth: u32) -> u32 {

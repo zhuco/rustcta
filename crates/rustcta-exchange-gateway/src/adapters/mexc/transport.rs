@@ -12,6 +12,7 @@ use super::signing::sign_raw_query;
 pub struct MexcPublicRest {
     exchange_id: ExchangeId,
     rest_base_url: String,
+    contract_rest_base_url: String,
     http: reqwest::Client,
 }
 
@@ -19,6 +20,7 @@ impl MexcPublicRest {
     pub fn new(
         exchange_id: ExchangeId,
         rest_base_url: String,
+        contract_rest_base_url: String,
         request_timeout_ms: u64,
     ) -> ExchangeApiResult<Self> {
         let http = reqwest::Client::builder()
@@ -34,6 +36,7 @@ impl MexcPublicRest {
         Ok(Self {
             exchange_id,
             rest_base_url,
+            contract_rest_base_url,
             http,
         })
     }
@@ -44,6 +47,23 @@ impl MexcPublicRest {
         params: &HashMap<String, String>,
     ) -> ExchangeApiResult<Value> {
         let url = build_url(&self.rest_base_url, endpoint, params);
+        let response =
+            self.http
+                .get(url)
+                .send()
+                .await
+                .map_err(|error| ExchangeApiError::Transport {
+                    message: error.to_string(),
+                })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    pub async fn send_contract_public_request(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<Value> {
+        let url = build_url(&self.contract_rest_base_url, endpoint, params);
         let response =
             self.http
                 .get(url)
@@ -112,6 +132,43 @@ impl MexcPublicRest {
         .await
     }
 
+    pub async fn send_contract_signed_get(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_contract_signed_request(
+            reqwest::Method::GET,
+            endpoint,
+            params,
+            None,
+            api_key,
+            api_secret,
+        )
+        .await
+    }
+
+    pub async fn send_contract_signed_post(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: Option<&Value>,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        self.send_contract_signed_request(
+            reqwest::Method::POST,
+            endpoint,
+            params,
+            body,
+            api_key,
+            api_secret,
+        )
+        .await
+    }
+
     async fn send_signed_request(
         &self,
         method: reqwest::Method,
@@ -135,6 +192,45 @@ impl MexcPublicRest {
             .request(method, url)
             .header("X-MEXC-APIKEY", api_key)
             .header("Content-Type", "application/x-www-form-urlencoded")
+            .send()
+            .await
+            .map_err(|error| ExchangeApiError::Transport {
+                message: error.to_string(),
+            })?;
+        parse_response(self.exchange_id.clone(), response).await
+    }
+
+    async fn send_contract_signed_request(
+        &self,
+        method: reqwest::Method,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: Option<&Value>,
+        api_key: &str,
+        api_secret: &str,
+    ) -> ExchangeApiResult<Value> {
+        let request_time = Utc::now().timestamp_millis().to_string();
+        let query = build_query_string(params);
+        let body_text = body.map(Value::to_string);
+        let sign_payload = format!(
+            "{}{}{}",
+            api_key,
+            request_time,
+            body_text.as_deref().unwrap_or(&query)
+        );
+        let signature = sign_raw_query(api_secret, &sign_payload)?;
+        let url = build_url(&self.contract_rest_base_url, endpoint, params);
+        let mut request = self
+            .http
+            .request(method, url)
+            .header("ApiKey", api_key)
+            .header("Request-Time", &request_time)
+            .header("Signature", signature)
+            .header("Content-Type", "application/json");
+        if let Some(body_text) = body_text {
+            request = request.body(body_text);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| ExchangeApiError::Transport {

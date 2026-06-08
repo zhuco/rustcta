@@ -65,6 +65,12 @@ Private request-spec-only endpoints:
 - `GET /orders?trade_pair={trade_pair}&status=pending&orderid=0&page=1&limit=500`
 - `GET /orders/{order_id}/fills`
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。ZebPay Trade API 支持 `POST /orders` 新建 limit order、`DELETE /orders/{orderId}` 撤单、`DELETE /orders/CancelAll`、`GET /orders` 和 `GET /orders/{orderId}/fills`。
+
+当前 private REST/trading 仍是 request-spec-only，runtime unsupported。这是 `项目未实现 bearer token/onboarding/private runtime`，不是 `交易所不支持下单/撤单`；Futures/Perpetual 仍按产品线文档写 `项目未实现`。
+
 ## Capability Boundary
 
 - `supports_public_rest = true`

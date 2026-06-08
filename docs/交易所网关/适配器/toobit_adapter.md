@@ -39,7 +39,7 @@ Private requests use Toobit Binance-style query signing:
 | symbol rules | `GET /api/v1/exchangeInfo` (`symbols`) | `GET /api/v1/exchangeInfo` (`contracts`) |
 | order book | `GET /quote/v1/depth` | `GET /quote/v1/depth` |
 | balances | `GET /api/v1/account` | `GET /api/v1/futures/balance` |
-| positions | Unsupported | `GET /api/v1/futures/positions` |
+| positions | Spot has no position model | `GET /api/v1/futures/positions` |
 | fees | config override only | `GET /api/v1/futures/commissionRate` |
 | place order | `POST /api/v1/spot/order` | `POST /api/v2/futures/order` |
 | cancel order | `DELETE /api/v1/spot/order` | `DELETE /api/v2/futures/order` |
@@ -52,6 +52,19 @@ Private requests use Toobit Binance-style query signing:
 | fills | `GET /api/v1/account/trades` | `GET /api/v2/futures/user-trades` |
 | public WS | `depth`, `trade`, `markPrice` subscribe specs | same |
 | private WS | `POST /api/v1/userDataStream`, `/api/v1/ws/<listenKey>` | same listenKey route/parser |
+
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms Spot and USDT-M public WS use
+`wss://stream.toobit.com/quote/ws/v1`. The `depth` topic is a 300ms snapshot
+stream when the book changes and carries 300 bids/asks per side. `diffDepth`
+pushes changed levels every second. USDT-M also documents `wholeBookTicker` for
+BBO. Payload version `v` is not guaranteed unique, so REST `/quote/v1/depth`
+snapshot fallback is required on gaps.
+
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。Toobit USDT-M `GET /api/v1/futures/positions` 已由当前项目 `get_positions` runtime 和 private tests 覆盖；Spot 没有标准仓位模型。
 
 ## Explicit Boundaries
 

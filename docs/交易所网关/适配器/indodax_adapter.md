@@ -20,6 +20,12 @@ Signing:
 - Headers are `Key` and `Sign`.
 - `Sign` is lowercase hex HMAC-SHA512 over the exact form body containing `method`, `nonce`, and operation parameters.
 
+Official Core Trading Detail:
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。Indodax TAPI/PDF 支持 `trade`、`cancelOrder`、`openOrders`、`orderHistory`、`tradeHistory`；当前项目下单已有运行证据，但通用撤单仍写 unsupported。
+
+这不是交易所不支持撤单，而是项目需要把 `cancelOrder` 的 side/pair/order id 上下文补进 runtime、request spec、parser 和撤单后对账。
+
 Boundaries:
 
 - Runtime support is limited to `MarketType::Spot`.

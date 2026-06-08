@@ -102,6 +102,24 @@ endpoints:
     support: native
     request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/request_specs/get_balances.json }
     response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs, fixture: tests/fixtures/exchanges/coinbase/balances_success.json }
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /intx/positions/{portfolio_uuid}
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinbase_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs::coinbase_adapter_should_load_intx_positions_with_portfolio_uuid }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/coinbase/private_tests.rs::coinbase_adapter_should_load_intx_positions_with_portfolio_uuid }
+    notes: Requires COINBASE_INTX_PORTFOLIO_UUID for INTX perpetual positions; CFM positions route remains adapter-specific.
   - operation: place_order
     product: spot
     market_types: [spot, perpetual]

@@ -69,6 +69,11 @@ pub(super) fn apply_toolchain_capabilities(
 }
 
 fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> {
+    let private_support = if private_rest_enabled {
+        CapabilitySupport::native()
+    } else {
+        CapabilitySupport::unsupported("private REST credentials unavailable")
+    };
     let mut endpoints = vec![
         rest_endpoint(
             "get_symbol_rules",
@@ -76,6 +81,18 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             "GET",
             "/api/v3/exchangeInfo",
             EndpointAuth::None,
+            vec![MarketType::Spot],
+            Vec::new(),
+            Some("public_ip"),
+            Some(10),
+        ),
+        rest_endpoint(
+            "get_symbol_rules",
+            CapabilitySupport::native(),
+            "GET",
+            "/fapi/v1/exchangeInfo",
+            EndpointAuth::None,
+            vec![MarketType::Perpetual],
             Vec::new(),
             Some("public_ip"),
             Some(10),
@@ -86,109 +103,232 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             "GET",
             "/api/v3/depth",
             EndpointAuth::None,
+            vec![MarketType::Spot],
+            Vec::new(),
+            Some("public_ip"),
+            Some(5),
+        ),
+        rest_endpoint(
+            "get_order_book",
+            CapabilitySupport::native(),
+            "GET",
+            "/fapi/v1/depth",
+            EndpointAuth::None,
+            vec![MarketType::Perpetual],
             Vec::new(),
             Some("public_ip"),
             Some(5),
         ),
     ];
 
-    let private_support = if private_rest_enabled {
-        CapabilitySupport::native()
-    } else {
-        CapabilitySupport::unsupported("private REST credentials unavailable")
-    };
-    for (operation, method, path, credential_scope, weight) in [
-        (
-            "get_balances",
-            "GET",
-            "/api/v3/account",
-            CredentialScope::ReadOnly,
-            20,
-        ),
-        (
-            "get_fees",
-            "GET",
-            "/api/v3/account/commission",
-            CredentialScope::ReadOnly,
-            20,
-        ),
-        (
-            "place_order",
-            "POST",
-            "/api/v3/order",
-            CredentialScope::Trade,
-            1,
-        ),
-        (
-            "place_quote_market_order",
-            "POST",
-            "/api/v3/order",
-            CredentialScope::Trade,
-            1,
-        ),
-        (
-            "cancel_order",
-            "DELETE",
-            "/api/v3/order",
-            CredentialScope::Trade,
-            1,
-        ),
-        (
-            "cancel_all_orders",
-            "DELETE",
-            "/api/v3/openOrders",
-            CredentialScope::Trade,
-            1,
-        ),
-        (
-            "amend_order",
-            "PUT",
-            "/api/v3/order/amend/keepPriority",
-            CredentialScope::Trade,
-            4,
-        ),
-        (
-            "place_order_list",
-            "POST",
-            "/api/v3/orderList/oco",
-            CredentialScope::Trade,
-            1,
-        ),
-        (
-            "query_order",
-            "GET",
-            "/api/v3/order",
-            CredentialScope::ReadOnly,
-            4,
-        ),
-        (
-            "get_open_orders",
-            "GET",
-            "/api/v3/openOrders",
-            CredentialScope::ReadOnly,
-            6,
-        ),
-        (
-            "get_recent_fills",
-            "GET",
-            "/api/v3/myTrades",
-            CredentialScope::ReadOnly,
-            20,
-        ),
-    ] {
+    for spec in private_endpoint_specs() {
         endpoints.push(rest_endpoint(
-            operation,
+            spec.operation,
             private_support.clone(),
-            method,
-            path,
+            spec.method,
+            spec.path,
             EndpointAuth::Hmac,
-            vec![credential_scope],
+            spec.market_types,
+            vec![spec.credential_scope],
             Some("signed_uid"),
-            Some(weight),
+            Some(spec.weight),
         ));
     }
 
     endpoints
+}
+
+struct PrivateEndpointSpec {
+    operation: &'static str,
+    method: &'static str,
+    path: &'static str,
+    market_types: Vec<MarketType>,
+    credential_scope: CredentialScope,
+    weight: u32,
+}
+
+fn private_endpoint_specs() -> Vec<PrivateEndpointSpec> {
+    use CredentialScope::{ReadOnly, Trade};
+    vec![
+        private_endpoint(
+            "get_balances",
+            "GET",
+            "/api/v3/account",
+            vec![MarketType::Spot],
+            ReadOnly,
+            20,
+        ),
+        private_endpoint(
+            "get_balances",
+            "GET",
+            "/fapi/v2/balance",
+            vec![MarketType::Perpetual],
+            ReadOnly,
+            20,
+        ),
+        private_endpoint(
+            "get_positions",
+            "GET",
+            "/fapi/v2/positionRisk",
+            vec![MarketType::Perpetual],
+            ReadOnly,
+            20,
+        ),
+        private_endpoint(
+            "get_fees",
+            "GET",
+            "/api/v3/account/commission",
+            vec![MarketType::Spot],
+            ReadOnly,
+            20,
+        ),
+        private_endpoint(
+            "get_fees",
+            "GET",
+            "/fapi/v1/commissionRate",
+            vec![MarketType::Perpetual],
+            ReadOnly,
+            20,
+        ),
+        private_endpoint(
+            "place_order",
+            "POST",
+            "/api/v3/order",
+            vec![MarketType::Spot],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "place_order",
+            "POST",
+            "/fapi/v1/order",
+            vec![MarketType::Perpetual],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "place_quote_market_order",
+            "POST",
+            "/api/v3/order",
+            vec![MarketType::Spot],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "cancel_order",
+            "DELETE",
+            "/api/v3/order",
+            vec![MarketType::Spot],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "cancel_order",
+            "DELETE",
+            "/fapi/v1/order",
+            vec![MarketType::Perpetual],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "cancel_all_orders",
+            "DELETE",
+            "/api/v3/openOrders",
+            vec![MarketType::Spot],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "cancel_all_orders",
+            "DELETE",
+            "/fapi/v1/allOpenOrders",
+            vec![MarketType::Perpetual],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "amend_order",
+            "PUT",
+            "/api/v3/order/amend/keepPriority",
+            vec![MarketType::Spot],
+            Trade,
+            4,
+        ),
+        private_endpoint(
+            "place_order_list",
+            "POST",
+            "/api/v3/orderList/oco",
+            vec![MarketType::Spot],
+            Trade,
+            1,
+        ),
+        private_endpoint(
+            "query_order",
+            "GET",
+            "/api/v3/order",
+            vec![MarketType::Spot],
+            ReadOnly,
+            4,
+        ),
+        private_endpoint(
+            "query_order",
+            "GET",
+            "/fapi/v1/order",
+            vec![MarketType::Perpetual],
+            ReadOnly,
+            4,
+        ),
+        private_endpoint(
+            "get_open_orders",
+            "GET",
+            "/api/v3/openOrders",
+            vec![MarketType::Spot],
+            ReadOnly,
+            6,
+        ),
+        private_endpoint(
+            "get_open_orders",
+            "GET",
+            "/fapi/v1/openOrders",
+            vec![MarketType::Perpetual],
+            ReadOnly,
+            6,
+        ),
+        private_endpoint(
+            "get_recent_fills",
+            "GET",
+            "/api/v3/myTrades",
+            vec![MarketType::Spot],
+            ReadOnly,
+            20,
+        ),
+        private_endpoint(
+            "get_recent_fills",
+            "GET",
+            "/fapi/v1/userTrades",
+            vec![MarketType::Perpetual],
+            ReadOnly,
+            20,
+        ),
+    ]
+}
+
+fn private_endpoint(
+    operation: &'static str,
+    method: &'static str,
+    path: &'static str,
+    market_types: Vec<MarketType>,
+    credential_scope: CredentialScope,
+    weight: u32,
+) -> PrivateEndpointSpec {
+    PrivateEndpointSpec {
+        operation,
+        method,
+        path,
+        market_types,
+        credential_scope,
+        weight,
+    }
 }
 
 fn rest_endpoint(
@@ -197,6 +337,7 @@ fn rest_endpoint(
     method: &str,
     path: &str,
     auth: EndpointAuth,
+    market_types: Vec<MarketType>,
     credential_scopes: Vec<CredentialScope>,
     rate_limit_bucket: Option<&str>,
     weight: Option<u32>,
@@ -204,7 +345,7 @@ fn rest_endpoint(
     EndpointCapability {
         operation: operation.to_string(),
         support,
-        market_types: vec![MarketType::Spot],
+        market_types,
         transport: EndpointTransport::Rest,
         method: Some(method.to_string()),
         path: Some(path.to_string()),

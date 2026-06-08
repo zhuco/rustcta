@@ -1,9 +1,10 @@
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::i18n::s;
 use crate::utils::{
     as_array, bool_at, canonical_exchange_name, exchange_field_value, fallback_exchange_schemas,
-    normalize_exchange_api_key_schemas, text_at,
+    normalize_exchange_api_key_schemas, text_at, value_text,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -349,6 +350,7 @@ impl CredentialAccountOption {
         lang: Language,
     ) -> Vec<Self> {
         let mut options = Vec::new();
+        let target_exchange = canonical_exchange_name(exchange);
         for row in AccountManagerAccountRow::from_rows(
             api_keys
                 .get("account_manager_accounts")
@@ -356,8 +358,9 @@ impl CredentialAccountOption {
             lang,
         )
         .into_iter()
-        .filter(|row| row.exchange.eq_ignore_ascii_case(exchange) && row.enabled)
-        {
+        .filter(|row| {
+            exchange_matches_alias(&row.exchange, exchange, &target_exchange) && row.enabled
+        }) {
             let account_id = if row.account_id.trim().is_empty() || row.account_id == "-" {
                 "default".to_string()
             } else {
@@ -376,7 +379,27 @@ impl CredentialAccountOption {
                 credential_namespace: row.credential_namespace,
             });
         }
-        let _ = current_account;
+        let current_account = normalize_account_id(current_account);
+        if !current_account.is_empty()
+            && !options
+                .iter()
+                .any(|option: &CredentialAccountOption| option.value == current_account)
+        {
+            options.push(Self {
+                value: current_account.clone(),
+                label: current_account,
+                env_prefix: String::new(),
+                credential_namespace: String::new(),
+            });
+        }
+        if options.is_empty() {
+            options.push(Self {
+                value: "default".to_string(),
+                label: "default".to_string(),
+                env_prefix: String::new(),
+                credential_namespace: String::new(),
+            });
+        }
         options.sort_by(|left, right| {
             let left_default = left.value.eq_ignore_ascii_case("default");
             let right_default = right.value.eq_ignore_ascii_case("default");
@@ -385,6 +408,20 @@ impl CredentialAccountOption {
                 .then_with(|| left.value.to_lowercase().cmp(&right.value.to_lowercase()))
         });
         options
+    }
+}
+
+fn exchange_matches_alias(row_exchange: &str, exchange: &str, target_exchange: &str) -> bool {
+    row_exchange.eq_ignore_ascii_case(exchange)
+        || canonical_exchange_name(row_exchange) == target_exchange
+}
+
+fn normalize_account_id(account_id: &str) -> String {
+    let account_id = account_id.trim();
+    if account_id.is_empty() || account_id == "-" {
+        String::new()
+    } else {
+        account_id.to_string()
     }
 }
 
@@ -1120,6 +1157,7 @@ pub(crate) struct CrossArbSourceData {
     pub(crate) hedge_records: Vec<Value>,
     pub(crate) repair_tasks: Vec<Value>,
     pub(crate) market_snapshots: Vec<Value>,
+    pub(crate) exchange_status: Vec<Value>,
     pub(crate) private_events: Vec<Value>,
     pub(crate) risk_events: Vec<Value>,
     pub(crate) instruments: Vec<Value>,
@@ -1181,6 +1219,7 @@ impl CrossArbSourceData {
             hedge_records: rows_at(cross_arb, "hedge_records"),
             repair_tasks: rows_at(cross_arb, "hedge_repair_tasks"),
             market_snapshots: rows_at(cross_arb, "market_snapshots"),
+            exchange_status: rows_at(cross_arb, "exchange_status"),
             private_events: rows_at(cross_arb, "private_events"),
             risk_events: rows_at(cross_arb, "risk_events"),
             instruments: rows_at(cross_arb, "instruments"),
@@ -1519,6 +1558,44 @@ impl CrossArbEventSummaryData {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SystemResourcePanelData {
+    pub(crate) cpu: String,
+    pub(crate) memory: String,
+    pub(crate) process_cpu: String,
+    pub(crate) process_memory: String,
+}
+
+impl SystemResourcePanelData {
+    pub(crate) fn from_status(status: &Value) -> Self {
+        let system = status.get("system").unwrap_or(&Value::Null);
+        let memory_used = system.get("memory_used_bytes").and_then(Value::as_u64);
+        let memory_total = system.get("memory_total_bytes").and_then(Value::as_u64);
+        let memory_usage = system.get("memory_usage_pct").and_then(Value::as_f64);
+        Self {
+            cpu: percent_value_text(system.get("cpu_usage_pct").and_then(Value::as_f64)),
+            memory: match (memory_usage, memory_used, memory_total) {
+                (Some(usage), Some(_), Some(total)) => {
+                    format!("{usage:.1}% / {}", bytes_text(total))
+                }
+                (Some(usage), _, _) => format!("{usage:.1}%"),
+                (_, Some(used), Some(total)) => {
+                    format!("{} / {}", bytes_text(used), bytes_text(total))
+                }
+                _ => "-".to_string(),
+            },
+            process_cpu: percent_value_text(
+                system.get("process_cpu_usage_pct").and_then(Value::as_f64),
+            ),
+            process_memory: system
+                .get("process_memory_bytes")
+                .and_then(Value::as_u64)
+                .map(bytes_text)
+                .unwrap_or_else(|| "-".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CrossArbReadinessData {
     pub(crate) account_text: String,
     pub(crate) account_label: String,
@@ -1529,16 +1606,19 @@ pub(crate) struct CrossArbReadinessData {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CrossArbExchangeFormData {
+    pub(crate) exchange: String,
+    pub(crate) label: String,
+    pub(crate) enabled: bool,
+    pub(crate) account_id: String,
+    pub(crate) env_prefix: String,
+    pub(crate) private_rest_enabled: bool,
+    pub(crate) private_ws_enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CrossArbSettingsFormData {
-    pub(crate) binance_enabled: bool,
-    pub(crate) bitget_enabled: bool,
-    pub(crate) gate_enabled: bool,
-    pub(crate) binance_account: String,
-    pub(crate) bitget_account: String,
-    pub(crate) gate_account: String,
-    pub(crate) binance_env: String,
-    pub(crate) bitget_env: String,
-    pub(crate) gate_env: String,
+    pub(crate) exchanges: Vec<CrossArbExchangeFormData>,
     pub(crate) symbols_text: String,
     pub(crate) target_notional: String,
     pub(crate) max_notional: String,
@@ -1551,17 +1631,14 @@ pub(crate) struct CrossArbSettingsFormData {
 }
 
 impl CrossArbSettingsFormData {
-    pub(crate) fn from_settings(settings: &Value) -> Self {
+    pub(crate) fn from_settings(
+        settings: &Value,
+        api_keys: &Value,
+        seed_exchanges: &[String],
+        lang: Language,
+    ) -> Self {
         Self {
-            binance_enabled: cross_arb_setting_exchange_enabled(settings, "binance"),
-            bitget_enabled: cross_arb_setting_exchange_enabled(settings, "bitget"),
-            gate_enabled: cross_arb_setting_exchange_enabled(settings, "gate"),
-            binance_account: cross_arb_setting_exchange_text(settings, "binance", "account_id"),
-            bitget_account: cross_arb_setting_exchange_text(settings, "bitget", "account_id"),
-            gate_account: cross_arb_setting_exchange_text(settings, "gate", "account_id"),
-            binance_env: cross_arb_setting_exchange_text(settings, "binance", "env_prefix"),
-            bitget_env: cross_arb_setting_exchange_text(settings, "bitget", "env_prefix"),
-            gate_env: cross_arb_setting_exchange_text(settings, "gate", "env_prefix"),
+            exchanges: cross_arb_exchange_form_rows(settings, api_keys, seed_exchanges, lang),
             symbols_text: cross_arb_symbols_text(settings),
             target_notional: number_setting_text(settings, "target_notional_usdt", 5.0),
             max_notional: number_setting_text(settings, "max_notional_usdt", 5.2),
@@ -1854,6 +1931,20 @@ pub(crate) struct CrossArbExchangeConsoleRowData {
     pub(crate) latency: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CrossArbExchangeStatusCardData {
+    pub(crate) exchange: String,
+    pub(crate) status_class: &'static str,
+    pub(crate) status_label: String,
+    pub(crate) subscriptions: String,
+    pub(crate) messages: String,
+    pub(crate) latency: String,
+    pub(crate) server_offset: String,
+    pub(crate) book_count: String,
+    pub(crate) last_update: String,
+    pub(crate) reconnects: String,
+}
+
 impl CrossArbExchangeConsoleRowData {
     pub(crate) fn from_exchanges(
         exchanges: &[String],
@@ -1880,6 +1971,94 @@ impl CrossArbExchangeConsoleRowData {
                     exchange,
                 ),
                 latency: crate::utils::cross_arb_exchange_latency(private_events, exchange, lang),
+            })
+            .collect()
+    }
+}
+
+impl CrossArbExchangeStatusCardData {
+    pub(crate) fn from_values(
+        exchanges: &[String],
+        exchange_status: &[Value],
+        market_snapshots: &[Value],
+        console_rows: &[CrossArbExchangeConsoleRowData],
+        symbol_count: usize,
+        lang: Language,
+    ) -> Vec<Self> {
+        exchanges
+            .iter()
+            .map(|exchange| {
+                let status = exchange_status.iter().find(|row| {
+                    canonical_exchange_name(&text_at(row, "exchange", Language::En))
+                        == canonical_exchange_name(exchange)
+                });
+                let fallback_console = console_rows.iter().find(|row| {
+                    canonical_exchange_name(&row.exchange) == canonical_exchange_name(exchange)
+                });
+                let messages = status
+                    .and_then(|row| row.get("message_count"))
+                    .map(|value| value_text(value, lang))
+                    .filter(|value| value != "-")
+                    .unwrap_or_else(|| {
+                        fallback_console
+                            .map(|row| row.order_count.to_string())
+                            .unwrap_or_else(|| "0".to_string())
+                    });
+                let subscriptions = status
+                    .and_then(|row| row.get("streamed_symbol_count"))
+                    .map(|value| value_text(value, lang))
+                    .filter(|value| value != "-")
+                    .unwrap_or_else(|| symbol_count.to_string());
+                let latency = status
+                    .and_then(|row| {
+                        row.get("last_latency_ms")
+                            .or_else(|| row.get("max_latency_ms"))
+                            .and_then(Value::as_f64)
+                    })
+                    .map(crate::utils::format_ms)
+                    .or_else(|| fallback_console.map(|row| row.latency.clone()))
+                    .unwrap_or_else(|| "-".to_string());
+                let server_offset = status
+                    .and_then(|row| row.get("server_time_offset_ms").and_then(Value::as_i64))
+                    .map(|value| format!("{value}ms"))
+                    .unwrap_or_else(|| "-".to_string());
+                let book_count = market_snapshots
+                    .iter()
+                    .filter(|row| {
+                        canonical_exchange_name(&text_at(row, "exchange", Language::En))
+                            == canonical_exchange_name(exchange)
+                    })
+                    .count()
+                    .to_string();
+                let last_update = status
+                    .map(|row| text_at(row, "last_message_at", lang))
+                    .filter(|value| value != "-")
+                    .unwrap_or_else(|| "-".to_string());
+                let reconnects = status
+                    .and_then(|row| row.get("disconnect_count"))
+                    .map(|value| value_text(value, lang))
+                    .filter(|value| value != "-")
+                    .unwrap_or_else(|| "0".to_string());
+                let online = status.is_some()
+                    || fallback_console
+                        .map(|row| row.order_count > 0 || row.latency != "-")
+                        .unwrap_or(false);
+                Self {
+                    exchange: exchange.clone(),
+                    status_class: if online { "pill" } else { "pill warn" },
+                    status_label: if online {
+                        s(lang, "online")
+                    } else {
+                        s(lang, "offline")
+                    },
+                    subscriptions,
+                    messages,
+                    latency,
+                    server_offset,
+                    book_count,
+                    last_update,
+                    reconnects,
+                }
             })
             .collect()
     }
@@ -2652,7 +2831,20 @@ fn text_or_fallback(value: String, fallback: impl FnOnce() -> String) -> String 
 }
 
 fn rows_at(value: &Value, key: &str) -> Vec<Value> {
-    as_array(value.get(key).unwrap_or(&Value::Null))
+    match value.get(key).unwrap_or(&Value::Null) {
+        Value::Array(rows) => rows.clone(),
+        Value::Object(rows) => rows
+            .iter()
+            .filter_map(|(exchange, row)| {
+                let mut object = row.as_object().cloned()?;
+                object
+                    .entry("exchange".to_string())
+                    .or_insert_with(|| Value::String(exchange.clone()));
+                Some(Value::Object(object))
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn rows_for_symbol(rows: &[Value], symbol_key: &str, lang: Language) -> Vec<Value> {
@@ -2664,27 +2856,247 @@ fn rows_for_symbol(rows: &[Value], symbol_key: &str, lang: Language) -> Vec<Valu
         .collect()
 }
 
-fn cross_arb_setting_exchange<'a>(settings: &'a Value, exchange: &str) -> Option<&'a Value> {
-    settings
-        .get("exchanges")
-        .and_then(Value::as_array)
-        .and_then(|rows| {
-            rows.iter()
-                .find(|row| text_at(row, "exchange", Language::En).eq_ignore_ascii_case(exchange))
+fn cross_arb_exchange_form_rows(
+    settings: &Value,
+    api_keys: &Value,
+    seed_exchanges: &[String],
+    lang: Language,
+) -> Vec<CrossArbExchangeFormData> {
+    let supported_rows = ExchangeCredentialSchema::from_supported_rows(
+        api_keys.get("supported_exchanges").unwrap_or(&Value::Null),
+        lang,
+    );
+    let supported_labels = supported_rows
+        .iter()
+        .map(|row| (exchange_key(&row.exchange), row.label.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let account_rows = AccountManagerAccountRow::from_rows(
+        api_keys
+            .get("account_manager_accounts")
+            .unwrap_or(&Value::Null),
+        lang,
+    );
+    let settings_rows = rows_at(settings, "exchanges");
+    let has_settings_rows = !settings_rows.is_empty();
+    let seed_exchange_keys = seed_exchanges
+        .iter()
+        .map(|exchange| exchange_key(exchange))
+        .filter(|exchange| !exchange.is_empty())
+        .collect::<BTreeSet<_>>();
+    let mut rows = BTreeMap::<String, CrossArbExchangeFormData>::new();
+    let mut order = Vec::<String>::new();
+
+    for row in settings_rows {
+        let exchange = text_at(&row, "exchange", Language::En);
+        let key = exchange_key(&exchange);
+        if key.is_empty() {
+            continue;
+        }
+        let label = exchange_label(&exchange, &supported_labels);
+        insert_cross_arb_exchange_form_row(
+            &mut rows,
+            &mut order,
+            key,
+            CrossArbExchangeFormData {
+                exchange,
+                label,
+                enabled: bool_at(&row, "enabled"),
+                account_id: normalize_account_id(&text_at(&row, "account_id", Language::En)),
+                env_prefix: optional_text_at(&row, "env_prefix"),
+                private_rest_enabled: row
+                    .get("private_rest_enabled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+                private_ws_enabled: row
+                    .get("private_ws_enabled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+            },
+        );
+    }
+
+    for account in account_rows.iter().filter(|row| row.enabled) {
+        let key = exchange_key(&account.exchange);
+        if key.is_empty() {
+            continue;
+        }
+        let account_id = normalize_account_id(&account.account_id);
+        let label = exchange_label(&account.exchange, &supported_labels);
+        let enabled = !has_settings_rows
+            && (seed_exchange_keys.contains(&key) || default_cross_arb_exchange(&account.exchange));
+        if let Some(existing) = rows.get_mut(&key) {
+            if existing.account_id.is_empty() && !account_id.is_empty() {
+                existing.account_id = account_id;
+            }
+            if existing.env_prefix.is_empty() && !account.env_prefix.trim().is_empty() {
+                existing.env_prefix = account.env_prefix.clone();
+            }
+            if existing.label == existing.exchange {
+                existing.label = label;
+            }
+            continue;
+        }
+        insert_cross_arb_exchange_form_row(
+            &mut rows,
+            &mut order,
+            key,
+            CrossArbExchangeFormData {
+                exchange: account.exchange.clone(),
+                label,
+                enabled,
+                account_id,
+                env_prefix: account.env_prefix.clone(),
+                private_rest_enabled: true,
+                private_ws_enabled: true,
+            },
+        );
+    }
+
+    for exchange in seed_exchanges {
+        let key = exchange_key(exchange);
+        if key.is_empty() {
+            continue;
+        }
+        let enabled = !has_settings_rows;
+        let label = exchange_label(exchange, &supported_labels);
+        insert_cross_arb_exchange_form_row(
+            &mut rows,
+            &mut order,
+            key,
+            CrossArbExchangeFormData {
+                exchange: exchange.clone(),
+                label,
+                enabled,
+                account_id: String::new(),
+                env_prefix: String::new(),
+                private_rest_enabled: true,
+                private_ws_enabled: true,
+            },
+        );
+    }
+
+    for row in supported_rows {
+        let key = exchange_key(&row.exchange);
+        if key.is_empty() {
+            continue;
+        }
+        insert_cross_arb_exchange_form_row(
+            &mut rows,
+            &mut order,
+            key,
+            CrossArbExchangeFormData {
+                exchange: row.exchange,
+                label: row.label,
+                enabled: false,
+                account_id: String::new(),
+                env_prefix: String::new(),
+                private_rest_enabled: true,
+                private_ws_enabled: true,
+            },
+        );
+    }
+
+    for exchange in ["binance", "okx", "bybit", "bitget", "gate"] {
+        let key = exchange_key(exchange);
+        if rows.contains_key(&key) {
+            continue;
+        }
+        insert_cross_arb_exchange_form_row(
+            &mut rows,
+            &mut order,
+            key,
+            CrossArbExchangeFormData {
+                exchange: exchange.to_string(),
+                label: exchange_label(exchange, &supported_labels),
+                enabled: !has_settings_rows && matches!(exchange, "binance" | "bitget" | "gate"),
+                account_id: String::new(),
+                env_prefix: String::new(),
+                private_rest_enabled: true,
+                private_ws_enabled: true,
+            },
+        );
+    }
+
+    order
+        .into_iter()
+        .filter_map(|key| rows.remove(&key))
+        .collect()
+}
+
+fn insert_cross_arb_exchange_form_row(
+    rows: &mut BTreeMap<String, CrossArbExchangeFormData>,
+    order: &mut Vec<String>,
+    key: String,
+    row: CrossArbExchangeFormData,
+) {
+    if rows.contains_key(&key) {
+        return;
+    }
+    order.push(key.clone());
+    rows.insert(key, row);
+}
+
+fn exchange_key(exchange: &str) -> String {
+    let exchange = exchange.trim();
+    if exchange.is_empty() || exchange == "-" {
+        String::new()
+    } else {
+        canonical_exchange_name(exchange)
+    }
+}
+
+fn exchange_label(exchange: &str, supported_labels: &BTreeMap<String, String>) -> String {
+    supported_labels
+        .get(&exchange_key(exchange))
+        .cloned()
+        .filter(|label| !label.trim().is_empty() && label != "-")
+        .unwrap_or_else(|| match exchange.trim().to_ascii_lowercase().as_str() {
+            "gate" | "gateio" | "gate.io" => "Gate.io".to_string(),
+            "okx" | "okx_spot" => "OKX".to_string(),
+            "bybit" => "Bybit".to_string(),
+            "bitget" => "Bitget".to_string(),
+            "binance" | "binance_spot" => "Binance".to_string(),
+            _ => exchange.to_string(),
         })
 }
 
-fn cross_arb_setting_exchange_enabled(settings: &Value, exchange: &str) -> bool {
-    cross_arb_setting_exchange(settings, exchange)
-        .map(|row| bool_at(row, "enabled"))
-        .unwrap_or_else(|| matches!(exchange, "binance" | "bitget" | "gate"))
+fn default_cross_arb_exchange(exchange: &str) -> bool {
+    matches!(
+        exchange_key(exchange).as_str(),
+        "binance" | "bitget" | "gateio"
+    )
 }
 
-fn cross_arb_setting_exchange_text(settings: &Value, exchange: &str, key: &str) -> String {
-    cross_arb_setting_exchange(settings, exchange)
-        .map(|row| text_at(row, key, Language::En))
-        .filter(|value| value != "-")
-        .unwrap_or_default()
+fn optional_text_at(value: &Value, key: &str) -> String {
+    let text = text_at(value, key, Language::En);
+    if text == "-" {
+        String::new()
+    } else {
+        text
+    }
+}
+
+fn percent_value_text(value: Option<f64>) -> String {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| format!("{value:.1}%"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn bytes_text(value: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let value = value as f64;
+    if value >= GIB {
+        format!("{:.2}G", value / GIB)
+    } else if value >= MIB {
+        format!("{:.0}M", value / MIB)
+    } else if value >= KIB {
+        format!("{:.0}K", value / KIB)
+    } else {
+        format!("{value:.0}B")
+    }
 }
 
 fn cross_arb_symbols_text(settings: &Value) -> String {

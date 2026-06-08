@@ -22,6 +22,16 @@ Runtime boundary:
 - Orders/cancels/batch: unsupported unverified
 - Account model: downstream venue account/wallet, not a Cod3x API-key/HMAC contract
 
+Core trading official detail:
+- Source: [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)
+- 写法：`交易所不支持当前交易/私有接口 runtime`。
+- 原因：当前未建立稳定 Cod3x-native exchange API；下游 venue 的下单/撤单能力必须继续由各自 adapter 承接，不复制到 `cod3x`。
+
+Position official detail:
+- Source: [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)
+- 写法：`交易所不支持当前仓位接口 runtime`。
+- 原因：Cod3x 是 perps terminal/routing layer；下游 venue 的 positions 走各自 adapter，不并入 Cod3x-native profile。
+
 Validation:
 - `python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/cod3x/endpoint_mapping.yaml`
 - `cargo fmt --check --package rustcta-exchange-gateway`

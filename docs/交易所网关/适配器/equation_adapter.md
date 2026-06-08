@@ -23,6 +23,16 @@ Runtime boundary:
 - Orders/cancels/batch: unsupported unverified
 - Account model: EVM wallet, not API key/HMAC
 
+Core trading official detail:
+- Source: [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)
+- 写法：`交易所不支持当前交易/私有接口 runtime`。
+- 原因：官方资料是 perpetual protocol / Arbitrum contract examples，当前未给稳定 exchange-gateway 交易 API；不启用未验证 browser/API paths 或 EVM signing runtime。
+
+Position official detail:
+- Source: [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)
+- 写法：`交易所不支持当前仓位接口 runtime`。
+- 原因：当前 adapter 是 audit-only EVM protocol profile，不启用稳定 private account/position runtime。
+
 Validation:
 - `python scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/equation/endpoint_mapping.yaml`
 - `cargo test -p rustcta-exchange-gateway equation --lib`

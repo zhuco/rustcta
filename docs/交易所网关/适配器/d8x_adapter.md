@@ -36,6 +36,18 @@ liquidations, liquidity provision and private streams remain `Unsupported`.
 | Testnet chain id | `2442` (`cardona`, SDK config) |
 | Public WS | Unsupported/runtime unverified |
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。D8X trading access 走 Futures Node SDK 或 smart contracts，需要 EVM wallet signer、ABI/calldata、gas/nonce/reorg 和链上/索引器对账。
+
+因此这里写 `官方协议可交易，项目未实现链上交易 runtime`，不是 `交易所不支持下单/撤单`。当前 adapter 只接 CoinGecko-compatible public REST market data，不能提交或模拟 EVM 交易。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。D8X 是链上 perpetual futures engine，仓位读取需要 wallet/contract/indexer 或 SDK 账户状态解析。
+
+因此仓位读取写 `官方协议支持，项目未实现链上仓位 runtime`。补仓位前必须完成 EVM wallet/indexer account scan、positions parser、funding/PnL/liquidation fields、reorg handling 和 reconciliation。
+
 ## Official WebSocket Order Book Detail
 
 官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。本批未找到 D8X 稳定官方公共订单簿 WebSocket 文档；当前可核验的是 CoinGecko-compatible REST `GET /coingecko/orderbook/{ticker_id}`。

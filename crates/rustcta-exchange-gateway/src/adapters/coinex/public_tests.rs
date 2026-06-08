@@ -1,10 +1,11 @@
 use rustcta_exchange_api::{
     ExchangeClient, OrderBookRequest, SymbolRulesRequest, EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::MarketType;
 use serde_json::json;
 
 use super::parser::{parse_orderbook_snapshot, parse_symbol_rules};
-use super::test_support::{context, spawn_rest_server, symbol_scope};
+use super::test_support::{context, perpetual_symbol_scope, spawn_rest_server, symbol_scope};
 use super::{CoinExGatewayAdapter, CoinExGatewayConfig};
 
 fn coinex_fixture(name: &str) -> serde_json::Value {
@@ -70,10 +71,47 @@ async fn coinex_adapter_should_load_symbol_rules_from_public_rest() {
     assert_eq!(seen.lock().unwrap()[0].path, "/spot/market".to_string());
 }
 
+#[tokio::test]
+async fn coinex_adapter_should_load_perpetual_symbol_rules_from_futures_public_rest() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": 0,
+        "data": [{
+            "market": "BTCUSDT",
+            "base_ccy": "BTC",
+            "quote_ccy": "USDT",
+            "price_precision": 1,
+            "amount_precision": 0,
+            "min_amount": "1",
+            "is_trading_available": true
+        }]
+    })])
+    .await;
+    let adapter = CoinExGatewayAdapter::new(CoinExGatewayConfig {
+        rest_base_url: base_url,
+        ..CoinExGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .get_symbol_rules(SymbolRulesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-rules"),
+            symbols: vec![perpetual_symbol_scope()],
+        })
+        .await
+        .expect("rules");
+
+    assert_eq!(response.rules.len(), 1);
+    assert_eq!(response.rules[0].symbol.market_type, MarketType::Perpetual);
+    assert!(response.rules[0].supports_reduce_only);
+    assert_eq!(seen.lock().unwrap()[0].path, "/futures/market");
+}
+
 #[test]
 fn coinex_public_parser_fixtures_should_cover_success_empty_and_missing_field() {
     let rules = parse_symbol_rules(
         &super::test_support::exchange_id(),
+        MarketType::Spot,
         &coinex_fixture("spot_markets_success.json")["data"],
     )
     .expect("rules");
@@ -82,6 +120,7 @@ fn coinex_public_parser_fixtures_should_cover_success_empty_and_missing_field() 
 
     let empty = parse_symbol_rules(
         &super::test_support::exchange_id(),
+        MarketType::Spot,
         &coinex_fixture("spot_markets_empty.json")["data"],
     )
     .expect("empty");
@@ -89,6 +128,7 @@ fn coinex_public_parser_fixtures_should_cover_success_empty_and_missing_field() 
 
     let missing = parse_symbol_rules(
         &super::test_support::exchange_id(),
+        MarketType::Spot,
         &coinex_fixture("spot_markets_missing_field.json")["data"],
     )
     .expect_err("missing market/name field should fail");

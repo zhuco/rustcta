@@ -10,6 +10,7 @@ use serde_json::Value;
 
 pub fn parse_symbol_rules(
     exchange_id: &ExchangeId,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<SymbolRules>> {
     let markets = value
@@ -25,11 +26,15 @@ pub fn parse_symbol_rules(
         })?;
     markets
         .iter()
-        .map(|value| parse_symbol_rule(exchange_id, value))
+        .map(|value| parse_symbol_rule(exchange_id, market_type, value))
         .collect()
 }
 
-fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
+fn parse_symbol_rule(
+    exchange_id: &ExchangeId,
+    market_type: MarketType,
+    value: &Value,
+) -> ExchangeApiResult<SymbolRules> {
     let exchange_symbol = required_str(exchange_id, value, "market")
         .or_else(|_| required_str(exchange_id, value, "name"))?
         .replace(['-', '_', '/'], "")
@@ -52,14 +57,10 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         CanonicalSymbol::new(&base_asset, &quote_asset).map_err(validation_error)?;
     let symbol = rustcta_exchange_api::SymbolScope {
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol: Some(canonical_symbol),
-        exchange_symbol: ExchangeSymbol::new(
-            exchange_id.clone(),
-            MarketType::Spot,
-            exchange_symbol,
-        )
-        .map_err(validation_error)?,
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, exchange_symbol)
+            .map_err(validation_error)?,
     };
     let price_precision = integer_from_value(
         value
@@ -99,7 +100,7 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         supports_market_orders: tradable,
         supports_limit_orders: tradable,
         supports_post_only: tradable,
-        supports_reduce_only: false,
+        supports_reduce_only: market_type == MarketType::Perpetual,
         updated_at: Utc::now(),
     })
 }
@@ -122,7 +123,7 @@ pub fn parse_orderbook_snapshot(
             })?;
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
-        MarketType::Spot,
+        symbol.market_type,
         canonical_symbol,
         bids,
         asks,

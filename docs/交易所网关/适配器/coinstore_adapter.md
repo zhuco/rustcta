@@ -178,6 +178,10 @@ read-only live probing confirms headers or published per-endpoint weights.
 - Futures Socket.IO ping/pong is handled as text frame specs; exact live cadence still needs live validation.
 - Use REST reconciliation as source of truth until API keys, permissions, notional limits and live WebSocket behavior have been validated with read-only preflight and live-dry-run.
 
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。Coinstore Futures `GET /api/future/queryPosi` 已由当前项目 `get_positions` runtime 覆盖；balance/position stream 仍保持 unsupported，断线后用 REST reconciliation。
+
 ## Validation
 
 ```bash

@@ -85,7 +85,7 @@ pub(crate) fn App() -> Element {
         async move {
             loop {
                 let token_value = token();
-                if auto_refresh() && !token_value.is_empty() {
+                if auto_refresh() {
                     let result = fetch_dashboard(&token_value, (refresh_context.data)()).await;
                     apply_dashboard_fetch(result, lang, false, refresh_context);
                 }
@@ -100,7 +100,7 @@ pub(crate) fn App() -> Element {
         async move {
             loop {
                 let token_value = token();
-                if auto_refresh() && !token_value.is_empty() {
+                if auto_refresh() {
                     let result = fetch_strategy_live_data(&token_value, data()).await;
                     apply_strategy_live_fetch(result, data, refresh_error_count, message);
                 }
@@ -110,7 +110,9 @@ pub(crate) fn App() -> Element {
     });
 
     rsx! {
-        document::Stylesheet { href: asset!("/assets/main.css") }
+        document::Stylesheet {
+            href: asset!("/assets/main.css", AssetOptions::css().with_static_head(true))
+        }
         div { class: "shell",
             aside { class: "sidebar",
                 div { class: "brand",
@@ -268,6 +270,8 @@ fn render_active_view(
                 CrossArbPanel {
                     cross_arb: snapshot.cross_arb,
                     api_keys: snapshot.api_keys,
+                    status: snapshot.status,
+                    processes: snapshot.processes,
                     token,
                     message,
                     lang,
@@ -420,9 +424,10 @@ fn refresh_health_text(lang: Language, updated: usize, stale: usize) -> String {
 fn refresh_time_text() -> String {
     let date = js_sys::Date::new_0();
     format!(
-        "{:02}:{:02}:{:02}",
+        "{:02}:{:02}:{:02}.{:03}",
         date.get_hours(),
         date.get_minutes(),
-        date.get_seconds()
+        date.get_seconds(),
+        date.get_milliseconds()
     )
 }

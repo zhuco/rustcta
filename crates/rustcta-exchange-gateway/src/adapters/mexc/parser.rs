@@ -10,8 +10,12 @@ use serde_json::Value;
 
 pub fn parse_symbol_rules(
     exchange_id: &ExchangeId,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<SymbolRules>> {
+    if market_type == MarketType::Perpetual {
+        return parse_contract_symbol_rules(exchange_id, value);
+    }
     let symbols = value
         .get("symbols")
         .and_then(Value::as_array)
@@ -19,6 +23,21 @@ pub fn parse_symbol_rules(
     symbols
         .iter()
         .map(|value| parse_symbol_rule(exchange_id, value))
+        .collect()
+}
+
+fn parse_contract_symbol_rules(
+    exchange_id: &ExchangeId,
+    value: &Value,
+) -> ExchangeApiResult<Vec<SymbolRules>> {
+    let symbols = value
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| value.as_array())
+        .ok_or_else(|| parse_error(exchange_id.clone(), "contract detail missing data", value))?;
+    symbols
+        .iter()
+        .map(|value| parse_contract_symbol_rule(exchange_id, value))
         .collect()
 }
 
@@ -81,13 +100,116 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
     })
 }
 
+fn parse_contract_symbol_rule(
+    exchange_id: &ExchangeId,
+    value: &Value,
+) -> ExchangeApiResult<SymbolRules> {
+    let exchange_symbol = required_str(exchange_id, value, "symbol")?.to_ascii_uppercase();
+    let (fallback_base, fallback_quote) =
+        split_contract_symbol(&exchange_symbol).unwrap_or_default();
+    let base_asset = value
+        .get("baseCoin")
+        .or_else(|| value.get("base_coin"))
+        .and_then(Value::as_str)
+        .map(str::to_ascii_uppercase)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_base);
+    let quote_asset = value
+        .get("quoteCoin")
+        .or_else(|| value.get("quote_coin"))
+        .and_then(Value::as_str)
+        .map(str::to_ascii_uppercase)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_quote);
+    if base_asset.is_empty() || quote_asset.is_empty() {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: format!("MEXC contract symbol missing base/quote: {value}"),
+        });
+    }
+    let canonical_symbol =
+        CanonicalSymbol::new(&base_asset, &quote_asset).map_err(validation_error)?;
+    let symbol = rustcta_exchange_api::SymbolScope {
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(canonical_symbol),
+        exchange_symbol: ExchangeSymbol::new(
+            exchange_id.clone(),
+            MarketType::Perpetual,
+            exchange_symbol,
+        )
+        .map_err(validation_error)?,
+    };
+    let tradable = value
+        .get("state")
+        .and_then(value_as_i64)
+        .is_none_or(|state| state == 0);
+    let price_increment = string_or_number(
+        value
+            .get("priceUnit")
+            .or_else(|| value.get("price_unit"))
+            .or_else(|| value.get("tickSize")),
+    );
+    let quantity_increment = string_or_number(
+        value
+            .get("volUnit")
+            .or_else(|| value.get("vol_unit"))
+            .or_else(|| value.get("stepSize")),
+    );
+    Ok(SymbolRules {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol,
+        base_asset,
+        quote_asset,
+        price_increment: price_increment.clone(),
+        quantity_increment: quantity_increment.clone(),
+        min_price: None,
+        max_price: None,
+        min_quantity: string_or_number(value.get("minVol").or_else(|| value.get("min_vol"))),
+        max_quantity: string_or_number(value.get("maxVol").or_else(|| value.get("max_vol"))),
+        min_notional: None,
+        max_notional: None,
+        price_precision: integer_from_value(
+            value.get("priceScale").or_else(|| value.get("price_scale")),
+        )
+        .or_else(|| {
+            precision_from_step(
+                price_increment
+                    .as_deref()
+                    .and_then(|step| step.parse().ok()),
+            )
+        }),
+        quantity_precision: integer_from_value(
+            value.get("volScale").or_else(|| value.get("vol_scale")),
+        )
+        .or_else(|| {
+            precision_from_step(
+                quantity_increment
+                    .as_deref()
+                    .and_then(|step| step.parse().ok()),
+            )
+        }),
+        supports_market_orders: tradable,
+        supports_limit_orders: tradable,
+        supports_post_only: tradable,
+        supports_reduce_only: true,
+        updated_at: Utc::now(),
+    })
+}
+
 pub fn parse_orderbook_snapshot(
     exchange_id: &ExchangeId,
     symbol: rustcta_exchange_api::SymbolScope,
     value: &Value,
 ) -> ExchangeApiResult<OrderBookSnapshot> {
-    let bids = parse_levels(exchange_id, value.get("bids").or_else(|| value.get("b")))?;
-    let asks = parse_levels(exchange_id, value.get("asks").or_else(|| value.get("a")))?;
+    let payload = value.get("data").unwrap_or(value);
+    let bids = parse_levels(
+        exchange_id,
+        payload.get("bids").or_else(|| payload.get("b")),
+    )?;
+    let asks = parse_levels(
+        exchange_id,
+        payload.get("asks").or_else(|| payload.get("a")),
+    )?;
     let canonical_symbol =
         symbol
             .canonical_symbol
@@ -97,7 +219,7 @@ pub fn parse_orderbook_snapshot(
             })?;
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
-        MarketType::Spot,
+        symbol.market_type,
         canonical_symbol,
         bids,
         asks,
@@ -105,16 +227,28 @@ pub fn parse_orderbook_snapshot(
     )
     .map_err(validation_error)?;
     snapshot.exchange_symbol = Some(symbol.exchange_symbol);
-    snapshot.sequence = value.get("lastUpdateId").and_then(Value::as_u64);
+    snapshot.sequence = payload
+        .get("lastUpdateId")
+        .or_else(|| payload.get("version"))
+        .and_then(value_as_u64);
     snapshot.exchange_timestamp = value
         .get("timestamp")
         .or_else(|| value.get("E"))
+        .or_else(|| payload.get("timestamp"))
+        .or_else(|| payload.get("ts"))
         .and_then(value_as_i64)
         .and_then(DateTime::<Utc>::from_timestamp_millis);
     Ok(snapshot)
 }
 
 pub fn normalize_mexc_symbol(symbol: &str) -> ExchangeApiResult<String> {
+    normalize_mexc_symbol_for_market(symbol, MarketType::Spot)
+}
+
+pub fn normalize_mexc_symbol_for_market(
+    symbol: &str,
+    market_type: MarketType,
+) -> ExchangeApiResult<String> {
     let normalized = symbol
         .trim()
         .replace(['/', '-', '_'], "")
@@ -124,7 +258,15 @@ pub fn normalize_mexc_symbol(symbol: &str) -> ExchangeApiResult<String> {
             message: "symbol must not be empty".to_string(),
         });
     }
-    Ok(normalized)
+    if market_type == MarketType::Perpetual {
+        split_compact_symbol(&normalized)
+            .map(|(base, quote)| format!("{base}_{quote}"))
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: format!("cannot infer MEXC contract symbol from {symbol}"),
+            })
+    } else {
+        Ok(normalized)
+    }
 }
 
 pub fn normalize_depth(depth: u32) -> u32 {
@@ -216,6 +358,10 @@ fn number_from_value(value: &Value) -> Option<f64> {
         Value::Number(number) => number.as_f64(),
         _ => None,
     }
+}
+
+fn value_as_u64(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_str()?.parse().ok())
 }
 
 pub(super) fn decimal_value_to_f64(value: Option<&Value>) -> ExchangeApiResult<Option<f64>> {
@@ -319,6 +465,32 @@ fn precision_from_step(step: Option<f64>) -> Option<u32> {
             .map(|fraction| fraction.len() as u32)
             .unwrap_or(0),
     )
+}
+
+fn integer_from_value(value: Option<&Value>) -> Option<u32> {
+    value.and_then(|value| {
+        value
+            .as_u64()
+            .map(|value| value as u32)
+            .or_else(|| value.as_str()?.parse().ok())
+    })
+}
+
+fn split_contract_symbol(symbol: &str) -> Option<(String, String)> {
+    let mut parts = symbol.split('_');
+    let base = parts.next()?.to_ascii_uppercase();
+    let quote = parts.next()?.to_ascii_uppercase();
+    (!base.is_empty() && !quote.is_empty()).then_some((base, quote))
+}
+
+fn split_compact_symbol(symbol: &str) -> Option<(String, String)> {
+    const QUOTES: [&str; 6] = ["USDT", "USDC", "BTC", "ETH", "USD", "EUR"];
+    QUOTES.iter().find_map(|quote| {
+        symbol
+            .strip_suffix(quote)
+            .filter(|base| !base.is_empty())
+            .map(|base| (base.to_string(), quote.to_string()))
+    })
 }
 
 pub(super) fn validation_error(error: impl std::fmt::Display) -> ExchangeApiError {

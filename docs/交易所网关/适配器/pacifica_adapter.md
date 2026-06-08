@@ -66,6 +66,11 @@ for base64, hex, and base58 local test keys. Sanitized fixture:
   `/api/v1/orders` for open-order snapshots; use `last_order_id`/`li` ordering
   where present.
 
+P9 official verification adds the public book details: `book` updates once
+every 100ms and accepts `agg_level` values 1, 10, 100, 1000, and 10000. The
+`bbo` stream sends top-of-book changes. Both streams include `li`/last order id
+ordering metadata; no checksum is documented.
+
 ## Capability Boundary
 
 Unsupported or request-spec-only:

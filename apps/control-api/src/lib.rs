@@ -1,9 +1,9 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Json;
 use axum::Router;
 use chrono::Utc;
@@ -12,7 +12,9 @@ use rustcta_control_api::{
 };
 use rustcta_event_ledger::JsonlLedger;
 use rustcta_supervisor::LifecycleCommandRecord;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
@@ -22,8 +24,12 @@ use tokio::sync::Mutex;
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8091";
 const DEFAULT_TENANT_ID: &str = "local";
 const DEFAULT_SUPERVISOR_REGISTRY_PATH: &str = "run/supervisor/registry.json";
+const DEFAULT_EXCHANGE_API_KEY_STORE: &str = "data/control_api/exchange_api_keys.env";
+const DEFAULT_ACCOUNTS_CONFIG: &str = "config/accounts.yml";
 const DEFAULT_STRATEGY_LOG_TAIL_LINES: usize = 800;
 const DEFAULT_STRATEGY_LOG_TAIL_BYTES: usize = 256 * 1024;
+const CROSS_ARB_STRATEGY_ID: &str = "cross_arb_live";
+const LOCAL_STRATEGY_CONFIG_REF: &str = "local-agent:strategy-config";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlApiAppConfig {
@@ -36,6 +42,8 @@ pub struct ControlApiAppConfig {
     pub strategy_log_path: Option<PathBuf>,
     pub strategy_log_tail_lines: Option<usize>,
     pub strategy_log_tail_bytes: Option<usize>,
+    pub exchange_api_key_store: PathBuf,
+    pub accounts_config: PathBuf,
     pub static_dir: Option<PathBuf>,
 }
 
@@ -96,6 +104,12 @@ impl ControlApiAppConfig {
                 &vars,
                 "RUSTCTA_CONTROL_API_STRATEGY_LOG_TAIL_BYTES",
             ),
+            exchange_api_key_store: path_value(&vars, "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE")
+                .or_else(|| path_value(&vars, "EXCHANGE_API_KEY_STORE"))
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_EXCHANGE_API_KEY_STORE)),
+            accounts_config: path_value(&vars, "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG")
+                .or_else(|| path_value(&vars, "ACCOUNTS_CONFIG"))
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_ACCOUNTS_CONFIG)),
             static_dir: path_value(&vars, "RUSTCTA_CONTROL_API_STATIC_DIR"),
         }
     }
@@ -137,6 +151,10 @@ impl ControlApiAppConfig {
     pub fn build_router(&self) -> Result<Router> {
         let state = self.build_state()?;
         let mut api = router(state.clone());
+        api = api.merge(local_credentials_router(LocalCredentialState {
+            exchange_api_key_store: self.exchange_api_key_store.clone(),
+            accounts_config: self.accounts_config.clone(),
+        }));
         if self.local_agent.is_some() {
             api = api.merge(local_mutation_router(state.clone()));
         }
@@ -158,6 +176,41 @@ impl ControlApiAppConfig {
             None => api,
         };
         Ok(app)
+    }
+
+    pub async fn clean_cross_arb_exchange_config_on_startup(&self) -> Result<()> {
+        let (Some(agent), Some(side_effects)) = (&self.local_agent, &self.local_side_effects)
+        else {
+            return Ok(());
+        };
+        if side_effects.strategy_config_path.is_none() {
+            return Ok(());
+        }
+
+        let state =
+            LocalSideEffectState::new(agent.clone(), side_effects.clone(), self.build_state()?);
+        let operation_id = local_operation_id();
+        match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+            Ok(view) => {
+                if view.cleaned_on_read {
+                    eprintln!(
+                        "rustcta-control-api cleaned cross-arb exchange config on startup: cleaned_invalid_count={} removed_exchanges={:?}",
+                        view.cleaned_invalid_count, view.removed_exchanges
+                    );
+                }
+            }
+            Err((status_code, Json(body))) => {
+                let status = body
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                eprintln!(
+                    "rustcta-control-api skipped cross-arb exchange config startup cleanup: http_status={} status={}",
+                    status_code, status
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -214,6 +267,12 @@ struct LocalSideEffectState {
     audit: Arc<Mutex<Vec<Value>>>,
 }
 
+#[derive(Clone)]
+struct LocalCredentialState {
+    exchange_api_key_store: PathBuf,
+    accounts_config: PathBuf,
+}
+
 impl LocalSideEffectState {
     fn new(
         agent: LocalAgentConfig,
@@ -245,12 +304,1309 @@ fn local_agent_router(state: LocalSideEffectState) -> Router {
             "/api/local-agent/strategy-config",
             get(local_agent_strategy_config_draft).post(local_agent_strategy_config),
         )
+        .route(
+            "/api/local-agent/cross-arb/exchanges",
+            get(local_agent_cross_arb_exchanges).post(local_agent_save_cross_arb_exchanges),
+        )
+        .route(
+            "/api/local-agent/cross-arb/exchanges/:exchange",
+            delete(local_agent_delete_cross_arb_exchange),
+        )
         .route("/api/local-agent/commands", post(local_agent_command))
         .route(
             "/api/local-agent/history/:kind/status",
             get(local_agent_history_status),
         )
         .with_state(state)
+}
+
+fn local_credentials_router(state: LocalCredentialState) -> Router {
+    Router::new()
+        .route(
+            "/api/exchange-api-keys",
+            get(exchange_api_keys).post(update_exchange_api_keys),
+        )
+        .route(
+            "/api/exchange-api-keys/:exchange",
+            delete(delete_exchange_api_keys),
+        )
+        .with_state(state)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExchangeApiKeyFieldStatus {
+    field: String,
+    label: String,
+    required: bool,
+    configured: bool,
+    source: Option<String>,
+    masked: Option<String>,
+    value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExchangeApiKeyExchangeStatus {
+    exchange: String,
+    label: String,
+    enabled: bool,
+    account_id: String,
+    account_label: String,
+    credential_namespace: String,
+    is_default_account: bool,
+    fields: Vec<ExchangeApiKeyFieldStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AccountManagerAccountStatus {
+    account_id: String,
+    name: String,
+    exchange: String,
+    account_type: String,
+    description: String,
+    env_prefix: String,
+    credential_namespace: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExchangeApiKeyStatusResponse {
+    store_path: String,
+    restart_required: bool,
+    enabled_exchanges: Vec<String>,
+    account_manager_accounts: Vec<AccountManagerAccountStatus>,
+    supported_exchanges: Vec<ExchangeApiKeyExchangeStatus>,
+    exchanges: Vec<ExchangeApiKeyExchangeStatus>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ExchangeApiKeyUpdateRequest {
+    exchange: String,
+    #[serde(default)]
+    account_id: Option<String>,
+    #[serde(default)]
+    account_label: Option<String>,
+    #[serde(default)]
+    credential_namespace: Option<String>,
+    #[serde(default)]
+    exchange_account_id: Option<String>,
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    api_secret: Option<String>,
+    #[serde(default)]
+    passphrase: Option<String>,
+    #[serde(default)]
+    clear: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CrossArbExchangeConfigUpdateRequest {
+    #[serde(default)]
+    strategy_id: Option<String>,
+    #[serde(default)]
+    exchanges: Vec<Value>,
+    #[serde(default = "default_true_bool")]
+    apply: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExchangeApiFieldSchema {
+    field: &'static str,
+    label: &'static str,
+    aliases: &'static [&'static str],
+    required: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExchangeApiKeySchema {
+    exchange: &'static str,
+    label: &'static str,
+    fields: &'static [ExchangeApiFieldSchema],
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AccountManagerConfigFile {
+    #[serde(default)]
+    accounts: BTreeMap<String, AccountManagerConfigEntry>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AccountManagerConfigEntry {
+    #[serde(default)]
+    name: Option<String>,
+    exchange: String,
+    #[serde(default, rename = "type")]
+    account_type: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    env_prefix: String,
+    #[serde(default = "default_true_bool")]
+    enabled: bool,
+}
+
+fn default_true_bool() -> bool {
+    true
+}
+
+async fn exchange_api_keys(State(state): State<LocalCredentialState>) -> Response {
+    match exchange_api_key_status(&state).await {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn update_exchange_api_keys(
+    State(state): State<LocalCredentialState>,
+    Json(request): Json<ExchangeApiKeyUpdateRequest>,
+) -> Response {
+    match apply_exchange_api_key_update(&state, request).await {
+        Ok(()) => match exchange_api_key_status(&state).await {
+            Ok(status) => Json(json!({
+                "saved": true,
+                "restart_required": true,
+                "status": status,
+            }))
+            .into_response(),
+            Err(error) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": error.to_string() })),
+            )
+                .into_response(),
+        },
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn delete_exchange_api_keys(
+    State(state): State<LocalCredentialState>,
+    AxumPath(exchange): AxumPath<String>,
+) -> Response {
+    match clear_exchange_api_keys(&state.exchange_api_key_store, &exchange).await {
+        Ok(()) => match exchange_api_key_status(&state).await {
+            Ok(status) => Json(json!({
+                "deleted": true,
+                "restart_required": true,
+                "status": status,
+            }))
+            .into_response(),
+            Err(error) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": error.to_string() })),
+            )
+                .into_response(),
+        },
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn exchange_api_key_status(
+    state: &LocalCredentialState,
+) -> Result<ExchangeApiKeyStatusResponse> {
+    let values = read_env_store(&state.exchange_api_key_store).await?;
+    let account_manager_accounts =
+        account_manager_accounts_for_status(&state.accounts_config).await;
+    let supported_schemas = exchange_api_key_schemas().iter().collect::<Vec<_>>();
+    let supported_exchanges = supported_schemas
+        .iter()
+        .map(|schema| exchange_schema_status(&values, schema, "default", false, true))
+        .collect::<Vec<_>>();
+    let mut exchanges = Vec::new();
+    let mut seen_accounts = std::collections::BTreeSet::new();
+    for schema in supported_schemas {
+        for account in account_manager_accounts
+            .iter()
+            .filter(|account| account.exchange.eq_ignore_ascii_case(schema.exchange))
+        {
+            let account_id = normalize_account_id(&account.account_id);
+            let credential_namespace = account.credential_namespace.trim().to_ascii_uppercase();
+            if seen_accounts.insert((
+                schema.exchange.to_string(),
+                account_id.clone(),
+                credential_namespace.clone(),
+            )) {
+                let status = exchange_schema_status_for_namespace(
+                    &values,
+                    schema,
+                    &account_id,
+                    &credential_namespace,
+                    true,
+                    account.enabled,
+                );
+                if exchange_status_has_configured_field(&status) {
+                    exchanges.push(status);
+                }
+            }
+        }
+        for (account_id, credential_namespace) in discovered_configured_accounts(&values, schema) {
+            if seen_accounts.insert((
+                schema.exchange.to_string(),
+                account_id.clone(),
+                credential_namespace.clone(),
+            )) {
+                exchanges.push(exchange_schema_status_for_namespace(
+                    &values,
+                    schema,
+                    &account_id,
+                    &credential_namespace,
+                    true,
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(ExchangeApiKeyStatusResponse {
+        store_path: "local-agent:exchange-api-key-store".to_string(),
+        restart_required: false,
+        enabled_exchanges: account_manager_accounts
+            .iter()
+            .filter(|account| account.enabled)
+            .map(|account| account.exchange.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        account_manager_accounts,
+        supported_exchanges,
+        exchanges,
+    })
+}
+
+fn exchange_status_has_configured_field(status: &ExchangeApiKeyExchangeStatus) -> bool {
+    status.fields.iter().any(|field| field.configured)
+}
+
+async fn account_manager_accounts_for_status(path: &PathBuf) -> Vec<AccountManagerAccountStatus> {
+    read_account_manager_accounts(path)
+        .await
+        .unwrap_or_default()
+}
+
+async fn read_account_manager_accounts(path: &PathBuf) -> Result<Vec<AccountManagerAccountStatus>> {
+    let content = match tokio::fs::read_to_string(path).await {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
+    };
+    let config: AccountManagerConfigFile =
+        serde_yaml::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
+    let mut accounts = config
+        .accounts
+        .into_iter()
+        .map(|(account_id, account)| {
+            let name = account
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(account_id.as_str())
+                .to_string();
+            let exchange = account.exchange.trim().to_ascii_lowercase();
+            let env_prefix = account.env_prefix.trim().to_ascii_uppercase();
+            AccountManagerAccountStatus {
+                credential_namespace: credential_namespace_for_env_prefix(
+                    &exchange,
+                    &account_id,
+                    &env_prefix,
+                ),
+                account_id,
+                name,
+                exchange,
+                account_type: account.account_type.unwrap_or_default(),
+                description: account.description.unwrap_or_default(),
+                env_prefix,
+                enabled: account.enabled,
+            }
+        })
+        .collect::<Vec<_>>();
+    accounts.sort_by(|left, right| {
+        left.exchange
+            .cmp(&right.exchange)
+            .then_with(|| left.account_id.cmp(&right.account_id))
+    });
+    Ok(accounts)
+}
+
+fn exchange_schema_status(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    include_values: bool,
+    enabled: bool,
+) -> ExchangeApiKeyExchangeStatus {
+    let normalized_account_id = normalize_account_id(account_id);
+    let credential_namespace =
+        credential_namespace_for_account(schema, &normalized_account_id, None);
+    exchange_schema_status_for_namespace(
+        values,
+        schema,
+        &normalized_account_id,
+        &credential_namespace,
+        include_values,
+        enabled,
+    )
+}
+
+fn exchange_schema_status_for_namespace(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: &str,
+    include_values: bool,
+    enabled: bool,
+) -> ExchangeApiKeyExchangeStatus {
+    let normalized_account_id = normalize_account_id(account_id);
+    ExchangeApiKeyExchangeStatus {
+        exchange: schema.exchange.to_string(),
+        label: schema.label.to_string(),
+        enabled,
+        account_id: normalized_account_id.clone(),
+        account_label: account_label(&normalized_account_id),
+        credential_namespace: credential_namespace.to_string(),
+        is_default_account: normalized_account_id == "default",
+        fields: schema
+            .fields
+            .iter()
+            .map(|field| {
+                api_key_field_status_for_namespace(
+                    values,
+                    schema,
+                    field,
+                    &normalized_account_id,
+                    credential_namespace,
+                    include_values,
+                )
+            })
+            .collect(),
+    }
+}
+
+fn api_key_field_status_for_namespace(
+    values: &BTreeMap<String, String>,
+    exchange_schema: &ExchangeApiKeySchema,
+    field_schema: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+    include_values: bool,
+) -> ExchangeApiKeyFieldStatus {
+    let configured = configured_field_value_for_namespace(
+        values,
+        exchange_schema,
+        field_schema,
+        account_id,
+        credential_namespace,
+    );
+    ExchangeApiKeyFieldStatus {
+        field: field_schema.field.to_string(),
+        label: field_schema.label.to_string(),
+        required: field_schema.required,
+        configured: configured.is_some(),
+        source: configured.as_ref().map(|(source, _)| source.clone()),
+        masked: include_values
+            .then_some(configured.as_ref())
+            .flatten()
+            .map(|(_, value)| mask_secret(value.as_str())),
+        value: include_values
+            .then_some(configured.as_ref())
+            .flatten()
+            .filter(|_| field_schema.field == "account_id")
+            .map(|(_, value)| value.clone()),
+    }
+}
+
+async fn apply_exchange_api_key_update(
+    state: &LocalCredentialState,
+    request: ExchangeApiKeyUpdateRequest,
+) -> Result<()> {
+    let exchange = request.exchange.trim().to_ascii_lowercase();
+    let raw_account_id = request.account_id.as_deref().unwrap_or("default").trim();
+    validate_account_identifier(raw_account_id)?;
+    let account_id = normalize_account_id(raw_account_id);
+    let credential_namespace_input = request.credential_namespace.as_deref();
+    reject_multiline_secret("account_label", request.account_label.as_deref())?;
+    reject_multiline_secret("credential_namespace", credential_namespace_input)?;
+    reject_multiline_secret("account_id", request.exchange_account_id.as_deref())?;
+    reject_multiline_secret("api_key", request.api_key.as_deref())?;
+    reject_multiline_secret("api_secret", request.api_secret.as_deref())?;
+    reject_multiline_secret("passphrase", request.passphrase.as_deref())?;
+    let mut values = read_env_store(&state.exchange_api_key_store).await?;
+    let schema = exchange_api_key_schema(&exchange)
+        .ok_or_else(|| anyhow::anyhow!("unsupported exchange {}", request.exchange))?;
+    let account_manager_accounts = read_account_manager_accounts(&state.accounts_config)
+        .await
+        .unwrap_or_default();
+    let credential_namespace = credential_namespace_for_update(
+        schema,
+        &account_manager_accounts,
+        &account_id,
+        credential_namespace_input,
+    )?;
+    validate_credential_namespace(&credential_namespace)?;
+    if request.clear {
+        clear_exchange_values_for_namespace(
+            &mut values,
+            schema,
+            &account_id,
+            &credential_namespace,
+        );
+    } else {
+        for field in schema.fields {
+            if let Some(value) = request_secret_value(&request, field.field) {
+                set_account_field_value_for_namespace(
+                    &mut values,
+                    schema,
+                    field,
+                    &account_id,
+                    &credential_namespace,
+                    value,
+                );
+            }
+        }
+        for field in schema.fields.iter().filter(|field| field.required) {
+            if !field_value_present_for_namespace(
+                &values,
+                schema,
+                field,
+                &account_id,
+                &credential_namespace,
+            ) {
+                return Err(anyhow::anyhow!(
+                    "{} {} requires {}",
+                    schema.label,
+                    account_label(&account_id),
+                    field.label
+                ));
+            }
+        }
+    }
+    write_env_store(&state.exchange_api_key_store, &values).await
+}
+
+async fn clear_exchange_api_keys(path: &PathBuf, exchange: &str) -> Result<()> {
+    let (normalized, account_id) = parse_exchange_account_path(exchange);
+    let schema = exchange_api_key_schema(&normalized)
+        .ok_or_else(|| anyhow::anyhow!("unsupported exchange {exchange}"))?;
+    let mut values = read_env_store(path).await?;
+    clear_exchange_values(&mut values, schema, &account_id);
+    write_env_store(path, &values).await
+}
+
+fn clear_exchange_values(
+    values: &mut BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+) {
+    let credential_namespace = credential_namespace_for_account(schema, account_id, None);
+    clear_exchange_values_for_namespace(values, schema, account_id, &credential_namespace);
+}
+
+fn clear_exchange_values_for_namespace(
+    values: &mut BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: &str,
+) {
+    if account_id == "default" {
+        if credential_namespace.eq_ignore_ascii_case(&env_exchange_prefix(schema.exchange)) {
+            clear_all_exchange_values(values, schema);
+        } else {
+            for field in schema.fields {
+                for key in namespace_env_keys(credential_namespace, field.field) {
+                    values.remove(&key);
+                }
+            }
+        }
+        return;
+    }
+    for field in schema.fields {
+        for key in namespace_env_keys(credential_namespace, field.field) {
+            values.remove(&key);
+        }
+    }
+    values.remove(&account_label_env_key(schema, account_id));
+}
+
+fn clear_all_exchange_values(values: &mut BTreeMap<String, String>, schema: &ExchangeApiKeySchema) {
+    for field in schema.fields {
+        for alias in field.aliases {
+            values.remove(*alias);
+        }
+    }
+    values.remove(&account_label_env_key(schema, "default"));
+    let prefix = account_env_prefix(schema.exchange);
+    let keys = values
+        .keys()
+        .filter(|key| key.starts_with(&prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in keys {
+        values.remove(&key);
+    }
+}
+
+fn request_secret_value<'a>(
+    request: &'a ExchangeApiKeyUpdateRequest,
+    field: &str,
+) -> Option<&'a str> {
+    match field {
+        "account_id" => request.exchange_account_id.as_deref(),
+        "api_key" => request.api_key.as_deref(),
+        "api_secret" => request.api_secret.as_deref(),
+        "passphrase" => request.passphrase.as_deref(),
+        _ => None,
+    }
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+}
+
+fn configured_field_value(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+) -> Option<(String, String)> {
+    if account_id == "default" {
+        field.aliases.iter().find_map(|alias| {
+            if let Some(value) = values.get(*alias) {
+                return (!value.is_empty()).then(|| ("key_store".to_string(), value.clone()));
+            }
+            std::env::var(alias)
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(|value| ("process_env".to_string(), value))
+        })
+    } else {
+        let key = account_env_key(schema, account_id, field.field);
+        if let Some(value) = values.get(&key) {
+            return (!value.is_empty()).then(|| ("key_store".to_string(), value.clone()));
+        }
+        std::env::var(&key)
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(|value| ("process_env".to_string(), value))
+    }
+}
+
+fn configured_field_value_for_namespace(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+) -> Option<(String, String)> {
+    let default_prefix = env_exchange_prefix(schema.exchange);
+    if credential_namespace.eq_ignore_ascii_case(&default_prefix) {
+        return configured_field_value(values, schema, field, account_id);
+    }
+    namespace_env_keys(credential_namespace, field.field)
+        .into_iter()
+        .find_map(|key| {
+            if let Some(value) = values.get(&key) {
+                return (!value.is_empty()).then(|| ("key_store".to_string(), value.clone()));
+            }
+            std::env::var(&key)
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(|value| ("process_env".to_string(), value))
+        })
+}
+
+fn field_value_present_for_namespace(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+) -> bool {
+    configured_field_value_for_namespace(values, schema, field, account_id, credential_namespace)
+        .is_some()
+}
+
+fn discovered_configured_accounts(
+    values: &BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+) -> Vec<(String, String)> {
+    let mut accounts = BTreeMap::new();
+    let default_namespace = env_exchange_prefix(schema.exchange);
+    if schema.fields.iter().any(|field| {
+        configured_field_value_for_namespace(values, schema, field, "default", &default_namespace)
+            .is_some()
+    }) {
+        accounts.insert("default".to_string(), default_namespace);
+    }
+    for key in configured_env_key_names(values) {
+        if let Some((account_id, credential_namespace)) =
+            account_namespace_from_env_key(schema, &key)
+        {
+            accounts.insert(account_id, credential_namespace);
+        }
+    }
+    accounts.into_iter().collect()
+}
+
+fn configured_env_key_names(values: &BTreeMap<String, String>) -> Vec<String> {
+    values
+        .iter()
+        .filter(|(_, value)| !value.trim().is_empty())
+        .map(|(key, _)| key.clone())
+        .chain(
+            std::env::vars()
+                .filter(|(_, value)| !value.trim().is_empty())
+                .map(|(key, _)| key),
+        )
+        .collect()
+}
+
+fn account_namespace_from_env_key(
+    schema: &ExchangeApiKeySchema,
+    key: &str,
+) -> Option<(String, String)> {
+    let key = key.trim().to_ascii_uppercase();
+    let prefix = format!("{}__", env_exchange_prefix(schema.exchange));
+    let rest = key.strip_prefix(&prefix)?;
+    for field in schema.fields {
+        let field = field.field.to_ascii_uppercase();
+        let legacy_suffix = format!("__{field}");
+        if let Some(raw_account) = rest.strip_suffix(&legacy_suffix) {
+            let account_id = normalize_account_id(raw_account);
+            if account_id != "default" {
+                return Some((
+                    account_id.clone(),
+                    credential_namespace_for_account(schema, &account_id, None),
+                ));
+            }
+        }
+        let suffix = format!("_{field}");
+        if let Some(raw_account) = rest.strip_suffix(&suffix) {
+            let account_id = normalize_account_id(raw_account);
+            if account_id != "default" {
+                return Some((
+                    account_id.clone(),
+                    credential_namespace_for_account(schema, &account_id, None),
+                ));
+            }
+        }
+    }
+    None
+}
+
+fn set_account_field_value_for_namespace(
+    values: &mut BTreeMap<String, String>,
+    schema: &ExchangeApiKeySchema,
+    field: &ExchangeApiFieldSchema,
+    account_id: &str,
+    credential_namespace: &str,
+    value: &str,
+) {
+    let default_prefix = env_exchange_prefix(schema.exchange);
+    if !credential_namespace.eq_ignore_ascii_case(&default_prefix) {
+        if let Some(key) = namespace_env_keys(credential_namespace, field.field)
+            .into_iter()
+            .next()
+        {
+            set_if_present(values, &key, Some(value));
+        }
+        return;
+    }
+    if account_id == "default" {
+        for alias in field.aliases {
+            set_if_present(values, alias, Some(value));
+        }
+    } else {
+        let key = account_env_key(schema, account_id, field.field);
+        set_if_present(values, &key, Some(value));
+    }
+}
+
+fn credential_namespace_for_account(
+    schema: &ExchangeApiKeySchema,
+    account_id: &str,
+    credential_namespace: Option<&str>,
+) -> String {
+    let configured = credential_namespace
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase());
+    if let Some(namespace) = configured {
+        return namespace;
+    }
+    let account_id = normalize_account_id(account_id);
+    if account_id == "default" {
+        env_exchange_prefix(schema.exchange)
+    } else {
+        format!(
+            "{}__{}_",
+            env_exchange_prefix(schema.exchange),
+            account_id.to_ascii_uppercase().replace('-', "_")
+        )
+    }
+}
+
+fn credential_namespace_for_env_prefix(
+    exchange: &str,
+    account_id: &str,
+    env_prefix: &str,
+) -> String {
+    let default_prefix = env_exchange_prefix(exchange);
+    let configured_prefix = env_prefix.trim();
+    if !configured_prefix.is_empty() {
+        return configured_prefix.to_ascii_uppercase();
+    }
+    let account_id = normalize_account_id(account_id);
+    if account_id == "default" {
+        default_prefix
+    } else {
+        format!(
+            "{}__{}_",
+            default_prefix,
+            account_id.to_ascii_uppercase().replace('-', "_")
+        )
+    }
+}
+
+fn credential_namespace_for_update(
+    schema: &ExchangeApiKeySchema,
+    account_manager_accounts: &[AccountManagerAccountStatus],
+    account_id: &str,
+    credential_namespace: Option<&str>,
+) -> Result<String> {
+    let account = account_manager_accounts.iter().find(|account| {
+        account.exchange.eq_ignore_ascii_case(schema.exchange)
+            && account.account_id.eq_ignore_ascii_case(account_id)
+    });
+    if let Some(account) = account {
+        let namespace = account.credential_namespace.trim().to_ascii_uppercase();
+        if namespace.is_empty() {
+            anyhow::bail!(
+                "{} account {} has empty env_prefix in account manager",
+                schema.label,
+                account_id
+            );
+        }
+        if let Some(requested) = credential_namespace
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let requested = requested.to_ascii_uppercase();
+            if requested != namespace {
+                anyhow::bail!(
+                    "{} account {} env_prefix mismatch: account manager uses {}, request used {}",
+                    schema.label,
+                    account_id,
+                    namespace,
+                    requested
+                );
+            }
+        }
+        return Ok(namespace);
+    }
+    Ok(credential_namespace
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase())
+        .unwrap_or_else(|| credential_namespace_for_account(schema, account_id, None)))
+}
+
+fn validate_account_identifier(account_id: &str) -> Result<()> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return Ok(());
+    }
+    if account_id
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        Ok(())
+    } else {
+        anyhow::bail!("account_id must contain only ASCII letters, digits, and _")
+    }
+}
+
+fn validate_credential_namespace(credential_namespace: &str) -> Result<()> {
+    if credential_namespace.is_empty()
+        || credential_namespace
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))
+    {
+        anyhow::bail!("credential_namespace must contain only ASCII letters, digits, and _");
+    }
+    Ok(())
+}
+
+fn normalize_account_id(value: &str) -> String {
+    let normalized = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let normalized = normalized.trim_matches('_').trim_matches('-').to_string();
+    if normalized.is_empty() || normalized == "main" {
+        "default".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn account_label(account_id: &str) -> String {
+    if account_id == "default" {
+        "Default".to_string()
+    } else {
+        account_id.to_string()
+    }
+}
+
+fn parse_exchange_account_path(exchange: &str) -> (String, String) {
+    if let Some((exchange, account_id)) = exchange.split_once(':') {
+        (
+            exchange.trim().to_ascii_lowercase(),
+            normalize_account_id(account_id),
+        )
+    } else {
+        (exchange.trim().to_ascii_lowercase(), "default".to_string())
+    }
+}
+
+fn account_env_key(schema: &ExchangeApiKeySchema, account_id: &str, field: &str) -> String {
+    format!(
+        "{}{}__{}",
+        account_env_prefix(schema.exchange),
+        account_id.to_ascii_uppercase().replace('-', "_"),
+        field.to_ascii_uppercase()
+    )
+}
+
+fn namespace_env_keys(credential_namespace: &str, field: &str) -> Vec<String> {
+    let namespace = credential_namespace.trim().to_ascii_uppercase();
+    let field = field.trim().to_ascii_uppercase();
+    if namespace.is_empty() || field.is_empty() {
+        return Vec::new();
+    }
+    let mut keys = Vec::new();
+    if namespace.ends_with('_') {
+        keys.push(format!("{namespace}{field}"));
+        if namespace.contains("__") {
+            keys.push(format!("{}__{field}", namespace.trim_end_matches('_')));
+        }
+    } else {
+        keys.push(format!("{namespace}_{field}"));
+    }
+    keys.dedup();
+    keys
+}
+
+fn account_label_env_key(schema: &ExchangeApiKeySchema, account_id: &str) -> String {
+    if account_id == "default" {
+        format!("{}_ACCOUNT_LABEL", env_exchange_prefix(schema.exchange))
+    } else {
+        account_env_key(schema, account_id, "account_label")
+    }
+}
+
+fn account_env_prefix(exchange: &str) -> String {
+    let prefix = env_exchange_prefix(exchange);
+    if prefix.ends_with('_') {
+        format!("{prefix}_")
+    } else {
+        format!("{prefix}__")
+    }
+}
+
+fn env_exchange_prefix(exchange: &str) -> String {
+    exchange
+        .trim_end_matches("_spot")
+        .to_ascii_uppercase()
+        .replace('-', "_")
+}
+
+fn exchange_api_key_schema(exchange: &str) -> Option<&'static ExchangeApiKeySchema> {
+    let normalized_exchange = exchange.trim().to_ascii_lowercase();
+    let normalized = match normalized_exchange.as_str() {
+        "gate" | "gate.io" | "gateio" => "gate",
+        "binance_spot" => "binance",
+        "okx_spot" => "okx",
+        value => value,
+    };
+    exchange_api_key_schemas()
+        .iter()
+        .find(|schema| schema.exchange == normalized)
+}
+
+fn exchange_api_key_schemas() -> &'static [ExchangeApiKeySchema] {
+    const MEXC_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["MEXC_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["MEXC_API_SECRET"],
+            required: true,
+        },
+    ];
+    const COINEX_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["COINEX_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["COINEX_API_SECRET"],
+            required: true,
+        },
+    ];
+    const GATE_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "account_id",
+            label: "Gate User ID / Account ID",
+            aliases: &[
+                "GATE_ACCOUNT_ID",
+                "GATEIO_ACCOUNT_ID",
+                "GATE_USER_ID",
+                "GATEIO_USER_ID",
+            ],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["GATE_API_KEY", "GATEIO_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["GATE_API_SECRET", "GATEIO_API_SECRET"],
+            required: true,
+        },
+    ];
+    const BYBIT_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["BYBIT_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["BYBIT_API_SECRET"],
+            required: true,
+        },
+    ];
+    const HTX_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["HTX_API_KEY", "HUOBI_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["HTX_API_SECRET", "HUOBI_API_SECRET"],
+            required: true,
+        },
+    ];
+    const BITMART_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["BITMART_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["BITMART_API_SECRET"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "passphrase",
+            label: "Memo",
+            aliases: &["BITMART_MEMO", "BITMART_API_MEMO", "BITMART_PASSPHRASE"],
+            required: true,
+        },
+    ];
+    const HYPERLIQUID_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "Wallet / API Key",
+            aliases: &["HYPERLIQUID_API_KEY", "HYPERLIQUID_WALLET_ADDRESS"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "Private Key",
+            aliases: &["HYPERLIQUID_API_SECRET", "HYPERLIQUID_PRIVATE_KEY"],
+            required: true,
+        },
+    ];
+    const BITGET_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["BITGET_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["BITGET_API_SECRET"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "passphrase",
+            label: "Passphrase",
+            aliases: &["BITGET_PASSPHRASE", "BITGET_API_PASSPHRASE"],
+            required: true,
+        },
+    ];
+    const KUCOIN_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["KUCOIN_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["KUCOIN_API_SECRET"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "passphrase",
+            label: "API Passphrase",
+            aliases: &["KUCOIN_API_PASSPHRASE"],
+            required: true,
+        },
+    ];
+    const BINANCE_SPOT_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["BINANCE_SPOT_API_KEY", "BINANCE_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["BINANCE_SPOT_API_SECRET", "BINANCE_API_SECRET"],
+            required: true,
+        },
+    ];
+    const OKX_SPOT_FIELDS: &[ExchangeApiFieldSchema] = &[
+        ExchangeApiFieldSchema {
+            field: "api_key",
+            label: "API Key",
+            aliases: &["OKX_SPOT_API_KEY", "OKX_API_KEY"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "api_secret",
+            label: "API Secret",
+            aliases: &["OKX_SPOT_API_SECRET", "OKX_API_SECRET"],
+            required: true,
+        },
+        ExchangeApiFieldSchema {
+            field: "passphrase",
+            label: "Passphrase",
+            aliases: &["OKX_SPOT_PASSPHRASE", "OKX_PASSPHRASE"],
+            required: true,
+        },
+    ];
+    const SCHEMAS: &[ExchangeApiKeySchema] = &[
+        ExchangeApiKeySchema {
+            exchange: "binance",
+            label: "Binance",
+            fields: BINANCE_SPOT_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "okx",
+            label: "OKX",
+            fields: OKX_SPOT_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "bitget",
+            label: "Bitget",
+            fields: BITGET_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "gate",
+            label: "Gate.io",
+            fields: GATE_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "bybit",
+            label: "Bybit",
+            fields: BYBIT_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "mexc",
+            label: "MEXC",
+            fields: MEXC_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "coinex",
+            label: "CoinEx",
+            fields: COINEX_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "kucoin",
+            label: "KuCoin",
+            fields: KUCOIN_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "htx",
+            label: "HTX",
+            fields: HTX_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "bitmart",
+            label: "BitMart",
+            fields: BITMART_FIELDS,
+        },
+        ExchangeApiKeySchema {
+            exchange: "hyperliquid",
+            label: "Hyperliquid",
+            fields: HYPERLIQUID_FIELDS,
+        },
+    ];
+    SCHEMAS
+}
+
+fn set_if_present(values: &mut BTreeMap<String, String>, key: &str, value: Option<&str>) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        values.insert(key.to_string(), value.to_string());
+    }
+}
+
+fn reject_multiline_secret(field: &str, value: Option<&str>) -> Result<()> {
+    if value.is_some_and(|value| value.contains('\n') || value.contains('\r')) {
+        return Err(anyhow::anyhow!("{field} must be a single-line value"));
+    }
+    Ok(())
+}
+
+async fn read_env_store(path: &PathBuf) -> Result<BTreeMap<String, String>> {
+    let content = match tokio::fs::read_to_string(path).await {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
+    };
+    let mut values = BTreeMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if is_shell_env_key(key) {
+            values.insert(key.to_string(), parse_shell_env_value(value.trim()));
+        }
+    }
+    Ok(values)
+}
+
+async fn write_env_store(path: &PathBuf, values: &BTreeMap<String, String>) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("create {}", parent.display()))?;
+    }
+    let mut content = "# Managed by RustCTA control-api. Do not commit this file.\n".to_string();
+    for (key, value) in values {
+        if is_shell_env_key(key) {
+            content.push_str(key);
+            content.push('=');
+            content.push_str(&shell_quote(value));
+            content.push('\n');
+        }
+    }
+    let tmp_path = path.with_extension("env.tmp");
+    tokio::fs::write(&tmp_path, content)
+        .await
+        .with_context(|| format!("write {}", tmp_path.display()))?;
+    set_file_mode_600(&tmp_path).await?;
+    tokio::fs::rename(&tmp_path, path)
+        .await
+        .with_context(|| format!("replace {}", path.display()))?;
+    set_file_mode_600(path).await?;
+    Ok(())
+}
+
+async fn set_file_mode_600(path: &PathBuf) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        tokio::fs::set_permissions(path, permissions)
+            .await
+            .with_context(|| format!("chmod 600 {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn parse_shell_env_value(value: &str) -> String {
+    if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
+        value[1..value.len() - 1].replace("'\\''", "'")
+    } else {
+        value.trim_matches('"').to_string()
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn is_shell_env_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn mask_secret(value: &str) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= 8 {
+        return "********".to_string();
+    }
+    let prefix = chars.iter().take(4).collect::<String>();
+    let suffix = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
 }
 
 async fn local_create_strategy(
@@ -678,6 +2034,732 @@ async fn local_agent_strategy_config(
             "local_path_exposed": false,
         }),
     )
+}
+
+async fn local_agent_cross_arb_exchanges(
+    State(state): State<LocalSideEffectState>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+        Ok(view) => local_json_response(
+            StatusCode::OK,
+            cross_arb_exchange_config_response(&view, &operation_id, false, false),
+        ),
+        Err(response) => response,
+    }
+}
+
+async fn local_agent_save_cross_arb_exchanges(
+    State(state): State<LocalSideEffectState>,
+    Json(request): Json<CrossArbExchangeConfigUpdateRequest>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    if request.apply && state.config.command_queue_path.is_none() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "command_queue_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    let mut view = match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+        Ok(view) => view,
+        Err(response) => return response,
+    };
+    let strategy_id = request
+        .strategy_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(CROSS_ARB_STRATEGY_ID)
+        .to_string();
+
+    let mut next = Map::<String, Value>::new();
+    let mut invalid_rows = 0usize;
+    for row in &request.exchanges {
+        let exchange_hint = row
+            .get("exchange")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let existing = storage_exchange_key(exchange_hint)
+            .and_then(|key| view.exchange_map.get(&key))
+            .or_else(|| {
+                row.get("exchange")
+                    .and_then(Value::as_str)
+                    .and_then(|exchange| find_exchange_config(&view.exchange_map, exchange))
+            });
+        if let Some((key, config)) = normalize_cross_arb_exchange_row(exchange_hint, row, existing)
+        {
+            next.insert(key, config);
+        } else {
+            invalid_rows += 1;
+        }
+    }
+    view.exchange_map = next;
+    view.exchanges = exchange_rows_from_map(&view.exchange_map);
+    view.enabled_exchanges = enabled_exchanges_from_map(&view.exchange_map);
+    view.cleaned_invalid_count += invalid_rows;
+    sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
+
+    match persist_cross_arb_exchange_config(
+        &state,
+        &view,
+        &operation_id,
+        &strategy_id,
+        "local_agent_cross_arb_exchange_config_save",
+        request.apply,
+    )
+    .await
+    {
+        Ok(realtime_queued) => local_json_response(
+            StatusCode::ACCEPTED,
+            cross_arb_exchange_config_response(&view, &operation_id, true, realtime_queued),
+        ),
+        Err(response) => response,
+    }
+}
+
+async fn local_agent_delete_cross_arb_exchange(
+    State(state): State<LocalSideEffectState>,
+    AxumPath(exchange): AxumPath<String>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    if state.config.command_queue_path.is_none() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "command_queue_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    let mut view = match load_cross_arb_exchange_config(&state, &operation_id, true).await {
+        Ok(view) => view,
+        Err(response) => return response,
+    };
+    let Some(remove_key) = find_exchange_config_key(&view.exchange_map, &exchange) else {
+        return local_json_response(
+            StatusCode::OK,
+            json!({
+                "schema_version": 1,
+                "accepted": true,
+                "status": "not_found",
+                "operation_id": operation_id,
+                "removed_exchange": exchange,
+                "exchanges": view.exchanges,
+                "enabled_exchanges": view.enabled_exchanges,
+                "local_path_exposed": false,
+            }),
+        );
+    };
+    view.exchange_map.remove(&remove_key);
+    view.removed_exchanges.push(remove_key.clone());
+    view.exchanges = exchange_rows_from_map(&view.exchange_map);
+    view.enabled_exchanges = enabled_exchanges_from_map(&view.exchange_map);
+    sync_cross_arb_exchanges_into_root(&mut view.root, &view.exchange_map, &view.enabled_exchanges);
+
+    match persist_cross_arb_exchange_config(
+        &state,
+        &view,
+        &operation_id,
+        CROSS_ARB_STRATEGY_ID,
+        "local_agent_cross_arb_exchange_config_delete",
+        true,
+    )
+    .await
+    {
+        Ok(realtime_queued) => {
+            let mut response =
+                cross_arb_exchange_config_response(&view, &operation_id, true, realtime_queued);
+            if let Some(map) = response.as_object_mut() {
+                map.insert("removed_exchange".to_string(), Value::String(remove_key));
+            }
+            local_json_response(StatusCode::ACCEPTED, response)
+        }
+        Err(response) => response,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CrossArbExchangeConfigView {
+    root: Value,
+    exchange_map: Map<String, Value>,
+    exchanges: Vec<Value>,
+    enabled_exchanges: Vec<String>,
+    cleaned_invalid_count: usize,
+    removed_exchanges: Vec<String>,
+    cleaned_on_read: bool,
+}
+
+async fn load_cross_arb_exchange_config(
+    state: &LocalSideEffectState,
+    operation_id: &str,
+    persist_cleaned: bool,
+) -> Result<CrossArbExchangeConfigView, (StatusCode, Json<Value>)> {
+    let Some(path) = state.config.strategy_config_path.as_ref() else {
+        return Err(local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "configured": false,
+                "status": "strategy_config_not_configured",
+                "operation_id": operation_id,
+                "path": LOCAL_STRATEGY_CONFIG_REF,
+                "local_path_exposed": false,
+            }),
+        ));
+    };
+    let content = match tokio::fs::read_to_string(path).await {
+        Ok(content) => content,
+        Err(error) => {
+            return Err(local_json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({
+                    "schema_version": 1,
+                    "configured": true,
+                    "status": "read_failed",
+                    "read_error": local_io_error_kind(&error),
+                    "operation_id": operation_id,
+                    "path": LOCAL_STRATEGY_CONFIG_REF,
+                    "local_path_exposed": false,
+                }),
+            ))
+        }
+    };
+    let mut root = match serde_yaml::from_str::<Value>(&content) {
+        Ok(value) => value,
+        Err(_) => {
+            return Err(local_json_response(
+                StatusCode::BAD_REQUEST,
+                json!({
+                    "schema_version": 1,
+                    "configured": true,
+                    "status": "invalid_yaml",
+                    "operation_id": operation_id,
+                    "path": LOCAL_STRATEGY_CONFIG_REF,
+                    "local_path_exposed": false,
+                }),
+            ))
+        }
+    };
+    if !root.is_object() {
+        return Err(local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "schema_version": 1,
+                "configured": true,
+                "status": "invalid_strategy_config_root",
+                "operation_id": operation_id,
+                "path": LOCAL_STRATEGY_CONFIG_REF,
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+
+    let previous_root = root.clone();
+    let (exchange_map, cleaned_invalid_count, removed_exchanges) =
+        sanitize_cross_arb_exchange_map(root.get("exchanges"));
+    let enabled_exchanges = enabled_exchanges_from_root_or_map(&root, &exchange_map);
+    sync_cross_arb_exchanges_into_root(&mut root, &exchange_map, &enabled_exchanges);
+    let cleaned_on_read = root != previous_root;
+    if persist_cleaned && cleaned_on_read {
+        if !state.control.audit_ledger_configured() {
+            return Err(local_json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({
+                    "schema_version": 1,
+                    "configured": true,
+                    "status": "audit_ledger_not_configured",
+                    "operation_id": operation_id,
+                    "path": LOCAL_STRATEGY_CONFIG_REF,
+                    "local_path_exposed": false,
+                }),
+            ));
+        }
+        if state
+            .control
+            .record_operator_audit(
+                "local_agent_cross_arb_exchange_config_clean",
+                state.agent.agent_id.clone(),
+                json!({
+                    "operation_id": operation_id,
+                    "cleaned_invalid_count": cleaned_invalid_count,
+                    "removed_exchanges": removed_exchanges,
+                    "would_submit_order": false,
+                    "local_path_exposed": false,
+                }),
+            )
+            .await
+            .is_err()
+        {
+            return Err(local_json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({
+                    "schema_version": 1,
+                    "configured": true,
+                    "status": "audit_write_failed",
+                    "operation_id": operation_id,
+                    "path": LOCAL_STRATEGY_CONFIG_REF,
+                    "local_path_exposed": false,
+                }),
+            ));
+        }
+        if write_strategy_yaml(path, &root, operation_id)
+            .await
+            .is_err()
+        {
+            return Err(local_json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({
+                    "schema_version": 1,
+                    "configured": true,
+                    "status": "write_failed",
+                    "operation_id": operation_id,
+                    "path": LOCAL_STRATEGY_CONFIG_REF,
+                    "local_path_exposed": false,
+                }),
+            ));
+        }
+    }
+    Ok(CrossArbExchangeConfigView {
+        root,
+        exchanges: exchange_rows_from_map(&exchange_map),
+        exchange_map,
+        enabled_exchanges,
+        cleaned_invalid_count,
+        removed_exchanges,
+        cleaned_on_read,
+    })
+}
+
+async fn persist_cross_arb_exchange_config(
+    state: &LocalSideEffectState,
+    view: &CrossArbExchangeConfigView,
+    operation_id: &str,
+    strategy_id: &str,
+    action: &str,
+    apply: bool,
+) -> Result<bool, (StatusCode, Json<Value>)> {
+    let Some(path) = state.config.strategy_config_path.as_ref() else {
+        return Err(local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "strategy_config_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        ));
+    };
+    if !state.control.audit_ledger_configured() {
+        return Err(local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "audit_ledger_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+    if state
+        .control
+        .record_operator_audit(
+            action,
+            state.agent.agent_id.clone(),
+            json!({
+                "operation_id": operation_id,
+                "strategy_id": strategy_id,
+                "exchange_count": view.exchanges.len(),
+                "enabled_exchanges": view.enabled_exchanges,
+                "removed_exchanges": view.removed_exchanges,
+                "would_submit_order": false,
+                "local_path_exposed": false,
+            }),
+        )
+        .await
+        .is_err()
+    {
+        return Err(local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+    if write_strategy_yaml(path, &view.root, operation_id)
+        .await
+        .is_err()
+    {
+        return Err(local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "write_failed",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+
+    if !apply {
+        return Ok(false);
+    }
+    let command = json!({
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "command": "update_cross_arb_exchange_config",
+        "strategy_id": strategy_id,
+        "payload": {
+            "strategy_id": strategy_id,
+            "enabled_exchanges": view.enabled_exchanges,
+            "exchanges": view.exchanges,
+        },
+        "source": "local_agent",
+        "accepted_at": Utc::now(),
+    });
+    if append_local_jsonl(state.config.command_queue_path.as_ref(), &command)
+        .await
+        .is_err()
+    {
+        return Err(local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "command_queue_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+    Ok(true)
+}
+
+fn cross_arb_exchange_config_response(
+    view: &CrossArbExchangeConfigView,
+    operation_id: &str,
+    accepted: bool,
+    realtime_queued: bool,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "configured": true,
+        "accepted": accepted,
+        "status": "ok",
+        "operation_id": operation_id,
+        "path": LOCAL_STRATEGY_CONFIG_REF,
+        "strategy_id": CROSS_ARB_STRATEGY_ID,
+        "exchanges": view.exchanges,
+        "enabled_exchanges": view.enabled_exchanges,
+        "cleaned_on_read": view.cleaned_on_read,
+        "cleaned_invalid_count": view.cleaned_invalid_count,
+        "removed_exchanges": view.removed_exchanges,
+        "realtime": {
+            "requested": accepted,
+            "queued": realtime_queued,
+        },
+        "local_path_exposed": false,
+    })
+}
+
+fn sanitize_cross_arb_exchange_map(
+    value: Option<&Value>,
+) -> (Map<String, Value>, usize, Vec<String>) {
+    let mut cleaned_invalid_count = 0usize;
+    let mut removed_exchanges = Vec::<String>::new();
+    let mut map = Map::<String, Value>::new();
+    match value {
+        Some(Value::Object(rows)) => {
+            for (exchange, row) in rows {
+                match normalize_cross_arb_exchange_row(exchange, row, None) {
+                    Some((key, config)) => {
+                        map.insert(key, config);
+                    }
+                    None => {
+                        cleaned_invalid_count += 1;
+                        if !exchange.trim().is_empty() {
+                            removed_exchanges.push(exchange.clone());
+                        }
+                    }
+                }
+            }
+        }
+        Some(Value::Array(rows)) => {
+            for row in rows {
+                let exchange = row
+                    .get("exchange")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                match normalize_cross_arb_exchange_row(exchange, row, None) {
+                    Some((key, config)) => {
+                        map.insert(key, config);
+                    }
+                    None => cleaned_invalid_count += 1,
+                }
+            }
+        }
+        Some(Value::Null) | None => {}
+        Some(_) => cleaned_invalid_count += 1,
+    }
+    (map, cleaned_invalid_count, removed_exchanges)
+}
+
+fn normalize_cross_arb_exchange_row(
+    exchange_hint: &str,
+    row: &Value,
+    base: Option<&Value>,
+) -> Option<(String, Value)> {
+    let row_object = row.as_object()?;
+    let exchange = row
+        .get("exchange")
+        .and_then(Value::as_str)
+        .unwrap_or(exchange_hint);
+    let key = storage_exchange_key(exchange)?;
+    let mut object = base
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_else(Map::new);
+    for (field, value) in row_object {
+        if field == "exchange" {
+            continue;
+        }
+        object.insert(field.clone(), value.clone());
+    }
+    normalize_cross_arb_exchange_fields(&key, &mut object);
+    Some((key, Value::Object(object)))
+}
+
+fn normalize_cross_arb_exchange_fields(exchange: &str, object: &mut Map<String, Value>) {
+    let enabled = object
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            object
+                .get("operating_mode")
+                .and_then(Value::as_str)
+                .map(|value| value.eq_ignore_ascii_case("enabled"))
+                .unwrap_or(false)
+        });
+    object.insert("enabled".to_string(), Value::Bool(enabled));
+    object.insert(
+        "operating_mode".to_string(),
+        Value::String(if enabled { "enabled" } else { "disabled" }.to_string()),
+    );
+    normalize_string_or_null(object, "account_id");
+    normalize_string_or_null(object, "env_prefix");
+    normalize_string_or_null(object, "private_rest_base_url");
+    normalize_string_or_null(object, "private_ws_url");
+    normalize_string_with_default(
+        object,
+        "position_mode",
+        if matches!(exchange, "okx") {
+            "net"
+        } else {
+            "hedge"
+        },
+    );
+    normalize_bool_with_default(object, "private_rest_enabled", true);
+    normalize_bool_with_default(object, "private_ws_enabled", true);
+    normalize_bool_with_default(object, "demo_trading", false);
+    normalize_u64_with_default(
+        object,
+        "ws_batch_size",
+        if matches!(exchange, "bitget") { 50 } else { 80 },
+    );
+    if object
+        .get("private_ws_run")
+        .is_some_and(|value| !value.is_object())
+    {
+        object.remove("private_ws_run");
+    }
+    if object.get("routes").is_some_and(|value| !value.is_object()) {
+        object.remove("routes");
+    }
+}
+
+fn normalize_string_or_null(object: &mut Map<String, Value>, field: &str) {
+    match object.get(field).and_then(Value::as_str).map(str::trim) {
+        Some(value) if !value.is_empty() && value != "-" => {
+            object.insert(field.to_string(), Value::String(value.to_string()));
+        }
+        _ => {
+            object.insert(field.to_string(), Value::Null);
+        }
+    }
+}
+
+fn normalize_string_with_default(object: &mut Map<String, Value>, field: &str, default: &str) {
+    let value = object
+        .get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "-")
+        .unwrap_or(default);
+    object.insert(field.to_string(), Value::String(value.to_string()));
+}
+
+fn normalize_bool_with_default(object: &mut Map<String, Value>, field: &str, default: bool) {
+    let value = object
+        .get(field)
+        .and_then(Value::as_bool)
+        .unwrap_or(default);
+    object.insert(field.to_string(), Value::Bool(value));
+}
+
+fn normalize_u64_with_default(object: &mut Map<String, Value>, field: &str, default: u64) {
+    let value = object.get(field).and_then(Value::as_u64).unwrap_or(default);
+    object.insert(field.to_string(), Value::from(value));
+}
+
+fn sync_cross_arb_exchanges_into_root(
+    root: &mut Value,
+    exchange_map: &Map<String, Value>,
+    enabled_exchanges: &[String],
+) {
+    let Some(root_object) = root.as_object_mut() else {
+        return;
+    };
+    root_object.insert("exchanges".to_string(), Value::Object(exchange_map.clone()));
+    root_object.insert(
+        "enabled_exchanges".to_string(),
+        Value::Array(
+            enabled_exchanges
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    if root_object.contains_key("venues") {
+        root_object.insert(
+            "venues".to_string(),
+            Value::Array(
+                enabled_exchanges
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    }
+}
+
+fn exchange_rows_from_map(exchange_map: &Map<String, Value>) -> Vec<Value> {
+    exchange_map
+        .iter()
+        .map(|(exchange, config)| {
+            let mut row = config.as_object().cloned().unwrap_or_else(Map::new);
+            row.insert("exchange".to_string(), Value::String(exchange.clone()));
+            Value::Object(row)
+        })
+        .collect()
+}
+
+fn enabled_exchanges_from_map(exchange_map: &Map<String, Value>) -> Vec<String> {
+    exchange_map
+        .iter()
+        .filter_map(|(exchange, config)| {
+            let enabled = config
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let operating_mode = config
+                .get("operating_mode")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            (enabled || operating_mode.eq_ignore_ascii_case("enabled")).then(|| exchange.clone())
+        })
+        .collect()
+}
+
+fn enabled_exchanges_from_root_or_map(
+    root: &Value,
+    exchange_map: &Map<String, Value>,
+) -> Vec<String> {
+    let enabled_from_map = enabled_exchanges_from_map(exchange_map);
+    let enabled_set = enabled_from_map
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut ordered = root
+        .get("enabled_exchanges")
+        .or_else(|| root.get("venues"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .filter_map(storage_exchange_key)
+                .filter(|exchange| enabled_set.contains(exchange))
+                .fold(Vec::<String>::new(), |mut rows, exchange| {
+                    if !rows.contains(&exchange) {
+                        rows.push(exchange);
+                    }
+                    rows
+                })
+        })
+        .unwrap_or_default();
+    for exchange in enabled_from_map {
+        if !ordered.contains(&exchange) {
+            ordered.push(exchange);
+        }
+    }
+    ordered
+}
+
+fn find_exchange_config_key(exchange_map: &Map<String, Value>, exchange: &str) -> Option<String> {
+    let target = storage_exchange_key(exchange)?;
+    exchange_map
+        .keys()
+        .find(|key| storage_exchange_key(key).as_deref() == Some(target.as_str()))
+        .cloned()
+}
+
+fn find_exchange_config<'a>(
+    exchange_map: &'a Map<String, Value>,
+    exchange: &str,
+) -> Option<&'a Value> {
+    let key = find_exchange_config_key(exchange_map, exchange)?;
+    exchange_map.get(&key)
+}
+
+fn storage_exchange_key(exchange: &str) -> Option<String> {
+    let lowercase = exchange.trim().to_ascii_lowercase();
+    let normalized = match lowercase.as_str() {
+        "" | "-" => return None,
+        "gateio" | "gate.io" => "gate",
+        "binance_spot" => "binance",
+        "okx_spot" => "okx",
+        other => other,
+    };
+    normalized
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        .then(|| normalized.to_string())
+}
+
+async fn write_strategy_yaml(
+    path: &PathBuf,
+    root: &Value,
+    operation_id: &str,
+) -> std::io::Result<()> {
+    let content = serde_yaml::to_string(root).map_err(std::io::Error::other)?;
+    atomic_write_local_file(path, &content, operation_id).await
 }
 
 async fn local_agent_command(
@@ -1155,6 +3237,378 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exchange_api_key_routes_should_use_account_manager_env_prefix_and_mask_values() {
+        let temp_dir = std::env::current_dir()
+            .unwrap()
+            .join("target/tmp")
+            .join(format!(
+                "rustcta-control-api-credentials-{}",
+                std::process::id()
+            ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let accounts_path = temp_dir.join("accounts.yml");
+        let store_path = temp_dir.join("keys.env");
+        std::fs::write(
+            &accounts_path,
+            r#"
+accounts:
+  binance_hcr:
+    name: HCR
+    exchange: binance
+    type: futures
+    description: test account
+    env_prefix: BINANCE_3
+    enabled: true
+"#,
+        )
+        .unwrap();
+        let accounts_path_text = accounts_path.to_string_lossy().to_string();
+        let store_path_text = store_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            (
+                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
+                store_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG",
+                accounts_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let status = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/exchange-api-keys")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(status.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            value["account_manager_accounts"][0]["account_id"],
+            "binance_hcr"
+        );
+        assert_eq!(
+            value["account_manager_accounts"][0]["credential_namespace"],
+            "BINANCE_3"
+        );
+        assert_eq!(value["store_path"], "local-agent:exchange-api-key-store");
+        assert!(!std::str::from_utf8(&body)
+            .unwrap()
+            .contains(temp_dir.to_string_lossy().as_ref()));
+
+        let save = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "binance",
+                            "account_id": "binance_hcr",
+                            "api_key": "abcd1234efgh5678",
+                            "api_secret": "secret1234567890",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(save.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(save.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let raw = std::str::from_utf8(&body).unwrap();
+        assert!(!raw.contains("abcd1234efgh5678"));
+        assert!(!raw.contains("secret1234567890"));
+        assert!(raw.contains("abcd...5678"));
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(store.contains("BINANCE_3_API_KEY='abcd1234efgh5678'"));
+        assert!(store.contains("BINANCE_3_API_SECRET='secret1234567890'"));
+
+        let clear = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "binance",
+                            "account_id": "binance_hcr",
+                            "credential_namespace": "BINANCE_3",
+                            "clear": true,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(clear.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(clear.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value["status"]["exchanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| !(row["exchange"] == "binance" && row["account_id"] == "binance_hcr")));
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(!store.contains("BINANCE_3_API_KEY"));
+        assert!(!store.contains("BINANCE_3_API_SECRET"));
+
+        let restarted_app = config.build_router().unwrap();
+        let restarted_status = restarted_app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/exchange-api-keys")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(restarted_status.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(restarted_status.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(value["exchanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| !(row["exchange"] == "binance" && row["account_id"] == "binance_hcr")));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_routes_should_allow_accounts_without_account_manager() {
+        let temp_dir = std::env::current_dir()
+            .unwrap()
+            .join("target/tmp")
+            .join(format!(
+                "rustcta-control-api-unmanaged-credentials-{}",
+                std::process::id()
+            ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let accounts_path = temp_dir.join("missing-accounts.yml");
+        let store_path = temp_dir.join("keys.env");
+        std::fs::write(
+            &store_path,
+            "BINANCE_API_KEY='defaultkey123456'\nBINANCE_API_SECRET='defaultsecret123456'\n",
+        )
+        .unwrap();
+        let accounts_path_text = accounts_path.to_string_lossy().to_string();
+        let store_path_text = store_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            (
+                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
+                store_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG",
+                accounts_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let save_binance_alt = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "binance",
+                            "account_id": "alt",
+                            "api_key": "altkey1234567890",
+                            "api_secret": "altsecret1234567890",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(save_binance_alt.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(save_binance_alt.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let raw = std::str::from_utf8(&body).unwrap();
+        assert!(!raw.contains("altkey1234567890"));
+        assert!(!raw.contains("altsecret1234567890"));
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let exchanges = value["status"]["exchanges"].as_array().unwrap();
+        assert!(exchanges.iter().any(|row| {
+            row["exchange"] == "binance"
+                && row["account_id"] == "default"
+                && row["credential_namespace"] == "BINANCE"
+        }));
+        let alt = exchanges
+            .iter()
+            .find(|row| row["exchange"] == "binance" && row["account_id"] == "alt")
+            .unwrap();
+        assert_eq!(alt["credential_namespace"], "BINANCE__ALT_");
+        assert_eq!(alt["enabled"], false);
+        assert!(alt["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|field| field["configured"] == true));
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(store.contains("BINANCE_API_KEY='defaultkey123456'"));
+        assert!(store.contains("BINANCE__ALT_API_KEY='altkey1234567890'"));
+        assert!(store.contains("BINANCE__ALT_API_SECRET='altsecret1234567890'"));
+
+        let save_mexc_alpha = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "mexc",
+                            "account_id": "alpha",
+                            "api_key": "mexckey1234567890",
+                            "api_secret": "mexcsecret1234567890",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(save_mexc_alpha.status(), StatusCode::OK);
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(store.contains("MEXC__ALPHA_API_KEY='mexckey1234567890'"));
+        assert!(store.contains("MEXC__ALPHA_API_SECRET='mexcsecret1234567890'"));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn exchange_api_key_routes_should_require_exchange_account_id_fields() {
+        let temp_dir = std::env::current_dir()
+            .unwrap()
+            .join("target/tmp")
+            .join(format!(
+                "rustcta-control-api-gate-credentials-{}",
+                std::process::id()
+            ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let accounts_path = temp_dir.join("missing-accounts.yml");
+        let store_path = temp_dir.join("keys.env");
+        let accounts_path_text = accounts_path.to_string_lossy().to_string();
+        let store_path_text = store_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            (
+                "RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE",
+                store_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG",
+                accounts_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let missing_account_id = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "gate",
+                            "account_id": "trade_a",
+                            "api_key": "gatekey1234567890",
+                            "api_secret": "gatesecret1234567890",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_account_id.status(), StatusCode::BAD_REQUEST);
+
+        let saved = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/exchange-api-keys")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "exchange": "gateio",
+                            "account_id": "trade_a",
+                            "exchange_account_id": "1234567",
+                            "api_key": "gatekey1234567890",
+                            "api_secret": "gatesecret1234567890",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.status(), StatusCode::OK);
+        let store = std::fs::read_to_string(&store_path).unwrap();
+        assert!(store.contains("GATE__TRADE_A_ACCOUNT_ID='1234567'"));
+        assert!(store.contains("GATE__TRADE_A_API_KEY='gatekey1234567890'"));
+        assert!(store.contains("GATE__TRADE_A_API_SECRET='gatesecret1234567890'"));
+
+        let restarted_app = config.build_router().unwrap();
+        let status = restarted_app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/exchange-api-keys")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(status.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(status.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let account = value["exchanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["exchange"] == "gate" && row["account_id"] == "trade_a")
+            .unwrap();
+        assert!(account["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|field| field["configured"] == true));
+        assert!(std::str::from_utf8(&body)
+            .unwrap()
+            .contains("\"value\":\"1234567\""));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
     async fn local_agent_routes_should_report_status_without_raw_paths() {
         let temp_dir = std::env::temp_dir().join(format!(
             "rustcta-control-api-local-status-{}",
@@ -1335,6 +3789,227 @@ mod tests {
         assert_eq!(value["events"][0]["accepted"], true);
         assert_eq!(value["events"][0]["action"], "strategy_config_edit");
         assert_eq!(value["events"][0]["restart_script_executed"], false);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_agent_cross_arb_exchange_config_should_clean_on_startup() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-cross-arb-startup-clean-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let strategy_path = temp_dir.join("cross.yml");
+        let audit_path = temp_dir.join("audit.jsonl");
+        std::fs::write(
+            &strategy_path,
+            r#"
+enabled_exchanges:
+  - binance
+  - bad_row
+exchanges:
+  binance:
+    enabled: true
+  bad_row: []
+"#,
+        )
+        .unwrap();
+
+        let strategy_path_text = strategy_path.to_string_lossy().to_string();
+        let audit_path_text = audit_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH",
+                audit_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+                strategy_path_text.as_str(),
+            ),
+        ]);
+
+        config
+            .clean_cross_arb_exchange_config_on_startup()
+            .await
+            .unwrap();
+
+        let cleaned_yaml = std::fs::read_to_string(&strategy_path).unwrap();
+        let cleaned_config: Value = serde_yaml::from_str(&cleaned_yaml).unwrap();
+        assert!(cleaned_config["exchanges"].get("bad_row").is_none());
+        assert_eq!(cleaned_config["enabled_exchanges"], json!(["binance"]));
+        let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_clean"));
+        assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_agent_cross_arb_exchange_config_should_clean_persist_delete_and_queue() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-cross-arb-exchanges-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let strategy_path = temp_dir.join("cross.yml");
+        let command_path = temp_dir.join("commands.jsonl");
+        let audit_path = temp_dir.join("audit.jsonl");
+        std::fs::write(
+            &strategy_path,
+            r#"
+mode: live_small
+enabled_exchanges:
+  - binance
+  - broken
+exchanges:
+  binance:
+    enabled: true
+    operating_mode: enabled
+    account_id: BINANCE
+    env_prefix: BINANCE
+    routes:
+      rest_public:
+        - https://fapi.binance.com
+  gate:
+    enabled: "yes"
+    env_prefix: 123
+  broken: []
+"#,
+        )
+        .unwrap();
+
+        let strategy_path_text = strategy_path.to_string_lossy().to_string();
+        let command_path_text = command_path.to_string_lossy().to_string();
+        let audit_path_text = audit_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH",
+                audit_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+                strategy_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_COMMAND_QUEUE_PATH",
+                command_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let loaded = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/local-agent/cross-arb/exchanges")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(loaded.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(loaded.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["cleaned_on_read"], true);
+        assert_eq!(value["enabled_exchanges"], json!(["binance"]));
+        assert!(value["exchanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["exchange"] != "broken"));
+
+        let cleaned_yaml = std::fs::read_to_string(&strategy_path).unwrap();
+        let cleaned_config: Value = serde_yaml::from_str(&cleaned_yaml).unwrap();
+        assert!(cleaned_config["exchanges"].get("broken").is_none());
+        assert_eq!(cleaned_config["exchanges"]["gate"]["enabled"], false);
+        assert_eq!(
+            cleaned_config["exchanges"]["gate"]["env_prefix"],
+            Value::Null
+        );
+
+        let saved = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local-agent/cross-arb/exchanges")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "strategy_id": "cross_arb_live",
+                            "apply": true,
+                            "exchanges": [
+                                {
+                                    "exchange": "binance",
+                                    "enabled": false,
+                                    "account_id": "BINANCE_ALT",
+                                    "env_prefix": "BINANCE_ALT",
+                                    "private_rest_enabled": true,
+                                    "private_ws_enabled": false
+                                },
+                                {
+                                    "exchange": "gateio",
+                                    "enabled": true,
+                                    "account_id": "GATE",
+                                    "env_prefix": "GATE",
+                                    "private_rest_enabled": true,
+                                    "private_ws_enabled": true
+                                }
+                            ]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.status(), StatusCode::ACCEPTED);
+        let saved_yaml = std::fs::read_to_string(&strategy_path).unwrap();
+        let saved_config: Value = serde_yaml::from_str(&saved_yaml).unwrap();
+        assert_eq!(saved_config["enabled_exchanges"], json!(["gate"]));
+        assert_eq!(saved_config["exchanges"]["binance"]["enabled"], false);
+        assert_eq!(
+            saved_config["exchanges"]["binance"]["routes"]["rest_public"][0],
+            "https://fapi.binance.com"
+        );
+        assert_eq!(saved_config["exchanges"]["gate"]["enabled"], true);
+        assert!(saved_config["exchanges"].get("gateio").is_none());
+        let command_log = std::fs::read_to_string(&command_path).unwrap();
+        assert!(command_log.contains("\"command\":\"update_cross_arb_exchange_config\""));
+        assert!(command_log.contains("\"enabled_exchanges\":[\"gate\"]"));
+
+        let deleted = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/local-agent/cross-arb/exchanges/gateio")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(deleted.status(), StatusCode::ACCEPTED);
+        let deleted_yaml = std::fs::read_to_string(&strategy_path).unwrap();
+        let deleted_config: Value = serde_yaml::from_str(&deleted_yaml).unwrap();
+        assert!(deleted_config["exchanges"].get("gate").is_none());
+        assert_eq!(deleted_config["enabled_exchanges"], json!([]));
+        assert_eq!(
+            std::fs::read_to_string(&command_path)
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_clean"));
+        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_save"));
+        assert!(ledger_log.contains("local_agent_cross_arb_exchange_config_delete"));
+        assert!(!ledger_log.contains(temp_dir.to_string_lossy().as_ref()));
 
         std::fs::remove_dir_all(temp_dir).ok();
     }

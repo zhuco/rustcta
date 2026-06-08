@@ -69,7 +69,7 @@ that API secrets never enter the request path, query, or body.
 | symbol rules | `GET /api/v3/exchangeInfo` | `GET /capi/v3/market/exchangeInfo` |
 | order book | `GET /api/v3/market/depth` | `GET /capi/v3/market/depth` |
 | balances | `GET /api/v2/account/assets` | `GET /capi/v3/account/balance` |
-| positions | Unsupported | `GET /capi/v3/account/position/allPosition` |
+| positions | Spot has no position model | `GET /capi/v3/account/position/allPosition` |
 | fees | parsed from `GET /api/v3/exchangeInfo` fee metadata | `GET /capi/v3/account/commissionRate` |
 | place order | `POST /api/v3/order` | `POST /capi/v3/order` |
 | cancel order | `DELETE /api/v3/order` | `DELETE /capi/v3/order` |
@@ -83,6 +83,16 @@ that API secrets never enter the request path, query, or body.
 | WebSocket private auth | connection headers over `/v3/ws/private` | same |
 | WebSocket heartbeat | server `event/type=ping`, reply helper `{"method":"PONG","id":...}` | same |
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。WEEX Spot V3 支持 `POST /api/v3/order` 和撤单；Contract V2/V3 支持 place/cancel、batch cancel、cancel all。Spot 支持 LIMIT/MARKET 和 GTC/IOC/FOK，Spot `newClientOrderId`、Contract `client_oid`/`origClientOrderId` 可用于幂等或撤单定位。
+
+当前矩阵仍显示 `place_order=-`、`cancel_order=-`，但本 adapter 文档和 endpoint table 已有 private order lifecycle 语义。后续应先核对 endpoint mapping 证据；如果是生成器识别缺口就修 mapping evidence，如果确实缺 runtime，就补 Spot/Perp place/cancel/query/open/fills specs 和 parser。
+
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。WEEX Contract `GET /capi/v3/account/position/allPosition` 已由当前项目 `get_positions` runtime 覆盖；Spot 没有标准仓位模型。
+
 ## WebSocket Boundary
 
 The current gateway trait exposes `subscribe_public_stream` and
@@ -92,6 +102,15 @@ the exchange-specific payload builders, auth payload, heartbeat helper, and
 message parsers used by the gateway runtime/supervisor layer. A future runtime
 can wire those helpers into a concrete socket loop without changing the public
 `ExchangeClient` interface.
+
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms the public depth channel uses
+`<symbol>@depth{level}` with supported levels 15 and 200, for example
+`BTCUSDT@depth15`. A snapshot is delivered automatically after subscription,
+followed by incremental updates. Payloads include `U/u`, depth level `l`, and
+`d=SNAPSHOT` or `CHANGED`; if an update id is missed, resubscribe to obtain a
+fresh snapshot. No fixed push interval or checksum is documented.
 
 ## Reconciliation And Unsupported Boundaries
 

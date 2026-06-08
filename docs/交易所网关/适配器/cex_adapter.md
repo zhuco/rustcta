@@ -38,6 +38,16 @@ The REST docs publish `currency_limits` and `order_book` public endpoints. Priva
 | Fiat ledger, deposit, withdrawal, transfer | Unsupported | Not a trading runtime operation |
 | Contract/Futures/Options | 交易所不支持合约 | Current public trading documentation is CEX.IO Spot Trading REST/WS. |
 
+## Official Core Trading Detail
+
+P0 core-trading verification confirms CEX.IO Spot Trading supports private
+trading through REST and WebSocket APIs: `do_new_order`,
+`do_cancel_my_order`, and `do_cancel_all_orders`. Spot Trading supports Market,
+Limit, and Stop Limit orders; TIF includes GTC, IOC, and GTD, with Market
+orders restricted to IOC. `clientOrderId` and `cancelRequestId` are part of the
+official flow. Current project private writes remain request-spec/unsupported
+runtime, so this is `项目未实现核心交易接口`, not `交易所不支持下单/撤单`.
+
 ## Files
 
 - Adapter: `crates/rustcta-exchange-gateway/src/adapters/cex/`

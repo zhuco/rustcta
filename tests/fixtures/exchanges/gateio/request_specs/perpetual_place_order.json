@@ -1,0 +1,25 @@
+{
+  "exchange": "gateio",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/futures/usdt/orders",
+  "auth": "signed",
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" },
+    "X-Gate-Size-Decimal": { "match": "exact", "value": "1" }
+  },
+  "body_contains": {
+    "contract": "BTC_USDT",
+    "size": "-100",
+    "price": "65000.1",
+    "tif": "ioc",
+    "text": "t-PERP1",
+    "reduce_only": true
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

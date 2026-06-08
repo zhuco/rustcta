@@ -61,6 +61,18 @@ Hibachi documents order signing using an account model with `accountId`, `nonce`
 
 Trustless/non-custodial signing and any key registration flow are not enabled in runtime. The adapter returns `hibachi.trade_write_request_spec_only` and related Unsupported boundaries for write methods.
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Hibachi 官方 trade REST 支持 `POST/DELETE/PATCH /trade/order` 和批量 orders endpoints。
+
+因此下单/撤单/改单不能写成 `交易所不支持`。当前只是 offline request specs 和签名向量；补交易接口前必须完成 account/signing runtime、trade order parser、批量订单边界、private readback 和 live-dry-run guard。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Hibachi 官方交易/风险资料明确有 positions、cross margin、subaccount isolated-like usage、risk panel 和 liquidation 语义。
+
+因此仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成 account/trade read-only auth smoke、positions/risk parser、cross-margin/subaccount 字段映射和 REST/WS readback。
+
 ## WebSocket Boundary
 
 The SDK exposes market/account/trade WS clients. This adapter only builds deterministic payloads and documents heartbeat/reconnect policy:

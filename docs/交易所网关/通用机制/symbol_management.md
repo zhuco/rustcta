@@ -9,6 +9,10 @@ RustCTA keeps the existing market symbol utilities, and adds a unified exchange 
 - market type
 - internal symbol
 
+Market type semantics are defined in [market_type_contract.md](market_type_contract.md).
+Perpetual symbols must use `MarketType::Perpetual`; `MarketType::Futures` is reserved for
+dated/delivery futures.
+
 The registry also exposes typed projections:
 
 - `SpotSymbol` for spot instruments

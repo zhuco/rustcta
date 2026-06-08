@@ -35,9 +35,11 @@ const API_SCANNER_RECOMMENDATIONS: &str = "/api/scanner/recommendations";
 const API_HEDGE_POLICY_STATUS: &str = "/api/hedge-policy/status";
 const API_CONTROL_SYMBOLS: &str = "/api/control/symbols";
 const API_CONTROL_AUDIT: &str = "/api/control/audit";
+const API_EXCHANGE_API_KEYS: &str = "/api/exchange-api-keys";
 const API_STRATEGY_LOGS: &str = "/api/strategy-logs";
 const API_CROSS_ARB_INSTRUMENTS: &str = "/api/cross-arb/instruments";
 const API_CROSS_ARB_MARKET_SNAPSHOTS: &str = "/api/cross-arb/market-snapshots";
+const API_LOCAL_CROSS_ARB_EXCHANGES: &str = "/api/local-agent/cross-arb/exchanges";
 
 pub(crate) struct DashboardFetch {
     pub(crate) data: DashboardData,
@@ -260,6 +262,14 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
         }
     };
     let credentials_status = workspace_data.credentials_status.clone();
+    let api_keys = fetch_or_previous(
+        API_EXCHANGE_API_KEYS,
+        token,
+        previous.api_keys,
+        &mut updated,
+        &mut errors,
+    )
+    .await;
     let strategy_snapshots = match api_get(API_STRATEGY_SNAPSHOTS, token).await {
         Ok(value) => {
             updated += 1;
@@ -401,7 +411,7 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
                 "cross_exchange_arbitrage",
                 previous.cross_arb,
             ),
-            api_keys: credentials_status.clone(),
+            api_keys,
             strategy_logs: fetch_or_previous(
                 API_STRATEGY_LOGS,
                 token,
@@ -419,6 +429,14 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
 
 pub(crate) async fn fetch_credential_status(token: &str) -> Result<Value, String> {
     api_get(API_CREDENTIALS_STATUS, token).await
+}
+
+pub(crate) async fn fetch_exchange_api_keys(token: &str) -> Result<Value, String> {
+    api_get(API_EXCHANGE_API_KEYS, token).await
+}
+
+pub(crate) async fn save_exchange_api_keys(token: &str, body: &Value) -> Result<Value, String> {
+    api_post_json(API_EXCHANGE_API_KEYS, token, body).await
 }
 
 pub(crate) async fn refresh_spot_symbol_control(
@@ -489,6 +507,28 @@ pub(crate) async fn fetch_cross_arb_settings(token: &str) -> Result<Value, Strin
 
 pub(crate) async fn save_cross_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
     post_local_agent_command(token, "update_cross_arb_settings", body.clone()).await
+}
+
+pub(crate) async fn fetch_cross_arb_exchange_config(token: &str) -> Result<Value, String> {
+    api_get(API_LOCAL_CROSS_ARB_EXCHANGES, token).await
+}
+
+pub(crate) async fn save_cross_arb_exchange_config(
+    token: &str,
+    body: &Value,
+) -> Result<Value, String> {
+    api_post_json(API_LOCAL_CROSS_ARB_EXCHANGES, token, body).await
+}
+
+pub(crate) async fn delete_cross_arb_exchange_config(
+    token: &str,
+    exchange: &str,
+) -> Result<Value, String> {
+    api_delete(
+        &format!("{API_LOCAL_CROSS_ARB_EXCHANGES}/{}", path_segment(exchange)),
+        token,
+    )
+    .await
 }
 
 pub(crate) async fn fetch_funding_arb_settings(token: &str) -> Result<Value, String> {
@@ -656,6 +696,22 @@ async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, S
         .json::<Value>()
         .await
         .map_err(|error| format!("解析 {path} 提交响应失败：{error}"))
+}
+
+async fn api_delete(path: &str, token: &str) -> Result<Value, String> {
+    let bearer = format!("Bearer {token}");
+    let response = Request::delete(path)
+        .header("Authorization", &bearer)
+        .send()
+        .await
+        .map_err(|error| format!("提交 {path} 删除失败：{error}"))?;
+    if !response.ok() {
+        return Err(api_error_message(path, response).await);
+    }
+    response
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("解析 {path} 删除响应失败：{error}"))
 }
 
 async fn api_error_message(path: &str, response: gloo_net::http::Response) -> String {

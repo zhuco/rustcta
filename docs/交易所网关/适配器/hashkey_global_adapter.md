@@ -57,6 +57,10 @@ Secrets are only used inside the transport signing path and are not written into
 
 Use REST reconciliation as the source of truth until API keys, permissions, minimum notional rules and live WebSocket behavior have been validated with a read-only preflight followed by live-dry-run.
 
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。HashKey Global futures positions 从 `GET /api/v1/futures/account` 解析，当前项目 `get_positions` runtime 已覆盖。
+
 ## Task 22 Toolchain Status
 
 - Endpoint mapping: `crates/rustcta-exchange-gateway/src/adapters/hashkey_global/endpoint_mapping.yaml`.

@@ -45,6 +45,15 @@ Fixtures use placeholder keys and synthetic order IDs only.
 - Private streams are not promoted; private state should reconcile through REST request specs.
 - Live private REST remains disabled by default. Write APIs are request-spec only and must not place real orders in this task.
 
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms NovaDAX public WebSocket uses Socket.IO over
+`wss://api.novadax.com`. The order book topic is
+`MARKET.{symbol}.DEPTH.LEVEL0`, subscribed with `SUBSCRIBE`; official docs state
+depth data is sent once per second. No fixed depth parameter, sequence, or
+checksum is documented. Mapping should record Socket.IO transport, 1s push,
+DEPTH.LEVEL0, and reconnect/re-subscribe as a full-state replacement.
+
 ## Endpoint Mapping
 
 The machine-readable mapping is:

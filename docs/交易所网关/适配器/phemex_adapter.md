@@ -144,3 +144,7 @@ behavior, fees, balances, positions, fills, transfer/deposit/withdraw/convert
 extensions, raw signed endpoints, public/private WebSocket subscription
 payloads, auth payloads, heartbeat/control parsing, and private stream event
 conversion.
+
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。Phemex USDT-M `GET /g-accounts/accountPositions` 已由当前项目 `get_positions` runtime 覆盖。

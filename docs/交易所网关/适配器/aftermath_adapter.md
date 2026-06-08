@@ -33,6 +33,18 @@ The public CCXT endpoints do not require API-key signing. Aftermath also documen
 
 Trading operations are not HMAC/API-key requests. They require Sui transaction blocks and wallet/account-cap authorization, so this adapter does not synthesize or sign private write payloads. Fixtures under `tests/fixtures/exchanges/aftermath/signing_vectors/` assert that boundary.
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Aftermath Perpetuals 是 Sui on-chain protocol，交易不是普通 HMAC REST 下单；需要 Sui transaction build/sign/submit、wallet/account authorization 和链上 readback。
+
+因此这里写 `官方协议可交易，项目未实现链上交易 runtime`，不是 `交易所不支持下单/撤单`。补交易接口前必须先设计 Sui transaction 构造、签名边界、submit/readback、order/cancel parser、失败状态和链上对账。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Aftermath Perpetuals SDK 的 account/account objects 返回 positions、available collateral、total equity，并按 account cap / account id 查询。
+
+因此仓位读取写 `官方支持，项目未实现链上账户仓位读取`。补仓位前必须设计 Sui account cap/account id read path、positions parser、available collateral/total equity 映射和链上/indexer 对账。
+
 ## Base URLs And Limits
 
 - REST base URL: `https://aftermath.finance`

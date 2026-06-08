@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_strategy_sdk::{
-    AccountPermission, ExecutionIntent, MarketDataChannel, MarketDataSubscription, MarketType,
-    RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration, StrategyCommandSchema,
-    StrategyConfigSchema, StrategyContext, StrategyEvent, StrategyInstanceId, StrategyRuntime,
-    StrategySnapshot, StrategySnapshotSchema, StrategySpec, StrategyStatus,
+    AccountPermission, ExecutionIntent, ExecutionOrderAck, ExecutionOrderCommand,
+    MarketDataChannel, MarketDataSubscription, MarketType, OrderSide as SdkOrderSide, OrderType,
+    RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration, SdkResult,
+    StrategyCommandSchema, StrategyConfigSchema, StrategyContext, StrategyEvent,
+    StrategyInstanceId, StrategyRuntime, StrategySnapshot, StrategySnapshotSchema, StrategySpec,
+    StrategyStatus, TimeInForce,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,9 +22,20 @@ pub use app_runtime::{
     CrossArbRuntimeInput, CrossArbStorageEvent,
 };
 pub use core::{
-    CanonicalSymbol, ExchangeFeeRates, ExchangeId, FeeBreakdown, FeeModel, FeeRole,
+    evaluate_dual_taker_close, evaluate_dual_taker_open_opportunities,
+    evaluate_ready_dual_taker_open_opportunities, filter_open_opportunities_by_risk,
+    inspect_single_leg_net_positions, plan_startup_usdt_position_takeover,
+    select_high_volatility_symbols, ArbitrageRiskState, CanonicalSymbol, CloseReason,
+    DualTakerArbitrageConfig, DualTakerCloseEvaluation, DualTakerFeeEstimate,
+    DualTakerOpenOpportunity, ExchangeFeeRates, ExchangeId, ExchangeRuntimeStatus,
+    ExchangeStartupReadiness, ExchangeStatusRegistry, FeeBreakdown, FeeModel, FeeRole,
     FillInferenceType, FundingEstimate, FundingModel, FundingSettlementLedger, MakerLegKind,
-    OrderSide, PositionSide, SimulatedBundleState, SimulatedBundleStatus, StrategyRoute,
+    NetPosition, NetPositionWarning, OpenArbitragePosition, OpenBlockReason, OrderBookTop,
+    OrderSide, PairedTakerFillState, PositionSide, PrecisionRegistry, QuantityUnit,
+    SimulatedBundleState, SimulatedBundleStatus, SingleLegGuard, StartupPositionTakeoverPlan,
+    StartupReadiness, StartupSingleLegResolution, StartupUsdtPosition, StrategyLogEventKind,
+    StrategyLogRotationConfig, StrategyRoute, SymbolPrecision, TakerFillAudit, TakerOrderDraft,
+    TakerOrderRole, VolatilityRankDirection, VolatilityRankTicker, VolatilityUniverseConfig,
 };
 pub use runtime_contract::{
     build_runtime_contract, default_runtime_contract, CrossArbDashboardSnapshot,
@@ -55,10 +68,26 @@ impl Default for CrossExchangeArbitrageStrategyInfo {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CrossExchangeArbitrageConfig {
+    #[serde(default = "default_cross_arb_venues")]
     pub venues: Vec<String>,
+    #[serde(default = "default_cross_arb_symbols")]
     pub symbols: Vec<String>,
+    #[serde(default = "default_excluded_bases")]
+    pub excluded_bases: Vec<String>,
+    #[serde(default)]
+    pub excluded_symbols: Vec<String>,
+    #[serde(default = "default_min_profit_bps")]
     pub min_profit_bps: f64,
+    #[serde(default = "default_max_position_notional_quote")]
     pub max_position_notional_quote: String,
+    #[serde(default = "default_market_type")]
+    pub market_type: MarketType,
+    #[serde(default)]
+    pub dual_taker: DualTakerArbitrageConfig,
+    #[serde(default)]
+    pub logging: StrategyLogRotationConfig,
+    #[serde(default)]
+    pub volatility_universe: VolatilityUniverseConfig,
     #[serde(default)]
     pub dry_run: bool,
 }
@@ -66,11 +95,283 @@ pub struct CrossExchangeArbitrageConfig {
 impl Default for CrossExchangeArbitrageConfig {
     fn default() -> Self {
         Self {
-            venues: vec!["binance".to_string(), "bitget".to_string()],
-            symbols: vec!["BTC/USDT".to_string()],
-            min_profit_bps: 0.0,
-            max_position_notional_quote: "20".to_string(),
+            venues: default_cross_arb_venues(),
+            symbols: default_cross_arb_symbols(),
+            excluded_bases: default_excluded_bases(),
+            excluded_symbols: Vec::new(),
+            min_profit_bps: default_min_profit_bps(),
+            max_position_notional_quote: default_max_position_notional_quote(),
+            market_type: default_market_type(),
+            dual_taker: DualTakerArbitrageConfig::default(),
+            logging: StrategyLogRotationConfig::default(),
+            volatility_universe: VolatilityUniverseConfig::default(),
             dry_run: true,
+        }
+    }
+}
+
+impl CrossExchangeArbitrageConfig {
+    pub fn from_runtime_value(value: &Value) -> Self {
+        let mut config = serde_json::from_value(value.clone())
+            .unwrap_or_else(|_| CrossExchangeArbitrageConfig::default());
+
+        if let Some(venues) = first_non_empty_strings(
+            value,
+            &[
+                &["venues"],
+                &["enabled_exchanges"],
+                &["universe", "enabled_exchanges"],
+                &["detection", "exchanges"],
+            ],
+        ) {
+            config.venues = venues;
+        } else if let Some(venues) = enabled_exchange_keys(value) {
+            config.venues = venues;
+        }
+        if let Some(symbols) = first_non_empty_strings(
+            value,
+            &[
+                &["symbols"],
+                &["enabled_symbols"],
+                &["universe", "symbols"],
+                &["detection", "symbols"],
+            ],
+        ) {
+            config.symbols = symbols;
+        }
+        if let Some(excluded_bases) = first_non_empty_strings(
+            value,
+            &[&["excluded_bases"], &["universe", "excluded_bases"]],
+        ) {
+            config.excluded_bases = excluded_bases;
+        }
+        if let Some(excluded_symbols) = first_non_empty_strings(
+            value,
+            &[&["excluded_symbols"], &["universe", "exclude_symbols"]],
+        ) {
+            config.excluded_symbols = excluded_symbols;
+        }
+        if let Some(market_type) =
+            text_at(value, &["market_type"]).or_else(|| text_at(value, &["market", "market_type"]))
+        {
+            config.market_type = parse_market_type(&market_type);
+        }
+        if let Some(dry_run) =
+            bool_at(value, &["dry_run"]).or_else(|| bool_at(value, &["execution", "dry_run"]))
+        {
+            config.dry_run = dry_run;
+        } else if bool_at(value, &["enable_live_trading"]).is_some_and(|enabled| enabled) {
+            config.dry_run = false;
+        }
+
+        let configured_target_notional = f64_at(value, &["max_live_notional_per_trade"])
+            .or_else(|| f64_at(value, &["sizing", "target_notional_usdt"]))
+            .or_else(|| parse_f64(&config.max_position_notional_quote));
+
+        if let Some(value) = configured_target_notional {
+            config.dual_taker.target_notional_usdt = value;
+            config.max_position_notional_quote = trim_float(value);
+        }
+        if let Some(value) = f64_at(value, &["thresholds", "min_open_raw_spread"]) {
+            config.dual_taker.min_open_spread_pct = value;
+            config.min_profit_bps = value * 10_000.0;
+        } else if config.min_profit_bps > 0.0 {
+            config.dual_taker.min_open_spread_pct = config.min_profit_bps / 10_000.0;
+        }
+        if let Some(value) = f64_at(value, &["thresholds", "max_open_raw_spread"]) {
+            config.dual_taker.max_open_spread_pct = value;
+        }
+        if let Some(value) = f64_at(value, &["execution", "taker_ioc_slippage_limit_pct"])
+            .or_else(|| f64_at(value, &["risk", "max_taker_slippage_pct"]))
+        {
+            config.dual_taker.taker_slippage_pct = value;
+        }
+        if let Some(value) = f64_at(value, &["thresholds", "close_min_net_profit_pct"])
+            .or_else(|| f64_at(value, &["thresholds", "lock_profit_dual_taker_pct"]))
+        {
+            config.dual_taker.close_min_net_profit_pct = value;
+        }
+        if let Some(value) = f64_at(value, &["dual_taker", "expected_close_spread_pct"])
+            .or_else(|| f64_at(value, &["thresholds", "expected_close_spread_pct"]))
+        {
+            config.dual_taker.expected_close_spread_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["dual_taker", "top_of_book_capacity_ratio"])
+            .or_else(|| f64_at(value, &["market", "top_of_book_capacity_ratio"]))
+        {
+            config.dual_taker.top_of_book_capacity_ratio = value.clamp(0.0, 1.0);
+        }
+        if let Some(value) = u64_at(value, &["risk", "max_book_age_ms"])
+            .or_else(|| u64_at(value, &["market", "stale_quote_ms"]))
+            .or_else(|| u64_at(value, &["detection", "stale_book_ms"]))
+        {
+            config.dual_taker.orderbook_stale_ms = value;
+        }
+        if let Some(value) = usize_at(value, &["market", "depth_levels"])
+            .or_else(|| usize_at(value, &["market", "public_book_depth"]))
+            .or_else(|| usize_at(value, &["detection", "depth_levels"]))
+        {
+            config.dual_taker.min_orderbook_levels = value.max(1);
+        }
+        if let Some(value) = u64_at(value, &["execution", "single_leg_timeout_ms"]) {
+            config.dual_taker.single_leg_timeout_ms = value;
+        }
+        if let Some(value) = u32_at(value, &["risk", "max_consecutive_single_leg_fills"]) {
+            config.dual_taker.max_consecutive_single_leg_fills = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["sizing", "max_positions_per_exchange"]) {
+            config.dual_taker.max_positions_per_exchange = value.max(1);
+        }
+        if let Some(value) = i64_at(value, &["risk", "symbol_cooldown_after_close_secs"]) {
+            config.dual_taker.symbol_cooldown_secs = value.max(0);
+        }
+        if let Some(value) = i64_at(value, &["risk", "max_hold_seconds"]) {
+            config.dual_taker.max_hold_secs = value.max(1);
+        }
+        if let Some(value) = u64_at(value, &["logging", "max_file_bytes"]) {
+            config.logging.max_file_bytes = value;
+        }
+        if let Some(value) = usize_at(value, &["logging", "retained_files"]) {
+            config.logging.retained_files = value;
+        }
+        if let Some(value) = bool_at(value, &["logging", "persist_only_key_events"]) {
+            config.logging.persist_only_key_events = value;
+        }
+        config.apply_volatility_runtime_value(value);
+
+        config.symbols = config.active_symbols();
+        config
+    }
+
+    pub fn active_venues(&self) -> Vec<String> {
+        self.venues
+            .iter()
+            .filter_map(|venue| {
+                let venue = venue.trim().to_ascii_lowercase();
+                (!venue.is_empty()).then_some(venue)
+            })
+            .fold(Vec::new(), |mut venues, venue| {
+                if !venues.contains(&venue) {
+                    venues.push(venue);
+                }
+                venues
+            })
+    }
+
+    pub fn active_symbols(&self) -> Vec<String> {
+        let excluded_bases: Vec<_> = self
+            .excluded_bases
+            .iter()
+            .map(|base| base.trim().to_ascii_uppercase())
+            .collect();
+        let excluded_symbols: Vec<_> = self
+            .excluded_symbols
+            .iter()
+            .map(|symbol| normalize_symbol(symbol))
+            .collect();
+
+        self.symbols
+            .iter()
+            .filter_map(|symbol| {
+                let normalized = normalize_symbol(symbol);
+                let base = symbol_base(&normalized);
+                (!normalized.is_empty()
+                    && !excluded_bases.contains(&base)
+                    && !excluded_symbols.contains(&normalized))
+                .then_some(normalized)
+            })
+            .fold(Vec::new(), |mut symbols, symbol| {
+                if !symbols.contains(&symbol) {
+                    symbols.push(symbol);
+                }
+                symbols
+            })
+    }
+
+    pub fn active_symbols_with_high_volatility(
+        &self,
+        tickers: &[VolatilityRankTicker],
+    ) -> Vec<String> {
+        let mut symbols = self.active_symbols();
+        let dynamic_symbols = select_high_volatility_symbols(
+            tickers,
+            &self.volatility_universe,
+            &self.excluded_bases,
+            &self.excluded_symbols,
+        );
+        for symbol in dynamic_symbols {
+            if !symbols.contains(&symbol) {
+                symbols.push(symbol);
+            }
+        }
+        symbols
+    }
+
+    fn apply_volatility_runtime_value(&mut self, value: &Value) {
+        if let Some(enabled) = bool_at(value, &["volatility_universe", "enabled"])
+            .or_else(|| bool_at(value, &["universe", "high_volatility", "enabled"]))
+        {
+            self.volatility_universe.enabled = enabled;
+        }
+        if let Some(value) = usize_at(value, &["volatility_universe", "top_gainers_per_exchange"])
+            .or_else(|| {
+                usize_at(
+                    value,
+                    &["universe", "high_volatility", "top_gainers_per_exchange"],
+                )
+            })
+        {
+            self.volatility_universe.top_gainers_per_exchange = value;
+        }
+        if let Some(value) = usize_at(value, &["volatility_universe", "top_losers_per_exchange"])
+            .or_else(|| {
+                usize_at(
+                    value,
+                    &["universe", "high_volatility", "top_losers_per_exchange"],
+                )
+            })
+        {
+            self.volatility_universe.top_losers_per_exchange = value;
+        }
+        if let Some(value) =
+            f64_at(value, &["volatility_universe", "min_abs_change_pct"]).or_else(|| {
+                f64_at(
+                    value,
+                    &["universe", "high_volatility", "min_abs_change_pct"],
+                )
+            })
+        {
+            self.volatility_universe.min_abs_change_pct = value.max(0.0);
+        }
+        if let Some(value) = f64_at(value, &["volatility_universe", "min_quote_volume_usdt"])
+            .or_else(|| {
+                f64_at(
+                    value,
+                    &["universe", "high_volatility", "min_quote_volume_usdt"],
+                )
+            })
+        {
+            self.volatility_universe.min_quote_volume_usdt = value.max(0.0);
+        }
+        if let Some(value) = u64_at(value, &["volatility_universe", "refresh_secs"])
+            .or_else(|| u64_at(value, &["universe", "high_volatility", "refresh_secs"]))
+        {
+            self.volatility_universe.refresh_secs = value.max(1);
+        }
+        if let Some(value) = usize_at(value, &["volatility_universe", "max_dynamic_symbols"])
+            .or_else(|| {
+                usize_at(
+                    value,
+                    &["universe", "high_volatility", "max_dynamic_symbols"],
+                )
+            })
+        {
+            self.volatility_universe.max_dynamic_symbols = value;
+        }
+        if let Some(value) = bool_at(value, &["volatility_universe", "monitor_orderbook"])
+            .or_else(|| bool_at(value, &["universe", "high_volatility", "monitor_orderbook"]))
+        {
+            self.volatility_universe.monitor_orderbook = value;
         }
     }
 }
@@ -81,6 +382,16 @@ pub struct CrossExchangeArbitrageSnapshotPayload {
     pub handled_events: u64,
     pub started_at: Option<DateTime<Utc>>,
     pub last_event_at: Option<DateTime<Utc>>,
+    pub configured_venues: Vec<String>,
+    pub configured_symbols: usize,
+    pub excluded_bases: Vec<String>,
+    pub target_notional_usdt: String,
+    pub min_open_spread_pct: String,
+    pub max_open_spread_pct: String,
+    pub close_min_net_profit_pct: String,
+    pub orderbook_stale_ms: u64,
+    pub high_volatility_universe_enabled: bool,
+    pub high_volatility_refresh_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +403,7 @@ pub struct CrossExchangeArbitrageRuntime {
     started_at: Option<DateTime<Utc>>,
     last_event_at: Option<DateTime<Utc>>,
     handled_events: u64,
+    config: CrossExchangeArbitrageConfig,
 }
 
 impl CrossExchangeArbitrageRuntime {
@@ -104,7 +416,14 @@ impl CrossExchangeArbitrageRuntime {
             started_at: None,
             last_event_at: None,
             handled_events: 0,
+            config: CrossExchangeArbitrageConfig::default(),
         }
+    }
+
+    pub fn reload_config_value(&mut self, value: &Value) {
+        self.config = CrossExchangeArbitrageConfig::from_runtime_value(value);
+        self.handled_events += 1;
+        self.last_event_at = Some(Utc::now());
     }
 
     fn snapshot_payload(&self) -> CrossExchangeArbitrageSnapshotPayload {
@@ -113,6 +432,16 @@ impl CrossExchangeArbitrageRuntime {
             handled_events: self.handled_events,
             started_at: self.started_at,
             last_event_at: self.last_event_at,
+            configured_venues: self.config.active_venues(),
+            configured_symbols: self.config.active_symbols().len(),
+            excluded_bases: self.config.excluded_bases.clone(),
+            target_notional_usdt: trim_float(self.config.dual_taker.target_notional_usdt),
+            min_open_spread_pct: trim_float(self.config.dual_taker.min_open_spread_pct),
+            max_open_spread_pct: trim_float(self.config.dual_taker.max_open_spread_pct),
+            close_min_net_profit_pct: trim_float(self.config.dual_taker.close_min_net_profit_pct),
+            orderbook_stale_ms: self.config.dual_taker.orderbook_stale_ms,
+            high_volatility_universe_enabled: self.config.volatility_universe.enabled,
+            high_volatility_refresh_secs: self.config.volatility_universe.refresh_secs,
         }
     }
 }
@@ -134,6 +463,7 @@ impl StrategyRuntime for CrossExchangeArbitrageRuntime {
         self.strategy_id = ctx.strategy_id().to_string();
         self.run_id = ctx.run_id().to_string();
         self.started_at = Some(ctx.started_at());
+        self.config = CrossExchangeArbitrageConfig::from_runtime_value(ctx.config());
         self.status = StrategyStatus::Running;
         Ok(())
     }
@@ -203,9 +533,10 @@ pub fn strategy_spec() -> StrategySpec {
         ),
         required_account_permissions: account_permissions(&[
             AccountPermission::ReadBalances,
+            AccountPermission::ReadPositions,
             AccountPermission::ReadOrders,
             AccountPermission::ReadFills,
-            AccountPermission::TradeSpot,
+            AccountPermission::TradePerpetual,
             AccountPermission::CancelOrders,
         ]),
         metadata: BTreeMap::from([
@@ -219,6 +550,12 @@ pub fn strategy_spec() -> StrategySpec {
                     "fee_model",
                     "funding_model",
                     "settlement_ledger",
+                    "dual_taker_open_close_model",
+                    "startup_readiness_gate",
+                    "single_leg_guard",
+                    "position_cooldown_and_hold_limits",
+                    "exchange_status_read_model",
+                    "log_rotation_policy",
                     "app_runtime_cycle",
                     "runtime_contract",
                     "task_orchestration_contract",
@@ -226,7 +563,8 @@ pub fn strategy_spec() -> StrategySpec {
                     "execution_provider_contract",
                     "storage_provider_contract",
                     "dashboard_snapshot_contract",
-                    "notification_provider_contract"
+                    "notification_provider_contract",
+                    "high_volatility_universe_contract"
                 ]),
             ),
             ("remaining_legacy_modules".to_string(), json!([])),
@@ -237,21 +575,39 @@ pub fn strategy_spec() -> StrategySpec {
 pub fn cross_exchange_market_data_subscriptions(
     config: &CrossExchangeArbitrageConfig,
 ) -> Vec<MarketDataSubscription> {
-    config
-        .venues
-        .iter()
-        .filter(|venue| !venue.trim().is_empty())
+    cross_exchange_market_data_subscriptions_for_symbols(config, config.active_symbols())
+}
+
+pub fn cross_exchange_market_data_subscriptions_for_high_volatility(
+    config: &CrossExchangeArbitrageConfig,
+    tickers: &[VolatilityRankTicker],
+) -> Vec<MarketDataSubscription> {
+    if !config.volatility_universe.monitor_orderbook {
+        return Vec::new();
+    }
+    cross_exchange_market_data_subscriptions_for_symbols(
+        config,
+        config.active_symbols_with_high_volatility(tickers),
+    )
+}
+
+fn cross_exchange_market_data_subscriptions_for_symbols(
+    config: &CrossExchangeArbitrageConfig,
+    symbols: Vec<String>,
+) -> Vec<MarketDataSubscription> {
+    let venues = config.active_venues();
+    venues
+        .into_iter()
         .flat_map(|venue| {
-            config
-                .symbols
-                .iter()
-                .filter(|symbol| !symbol.trim().is_empty())
-                .map(move |symbol| MarketDataSubscription {
-                    exchange_id: venue.trim().to_ascii_lowercase(),
-                    symbol: symbol.trim().to_ascii_uppercase(),
-                    market_type: MarketType::Spot,
-                    channels: vec![MarketDataChannel::OrderBookTop, MarketDataChannel::Ticker],
-                })
+            symbols.iter().map(move |symbol| MarketDataSubscription {
+                exchange_id: venue.clone(),
+                symbol: symbol.clone(),
+                market_type: config.market_type.clone(),
+                channels: vec![
+                    MarketDataChannel::OrderBookDepth,
+                    MarketDataChannel::Custom("fastest_l1_10ms".to_string()),
+                ],
+            })
         })
         .collect()
 }
@@ -275,18 +631,310 @@ pub fn cross_exchange_execution_intent(
     }
 }
 
+pub struct ConcurrentTakerOrderSubmission {
+    pub first: SdkResult<ExecutionOrderAck>,
+    pub second: SdkResult<ExecutionOrderAck>,
+}
+
+impl ConcurrentTakerOrderSubmission {
+    pub fn both_accepted(&self) -> bool {
+        self.first.as_ref().is_ok_and(|ack| ack.accepted)
+            && self.second.as_ref().is_ok_and(|ack| ack.accepted)
+    }
+}
+
+pub async fn submit_taker_order_pair_concurrently(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    first: &TakerOrderDraft,
+    second: &TakerOrderDraft,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+) -> ConcurrentTakerOrderSubmission {
+    let first_command =
+        taker_order_command(ctx, bundle_id, first, risk_profile_id, requested_at, "0");
+    let second_command =
+        taker_order_command(ctx, bundle_id, second, risk_profile_id, requested_at, "1");
+    let first_client = ctx.execution();
+    let second_client = ctx.execution();
+    let (first, second) = tokio::join!(
+        first_client.submit_order(first_command),
+        second_client.submit_order(second_command)
+    );
+    ConcurrentTakerOrderSubmission { first, second }
+}
+
+fn taker_order_command(
+    ctx: &StrategyContext,
+    bundle_id: &str,
+    order: &TakerOrderDraft,
+    risk_profile_id: &str,
+    requested_at: DateTime<Utc>,
+    leg_index: &str,
+) -> ExecutionOrderCommand {
+    let role = debug_name_to_snake(order.role);
+    let side = match order.side {
+        OrderSide::Buy => SdkOrderSide::Buy,
+        OrderSide::Sell => SdkOrderSide::Sell,
+    };
+    let client_order_id = format!(
+        "{}:{}:{}:{}",
+        ctx.strategy_id(),
+        bundle_id,
+        order.exchange,
+        role
+    );
+    let idempotency_key = format!("{}:{}:{}", ctx.run_id(), client_order_id, leg_index);
+
+    ExecutionOrderCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        client_order_id,
+        idempotency_key,
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: order.exchange.to_string(),
+        symbol: order.canonical_symbol.as_pair(),
+        side,
+        order_type: OrderType::ImmediateOrCancel,
+        quantity: trim_float(order.quantity),
+        price: Some(trim_float(order.worst_acceptable_price)),
+        time_in_force: Some(TimeInForce::ImmediateOrCancel),
+        reduce_only: order.reduce_only,
+        metadata: BTreeMap::from([
+            ("bundle_id".to_string(), json!(bundle_id)),
+            ("role".to_string(), json!(role)),
+            ("execution_style".to_string(), json!("dual_taker_ioc_limit")),
+            (
+                "submit_group".to_string(),
+                json!("concurrent_two_leg_arbitrage"),
+            ),
+            (
+                "planned_execution_price".to_string(),
+                json!(trim_float(order.reference_price)),
+            ),
+            (
+                "worst_acceptable_price".to_string(),
+                json!(trim_float(order.worst_acceptable_price)),
+            ),
+            (
+                "planned_base_quantity".to_string(),
+                json!(trim_float(order.base_quantity)),
+            ),
+            (
+                "exchange_order_quantity".to_string(),
+                json!(trim_float(order.quantity)),
+            ),
+            (
+                "quantity_unit".to_string(),
+                json!(debug_name_to_snake(order.quantity_unit)),
+            ),
+            (
+                "contract_size_base".to_string(),
+                json!(trim_float(order.contract_size)),
+            ),
+            (
+                "planned_notional_usdt".to_string(),
+                json!(trim_float(order.planned_notional_usdt())),
+            ),
+            ("hedge_mode_position_side_required".to_string(), json!(true)),
+            (
+                "provider_must_normalize_exchange_close_flags".to_string(),
+                json!(true),
+            ),
+        ]),
+    }
+}
+
+fn debug_name_to_snake(value: impl std::fmt::Debug) -> String {
+    let name = format!("{value:?}");
+    let mut output = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if index > 0 {
+                output.push('_');
+            }
+            output.push(ch.to_ascii_lowercase());
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
+fn default_cross_arb_venues() -> Vec<String> {
+    vec![
+        "binance".to_string(),
+        "gate".to_string(),
+        "bitget".to_string(),
+    ]
+}
+
+fn default_cross_arb_symbols() -> Vec<String> {
+    vec!["EDGE/USDT".to_string(), "DRIFT/USDT".to_string()]
+}
+
+fn default_excluded_bases() -> Vec<String> {
+    [
+        "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "TRX", "TON", "LTC",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn default_min_profit_bps() -> f64 {
+    50.0
+}
+
+fn default_max_position_notional_quote() -> String {
+    "5.5".to_string()
+}
+
+fn default_market_type() -> MarketType {
+    MarketType::Perpetual
+}
+
+fn normalize_symbol(symbol: &str) -> String {
+    let symbol = symbol.trim().to_ascii_uppercase().replace(['-', '_'], "/");
+    if symbol.is_empty() || symbol.contains('/') {
+        return symbol;
+    }
+    for quote in ["USDT", "USDC", "USD"] {
+        if symbol.ends_with(quote) && symbol.len() > quote.len() {
+            let base = &symbol[..symbol.len() - quote.len()];
+            return format!("{base}/{quote}");
+        }
+    }
+    symbol
+}
+
+fn symbol_base(symbol: &str) -> String {
+    normalize_symbol(symbol)
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn parse_market_type(value: &str) -> MarketType {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "spot" => MarketType::Spot,
+        "margin" => MarketType::Margin,
+        "perpetual" | "perp" | "swap" => MarketType::Perpetual,
+        "future" | "futures" => MarketType::Futures,
+        "option" | "options" => MarketType::Option,
+        other => MarketType::Custom(other.to_string()),
+    }
+}
+
+fn value_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    path.iter().try_fold(value, |current, key| current.get(key))
+}
+
+fn strings_at(value: &Value, path: &[&str]) -> Option<Vec<String>> {
+    let values = value_at(value, path)?.as_array()?;
+    Some(
+        values
+            .iter()
+            .filter_map(|value| value.as_str())
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+fn first_non_empty_strings(value: &Value, paths: &[&[&str]]) -> Option<Vec<String>> {
+    paths.iter().find_map(|path| {
+        let values = strings_at(value, path)?;
+        (!values.is_empty()).then_some(values)
+    })
+}
+
+fn enabled_exchange_keys(value: &Value) -> Option<Vec<String>> {
+    let exchanges = value_at(value, &["exchanges"])?.as_object()?;
+    let mut venues: Vec<_> = exchanges
+        .iter()
+        .filter_map(|(exchange, config)| {
+            let enabled = bool_at(config, &["enabled"]).unwrap_or(false);
+            let operating_mode = text_at(config, &["operating_mode"])
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            (enabled || operating_mode == "enabled").then_some(exchange.to_string())
+        })
+        .collect();
+    venues.sort();
+    (!venues.is_empty()).then_some(venues)
+}
+
+fn text_at(value: &Value, path: &[&str]) -> Option<String> {
+    value_at(value, path)?.as_str().map(str::to_string)
+}
+
+fn bool_at(value: &Value, path: &[&str]) -> Option<bool> {
+    value_at(value, path)?.as_bool()
+}
+
+fn f64_at(value: &Value, path: &[&str]) -> Option<f64> {
+    match value_at(value, path)? {
+        Value::Number(number) => number.as_f64(),
+        Value::String(value) => parse_f64(value),
+        _ => None,
+    }
+}
+
+fn u64_at(value: &Value, path: &[&str]) -> Option<u64> {
+    match value_at(value, path)? {
+        Value::Number(number) => number
+            .as_u64()
+            .or_else(|| number.as_f64().map(|value| value.max(0.0) as u64)),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn usize_at(value: &Value, path: &[&str]) -> Option<usize> {
+    u64_at(value, path).map(|value| value as usize)
+}
+
+fn u32_at(value: &Value, path: &[&str]) -> Option<u32> {
+    u64_at(value, path).map(|value| value as u32)
+}
+
+fn i64_at(value: &Value, path: &[&str]) -> Option<i64> {
+    match value_at(value, path)? {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|value| value as i64)),
+        Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn parse_f64(value: &str) -> Option<f64> {
+    value.parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
+fn trim_float(value: f64) -> String {
+    let mut text = format!("{value:.10}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
 pub fn config_schema() -> StrategyConfigSchema {
     StrategyConfigSchema {
         schema_version: 1,
         json_schema: json!({
             "type": "object",
-            "additionalProperties": false,
-            "required": [
-                "venues",
-                "symbols",
-                "min_profit_bps",
-                "max_position_notional_quote"
-            ],
+            "additionalProperties": true,
+            "required": ["venues", "symbols"],
             "properties": {
                 "venues": {
                     "type": "array",
@@ -302,6 +950,62 @@ pub fn config_schema() -> StrategyConfigSchema {
                 "max_position_notional_quote": {
                     "type": "string",
                     "pattern": "^[0-9]+(\\.[0-9]+)?$"
+                },
+                "market_type": {
+                    "type": "string",
+                    "enum": ["perpetual", "perp", "swap", "futures", "future", "spot", "margin"]
+                },
+                "excluded_bases": {
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 }
+                },
+                "excluded_symbols": {
+                    "type": "array",
+                    "items": { "type": "string", "minLength": 1 }
+                },
+                "dual_taker": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "target_notional_usdt": { "type": "number", "minimum": 0.0 },
+                        "min_open_spread_pct": { "type": "number", "minimum": 0.0 },
+                        "max_open_spread_pct": { "type": "number", "minimum": 0.0 },
+                        "taker_slippage_pct": { "type": "number", "minimum": 0.0 },
+                        "close_min_net_profit_pct": { "type": "number", "minimum": 0.0 },
+                        "expected_close_spread_pct": { "type": "number", "minimum": 0.0 },
+                        "top_of_book_capacity_ratio": { "type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0 },
+                        "orderbook_stale_ms": { "type": "integer", "minimum": 1 },
+                        "min_orderbook_levels": { "type": "integer", "minimum": 1 },
+                        "single_leg_timeout_ms": { "type": "integer", "minimum": 1 },
+                        "max_consecutive_single_leg_fills": { "type": "integer", "minimum": 1 },
+                        "max_positions_per_exchange": { "type": "integer", "minimum": 1 },
+                        "max_active_bundles_per_symbol": { "type": "integer", "minimum": 1 },
+                        "symbol_cooldown_secs": { "type": "integer", "minimum": 0 },
+                        "max_hold_secs": { "type": "integer", "minimum": 1 }
+                    }
+                },
+                "logging": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "persist_only_key_events": { "type": "boolean" },
+                        "max_file_bytes": { "type": "integer", "minimum": 1 },
+                        "retained_files": { "type": "integer", "minimum": 1 }
+                    }
+                },
+                "volatility_universe": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" },
+                        "top_gainers_per_exchange": { "type": "integer", "minimum": 0 },
+                        "top_losers_per_exchange": { "type": "integer", "minimum": 0 },
+                        "min_abs_change_pct": { "type": "number", "minimum": 0.0 },
+                        "min_quote_volume_usdt": { "type": "number", "minimum": 0.0 },
+                        "refresh_secs": { "type": "integer", "minimum": 1 },
+                        "max_dynamic_symbols": { "type": "integer", "minimum": 0 },
+                        "monitor_orderbook": { "type": "boolean" }
+                    }
                 },
                 "dry_run": { "type": "boolean", "default": true }
             }
@@ -325,7 +1029,23 @@ fn common_snapshot_schema() -> Value {
             "migrated_from": { "type": "string" },
             "handled_events": { "type": "integer", "minimum": 0 },
             "started_at": { "type": ["string", "null"], "format": "date-time" },
-            "last_event_at": { "type": ["string", "null"], "format": "date-time" }
+            "last_event_at": { "type": ["string", "null"], "format": "date-time" },
+            "configured_venues": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "configured_symbols": { "type": "integer", "minimum": 0 },
+            "excluded_bases": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "target_notional_usdt": { "type": "string" },
+            "min_open_spread_pct": { "type": "string" },
+            "max_open_spread_pct": { "type": "string" },
+            "close_min_net_profit_pct": { "type": "string" },
+            "orderbook_stale_ms": { "type": "integer", "minimum": 1 },
+            "high_volatility_universe_enabled": { "type": "boolean" },
+            "high_volatility_refresh_secs": { "type": "integer", "minimum": 1 }
         }
     })
 }
@@ -388,9 +1108,30 @@ mod tests {
         ExecutionOrderAck, ExecutionOrderCommand, MarketDataChannel, MarketType, SdkResult,
         StrategyExecutionClient,
     };
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     struct NoopExecutionClient;
+
+    #[test]
+    fn config_market_type_should_keep_futures_distinct_from_perpetual() {
+        for (market_type, expected) in [
+            ("perpetual", MarketType::Perpetual),
+            ("perp", MarketType::Perpetual),
+            ("swap", MarketType::Perpetual),
+            ("futures", MarketType::Futures),
+            ("future", MarketType::Futures),
+        ] {
+            let config = CrossExchangeArbitrageConfig::from_runtime_value(&json!({
+                "venues": ["binance", "bitget"],
+                "symbols": ["DRIFT/USDT"],
+                "market_type": market_type
+            }));
+            assert_eq!(config.market_type, expected);
+        }
+    }
 
     #[async_trait]
     impl StrategyExecutionClient for NoopExecutionClient {
@@ -437,6 +1178,66 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct ConcurrentProbeExecutionClient {
+        in_flight: AtomicUsize,
+        max_in_flight: AtomicUsize,
+        orders: Mutex<Vec<ExecutionOrderCommand>>,
+    }
+
+    #[async_trait]
+    impl StrategyExecutionClient for ConcurrentProbeExecutionClient {
+        async fn submit_order(
+            &self,
+            command: ExecutionOrderCommand,
+        ) -> SdkResult<ExecutionOrderAck> {
+            let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            self.orders
+                .lock()
+                .expect("probe orders lock should not be poisoned")
+                .push(command.clone());
+            Ok(ExecutionOrderAck {
+                schema_version: command.schema_version,
+                accepted: true,
+                client_order_id: command.client_order_id,
+                execution_order_id: Some("accepted".to_string()),
+                reason: None,
+                received_at: Utc::now(),
+            })
+        }
+
+        async fn cancel_order(
+            &self,
+            command: ExecutionCancelCommand,
+        ) -> SdkResult<ExecutionCancelAck> {
+            Ok(ExecutionCancelAck {
+                schema_version: command.schema_version,
+                accepted: false,
+                client_order_id: command.client_order_id,
+                execution_order_id: command.execution_order_id,
+                reason: Some("not used by concurrent submission probe".to_string()),
+                received_at: Utc::now(),
+            })
+        }
+
+        async fn submit_raw_intent(
+            &self,
+            intent: ExecutionIntent,
+        ) -> SdkResult<ExecutionIntentAck> {
+            Ok(ExecutionIntentAck {
+                schema_version: intent.schema_version,
+                accepted: false,
+                intent_kind: intent.intent_kind,
+                reason: Some("not used by concurrent submission probe".to_string()),
+                received_at: Utc::now(),
+                payload: Value::Null,
+            })
+        }
+    }
+
     #[test]
     fn spec_should_expose_config_and_snapshot_schemas() {
         let spec = strategy_spec();
@@ -459,7 +1260,14 @@ mod tests {
         assert!(!spec.market_data_subscriptions.is_empty());
         assert_eq!(
             spec.market_data_subscriptions[0].channels,
-            vec![MarketDataChannel::OrderBookTop, MarketDataChannel::Ticker]
+            vec![
+                MarketDataChannel::OrderBookDepth,
+                MarketDataChannel::Custom("fastest_l1_10ms".to_string())
+            ]
+        );
+        assert_eq!(
+            spec.market_data_subscriptions[0].market_type,
+            MarketType::Perpetual
         );
         assert_eq!(spec.metadata["runtime_contract_migration"], json!(true));
         assert_eq!(spec.metadata["remaining_legacy_modules"], json!([]));
@@ -470,7 +1278,7 @@ mod tests {
     fn config_parse_and_market_data_subscription_should_use_sdk_contract() {
         let config: CrossExchangeArbitrageConfig = serde_json::from_value(json!({
             "venues": ["binance", "bitget"],
-            "symbols": ["btc/usdt"],
+            "symbols": ["drift/usdt"],
             "min_profit_bps": 1.5,
             "max_position_notional_quote": "25",
             "dry_run": true
@@ -479,15 +1287,31 @@ mod tests {
 
         let subscriptions = cross_exchange_market_data_subscriptions(&config);
 
-        assert_eq!(config.symbols, vec!["btc/usdt"]);
+        assert_eq!(config.symbols, vec!["drift/usdt"]);
         assert_eq!(subscriptions.len(), 2);
         assert_eq!(subscriptions[0].exchange_id, "binance");
-        assert_eq!(subscriptions[0].symbol, "BTC/USDT");
-        assert_eq!(subscriptions[0].market_type, MarketType::Spot);
+        assert_eq!(subscriptions[0].symbol, "DRIFT/USDT");
+        assert_eq!(subscriptions[0].market_type, MarketType::Perpetual);
         assert_eq!(
             subscriptions[0].channels,
-            vec![MarketDataChannel::OrderBookTop, MarketDataChannel::Ticker]
+            vec![
+                MarketDataChannel::OrderBookDepth,
+                MarketDataChannel::Custom("fastest_l1_10ms".to_string())
+            ]
         );
+    }
+
+    #[test]
+    fn config_should_filter_excluded_major_symbols_before_subscription() {
+        let config: CrossExchangeArbitrageConfig = serde_json::from_value(json!({
+            "venues": ["binance", "gate", "bitget"],
+            "symbols": ["BTC/USDT", "eth_usdt", "BNBUSDT", "EDGE/USDT"],
+            "dry_run": true
+        }))
+        .expect("config should parse");
+
+        assert_eq!(config.active_symbols(), vec!["EDGE/USDT"]);
+        assert_eq!(cross_exchange_market_data_subscriptions(&config).len(), 3);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -515,6 +1339,38 @@ mod tests {
         assert_eq!(snapshot.status, StrategyStatus::Running);
         assert_secret_free(&snapshot.payload);
         assert_secret_free(&serde_json::to_value(snapshot).expect("snapshot should serialize"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_reload_config_value_should_update_snapshot_venues() {
+        let mut runtime = CrossExchangeArbitrageRuntime::new();
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "cross_arb_live",
+            "run-1",
+            json!({
+                "enabled_exchanges": ["binance"],
+                "enabled_symbols": ["EDGE/USDT"]
+            }),
+            execution,
+        );
+        runtime.start(ctx).await.expect("runtime should start");
+        runtime.reload_config_value(&json!({
+            "enabled_exchanges": ["gate", "bitget"],
+            "enabled_symbols": ["EDGE/USDT"]
+        }));
+
+        let snapshot = runtime.snapshot().await.expect("snapshot should build");
+
+        assert_eq!(
+            snapshot.payload["configured_venues"],
+            json!(["gate", "bitget"])
+        );
+        assert_eq!(snapshot.payload["handled_events"], json!(1));
+        assert!(snapshot.payload["last_event_at"].is_string());
     }
 
     #[test]
@@ -554,6 +1410,78 @@ mod tests {
         assert_eq!(intent.idempotency_key, "strategy-1:run-1:bundle-1");
         assert_eq!(intent.payload["dry_run"], json!(true));
         assert_secret_free(&serde_json::to_value(intent).expect("intent should serialize"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn taker_order_pair_submission_should_submit_two_legs_concurrently() {
+        let probe = Arc::new(ConcurrentProbeExecutionClient::default());
+        let execution: Arc<dyn StrategyExecutionClient> = probe.clone();
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "strategy-1",
+            "run-1",
+            json!({}),
+            execution,
+        );
+        let symbol = CanonicalSymbol::new("EDGE", "USDT");
+        let first = TakerOrderDraft {
+            exchange: ExchangeId::new("binance"),
+            canonical_symbol: symbol.clone(),
+            side: OrderSide::Buy,
+            base_quantity: 0.055,
+            quantity: 0.055,
+            quantity_unit: QuantityUnit::Base,
+            contract_size: 1.0,
+            reference_price: 100.0,
+            worst_acceptable_price: 100.05,
+            reduce_only: false,
+            role: TakerOrderRole::OpenLong,
+        };
+        let second = TakerOrderDraft {
+            exchange: ExchangeId::new("gate"),
+            canonical_symbol: symbol,
+            side: OrderSide::Sell,
+            base_quantity: 0.055,
+            quantity: 55.0,
+            quantity_unit: QuantityUnit::Contracts,
+            contract_size: 0.001,
+            reference_price: 100.6,
+            worst_acceptable_price: 100.54,
+            reduce_only: false,
+            role: TakerOrderRole::OpenShort,
+        };
+
+        let submitted = submit_taker_order_pair_concurrently(
+            &ctx,
+            "bundle-1",
+            &first,
+            &second,
+            "cross-arb-live",
+            Utc::now(),
+        )
+        .await;
+
+        assert!(submitted.both_accepted());
+        assert_eq!(probe.max_in_flight.load(Ordering::SeqCst), 2);
+        let orders = probe
+            .orders
+            .lock()
+            .expect("probe orders lock should not be poisoned");
+        assert_eq!(orders.len(), 2);
+        assert!(orders
+            .iter()
+            .all(|order| order.order_type == OrderType::ImmediateOrCancel));
+        assert!(orders
+            .iter()
+            .all(|order| order.time_in_force == Some(TimeInForce::ImmediateOrCancel)));
+        assert!(orders
+            .iter()
+            .any(|order| order.metadata["quantity_unit"] == json!("contracts")));
+        assert!(orders
+            .iter()
+            .all(|order| order.metadata["planned_execution_price"].is_string()));
     }
 
     #[test]

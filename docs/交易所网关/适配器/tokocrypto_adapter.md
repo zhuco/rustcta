@@ -45,3 +45,11 @@ P6 official product-line verification found this as a Tokocrypto spot/Binance-
 family surface; `exchangeInfo` has `spotTradingEnable=1` and
 `marginTradingEnable=0`, and no standard futures/perpetual/options API was
 verified. Standard contracts are `交易所不支持合约`.
+
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms MBX public streams support partial book depth
+and diff depth. Partial stream names are `<symbol>@depth<levels>` or
+`<symbol>@depth<levels>@100ms`, with levels 5, 10, or 20 and update speed
+1000ms or 100ms. Diff depth uses `<symbol>@depth` or `<symbol>@depth@100ms` and
+has `U/u` update ids. Rebuild with REST `/api/v3/depth` and `lastUpdateId`.

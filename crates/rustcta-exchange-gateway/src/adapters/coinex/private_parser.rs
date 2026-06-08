@@ -18,6 +18,7 @@ pub fn parse_balances(
     exchange_id: &ExchangeId,
     tenant_id: TenantId,
     account_id: AccountId,
+    market_type: MarketType,
     assets: &[String],
     value: &Value,
 ) -> ExchangeApiResult<Vec<ExchangeBalance>> {
@@ -64,7 +65,7 @@ pub fn parse_balances(
         tenant_id,
         account_id,
         exchange_id: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         balances,
         observed_at: Utc::now(),
     }])
@@ -79,10 +80,13 @@ pub fn parse_order_state(
         .or_else(|_| required_str(exchange_id, value, "symbol"))
         .unwrap_or("UNKNOWN");
     let normalized_market = normalize_coinex_symbol(market)?;
+    let market_type = symbol_hint
+        .map(|symbol| symbol.market_type)
+        .unwrap_or(MarketType::Spot);
     let exchange_symbol = if let Some(symbol) = symbol_hint {
         symbol.exchange_symbol.clone()
     } else {
-        ExchangeSymbol::new(exchange_id.clone(), MarketType::Spot, normalized_market)
+        ExchangeSymbol::new(exchange_id.clone(), market_type, normalized_market)
             .map_err(validation_error)?
     };
     let canonical_symbol = symbol_hint.and_then(|symbol| symbol.canonical_symbol.clone());
@@ -95,7 +99,7 @@ pub fn parse_order_state(
     Ok(OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol,
         exchange_symbol,
         client_order_id: value_as_string(value.get("client_id")),
@@ -106,7 +110,11 @@ pub fn parse_order_state(
             .map(parse_side)
             .transpose()?
             .unwrap_or(OrderSide::Buy),
-        position_side: Some(PositionSide::None),
+        position_side: Some(if market_type == MarketType::Perpetual {
+            PositionSide::Net
+        } else {
+            PositionSide::None
+        }),
         order_type: parse_order_type(order_type_text, option),
         time_in_force: parse_time_in_force(option),
         status: value
@@ -128,7 +136,11 @@ pub fn parse_order_state(
         average_fill_price: non_zero_string(
             string_or_number(value.get("avg_price")).unwrap_or_else(|| "0".to_string()),
         ),
-        reduce_only: false,
+        reduce_only: value
+            .get("is_reduce_only")
+            .or_else(|| value.get("reduce_only"))
+            .and_then(value_as_bool)
+            .unwrap_or(false),
         post_only: order_type_text.eq_ignore_ascii_case("maker_only")
             || option.is_some_and(|text| text.eq_ignore_ascii_case("maker_only")),
         created_at: first_timestamp_millis(value, &["created_at", "create_time"]),
@@ -216,14 +228,18 @@ pub fn parse_recent_fills(
                 tenant_id: tenant_id.clone(),
                 account_id: account_id.clone(),
                 exchange_id: exchange_id.clone(),
-                market_type: MarketType::Spot,
+                market_type: symbol.market_type,
                 canonical_symbol: canonical_symbol.clone(),
                 exchange_symbol: Some(symbol.exchange_symbol.clone()),
                 order_id: value_as_string(fill.get("order_id")),
                 client_order_id: value_as_string(fill.get("client_id")),
                 fill_id: value_as_string(fill.get("deal_id").or_else(|| fill.get("id"))),
                 side: parse_side(required_str(exchange_id, fill, "side")?)?,
-                position_side: PositionSide::None,
+                position_side: if symbol.market_type == MarketType::Perpetual {
+                    PositionSide::Net
+                } else {
+                    PositionSide::None
+                },
                 status: FillStatus::Confirmed,
                 liquidity_role: LiquidityRole::Unknown,
                 price: decimal_value_to_f64(fill.get("price"))?.unwrap_or(0.0),
@@ -343,6 +359,14 @@ fn first_timestamp_millis(value: &Value, fields: &[&str]) -> Option<DateTime<Utc
 
 fn value_as_i64(value: &Value) -> Option<i64> {
     value.as_i64().or_else(|| value.as_str()?.parse().ok())
+}
+
+fn value_as_bool(value: &Value) -> Option<bool> {
+    value.as_bool().or_else(|| match value.as_str()? {
+        "true" | "TRUE" | "1" => Some(true),
+        "false" | "FALSE" | "0" => Some(false),
+        _ => None,
+    })
 }
 
 fn non_zero_string(value: String) -> Option<String> {

@@ -350,7 +350,7 @@ fn rest_endpoint(
     EndpointCapability {
         operation: operation.to_string(),
         support,
-        market_types: vec![MarketType::Spot],
+        market_types: vec![MarketType::Spot, MarketType::Perpetual],
         transport: EndpointTransport::Rest,
         method: Some(method.to_string()),
         path: Some(path.to_string()),

@@ -4,6 +4,7 @@ use rustcta_exchange_api::{
     ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
     SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
 };
+use rustcta_types::MarketType;
 use serde_json::Value;
 
 use super::parser::{
@@ -26,27 +27,48 @@ impl BinanceGatewayAdapter {
         self.ensure_exchange(&exchange)?;
         for symbol in &request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_supported_market(symbol.market_type)?;
         }
 
-        let requested = request
-            .symbols
-            .iter()
-            .map(|symbol| normalize_binance_symbol(&symbol.exchange_symbol.symbol))
-            .collect::<ExchangeApiResult<Vec<_>>>()?;
-        let mut params = HashMap::new();
-        if requested.len() == 1 {
-            params.insert("symbol".to_string(), requested[0].clone());
-        }
+        let markets = if request.symbols.is_empty() {
+            vec![MarketType::Spot, MarketType::Perpetual]
+        } else {
+            let mut markets = Vec::new();
+            for symbol in &request.symbols {
+                if !markets.contains(&symbol.market_type) {
+                    markets.push(symbol.market_type);
+                }
+            }
+            markets
+        };
 
-        let mut response = self
-            .rest
-            .send_public_request("/api/v3/exchangeInfo", &params)
-            .await?;
-        retain_requested_symbols(&mut response, &requested);
-        let mut rules = parse_symbol_rules(&self.exchange_id, &response)?;
-        if !requested.is_empty() {
-            rules.retain(|rule| requested.contains(&rule.symbol.exchange_symbol.symbol));
+        let mut rules = Vec::new();
+        for market_type in markets {
+            let requested = request
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.market_type == market_type)
+                .map(|symbol| normalize_binance_symbol(&symbol.exchange_symbol.symbol))
+                .collect::<ExchangeApiResult<Vec<_>>>()?;
+            let mut params = HashMap::new();
+            if requested.len() == 1 {
+                params.insert("symbol".to_string(), requested[0].clone());
+            }
+            let endpoint = match market_type {
+                MarketType::Spot => "/api/v3/exchangeInfo",
+                MarketType::Perpetual => "/fapi/v1/exchangeInfo",
+                _ => unreachable!("checked by ensure_supported_market"),
+            };
+            let mut response = self
+                .rest_for_market(market_type)?
+                .send_public_request(endpoint, &params)
+                .await?;
+            retain_requested_symbols(&mut response, &requested);
+            rules.extend(parse_symbol_rules(
+                &self.exchange_id,
+                market_type,
+                &response,
+            )?);
         }
 
         Ok(SymbolRulesResponse {
@@ -62,17 +84,22 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<OrderBookResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        let depth = normalize_depth(request.depth.unwrap_or(5));
+        self.ensure_supported_market(request.symbol.market_type)?;
+        let depth = normalize_depth(request.depth.unwrap_or(5), request.symbol.market_type);
         let mut params = HashMap::new();
         params.insert(
             "symbol".to_string(),
             normalize_binance_symbol(&request.symbol.exchange_symbol.symbol)?,
         );
         params.insert("limit".to_string(), depth.to_string());
+        let endpoint = match request.symbol.market_type {
+            MarketType::Spot => "/api/v3/depth",
+            MarketType::Perpetual => "/fapi/v1/depth",
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .rest
-            .send_public_request("/api/v3/depth", &params)
+            .rest_for_market(request.symbol.market_type)?
+            .send_public_request(endpoint, &params)
             .await?;
         let order_book = parse_orderbook_snapshot(&self.exchange_id, request.symbol, &value)?;
         Ok(OrderBookResponse {

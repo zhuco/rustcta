@@ -33,6 +33,9 @@ pub use config::BitgetGatewayConfig;
 use signing::BitgetPrivateCredentials;
 use transport::BitgetRest;
 
+const BITGET_PERP_PRODUCT_TYPE: &str = "USDT-FUTURES";
+const BITGET_PERP_MARGIN_COIN: &str = "USDT";
+
 #[derive(Clone)]
 pub struct BitgetGatewayAdapter {
     exchange_id: ExchangeId,
@@ -83,6 +86,15 @@ impl BitgetGatewayAdapter {
         Ok(())
     }
 
+    fn ensure_supported_market_type(&self, market_type: MarketType) -> ExchangeApiResult<()> {
+        if !matches!(market_type, MarketType::Spot | MarketType::Perpetual) {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "bitget.unsupported_market_type",
+            });
+        }
+        Ok(())
+    }
+
     fn unsupported_private<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
@@ -119,12 +131,13 @@ impl ExchangeClient for BitgetGatewayAdapter {
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let private = self.config.private_rest_available();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
-        capabilities.market_types = vec![MarketType::Spot];
+        capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
+        capabilities.supports_positions = private;
         capabilities.supports_fees = private;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
@@ -135,6 +148,8 @@ impl ExchangeClient for BitgetGatewayAdapter {
         capabilities.supports_quote_market_order = private;
         capabilities.supports_amend_order = private;
         capabilities.supports_client_order_id = true;
+        capabilities.supports_reduce_only = true;
+        capabilities.supports_post_only = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
             TimeInForce::IOC,
@@ -244,9 +259,9 @@ impl ExchangeClient for BitgetGatewayAdapter {
 
     async fn get_positions(
         &self,
-        _request: PositionsRequest,
+        request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private("bitget.get_positions")
+        self.get_positions_impl(request).await
     }
 
     async fn get_symbol_rules(

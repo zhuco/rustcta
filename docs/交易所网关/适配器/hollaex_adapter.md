@@ -41,6 +41,12 @@ Endpoint mapping:
   - `GET /v2/orderbook?symbol={symbol}`
 - Private endpoints are mapped for request-spec and reconciliation boundaries but remain runtime `Unsupported`.
 
+Official Core Trading Detail:
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。HollaEx API 支持 `POST /v2/order`、`DELETE /v2/order`、`DELETE /v2/order/all`、`GET /v2/order`；user order 支持 limit/market，`meta.post_only` 和可选 stop price。
+
+当前 adapter 只映射官方 demo/API profile，private trading/readback 是 offline request-spec 边界，runtime 仍 unsupported。因此这是 `项目未实现核心交易 runtime`，不是 `交易所不支持下单/撤单`；任意白标 HollaEx venue 仍需单独核验。
+
 WebSocket boundary:
 
 - Public order book subscribe/unsubscribe payloads use `orderbook:{symbol}`.

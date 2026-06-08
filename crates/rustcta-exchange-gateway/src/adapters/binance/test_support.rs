@@ -131,9 +131,20 @@ pub(super) fn symbol_scope(exchange_symbol: &str) -> SymbolScope {
     }
 }
 
+pub(super) fn perpetual_symbol_scope(exchange_symbol: &str) -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, exchange_symbol)
+            .expect("symbol"),
+    }
+}
+
 pub(super) fn private_config(base_url: String) -> BinanceGatewayConfig {
     BinanceGatewayConfig {
-        rest_base_url: base_url,
+        rest_base_url: base_url.clone(),
+        futures_rest_base_url: base_url,
         api_key: Some("test-key".to_string()),
         api_secret: Some("test-secret".to_string()),
         recv_window_ms: 5_000,

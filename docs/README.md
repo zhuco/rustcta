@@ -2,14 +2,16 @@
 
 Status date: 2026-06-08
 
-This directory is now organized around current-state architecture, active
-operations, and the industrial workspace migration. The migration status file is
-the best starting point when multiple AI agents are working in parallel.
+This directory is now organized around current-state architecture and active
+operations. Several migration plans remain for history only; their retired-root
+paths are not current run commands.
 
 ## Start Here
 
-- `industrial_workspace_migration_status.md` - current migration progress,
-  verified checks, remaining work, and next batch scope.
+- `dioxus_control_panel.md` - current local Web control panel entrypoint and
+  Dioxus UI notes.
+- `control_web_directory_migration_plan.md` - current control API and Web panel
+  directory boundary.
 - `交易所网关/README.md` - exchange gateway docs, adapter index, interface
   checklist, WebSocket market-data dimensions, and per-exchange references.
 - `交易所网关/总览/exchange_gateway_next_40_parallel_tasks_zh.md` - 2026-06-08
@@ -17,16 +19,10 @@ the best starting point when multiple AI agents are working in parallel.
 - `industrial_workspace_update_2026-06-07_v0.3.9.md` - previous workspace
   cleanup note, version bump, validation result, and current directory
   structure.
-- `industrial_cta_platform_architecture_assessment.md` - target industrial
-  architecture and long-term migration direction.
-- `industrial_directory_migration_plan.md` - historical app/tool/strategy/runtime
-  ownership map for retired root binary entrypoints.
 - `industrial_migration_final_gates.md` - CI gates, final root-source retirement
   checks, and local paper end-to-end checklist.
-- `control_web_directory_migration_plan.md` - control API and Dioxus workspace
-  migration boundaries.
-- `tools_ops_migration_plan.md` - `tools/ops` command taxonomy and historical
-  migration notes.
+- `industrial_cta_platform_architecture_assessment.md` - target industrial
+  architecture and long-term direction.
 
 ## Current Runtime Entrypoints
 
@@ -56,8 +52,7 @@ runtime entrypoints.
 
 ## Architecture And Safety
 
-- `architecture_module_layout.md` - legacy root module map and current
-  functional paths.
+- `architecture_module_layout.md` - current workspace module layout.
 - `control_plane_security.md` - control-plane write and audit rules.
 - `kill_switch.md` - kill-switch state and safety semantics.
 - `live_preflight.md` - read-only readiness gate.
@@ -74,7 +69,18 @@ WebSocket market-data rules now live under `交易所网关/`.
 - `spot_spot_inventory_rebalance_flow_zh.md` - Chinese version of the inventory
   rebalance flow.
 - `hedged_dual_direction_grid.md` - multi-symbol hedged grid internals.
-- `dioxus_control_panel.md` - current local control panel and Dioxus UI notes.
+
+## Historical Migration Records
+
+These documents preserve pre-cleanup planning context. Do not use retired root
+paths in them as current entrypoints.
+
+- `industrial_workspace_migration_status.md`
+- `industrial_directory_migration_plan.md`
+- `legacy_src_full_workspace_migration_parallel_tasks_zh.md`
+- `full_workspace_migration_execution_plan_zh.md`
+- `parallel_ai_migration_tasks.md`
+- `tools_ops_migration_plan.md`
 
 ## Exchange References
 
@@ -130,6 +136,59 @@ WebSocket market-data rules now live under `交易所网关/`.
   WebSocket order-book details for the third supplemental batch, including
   HitBTC-family 100ms feeds, Gemini/KuCoin Futures low-latency feeds, and
   chain/profile runtime boundaries.
+- `交易所网关/WebSocket官方核验_P9_剩余交易所盘口细项.md` - official
+  WebSocket order-book details for the remaining public-WS detail queue,
+  including OKX regional 10ms BBO, OX.FUN/Pacifica 100ms books, and
+  sequence/rebuild risks for the final 14 adapters.
+- `交易所网关/核心交易官方核验_P0_第一批.md` - official core trading
+  verification for order placement/cancel support, including ApeX zkLink
+  signer gating, Bybit EU regional credential scope, and CEX.IO Spot Trading.
+- `交易所网关/核心交易官方核验_P1_第二批.md` - official core trading
+  verification for HitBTC-family venues, Indodax, Paymium, P2B, CoinSpot,
+  MyOKX, OKX US, and WEEX order placement/cancel support.
+- `交易所网关/核心交易官方核验_P2_第三批.md` - official core trading
+  verification for dYdX, Lighter, WX Network, HollaEx, LATOKEN, YoBit,
+  ZebPay, and Zeta Markets current trading boundaries.
+- `交易所网关/核心交易官方核验_P3_第四批.md` - official core trading
+  verification for the final core-trading queue, separating project-missing
+  signed/on-chain trading runtimes from unsupported current profile runtimes.
+- `交易所网关/仓位接口官方核验_P0_第一批.md` - official position interface
+  verification for the first P2 position batch, including Orderly positions,
+  Bybit V5 position list, SDK/on-chain account positions, and unsupported
+  runtime boundaries.
+- `交易所网关/仓位接口官方核验_P1_第二批.md` - official position interface
+  verification for the remaining position queue, including implemented
+  Coinbase/Coinstore/HashKey/Kraken/Phemex/Toobit/WEEX/WOO positions,
+  Huobi legacy profile gap, and unsupported profile boundaries.
+- `交易所网关/账户接口官方核验_P0_第一批.md` - official account/balance
+  verification for the first account-state batch, separating project-missing
+  private read runtimes from unsupported current profile runtimes.
+- `交易所网关/账户接口官方核验_P1_第二批.md` - official account/balance
+  verification for the remaining account-state queue, clearing project-missing
+  readbacks and unsupported current profile boundaries.
+- `交易所网关/费率接口官方核验_P0_第一批.md` - official fee interface
+  verification for the first fee batch, separating project-missing fee sources,
+  unsupported current profile runtimes, and remaining uncertain checks.
+- `交易所网关/费率接口官方核验_P1_第二批.md` - official fee interface
+  verification for the second fee batch, clearing Bybit fee-rate support and
+  unsupported/current-placeholder fee runtimes.
+- `交易所网关/费率接口官方核验_P2_第三批.md` - official fee interface
+  verification for the final fee batch, clearing fee API/config sources and
+  unsupported current fee runtimes.
+- `交易所网关/高级订单能力官方核验_P0_第一批.md` - official advanced order
+  capability verification for batch, amend, and OCO/OTO style interfaces.
+- `交易所网关/高级订单能力官方核验_P1_第二批.md` - official advanced order
+  capability verification for unsupported current advanced-order runtimes.
+- `交易所网关/高级订单能力官方核验_P2_第三批.md` - official advanced order
+  capability verification for batch/amend matrix gaps and unsupported sub-capabilities.
+- `交易所网关/高级订单能力官方核验_P3_第四批.md` - official advanced order
+  capability verification for composed/native batch evidence and unsupported boundaries.
+- `交易所网关/高级订单能力官方核验_P4_第五批.md` - official advanced order
+  capability verification for the fifth batch of batch/amend/order-list boundaries.
+- `交易所网关/高级订单能力官方核验_P5_第六批.md` - official advanced order
+  capability verification for the sixth batch of batch/amend/order-list boundaries.
+- `交易所网关/高级订单能力官方核验_P6_第七批.md` - official advanced order
+  capability verification for the final batch of batch/amend/order-list boundaries.
 - `交易所网关/剩余官方核验队列.md` - generated queue of official docs still
   needing verification before more adapter tasks can be declared.
 - `交易所网关/适配器索引.md` - Chinese index for adapter file names.

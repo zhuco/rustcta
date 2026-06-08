@@ -164,6 +164,9 @@ impl GateIoPublicRest {
             .header("Timestamp", timestamp)
             .header("SIGN", signature)
             .header("Content-Type", "application/json");
+        if endpoint.starts_with("/futures/") {
+            request = request.header("X-Gate-Size-Decimal", "1");
+        }
         if !body_text.is_empty() {
             request = request.body(body_text);
         }

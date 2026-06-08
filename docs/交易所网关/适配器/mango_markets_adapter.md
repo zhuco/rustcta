@@ -53,6 +53,18 @@ The signing fixture records an instruction fingerprint and boundary statement.
 It contains no private key, seed phrase, wallet signature, token account,
 phone, email or real user account id.
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Mango v4 SDK 支持 wallet/MangoAccount 驱动的订单交易，需要 Solana wallet-signed transactions、MangoAccount health/order id、slot/reorg 和 event queue/indexer 对账。
+
+因此这里写 `官方协议可交易，项目未实现链上交易 runtime`，不是 `交易所不支持下单/撤单`。当前 adapter 不构造、不签名、不提交任何交易。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Mango v4 在 MangoAccount 中跟踪 PerpPosition，包含 base lots、quote native、funding settlement、market index 等。
+
+因此仓位读取写 `官方协议支持，项目未实现链上仓位 runtime`。补仓位前必须完成 Solana/MangoAccount decoding、PerpPosition parser、health/PnL/funding fields、slot/reorg/indexer reconciliation。
+
 ## Endpoint Mapping
 
 | Standard capability | Mango/Solana surface | Current implementation |

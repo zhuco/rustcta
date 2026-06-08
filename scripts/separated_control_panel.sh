@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 STRATEGY_CONFIG="${STRATEGY_CONFIG:-config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml}"
+CONTROL_PANEL_MODE="${CONTROL_PANEL_MODE:-legacy-local}"
 STRATEGY_BIN="${STRATEGY_BIN:-target/release/rustcta}"
 CONTROL_API_BIN="${CONTROL_API_BIN:-target/release/control_api}"
 CONTROL_API_BIND_ADDR="${CONTROL_API_BIND_ADDR:-127.0.0.1:8091}"
@@ -35,6 +36,7 @@ fi
 usage() {
   cat <<'USAGE'
 Usage:
+  scripts/separated_control_panel.sh doctor
   scripts/separated_control_panel.sh build
   scripts/separated_control_panel.sh start-strategy
   scripts/separated_control_panel.sh start-control-api
@@ -50,6 +52,7 @@ Usage:
   scripts/separated_control_panel.sh logs-control-api [lines]
 
 Environment:
+  CONTROL_PANEL_MODE=legacy-local
   STRATEGY_CONFIG=config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml
   CROSS_ARB_BIN=target/release/cross_arb_live
   CROSS_ARB_EXECUTE=false
@@ -64,11 +67,94 @@ Environment:
   COMMAND_PATH=data/control_api/control_commands.jsonl
   DIOXUS_STATIC_DIR=web-ui/dioxus/dist
   DIOXUS_BUILD_PUBLIC=web-ui/dioxus/target/dx/rustcta-control-panel/release/web/public
+
+This helper is for the retired legacy local three-strategy console only.
+It must not be repointed at the workspace rustcta-control-api backend.
 USAGE
 }
 
 log() {
   printf '[separated-control] %s\n' "$*"
+}
+
+legacy_local_sources_present() {
+  [[ -f src/bin/control_api.rs && -f src/bin/cross_arb_live.rs && -f src/web/server.rs ]]
+}
+
+workspace_backend_substitution_requested() {
+  [[ "$(basename "$CONTROL_API_BIN")" == "rustcta-control-api" ]] \
+    || [[ "$(basename "$CROSS_ARB_BIN")" == "cross-exchange-arbitrage-runtime" ]] \
+    || [[ "$(basename "$STRATEGY_BIN")" == "spot-spot-arbitrage-runtime" ]]
+}
+
+fail_wrong_control_panel_mode() {
+  local reason="$1"
+  cat >&2 <<EOF
+separated_control_panel.sh is the retired legacy local three-strategy console launcher.
+$reason
+
+Do not substitute the workspace rustcta-control-api backend here. It serves the
+same Dioxus static frontend, but it does not provide the legacy local console's
+three-strategy wiring, raw local config editor, or exchange API key env-store
+routes.
+
+Current workspace control API entrypoint:
+  RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \\
+  cargo run -p rustcta-control-api-app --bin rustcta-control-api
+
+Legacy local console reference:
+  git show ae5ffbf^:src/bin/control_api.rs
+  git show ae5ffbf^:src/bin/cross_arb_live.rs
+
+Use docs/dioxus_control_panel.md for the workspace API and
+docs/control_web_directory_migration_plan.md before migrating legacy routes.
+EOF
+  exit 7
+}
+
+require_legacy_panel_mode() {
+  if [[ "$CONTROL_PANEL_MODE" != "legacy-local" ]]; then
+    fail_wrong_control_panel_mode "CONTROL_PANEL_MODE=$CONTROL_PANEL_MODE is not supported by this helper."
+  fi
+  if workspace_backend_substitution_requested; then
+    fail_wrong_control_panel_mode "A workspace backend binary was supplied to a legacy-local launcher."
+  fi
+}
+
+require_legacy_sources_for_build() {
+  require_legacy_panel_mode
+  if ! legacy_local_sources_present; then
+    fail_wrong_control_panel_mode "The retired root src/ legacy entrypoints are not present in this checkout, so the legacy local console cannot be built."
+  fi
+}
+
+require_legacy_binary() {
+  local kind="$1"
+  local binary="$2"
+  require_legacy_panel_mode
+  if [[ ! -x "$binary" ]]; then
+    fail_wrong_control_panel_mode "Missing executable for $kind: $binary. Build the retired legacy checkout first; do not point this variable at a workspace binary."
+  fi
+}
+
+doctor() {
+  printf 'control_panel_mode=%s\n' "$CONTROL_PANEL_MODE"
+  if legacy_local_sources_present; then
+    printf 'legacy_sources=present\n'
+  else
+    printf 'legacy_sources=missing\n'
+  fi
+  printf 'strategy_config=%s\n' "$STRATEGY_CONFIG"
+  printf 'strategy_bin=%s executable=%s\n' "$STRATEGY_BIN" "$([[ -x "$STRATEGY_BIN" ]] && printf yes || printf no)"
+  printf 'cross_arb_bin=%s executable=%s\n' "$CROSS_ARB_BIN" "$([[ -x "$CROSS_ARB_BIN" ]] && printf yes || printf no)"
+  printf 'control_api_bin=%s executable=%s\n' "$CONTROL_API_BIN" "$([[ -x "$CONTROL_API_BIN" ]] && printf yes || printf no)"
+  printf 'dioxus_static_dir=%s index=%s\n' "$DIOXUS_STATIC_DIR" "$([[ -f "$DIOXUS_STATIC_DIR/index.html" ]] && printf present || printf missing)"
+  if workspace_backend_substitution_requested; then
+    printf 'warning=workspace backend binary supplied to legacy launcher; start/build will be blocked\n'
+  fi
+  if ! legacy_local_sources_present && [[ ! -x "$CONTROL_API_BIN" ]]; then
+    printf 'warning=legacy local console unavailable in this checkout\n'
+  fi
 }
 
 rotate_log_file() {
@@ -260,6 +346,7 @@ ensure_token() {
 }
 
 build() {
+  require_legacy_sources_for_build
   log "building strategy runtime and control-api binaries"
   cargo build --release --bin rustcta --bin cross_arb_live --bin control_api
   log "building Dioxus web UI"
@@ -346,6 +433,11 @@ stop_pid() {
 }
 
 start_strategy() {
+  if is_cross_arb_config; then
+    require_legacy_binary "cross-arb strategy runtime" "$CROSS_ARB_BIN"
+  else
+    require_legacy_binary "spot strategy runtime" "$STRATEGY_BIN"
+  fi
   ensure_token
   mkdir -p "$RUN_DIR" "$LOG_DIR" "$(dirname "$SNAPSHOT_PATH")"
   write_local_token_hint
@@ -413,6 +505,7 @@ start_strategy() {
 }
 
 start_control_api() {
+  require_legacy_binary "legacy control API" "$CONTROL_API_BIN"
   ensure_token
   mkdir -p "$RUN_DIR" "$LOG_DIR" "$(dirname "$COMMAND_PATH")"
   write_local_token_hint
@@ -495,6 +588,9 @@ show_log() {
 }
 
 case "${1:-}" in
+  doctor)
+    doctor
+    ;;
   build)
     build
     ;;

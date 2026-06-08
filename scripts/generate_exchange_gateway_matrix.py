@@ -46,47 +46,111 @@ STANDARD_OPS: list[tuple[str, str]] = [
 
 OP_ALIASES = {
     "symbol_rules": "get_symbol_rules",
+    "spot_symbol_rules": "get_symbol_rules",
+    "perp_symbol_rules": "get_symbol_rules",
+    "futures_symbol_rules": "get_symbol_rules",
     "get_symbol_rules_spot": "get_symbol_rules",
     "get_symbol_rules_perp": "get_symbol_rules",
     "get_symbol_rules_futures": "get_symbol_rules",
     "get_contract_symbol_rules": "get_symbol_rules",
     "order_book": "get_order_book",
+    "spot_order_book": "get_order_book",
+    "perp_order_book": "get_order_book",
+    "futures_order_book": "get_order_book",
     "get_order_book_spot": "get_order_book",
     "get_order_book_perp": "get_order_book",
     "get_order_book_futures": "get_order_book",
     "get_contract_order_book": "get_order_book",
     "balances": "get_balances",
+    "spot_balances": "get_balances",
+    "perp_balances": "get_balances",
+    "futures_balances": "get_balances",
     "get_balances_spot": "get_balances",
     "get_balances_perp": "get_balances",
     "get_balances_futures": "get_balances",
     "get_contract_balances": "get_balances",
+    "weex_get_balances": "get_balances",
+    "weex_get_balances_spot": "get_balances",
+    "weex_get_balances_perpetual": "get_balances",
     "positions": "get_positions",
+    "position": "get_positions",
+    "spot_positions": "get_positions",
+    "perp_positions": "get_positions",
+    "futures_positions": "get_positions",
+    "contract_positions": "get_positions",
+    "account_positions": "get_positions",
+    "perp_account_positions": "get_positions",
+    "futures_account_positions": "get_positions",
+    "get_positions_perpetual": "get_positions",
+    "get_positions_linear_perp": "get_positions",
+    "get_positions_inverse": "get_positions",
+    "get_positions_option": "get_positions",
+    "get_positions_contract": "get_positions",
+    "weex_get_positions_perpetual": "get_positions",
     "fees": "get_fees",
+    "spot_fees": "get_fees",
+    "perp_fees": "get_fees",
+    "futures_fees": "get_fees",
+    "contract_fees": "get_fees",
+    "account_fees": "get_fees",
+    "get_fees_spot": "get_fees",
+    "get_fees_perp": "get_fees",
+    "get_fees_perpetual": "get_fees",
     "get_fees_futures": "get_fees",
+    "get_fees_contract": "get_fees",
+    "weex_get_fees": "get_fees",
+    "weex_get_fees_perpetual": "get_fees",
     "quote_market_order": "place_quote_market_order",
+    "spot_place_order": "place_order",
+    "perp_place_order": "place_order",
+    "futures_place_order": "place_order",
     "place_order_spot": "place_order",
     "place_order_perp": "place_order",
     "place_order_futures": "place_order",
     "place_contract_order": "place_order",
+    "spot_cancel_order": "cancel_order",
+    "perp_cancel_order": "cancel_order",
+    "futures_cancel_order": "cancel_order",
     "cancel_order_spot": "cancel_order",
     "cancel_order_perp": "cancel_order",
     "cancel_order_futures": "cancel_order",
     "cancel_contract_order": "cancel_order",
+    "spot_amend_order": "amend_order",
+    "perp_amend_order": "amend_order",
+    "futures_amend_order": "amend_order",
     "amend_order_futures": "amend_order",
     "order_list": "place_order_list",
     "batch_orders": "batch_place_orders",
     "bulk_orders": "batch_place_orders",
+    "spot_batch_place_orders": "batch_place_orders",
+    "perp_batch_place_orders": "batch_place_orders",
+    "futures_batch_place_orders": "batch_place_orders",
     "batch_place_orders_futures": "batch_place_orders",
     "batch_place_contract_orders": "batch_place_orders",
     "batch_cancel": "batch_cancel_orders",
+    "spot_batch_cancel_orders": "batch_cancel_orders",
+    "perp_batch_cancel_orders": "batch_cancel_orders",
+    "futures_batch_cancel_orders": "batch_cancel_orders",
     "batch_cancel_orders_futures": "batch_cancel_orders",
+    "spot_cancel_all_orders": "cancel_all_orders",
+    "perp_cancel_all_orders": "cancel_all_orders",
+    "futures_cancel_all_orders": "cancel_all_orders",
     "cancel_all_orders_futures": "cancel_all_orders",
+    "spot_query_order": "query_order",
+    "perp_query_order": "query_order",
+    "futures_query_order": "query_order",
     "query_order_futures": "query_order",
     "open_orders": "get_open_orders",
+    "spot_open_orders": "get_open_orders",
+    "perp_open_orders": "get_open_orders",
+    "futures_open_orders": "get_open_orders",
     "get_open_orders_spot": "get_open_orders",
     "get_open_orders_perp": "get_open_orders",
     "get_open_orders_futures": "get_open_orders",
     "recent_fills": "get_recent_fills",
+    "spot_recent_fills": "get_recent_fills",
+    "perp_recent_fills": "get_recent_fills",
+    "futures_recent_fills": "get_recent_fills",
     "get_recent_fills_spot": "get_recent_fills",
     "get_recent_fills_perp": "get_recent_fills",
     "get_recent_fills_futures": "get_recent_fills",
@@ -152,8 +216,10 @@ def normalize_operation(value: Any) -> str:
     op = str(value or "").strip()
     if not op:
         return ""
+    if "." in op:
+        op = op.rsplit(".", 1)[-1]
     op = OP_ALIASES.get(op, op)
-    for suffix in ("_spot", "_perp", "_futures", "_contract"):
+    for suffix in ("_spot", "_perp", "_perpetual", "_futures", "_contract"):
         if op.endswith(suffix):
             op = op[: -len(suffix)]
             op = OP_ALIASES.get(op, op)
@@ -168,6 +234,33 @@ def iter_endpoint_items(data: dict[str, Any]) -> list[dict[str, Any]]:
             items.extend(item for item in value if isinstance(item, dict))
         elif isinstance(value, dict):
             items.extend(item for item in value.values() if isinstance(item, dict))
+
+    operations = data.get("operations")
+    if isinstance(operations, dict):
+        endpoint_keys = {
+            "method",
+            "path",
+            "support",
+            "auth",
+            "transport",
+            "request_spec",
+            "response_parser",
+        }
+        for operation, value in operations.items():
+            if not isinstance(value, dict):
+                continue
+            if endpoint_keys & set(value):
+                item = dict(value)
+                item.setdefault("operation", operation)
+                items.append(item)
+                continue
+            for product, product_value in value.items():
+                if not isinstance(product_value, dict):
+                    continue
+                item = dict(product_value)
+                item.setdefault("operation", operation)
+                item.setdefault("product", product)
+                items.append(item)
     return items
 
 
@@ -243,19 +336,84 @@ def rust_runtime_impls(adapter_dir: Path) -> set[str]:
 
 
 def endpoint_status_by_op(
+    data: dict[str, Any],
     endpoint_items: list[dict[str, Any]],
     runtime_impls: set[str],
 ) -> dict[str, str]:
     status = {op: "-" for _, op in STANDARD_OPS}
     for item in endpoint_items:
         op = normalize_operation(item.get("operation"))
+        if item_supports_balances(item) and "get_balances" in runtime_impls:
+            balance_bucket = support_bucket(item)
+            if balance_bucket in {"原生", "映射", "组合", "REST兜底"}:
+                balance_bucket = "运行"
+            status["get_balances"] = pick_better(status["get_balances"], balance_bucket)
+        if item_supports_fees(item) and "get_fees" in runtime_impls:
+            fee_bucket = support_bucket(item)
+            if fee_bucket in {"原生", "映射", "组合", "REST兜底"}:
+                fee_bucket = "运行"
+            status["get_fees"] = pick_better(status["get_fees"], fee_bucket)
+        if item_supports_positions(item) and "get_positions" in runtime_impls:
+            position_bucket = support_bucket(item)
+            if position_bucket in {"原生", "映射", "组合", "REST兜底"}:
+                position_bucket = "运行"
+            status["get_positions"] = pick_better(status["get_positions"], position_bucket)
         if op not in status:
             continue
         bucket = support_bucket(item)
         if bucket in {"原生", "映射", "组合", "REST兜底"} and op in runtime_impls:
             bucket = "运行"
         status[op] = pick_better(status[op], bucket)
+
+    reconciliation = data.get("reconciliation")
+    if isinstance(reconciliation, dict):
+        for readback in as_list(reconciliation.get("readbacks")):
+            op = normalize_operation(readback)
+            if op in status and op in runtime_impls:
+                status[op] = pick_better(status[op], "运行")
     return status
+
+
+def item_supports_balances(item: dict[str, Any]) -> bool:
+    op = normalize_operation(item.get("operation"))
+    if op == "get_balances":
+        return True
+    text = " ".join(
+        str(item.get(key, "") or "")
+        for key in ("operation", "path", "notes", "description", "response_parser")
+    ).lower()
+    return op in {"account", "balances"} or ("balance" in text and op in {"account_info"})
+
+
+def item_supports_fees(item: dict[str, Any]) -> bool:
+    op = normalize_operation(item.get("operation"))
+    if op == "get_fees":
+        return True
+    text = " ".join(
+        str(item.get(key, "") or "")
+        for key in ("operation", "path", "notes", "description", "response_parser")
+    ).lower()
+    fee_text = any(token in text for token in ("fee", "fees", "commission", "maker", "taker"))
+    return fee_text and op in {
+        "account",
+        "account_info",
+        "exchange_info",
+        "symbol_rules",
+        "get_symbol_rules",
+        "market_config",
+        "product_config",
+    }
+
+
+def item_supports_positions(item: dict[str, Any]) -> bool:
+    op = normalize_operation(item.get("operation"))
+    if op == "get_positions":
+        return True
+    text = " ".join(
+        str(item.get(key, "") or "")
+        for key in ("operation", "path", "notes", "description", "response_parser")
+    ).lower()
+    return "position" in text and op in {"account", "get_balances", "balances"}
 
 
 def get_nested(data: dict[str, Any], *keys: str) -> Any:
@@ -477,7 +635,7 @@ def row_for_mapping(repo_root: Path, path: Path) -> dict[str, Any]:
     endpoint_items = iter_endpoint_items(data)
     mts = market_types(data, endpoint_items)
     runtime_impls = rust_runtime_impls(adapter_dir)
-    op_status = endpoint_status_by_op(endpoint_items, runtime_impls)
+    op_status = endpoint_status_by_op(data, endpoint_items, runtime_impls)
     public_channels = collect_channels(data, "public")
     private_channels = collect_channels(data, "private")
     orderbook_channels = extract_orderbook_channels(public_channels)

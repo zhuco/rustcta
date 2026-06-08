@@ -6,7 +6,7 @@ use rustcta_exchange_api::{
 };
 
 use super::parser::{
-    normalize_depth, normalize_mexc_symbol, parse_orderbook_snapshot, parse_symbol_rules,
+    normalize_depth, normalize_mexc_symbol_for_market, parse_orderbook_snapshot, parse_symbol_rules,
 };
 use super::MexcGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -23,21 +23,39 @@ impl MexcGatewayAdapter {
             .map(|symbol| symbol.exchange.clone())
             .unwrap_or_else(|| self.exchange_id.clone());
         self.ensure_exchange(&exchange)?;
+        let market_type = request
+            .symbols
+            .first()
+            .map(|symbol| symbol.market_type)
+            .unwrap_or(rustcta_types::MarketType::Spot);
         for symbol in &request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_market_type(symbol.market_type)?;
+            if symbol.market_type != market_type {
+                return Err(rustcta_exchange_api::ExchangeApiError::InvalidRequest {
+                    message: "mexc.get_symbol_rules does not support mixed market types"
+                        .to_string(),
+                });
+            }
         }
 
-        let response = self
-            .rest
-            .send_public_request("/api/v3/exchangeInfo", &HashMap::new())
-            .await?;
+        let response = if market_type == rustcta_types::MarketType::Perpetual {
+            self.rest
+                .send_contract_public_request("/api/v1/contract/detail", &HashMap::new())
+                .await?
+        } else {
+            self.rest
+                .send_public_request("/api/v3/exchangeInfo", &HashMap::new())
+                .await?
+        };
         let requested = request
             .symbols
             .iter()
-            .map(|symbol| symbol.exchange_symbol.symbol.to_ascii_uppercase())
-            .collect::<Vec<_>>();
-        let mut rules = parse_symbol_rules(&self.exchange_id, &response)?;
+            .map(|symbol| {
+                normalize_mexc_symbol_for_market(&symbol.exchange_symbol.symbol, symbol.market_type)
+            })
+            .collect::<ExchangeApiResult<Vec<_>>>()?;
+        let mut rules = parse_symbol_rules(&self.exchange_id, market_type, &response)?;
         if !requested.is_empty() {
             rules.retain(|rule| requested.contains(&rule.symbol.exchange_symbol.symbol));
         }
@@ -55,18 +73,28 @@ impl MexcGatewayAdapter {
     ) -> ExchangeApiResult<OrderBookResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_market_type(request.symbol.market_type)?;
         let depth = normalize_depth(request.depth.unwrap_or(5));
         let mut params = HashMap::new();
-        params.insert(
-            "symbol".to_string(),
-            normalize_mexc_symbol(&request.symbol.exchange_symbol.symbol)?,
-        );
-        params.insert("limit".to_string(), depth.to_string());
-        let value = self
-            .rest
-            .send_public_request("/api/v3/depth", &params)
-            .await?;
+        let normalized_symbol = normalize_mexc_symbol_for_market(
+            &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
+        )?;
+        let value = if request.symbol.market_type == rustcta_types::MarketType::Perpetual {
+            params.insert("limit".to_string(), depth.to_string());
+            self.rest
+                .send_contract_public_request(
+                    &format!("/api/v1/contract/depth/{normalized_symbol}"),
+                    &params,
+                )
+                .await?
+        } else {
+            params.insert("symbol".to_string(), normalized_symbol);
+            params.insert("limit".to_string(), depth.to_string());
+            self.rest
+                .send_public_request("/api/v3/depth", &params)
+                .await?
+        };
         let order_book = parse_orderbook_snapshot(&self.exchange_id, request.symbol, &value)?;
         Ok(OrderBookResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,

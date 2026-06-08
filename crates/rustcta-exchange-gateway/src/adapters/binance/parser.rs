@@ -11,6 +11,7 @@ use serde_json::Value;
 
 pub fn parse_symbol_rules(
     exchange_id: &ExchangeId,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<SymbolRules>> {
     let symbols = value
@@ -19,11 +20,15 @@ pub fn parse_symbol_rules(
         .ok_or_else(|| parse_error(exchange_id.clone(), "exchangeInfo missing symbols", value))?;
     symbols
         .iter()
-        .map(|value| parse_symbol_rule(exchange_id, value))
+        .map(|value| parse_symbol_rule(exchange_id, market_type, value))
         .collect()
 }
 
-fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
+fn parse_symbol_rule(
+    exchange_id: &ExchangeId,
+    market_type: MarketType,
+    value: &Value,
+) -> ExchangeApiResult<SymbolRules> {
     let exchange_symbol = required_str(exchange_id, value, "symbol")?.to_ascii_uppercase();
     let base_asset = required_str(exchange_id, value, "baseAsset")?.to_ascii_uppercase();
     let quote_asset = required_str(exchange_id, value, "quoteAsset")?.to_ascii_uppercase();
@@ -31,14 +36,10 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         CanonicalSymbol::new(&base_asset, &quote_asset).map_err(validation_error)?;
     let symbol = rustcta_exchange_api::SymbolScope {
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol: Some(canonical_symbol),
-        exchange_symbol: ExchangeSymbol::new(
-            exchange_id.clone(),
-            MarketType::Spot,
-            exchange_symbol,
-        )
-        .map_err(validation_error)?,
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, exchange_symbol)
+            .map_err(validation_error)?,
     };
     let filters = value
         .get("filters")
@@ -98,8 +99,10 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         }),
         supports_market_orders: trading && has_or_unlisted(&exchange_order_types, "MARKET"),
         supports_limit_orders: trading && has_or_unlisted(&exchange_order_types, "LIMIT"),
-        supports_post_only: trading && has_or_unlisted(&exchange_order_types, "LIMIT_MAKER"),
-        supports_reduce_only: false,
+        supports_post_only: trading
+            && (has_or_unlisted(&exchange_order_types, "LIMIT_MAKER")
+                || market_type == MarketType::Perpetual),
+        supports_reduce_only: market_type == MarketType::Perpetual,
         updated_at: Utc::now(),
     })
 }
@@ -120,7 +123,7 @@ pub fn parse_orderbook_snapshot(
             })?;
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
-        MarketType::Spot,
+        symbol.market_type,
         canonical_symbol,
         bids,
         asks,
@@ -152,12 +155,39 @@ pub fn normalize_binance_symbol(symbol: &str) -> ExchangeApiResult<String> {
     Ok(normalized)
 }
 
-pub fn normalize_depth(depth: u32) -> u32 {
-    match depth {
-        0..=5 => 5,
-        6..=10 => 10,
+pub fn normalize_depth(depth: u32, market_type: MarketType) -> u32 {
+    match market_type {
+        MarketType::Spot => match depth {
+            0..=5 => 5,
+            6..=10 => 10,
+            _ => 20,
+        },
+        MarketType::Perpetual => match depth {
+            0..=5 => 5,
+            6..=10 => 10,
+            11..=20 => 20,
+            21..=50 => 50,
+            51..=100 => 100,
+            101..=500 => 500,
+            _ => 1000,
+        },
         _ => 20,
     }
+}
+
+pub(super) fn compact_symbol_assets(symbol: &str) -> Option<(String, String)> {
+    let compact = symbol
+        .trim()
+        .replace(['/', '-', '_'], "")
+        .to_ascii_uppercase();
+    for quote in ["USDT", "USDC", "BUSD", "BTC", "ETH"] {
+        if let Some(base) = compact.strip_suffix(quote) {
+            if !base.is_empty() {
+                return Some((base.to_string(), quote.to_string()));
+            }
+        }
+    }
+    None
 }
 
 fn parse_levels(

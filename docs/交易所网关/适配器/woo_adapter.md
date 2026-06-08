@@ -140,3 +140,7 @@ helpers, public/private stream subscription payloads, heartbeat, listen-key
 private sessions, and standard stream-event conversion.
 Latest targeted run passed 18 WOO tests with 734 filtered out and existing
 workspace warnings.
+
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。WOO X V3 `GET /v3/futures/positions` 已由当前项目 `get_positions` runtime 和 positions fixture 覆盖。

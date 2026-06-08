@@ -59,6 +59,18 @@ The adapter does not store API private keys and does not synthesize signed txs.
 Withdrawals, transfers, priority transactions, public pools, referral,
 notification and account tier mutation are out of trading runtime scope.
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。Lighter API Trading 文档列出 Trading REST `/orders`、`/batchOrders`，WebSocket `orderUpdates`、`fills`，并说明支持单笔/批量下单撤单；示例使用 client-generated id、limit order 和 `GTC`。
+
+当前 adapter 只有 spec/parser 边界，没有 SDK-compatible signed tx、API-key private key/index/nonce 管理和 live-dry-run gate。因此这是 `项目未实现 signed tx 核心交易`，不是 `交易所不支持下单/撤单`。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Lighter SDK/API 的 `AccountApi.account` 返回 account data；账号/sub-account、auth token、WS account updates 都依赖 signer/auth token。
+
+因此 Lighter 仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成 `AccountApi.account` request spec、read-only auth token、positions parser、sub-account index 映射和 WS/REST reconciliation。
+
 ## Endpoint Mapping
 
 Machine-readable mapping:

@@ -64,6 +64,13 @@ def build_queue(matrix_rows: list[dict[str, str]], task_rows: list[dict[str, str
         | task_adapters["public_ws_struct"]
         | task_adapters["public_ws_unsupported"]
     )
+    core_trading_done = task_adapters["core_trading"] | task_adapters["core_trading_unsupported"]
+    account_state_done = task_adapters["account_state"] | task_adapters["account_state_unsupported"]
+    position_done = task_adapters["position"] | task_adapters["position_unsupported"]
+    fee_done = task_adapters["fee"] | task_adapters["fee_unsupported"]
+    advanced_trading_done = (
+        task_adapters["advanced_trading"] | task_adapters["advanced_trading_unsupported"]
+    )
 
     items: list[dict[str, str]] = []
     for row in matrix_rows:
@@ -96,7 +103,9 @@ def build_queue(matrix_rows: list[dict[str, str]], task_rows: list[dict[str, str
                 "ws_gap",
             )
 
-        if row["place_order"] in MISSING_STATUS or row["cancel_order"] in MISSING_STATUS:
+        if (
+            row["place_order"] in MISSING_STATUS or row["cancel_order"] in MISSING_STATUS
+        ) and adapter not in core_trading_done:
             add_item(
                 items,
                 "P2",
@@ -108,7 +117,7 @@ def build_queue(matrix_rows: list[dict[str, str]], task_rows: list[dict[str, str
                 "place_order,cancel_order",
             )
 
-        if row["get_balances"] in MISSING_STATUS:
+        if row["get_balances"] in MISSING_STATUS and adapter not in account_state_done:
             add_item(
                 items,
                 "P3",
@@ -120,7 +129,11 @@ def build_queue(matrix_rows: list[dict[str, str]], task_rows: list[dict[str, str
                 "get_balances",
             )
 
-        if row["contract_project"] == "声明" and row["get_positions"] in MISSING_STATUS:
+        if (
+            row["contract_project"] == "声明"
+            and row["get_positions"] in MISSING_STATUS
+            and adapter not in position_done
+        ):
             add_item(
                 items,
                 "P2",
@@ -132,7 +145,7 @@ def build_queue(matrix_rows: list[dict[str, str]], task_rows: list[dict[str, str
                 "get_positions",
             )
 
-        if row["get_fees"] in MISSING_STATUS:
+        if row["get_fees"] in MISSING_STATUS and adapter not in fee_done:
             add_item(
                 items,
                 "P3",
@@ -149,7 +162,7 @@ def build_queue(matrix_rows: list[dict[str, str]], task_rows: list[dict[str, str
             for op in ("amend_order", "place_order_list", "batch_place_orders", "batch_cancel_orders")
             if row[op] in MISSING_STATUS
         ]
-        if advanced_missing:
+        if advanced_missing and adapter not in advanced_trading_done:
             add_item(
                 items,
                 "P4",
@@ -185,6 +198,12 @@ def write_csv(path: Path, rows: list[dict[str, str]]) -> None:
 
 def top_adapters(rows: list[dict[str, str]], category: str, limit: int = 60) -> list[str]:
     return [row["adapter"] for row in rows if row["category"] == category][:limit]
+
+
+def format_adapter_list(adapters: list[str]) -> str:
+    if not adapters:
+        return "无"
+    return "`" + "`, `".join(adapters) + "`"
 
 
 def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
@@ -226,19 +245,31 @@ def write_markdown(path: Path, rows: list[dict[str, str]]) -> None:
             "",
             "这些 adapter 在当前项目里未声明现货或合约，且尚未进入已核验补全任务。不能直接写 `交易所不支持`。",
             "",
-            "`" + "`, `".join(top_adapters(rows, "product_line_official_check")) + "`",
+            format_adapter_list(top_adapters(rows, "product_line_official_check")),
             "",
             "## 公共 WebSocket 仍需官方细项",
             "",
             "这些 adapter 还需要查订单簿 channel、推流间隔、档位、sequence/checksum、snapshot 重建。",
             "",
-            "`" + "`, `".join(top_adapters(rows, "public_ws_official_detail_check")) + "`",
+            format_adapter_list(top_adapters(rows, "public_ws_official_detail_check")),
             "",
             "## 核心交易接口仍需官方核验",
             "",
             "这些 adapter 的下单或撤单在当前矩阵中缺失/不支持，需要查官方交易接口后决定补实现还是写 `交易所不支持`。",
             "",
-            "`" + "`, `".join(top_adapters(rows, "core_trading_official_check")) + "`",
+            format_adapter_list(top_adapters(rows, "core_trading_official_check")),
+            "",
+            "## 费率接口仍需官方核验",
+            "",
+            "这些 adapter 还需要查官方 fee endpoint、maker/taker、VIP/market maker 口径；查完后转成明确 `fee` 任务或 `fee_unsupported` 边界。",
+            "",
+            format_adapter_list(top_adapters(rows, "fee_official_check")),
+            "",
+            "## 高级订单能力仍需官方核验",
+            "",
+            "这些 adapter 还需要查官方批量下单、批量撤单、改单、OCO/OTO 支持。列表较长，完整明细以 CSV 为准。",
+            "",
+            format_adapter_list(top_adapters(rows, "advanced_trading_official_check")),
             "",
             "## 下一步处理方式",
             "",

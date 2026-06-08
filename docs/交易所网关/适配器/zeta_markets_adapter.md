@@ -37,6 +37,14 @@ Status date: 2026-06-08
 
 The adapter never accepts wallet private keys, seed phrases or production signing material. Historical Solana SDK transaction construction is documented only through a sanitized signing-boundary fixture. Options-specific semantics remain audit-only because the gateway trait does not expose a lossless option contract model.
 
+Official core trading verification:
+
+[核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md) confirms this is not a live trading implementation gap. Official Zeta docs state the original venue ceased operations in 2025-05, and Final Epoch material says trading was disabled after 2025-05-01 04:00 UTC. Keep this adapter as `交易所不支持当前交易/私有接口 runtime`; do not add live place/cancel runtime for the legacy Zeta venue.
+
+Official position verification:
+
+[仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md) confirms balances/positions/private account runtime remain unsupported for this legacy scan adapter. Keep `get_positions` as `交易所不支持当前仓位接口 runtime`; do not add live private position runtime for the stopped venue.
+
 ## Validation
 
 Allowed validation commands:

@@ -2,8 +2,10 @@
 
 状态日期：2026-06-08
 
-本文档用于指导一次全量迁移，把仍在 legacy `src/` 中承载的业务实现收口到
-workspace 边界：`crates/`、`apps/`、`tools/`、`strategies/`、`web-ui/`。
+归档状态：本文档是 root `src/` 删除前的全量迁移计划，保留为历史记录。
+当前 checkout 已删除 root `src/`，不要把本文中的旧入口当成当前运行命令。
+当前控制面板入口见 `docs/dioxus_control_panel.md` 和
+`docs/control_web_directory_migration_plan.md`。
 
 本轮迁移的两个关键决策：
 

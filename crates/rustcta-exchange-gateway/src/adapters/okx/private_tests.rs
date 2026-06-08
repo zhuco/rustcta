@@ -12,7 +12,7 @@ use crate::signing_spec::SigningVector;
 
 use super::test_support::{
     assert_signed_okx_request, assert_signed_okx_request_method, context, exchange_id,
-    private_config, spawn_rest_server, symbol_scope,
+    perpetual_symbol_scope, private_config, spawn_rest_server, symbol_scope,
 };
 use super::{OkxGatewayAdapter, OkxGatewayConfig};
 
@@ -492,6 +492,47 @@ fn load_signing_vector(path: &str) -> SigningVector {
     );
     let text = std::fs::read_to_string(path).expect("signing vector fixture");
     serde_json::from_str(&text).expect("signing vector fixture")
+}
+
+#[tokio::test]
+async fn okx_adapter_should_place_perpetual_order_as_swap() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "code": "0",
+        "msg": "",
+        "data": [{"ordId": "3001", "clOrdId": "PERP1", "sCode": "0", "sMsg": ""}]
+    })])
+    .await;
+    let adapter = OkxGatewayAdapter::new(private_config(base_url)).expect("adapter");
+
+    let response = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-place"),
+            symbol: perpetual_symbol_scope(),
+            client_order_id: Some("PERP1".to_string()),
+            side: OrderSide::Sell,
+            position_side: Some(rustcta_types::PositionSide::Net),
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "1".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        })
+        .await
+        .expect("perp place");
+
+    assert_eq!(response.order.market_type, MarketType::Perpetual);
+    assert!(response.order.reduce_only);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_signed_okx_request_method(&request, "POST", "/api/v5/trade/order");
+    let body = request.body.as_ref().expect("place body");
+    assert_eq!(body["instId"], "BTC-USDT-SWAP");
+    assert_eq!(body["tdMode"], "cross");
+    assert_eq!(body["reduceOnly"], true);
+    assert_eq!(body["posSide"], "net");
+    assert!(body.get("tgtCcy").is_none());
 }
 
 #[tokio::test]

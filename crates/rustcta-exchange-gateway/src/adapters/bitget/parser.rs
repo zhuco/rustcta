@@ -10,6 +10,7 @@ use serde_json::Value;
 
 pub fn parse_symbol_rules(
     exchange_id: &ExchangeId,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<SymbolRules>> {
     value
@@ -24,11 +25,15 @@ pub fn parse_symbol_rules(
             )
         })?
         .iter()
-        .map(|value| parse_symbol_rule(exchange_id, value))
+        .map(|value| parse_symbol_rule(exchange_id, market_type, value))
         .collect()
 }
 
-fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
+fn parse_symbol_rule(
+    exchange_id: &ExchangeId,
+    market_type: MarketType,
+    value: &Value,
+) -> ExchangeApiResult<SymbolRules> {
     let exchange_symbol = required_str(exchange_id, value, "symbol")?.to_ascii_uppercase();
     let (fallback_base, fallback_quote) = split_compact_symbol(&exchange_symbol)
         .unwrap_or_else(|| ("UNKNOWN".to_string(), "USDT".to_string()));
@@ -48,14 +53,10 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         CanonicalSymbol::new(&base_asset, &quote_asset).map_err(validation_error)?;
     let symbol = rustcta_exchange_api::SymbolScope {
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol: Some(canonical_symbol),
-        exchange_symbol: ExchangeSymbol::new(
-            exchange_id.clone(),
-            MarketType::Spot,
-            exchange_symbol,
-        )
-        .map_err(validation_error)?,
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, exchange_symbol)
+            .map_err(validation_error)?,
     };
     let price_precision = integer_from_value(
         value
@@ -83,7 +84,7 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         symbol,
         base_asset,
         quote_asset,
-        price_increment: price_precision.map(increment_from_precision),
+        price_increment: price_increment(value, price_precision),
         quantity_increment: quantity_precision
             .map(increment_from_precision)
             .or_else(|| string_or_number(value.get("sizeMultiplier"))),
@@ -106,7 +107,7 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
         supports_market_orders: tradable,
         supports_limit_orders: tradable,
         supports_post_only: tradable,
-        supports_reduce_only: false,
+        supports_reduce_only: market_type == MarketType::Perpetual,
         updated_at: Utc::now(),
     })
 }
@@ -132,7 +133,7 @@ pub fn parse_orderbook_snapshot(
             })?;
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
-        MarketType::Spot,
+        symbol.market_type,
         canonical_symbol,
         bids,
         asks,
@@ -242,6 +243,20 @@ fn integer_from_value(value: Option<&Value>) -> Option<u32> {
         Value::String(text) => text.parse().ok(),
         Value::Number(number) => number.as_u64().map(|number| number as u32),
         _ => None,
+    })
+}
+
+fn price_increment(value: &Value, price_precision: Option<u32>) -> Option<String> {
+    string_or_number(value.get("tickSize").or_else(|| value.get("priceTick"))).or_else(|| {
+        let precision = price_precision?;
+        let mut increment = increment_from_precision(precision);
+        if let Some(end_step) = value.get("priceEndStep").and_then(number_from_value) {
+            if end_step > 1.0 {
+                let adjusted = increment.parse::<f64>().ok()? * end_step;
+                increment = adjusted.to_string();
+            }
+        }
+        Some(increment)
     })
 }
 

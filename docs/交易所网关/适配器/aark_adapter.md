@@ -124,6 +124,18 @@ The adapter must not enable the following without a separate validation task:
 - public WebSocket runtime, sequence gap detection and signed REST resync
 - private WebSocket auth, auth renewal and reconciliation fallback
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Aark Perpetual Mode 走 Orderly infrastructure；Orderly signed account endpoints 支持订单生命周期，但 Aark profile 的账户 onboarding、key 权限、region/KYC 和 frontend/profile 语义还没有在本项目审计。
+
+因此这里不能写成 `交易所不支持下单/撤单`。正确写法是：官方支持，项目未实现/未启用。补交易接口前必须先完成 Aark/Orderly account audit、Ed25519 signing、order/cancel/query/open/fills parser、private read-only reconciliation 和 live-dry-run guard。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Orderly EVM private REST 支持 `GET /v1/positions`，返回 margin ratio、free collateral、`position_qty`、mark price、liq price、funding、`margin_mode` 等字段。
+
+因此 Aark 仓位接口写 `官方支持，项目未实现/未启用`，不是 `交易所不支持仓位接口`。补仓位前必须完成 Aark/Orderly account audit、signed request spec、Ed25519 signing、positions parser、margin mode/position side 映射和 read-only reconciliation。
+
 ## Official WebSocket Order Book Detail
 
 Official Orderly public WS supports `{symbol}@orderbookupdate` every 200ms for

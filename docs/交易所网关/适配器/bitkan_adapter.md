@@ -103,6 +103,18 @@ Before enabling any BitKan trading feature, update this document with:
 
 Do not implement against website-only paths or undocumented browser traffic.
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。当前未核到稳定官方 BitKan-native exchange trading API、签名规则和订单生命周期文档。
+
+因此当前 gateway 口径写 `交易所不支持当前交易/私有接口 runtime`。不要把 placeholder base URL、payload helper、网站路径或未文档化浏览器流量提升为 place/cancel runtime；只有取得稳定官方 API reference 后再重核。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。当前未核到稳定官方 BitKan-native exchange API、签名规则和仓位生命周期文档。
+
+因此当前写 `交易所不支持当前仓位接口 runtime`。不要把 placeholder base URL、payload helper、网站路径或未文档化浏览器流量提升为 positions runtime。
+
 ## Task 30 Toolchain Status
 
 - Endpoint mapping: `crates/rustcta-exchange-gateway/src/adapters/bitkan/endpoint_mapping.yaml`.

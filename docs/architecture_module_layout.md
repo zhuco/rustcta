@@ -1,8 +1,7 @@
 # Architecture Module Layout
 
 This document describes the current repository architecture after the
-industrial workspace split, exchange adapter cleanup, and legacy strategy
-removal.
+industrial workspace split, exchange adapter cleanup, and root `src/` removal.
 
 ## Workspace Layout
 
@@ -12,34 +11,20 @@ crates/      reusable platform crates and API contracts
 strategies/  independent strategy crates and adapter-free migrating cores
 tools/       operator, audit, migration, and diagnostic commands
 web-ui/      Dioxus control panel workspace
-src/         legacy root crate, compatibility runtime, and remaining concrete behavior
 config/      active runtime configs, exchange examples, and supervisor specs
 docs/        current-state architecture, operations, and migration docs
 scripts/     local automation and validation helpers
 tests/       integration, regression, fixture, and live-readonly tests
 ```
 
-`src/` remains intentionally present while concrete runtime behavior is being
-pulled into the workspace crates. New code should prefer the workspace
-boundaries above and use `src/` only for compatibility paths that have not been
-extracted yet.
+The old root `src/` tree has been removed. New implementation belongs in
+`apps/`, `crates/`, `strategies/`, `tools/`, or `web-ui/`.
 
 ## Layer Map
 
-```text
-src/
-  core/        shared config, errors, common types, retry/request utilities
-  data/        book events, book cache, book health, recording, websocket books
-  market/      symbols, order books, instruments, precision, routing, funding
-  exchanges/   exchange clients, gateways, registry, protocol adapters
-  scanner/     read-only spot coverage and cross-exchange scan analytics
-  execution/   order commands, router, fee model, reconciliation, dry-run gates
-  control/     spot control plane, lifecycle, audit, snapshots, liquidation
-  risk/        kill switch, disabled-symbol registry, hedge policy
-  strategies/  trading intent and strategy runtimes
-  web/         sanitized monitoring/control read models and HTTP routes
-  bin/         executable composition and operational CLIs
-```
+The old root module map is no longer a runnable layout. Current runnable
+entrypoints are workspace app binaries under `apps/`; current reusable contracts
+and implementations live under `crates/` and strategy packages.
 
 The system supports two arbitrage families:
 

@@ -4,16 +4,16 @@ use rustcta_exchange_api::{
     AmendOrderRequest, AmendOrderResponse, BalancesRequest, BalancesResponse,
     CancelAllOrdersRequest, CancelAllOrdersResponse, CancelOrderRequest, CancelOrderResponse,
     ExchangeApiError, ExchangeApiResult, FeesRequest, FeesResponse, OpenOrdersRequest,
-    OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, QueryOrderRequest,
-    QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest, RecentFillsResponse,
-    TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    OpenOrdersResponse, PlaceOrderRequest, PlaceOrderResponse, PositionsRequest, PositionsResponse,
+    QueryOrderRequest, QueryOrderResponse, QuoteMarketOrderRequest, RecentFillsRequest,
+    RecentFillsResponse, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{MarketType, OrderSide, OrderType};
 use serde_json::{json, Value};
 
 use super::parser::normalize_gateio_symbol;
 use super::private_parser::{
-    parse_balances, parse_fees, parse_fills, parse_open_orders, parse_order,
+    parse_balances, parse_fees, parse_fills, parse_open_orders, parse_order, parse_positions,
 };
 use super::GateIoGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -25,12 +25,21 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        let body = gateio_order_body(&request)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
+        let (endpoint, body) = match request.symbol.market_type {
+            MarketType::Spot => ("/spot/orders", gateio_order_body(&request)?),
+            MarketType::Perpetual => ("/futures/usdt/orders", gateio_futures_order_body(&request)?),
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
-            .send_signed_post("gateio.place_order", "/spot/orders", &HashMap::new(), &body)
+            .send_signed_post("gateio.place_order", endpoint, &HashMap::new(), &body)
             .await?;
-        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        let order = parse_order(
+            &self.exchange_id,
+            Some(&request.symbol),
+            request.symbol.market_type,
+            &value,
+        )?;
         Ok(PlaceOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
@@ -54,7 +63,12 @@ impl GateIoGatewayAdapter {
                 &body,
             )
             .await?;
-        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        let order = parse_order(
+            &self.exchange_id,
+            Some(&request.symbol),
+            request.symbol.market_type,
+            &value,
+        )?;
         Ok(PlaceOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
@@ -68,25 +82,40 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<CancelOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        let order_id = request
-            .exchange_order_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(ExchangeApiError::Unsupported {
-                operation: "gateio.cancel_by_client_order_id",
-            })?;
+        self.ensure_supported_market(request.symbol.market_type)?;
+        let order_id = gateio_order_lookup_id(
+            request.exchange_order_id.as_deref(),
+            request.client_order_id.as_deref(),
+            request.symbol.market_type,
+            "gateio.cancel_by_client_order_id",
+        )?;
         let mut params = HashMap::new();
-        params.insert(
-            "currency_pair".to_string(),
-            normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
-        );
-        let endpoint = format!("/spot/orders/{order_id}");
+        let endpoint = match request.symbol.market_type {
+            MarketType::Spot => {
+                params.insert(
+                    "currency_pair".to_string(),
+                    normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+                );
+                format!("/spot/orders/{order_id}")
+            }
+            MarketType::Perpetual => {
+                params.insert(
+                    "contract".to_string(),
+                    normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+                );
+                gateio_futures_order_path(&order_id)
+            }
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
             .send_signed_delete("gateio.cancel_order", &endpoint, &params)
             .await?;
-        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        let order = parse_order(
+            &self.exchange_id,
+            Some(&request.symbol),
+            request.symbol.market_type,
+            &value,
+        )?;
         Ok(CancelOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
@@ -101,24 +130,53 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
-        let symbol = request
+        self.ensure_optional_supported_market(request.market_type)?;
+        let market_type = request
             .symbol
             .as_ref()
-            .ok_or_else(|| ExchangeApiError::InvalidRequest {
-                message: "gateio.cancel_all_orders requires symbol".to_string(),
-            })?;
-        self.ensure_exchange(&symbol.exchange)?;
-        self.ensure_spot(symbol.market_type)?;
+            .map(|symbol| symbol.market_type)
+            .or(request.market_type)
+            .unwrap_or(MarketType::Spot);
+        self.ensure_supported_market(market_type)?;
         let mut params = HashMap::new();
-        params.insert(
-            "currency_pair".to_string(),
-            normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
-        );
+        let (endpoint, fallback_symbol) =
+            match market_type {
+                MarketType::Spot => {
+                    let symbol = request.symbol.as_ref().ok_or_else(|| {
+                        ExchangeApiError::InvalidRequest {
+                            message: "gateio.cancel_all_orders requires symbol".to_string(),
+                        }
+                    })?;
+                    self.ensure_exchange(&symbol.exchange)?;
+                    self.ensure_spot(symbol.market_type)?;
+                    params.insert(
+                        "currency_pair".to_string(),
+                        normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                    );
+                    ("/spot/orders", Some(symbol))
+                }
+                MarketType::Perpetual => {
+                    if let Some(symbol) = request.symbol.as_ref() {
+                        self.ensure_exchange(&symbol.exchange)?;
+                        if symbol.market_type != MarketType::Perpetual {
+                            return Err(ExchangeApiError::InvalidRequest {
+                                message: "gateio.cancel_all_orders market_type/symbol mismatch"
+                                    .to_string(),
+                            });
+                        }
+                        params.insert(
+                            "contract".to_string(),
+                            normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                        );
+                    }
+                    ("/futures/usdt/orders", request.symbol.as_ref())
+                }
+                _ => unreachable!("checked by ensure_supported_market"),
+            };
         let value = self
-            .send_signed_delete("gateio.cancel_all_orders", "/spot/orders", &params)
+            .send_signed_delete("gateio.cancel_all_orders", endpoint, &params)
             .await?;
-        let orders = parse_open_orders(&self.exchange_id, Some(symbol), &value)?;
+        let orders = parse_open_orders(&self.exchange_id, fallback_symbol, market_type, &value)?;
         Ok(CancelAllOrdersResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
@@ -147,7 +205,12 @@ impl GateIoGatewayAdapter {
         let value = self
             .send_signed_patch("gateio.amend_order", &endpoint, &HashMap::new(), &body)
             .await?;
-        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        let order = parse_order(
+            &self.exchange_id,
+            Some(&request.symbol),
+            request.symbol.market_type,
+            &value,
+        )?;
         Ok(AmendOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
@@ -161,17 +224,23 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_supported_market(request.market_type)?;
+        let market_type = request.market_type.unwrap_or(MarketType::Spot);
         let (tenant_id, account_id) =
             self.context_account(&request.context, "gateio.get_balances")?;
+        let endpoint = match market_type {
+            MarketType::Spot => "/spot/accounts",
+            MarketType::Perpetual => "/futures/usdt/accounts",
+            _ => unreachable!("checked by ensure_optional_supported_market"),
+        };
         let value = self
-            .send_signed_get("gateio.get_balances", "/spot/accounts", &HashMap::new())
+            .send_signed_get("gateio.get_balances", endpoint, &HashMap::new())
             .await?;
         let balances = parse_balances(
             &self.exchange_id,
             tenant_id,
             account_id,
-            MarketType::Spot,
+            market_type,
             &request.assets,
             &value,
         )?;
@@ -179,6 +248,46 @@ impl GateIoGatewayAdapter {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
             balances,
+        })
+    }
+
+    pub(super) async fn get_positions_impl(
+        &self,
+        request: PositionsRequest,
+    ) -> ExchangeApiResult<PositionsResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.exchange)?;
+        if request
+            .market_type
+            .is_some_and(|market_type| market_type != MarketType::Perpetual)
+        {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "gateio.positions_non_perpetual",
+            });
+        }
+        let (tenant_id, account_id) =
+            self.context_account(&request.context, "gateio.get_positions")?;
+        let endpoint = if let Some(symbol) = request.symbols.first() {
+            self.ensure_exchange(&symbol.exchange_id)?;
+            if symbol.market_type != MarketType::Perpetual {
+                return Err(ExchangeApiError::Unsupported {
+                    operation: "gateio.positions_non_perpetual",
+                });
+            }
+            format!(
+                "/futures/usdt/positions/{}",
+                normalize_gateio_symbol(&symbol.symbol)?
+            )
+        } else {
+            "/futures/usdt/positions".to_string()
+        };
+        let value = self
+            .send_signed_get("gateio.get_positions", &endpoint, &HashMap::new())
+            .await?;
+        Ok(PositionsResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(request.exchange, request.context.request_id),
+            positions: parse_positions(&self.exchange_id, tenant_id, account_id, &value)?,
         })
     }
 
@@ -195,16 +304,31 @@ impl GateIoGatewayAdapter {
         let mut fees = Vec::new();
         for symbol in &request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_supported_market(symbol.market_type)?;
             let mut params = HashMap::new();
-            params.insert(
-                "currency_pair".to_string(),
-                normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
-            );
+            let endpoint = match symbol.market_type {
+                MarketType::Spot => {
+                    params.insert(
+                        "currency_pair".to_string(),
+                        normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                    );
+                    "/spot/fee".to_string()
+                }
+                MarketType::Perpetual => format!(
+                    "/futures/usdt/contracts/{}",
+                    normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?
+                ),
+                _ => unreachable!("checked by ensure_supported_market"),
+            };
             let value = self
-                .send_signed_get("gateio.get_fees", "/spot/fee", &params)
+                .send_signed_get("gateio.get_fees", &endpoint, &params)
                 .await?;
-            fees.push(parse_fees(&self.exchange_id, symbol, &value)?);
+            fees.push(parse_fees(
+                &self.exchange_id,
+                symbol,
+                symbol.market_type,
+                &value,
+            )?);
         }
         Ok(FeesResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -219,24 +343,40 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
-        let order_id = request
-            .exchange_order_id
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| ExchangeApiError::InvalidRequest {
-                message: "gateio.query_order requires exchange_order_id".to_string(),
-            })?;
+        self.ensure_supported_market(request.symbol.market_type)?;
+        let order_id = gateio_order_lookup_id(
+            request.exchange_order_id.as_deref(),
+            request.client_order_id.as_deref(),
+            request.symbol.market_type,
+            "gateio.query_by_client_order_id",
+        )?;
         let mut params = HashMap::new();
-        params.insert(
-            "currency_pair".to_string(),
-            normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
-        );
-        let endpoint = format!("/spot/orders/{order_id}");
+        let endpoint = match request.symbol.market_type {
+            MarketType::Spot => {
+                params.insert(
+                    "currency_pair".to_string(),
+                    normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+                );
+                format!("/spot/orders/{order_id}")
+            }
+            MarketType::Perpetual => {
+                params.insert(
+                    "contract".to_string(),
+                    normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+                );
+                gateio_futures_order_path(&order_id)
+            }
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         let value = self
             .send_signed_get("gateio.query_order", &endpoint, &params)
             .await?;
-        let order = parse_order(&self.exchange_id, Some(&request.symbol), &value)?;
+        let order = parse_order(
+            &self.exchange_id,
+            Some(&request.symbol),
+            request.symbol.market_type,
+            &value,
+        )?;
         Ok(QueryOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.symbol.exchange, request.context.request_id),
@@ -250,20 +390,55 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_supported_market(request.market_type)?;
+        let market_type = request
+            .symbol
+            .as_ref()
+            .map(|symbol| symbol.market_type)
+            .or(request.market_type)
+            .unwrap_or(MarketType::Spot);
+        self.ensure_supported_market(market_type)?;
         let mut params = HashMap::new();
+        let endpoint = match market_type {
+            MarketType::Spot => "/spot/open_orders",
+            MarketType::Perpetual => {
+                params.insert("status".to_string(), "open".to_string());
+                "/futures/usdt/orders"
+            }
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         if let Some(symbol) = &request.symbol {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
-            params.insert(
-                "currency_pair".to_string(),
-                normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
-            );
+            if symbol.market_type != market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message: "gateio.get_open_orders market_type/symbol mismatch".to_string(),
+                });
+            }
+            match market_type {
+                MarketType::Spot => {
+                    params.insert(
+                        "currency_pair".to_string(),
+                        normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                    );
+                }
+                MarketType::Perpetual => {
+                    params.insert(
+                        "contract".to_string(),
+                        normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                    );
+                }
+                _ => unreachable!("checked by ensure_supported_market"),
+            }
         }
         let value = self
-            .send_signed_get("gateio.get_open_orders", "/spot/open_orders", &params)
+            .send_signed_get("gateio.get_open_orders", endpoint, &params)
             .await?;
-        let orders = parse_open_orders(&self.exchange_id, request.symbol.as_ref(), &value)?;
+        let orders = parse_open_orders(
+            &self.exchange_id,
+            request.symbol.as_ref(),
+            market_type,
+            &value,
+        )?;
         Ok(OpenOrdersResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
             metadata: response_metadata(request.exchange, request.context.request_id),
@@ -277,7 +452,7 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<RecentFillsResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_supported_market(request.market_type)?;
         let symbol = request
             .symbol
             .as_ref()
@@ -285,19 +460,45 @@ impl GateIoGatewayAdapter {
                 message: "gateio.get_recent_fills requires symbol".to_string(),
             })?;
         self.ensure_exchange(&symbol.exchange)?;
-        self.ensure_spot(symbol.market_type)?;
+        self.ensure_supported_market(symbol.market_type)?;
+        if request
+            .market_type
+            .is_some_and(|market_type| market_type != symbol.market_type)
+        {
+            return Err(ExchangeApiError::InvalidRequest {
+                message: "gateio.get_recent_fills market_type/symbol mismatch".to_string(),
+            });
+        }
         let (tenant_id, account_id) =
             self.context_account(&request.context, "gateio.get_recent_fills")?;
         let mut params = HashMap::new();
-        params.insert(
-            "currency_pair".to_string(),
-            normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
-        );
+        let endpoint = match symbol.market_type {
+            MarketType::Spot => {
+                params.insert(
+                    "currency_pair".to_string(),
+                    normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                );
+                "/spot/my_trades"
+            }
+            MarketType::Perpetual => {
+                params.insert(
+                    "contract".to_string(),
+                    normalize_gateio_symbol(&symbol.exchange_symbol.symbol)?,
+                );
+                "/futures/usdt/my_trades"
+            }
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
         if let Some(limit) = request.limit {
             params.insert("limit".to_string(), limit.min(1000).to_string());
         }
         if let Some(order_id) = request.exchange_order_id.as_deref() {
-            params.insert("order_id".to_string(), order_id.to_string());
+            let key = if symbol.market_type == MarketType::Perpetual {
+                "order"
+            } else {
+                "order_id"
+            };
+            params.insert(key.to_string(), order_id.to_string());
         }
         if let Some(from_trade_id) = request.from_trade_id.as_deref() {
             params.insert("last_id".to_string(), from_trade_id.to_string());
@@ -309,13 +510,14 @@ impl GateIoGatewayAdapter {
             params.insert("to".to_string(), end_time.timestamp().to_string());
         }
         let value = self
-            .send_signed_get("gateio.get_recent_fills", "/spot/my_trades", &params)
+            .send_signed_get("gateio.get_recent_fills", endpoint, &params)
             .await?;
         let fills = parse_fills(
             &self.exchange_id,
             tenant_id,
             account_id,
             Some(symbol),
+            symbol.market_type,
             &value,
         )?;
         Ok(RecentFillsResponse {
@@ -365,6 +567,43 @@ fn gateio_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
     Ok(body)
 }
 
+fn gateio_futures_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value> {
+    if request.quote_quantity.is_some() {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "gateio.futures_quote_quantity",
+        });
+    }
+    if matches!(
+        request.order_type,
+        OrderType::StopMarket | OrderType::StopLimit
+    ) {
+        return Err(ExchangeApiError::Unsupported {
+            operation: "gateio.futures_stop_order",
+        });
+    }
+    let mut body = json!({
+        "contract": normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+        "size": gateio_signed_size(request.side, &request.quantity)?,
+        "tif": gateio_futures_tif(request),
+        "reduce_only": request.reduce_only,
+    });
+    if let Some(client_order_id) = request.client_order_id.as_deref() {
+        body["text"] = Value::String(gateio_client_text(client_order_id)?);
+    }
+    if request.order_type == OrderType::Market {
+        body["price"] = Value::String("0".to_string());
+    } else {
+        let price = request
+            .price
+            .as_deref()
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: "gateio futures limit-style order requires price".to_string(),
+            })?;
+        body["price"] = Value::String(non_empty("price", price)?);
+    }
+    Ok(body)
+}
+
 fn gateio_quote_market_order_body(request: &QuoteMarketOrderRequest) -> ExchangeApiResult<Value> {
     if request.side != OrderSide::Buy {
         return Err(ExchangeApiError::Unsupported {
@@ -410,10 +649,78 @@ fn gateio_client_text(client_order_id: &str) -> ExchangeApiResult<String> {
     })
 }
 
+fn gateio_order_lookup_id(
+    exchange_order_id: Option<&str>,
+    client_order_id: Option<&str>,
+    market_type: MarketType,
+    client_id_operation: &'static str,
+) -> ExchangeApiResult<String> {
+    if let Some(order_id) = exchange_order_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(order_id.to_string());
+    }
+    if let Some(client_order_id) = client_order_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if market_type == MarketType::Perpetual {
+            return gateio_client_text(client_order_id);
+        }
+        return Err(ExchangeApiError::Unsupported {
+            operation: client_id_operation,
+        });
+    }
+    Err(ExchangeApiError::InvalidRequest {
+        message: "gateio order lookup requires exchange_order_id or client_order_id".to_string(),
+    })
+}
+
+fn gateio_futures_order_path(order_id: &str) -> String {
+    format!("/futures/usdt/orders/{}", urlencoding::encode(order_id))
+}
+
 fn gateio_side(side: OrderSide) -> &'static str {
     match side {
         OrderSide::Buy => "buy",
         OrderSide::Sell => "sell",
+    }
+}
+
+fn gateio_signed_size(side: OrderSide, quantity: &str) -> ExchangeApiResult<String> {
+    let quantity = non_empty("quantity", quantity)?;
+    let number = quantity
+        .parse::<f64>()
+        .map_err(|error| ExchangeApiError::InvalidRequest {
+            message: format!("invalid gateio futures quantity `{quantity}`: {error}"),
+        })?;
+    if !number.is_finite() || number == 0.0 {
+        return Err(ExchangeApiError::InvalidRequest {
+            message: "gateio futures quantity must be non-zero and finite".to_string(),
+        });
+    }
+    let unsigned = quantity
+        .trim_start_matches('+')
+        .trim_start_matches('-')
+        .to_string();
+    Ok(match side {
+        OrderSide::Buy => unsigned,
+        OrderSide::Sell => format!("-{unsigned}"),
+    })
+}
+
+fn gateio_futures_tif(request: &PlaceOrderRequest) -> &'static str {
+    if request.post_only || request.order_type == OrderType::PostOnly {
+        return "poc";
+    }
+    if let Some(time_in_force) = request.time_in_force {
+        return gateio_time_in_force(time_in_force);
+    }
+    match request.order_type {
+        OrderType::IOC => "ioc",
+        OrderType::FOK => "fok",
+        _ => "gtc",
     }
 }
 

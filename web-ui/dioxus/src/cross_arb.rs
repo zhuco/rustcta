@@ -2,18 +2,20 @@ use dioxus::prelude::*;
 use serde_json::{json, Value};
 
 use crate::api::{
+    delete_cross_arb_exchange_config, fetch_cross_arb_exchange_config,
     fetch_cross_arb_instrument_data, fetch_cross_arb_market_snapshot_data,
-    fetch_cross_arb_settings, save_cross_arb_settings,
+    fetch_cross_arb_settings, save_cross_arb_exchange_config, save_cross_arb_settings,
 };
 use crate::i18n::{s, t};
 use crate::storage::save_active_view;
 use crate::types::{
     ControlPanelView, CredentialAccountOption, CrossArbAccountRowData, CrossArbEventSummaryData,
-    CrossArbExchangeConsoleRowData, CrossArbInstrumentRowData, CrossArbMarketSnapshotRowData,
-    CrossArbOpenOrderRowData, CrossArbOpportunityRowData, CrossArbPanelData,
-    CrossArbPositionBundleRowData, CrossArbReadinessData, CrossArbRepairTaskRowData,
-    CrossArbResultRowData, CrossArbSaveResultData, CrossArbSettingsFormData, CrossArbSourceData,
-    Language,
+    CrossArbExchangeConsoleRowData, CrossArbExchangeFormData, CrossArbExchangeStatusCardData,
+    CrossArbInstrumentRowData, CrossArbMarketSnapshotRowData, CrossArbOpenOrderRowData,
+    CrossArbOpportunityRowData, CrossArbPanelData, CrossArbPositionBundleRowData,
+    CrossArbReadinessData, CrossArbRepairTaskRowData, CrossArbResultRowData,
+    CrossArbSaveResultData, CrossArbSettingsFormData, CrossArbSourceData, Language,
+    SystemResourcePanelData,
 };
 use crate::ui::{control_click, ControlActionTarget, Metric, Pager, StatusPill};
 use crate::utils::*;
@@ -22,6 +24,8 @@ use crate::utils::*;
 pub(crate) fn CrossArbPanel(
     cross_arb: Value,
     api_keys: Value,
+    status: Value,
+    processes: Value,
     token: String,
     mut message: Signal<String>,
     lang: Language,
@@ -33,19 +37,13 @@ pub(crate) fn CrossArbPanel(
     let mut opp_page = use_signal(|| 0usize);
     let mut hedge_page = use_signal(|| 0usize);
     let mut symbol_page = use_signal(|| 0usize);
+    let mut settings_dialog_open = use_signal(|| false);
     let source = CrossArbSourceData::from_dashboard(&cross_arb);
     let summary = source.summary.clone();
     let settings = source.settings.clone();
-    let initial_settings = CrossArbSettingsFormData::from_settings(&settings);
-    let mut binance_enabled = use_signal(|| initial_settings.binance_enabled);
-    let mut bitget_enabled = use_signal(|| initial_settings.bitget_enabled);
-    let mut gate_enabled = use_signal(|| initial_settings.gate_enabled);
-    let mut binance_account = use_signal(|| initial_settings.binance_account.clone());
-    let mut bitget_account = use_signal(|| initial_settings.bitget_account.clone());
-    let mut gate_account = use_signal(|| initial_settings.gate_account.clone());
-    let mut binance_env = use_signal(|| initial_settings.binance_env.clone());
-    let mut bitget_env = use_signal(|| initial_settings.bitget_env.clone());
-    let mut gate_env = use_signal(|| initial_settings.gate_env.clone());
+    let initial_settings =
+        CrossArbSettingsFormData::from_settings(&settings, &api_keys, &source.exchanges, lang);
+    let mut exchange_settings = use_signal(|| initial_settings.exchanges.clone());
     let mut symbol_text = use_signal(|| initial_settings.symbols_text.clone());
     let mut hedge_notional = use_signal(|| initial_settings.target_notional.clone());
     let mut max_hedge_notional = use_signal(|| initial_settings.max_notional.clone());
@@ -55,15 +53,43 @@ pub(crate) fn CrossArbPanel(
     let mut close_profit = use_signal(|| initial_settings.close_profit.clone());
     let mut close_spread = use_signal(|| initial_settings.close_spread.clone());
     let mut execution_profile = use_signal(|| initial_settings.execution_profile.clone());
-    let binance_account_options =
-        CredentialAccountOption::for_exchange(&api_keys, "binance", &binance_account(), lang);
-    let bitget_account_options =
-        CredentialAccountOption::for_exchange(&api_keys, "bitget", &bitget_account(), lang);
-    let gate_account_options =
-        CredentialAccountOption::for_exchange(&api_keys, "gate", &gate_account(), lang);
-    let binance_select_options = binance_account_options.clone();
-    let bitget_select_options = bitget_account_options.clone();
-    let gate_select_options = gate_account_options.clone();
+    let load_exchange_config_token = token.clone();
+    let load_exchange_config_api_keys = api_keys.clone();
+    let load_exchange_config_seed = source.exchanges.clone();
+    let _exchange_config_bootstrap = use_future(move || {
+        let token_value = load_exchange_config_token.clone();
+        let api_keys_value = load_exchange_config_api_keys.clone();
+        let seed_exchanges = load_exchange_config_seed.clone();
+        async move {
+            match fetch_cross_arb_exchange_config(&token_value).await {
+                Ok(value) => {
+                    let form = CrossArbSettingsFormData::from_settings(
+                        &value,
+                        &api_keys_value,
+                        &seed_exchanges,
+                        lang,
+                    );
+                    exchange_settings.set(form.exchanges);
+                    if value
+                        .get("cleaned_on_read")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        let cleaned = value
+                            .get("cleaned_invalid_count")
+                            .and_then(Value::as_u64)
+                            .unwrap_or_default();
+                        message.set(format!("{}: {}", t(lang, "config_cleaned"), cleaned));
+                    }
+                }
+                Err(error) => {
+                    if !optional_exchange_config_error(&error) {
+                        message.set(error);
+                    }
+                }
+            }
+        }
+    });
     let opportunities = source.opportunities.clone();
     let signals = source.signals.clone();
     let hedge_records = source.hedge_records.clone();
@@ -94,6 +120,14 @@ pub(crate) fn CrossArbPanel(
     let account_rows = CrossArbAccountRowData::from_value_rows(&balance_rows, lang);
     let exchange_console_rows =
         CrossArbExchangeConsoleRowData::from_exchanges(&exchanges, &private_events, lang);
+    let exchange_status_cards = CrossArbExchangeStatusCardData::from_values(
+        &exchanges,
+        &source.exchange_status,
+        &market_snapshot_rows(),
+        &exchange_console_rows,
+        symbols.len(),
+        lang,
+    );
     let opportunity_rows = CrossArbOpportunityRowData::from_value_rows(&opportunities, lang);
     let position_bundle_rows =
         CrossArbPositionBundleRowData::from_value_rows(&position_bundles, lang);
@@ -110,6 +144,8 @@ pub(crate) fn CrossArbPanel(
         &instrument_feasibility(),
         lang,
     );
+    let system_resources = SystemResourcePanelData::from_status(&status);
+    let runtime_text = cross_arb_runtime_text(&processes, &cross_arb);
     let opp_page_size = 24usize;
     let hedge_page_size = 18usize;
     let symbol_page_size = 40usize;
@@ -120,21 +156,22 @@ pub(crate) fn CrossArbPanel(
     let hedge_start = page_start(hedge_page(), hedge_page_size, position_bundle_rows.len());
     let symbol_start = page_start(symbol_page(), symbol_page_size, symbols.len());
     let load_settings_token = token.clone();
+    let load_settings_api_keys = api_keys.clone();
+    let load_settings_exchanges = exchanges.clone();
     let load_settings = move |_| {
         let token_value = load_settings_token.clone();
+        let api_keys_value = load_settings_api_keys.clone();
+        let seed_exchanges = load_settings_exchanges.clone();
         wasm_bindgen_futures::spawn_local(async move {
             match fetch_cross_arb_settings(&token_value).await {
                 Ok(value) => {
-                    let form = CrossArbSettingsFormData::from_settings(&value);
-                    binance_enabled.set(form.binance_enabled);
-                    bitget_enabled.set(form.bitget_enabled);
-                    gate_enabled.set(form.gate_enabled);
-                    binance_account.set(form.binance_account);
-                    bitget_account.set(form.bitget_account);
-                    gate_account.set(form.gate_account);
-                    binance_env.set(form.binance_env);
-                    bitget_env.set(form.bitget_env);
-                    gate_env.set(form.gate_env);
+                    let form = CrossArbSettingsFormData::from_settings(
+                        &value,
+                        &api_keys_value,
+                        &seed_exchanges,
+                        lang,
+                    );
+                    exchange_settings.set(form.exchanges);
                     symbol_text.set(form.symbols_text);
                     hedge_notional.set(form.target_notional);
                     max_hedge_notional.set(form.max_notional);
@@ -144,6 +181,16 @@ pub(crate) fn CrossArbPanel(
                     close_profit.set(form.close_profit);
                     close_spread.set(form.close_spread);
                     execution_profile.set(form.execution_profile);
+                    if let Ok(exchange_value) = fetch_cross_arb_exchange_config(&token_value).await
+                    {
+                        let exchange_form = CrossArbSettingsFormData::from_settings(
+                            &exchange_value,
+                            &api_keys_value,
+                            &seed_exchanges,
+                            lang,
+                        );
+                        exchange_settings.set(exchange_form.exchanges);
+                    }
                     message.set(t(lang, "config_loaded").to_string());
                 }
                 Err(error) => message.set(error),
@@ -192,8 +239,12 @@ pub(crate) fn CrossArbPanel(
         });
     };
     let save_settings_token = token.clone();
+    let save_settings_api_keys = api_keys.clone();
+    let save_settings_seed_exchanges = exchanges.clone();
     let save_settings = move |_| {
         let token_value = save_settings_token.clone();
+        let api_keys_value = save_settings_api_keys.clone();
+        let seed_exchanges = save_settings_seed_exchanges.clone();
         let symbols = split_symbol_text(&symbol_text());
         let target_notional = parse_number_or_default(&hedge_notional(), 5.0);
         let max_notional =
@@ -203,17 +254,31 @@ pub(crate) fn CrossArbPanel(
         let min_net_edge_value = parse_number_or_default(&min_net_edge(), 0.005);
         let close_profit_value = parse_number_or_default(&close_profit(), 0.0005);
         let close_spread_value = parse_number_or_default(&close_spread(), 0.0005);
-        let enabled_exchange_count = [binance_enabled(), bitget_enabled(), gate_enabled()]
-            .into_iter()
-            .filter(|enabled| *enabled)
+        let exchange_rows = exchange_settings();
+        let enabled_exchange_count = exchange_rows
+            .iter()
+            .filter(|row| row.enabled)
             .count()
             .max(1) as f64;
+        let exchange_payload = exchange_rows
+            .iter()
+            .map(|row| {
+                json!({
+                    "exchange": row.exchange.clone(),
+                    "enabled": row.enabled,
+                    "account_id": row.account_id.clone(),
+                    "env_prefix": row.env_prefix.clone(),
+                    "private_rest_enabled": row.private_rest_enabled,
+                    "private_ws_enabled": row.private_ws_enabled,
+                })
+            })
+            .collect::<Vec<_>>();
+        let exchange_body = json!({
+            "strategy_id": "cross_arb_live",
+            "apply": true,
+            "exchanges": exchange_payload,
+        });
         let body = json!({
-            "exchanges": [
-                { "exchange": "binance", "enabled": binance_enabled(), "account_id": binance_account(), "env_prefix": binance_env(), "private_rest_enabled": true, "private_ws_enabled": true },
-                { "exchange": "bitget", "enabled": bitget_enabled(), "account_id": bitget_account(), "env_prefix": bitget_env(), "private_rest_enabled": true, "private_ws_enabled": true },
-                { "exchange": "gate", "enabled": gate_enabled(), "account_id": gate_account(), "env_prefix": gate_env(), "private_rest_enabled": true, "private_ws_enabled": true }
-            ],
             "symbols": symbols,
             "target_symbol_count": symbols.len(),
             "min_notional_usdt": target_notional,
@@ -233,8 +298,27 @@ pub(crate) fn CrossArbPanel(
             "execution_profile": execution_profile()
         });
         wasm_bindgen_futures::spawn_local(async move {
-            match save_cross_arb_settings(&token_value, &body).await {
-                Ok(value) => message.set(cross_arb_save_result_message(&value, lang)),
+            match save_cross_arb_exchange_config(&token_value, &exchange_body).await {
+                Ok(exchange_value) => {
+                    let exchange_form = CrossArbSettingsFormData::from_settings(
+                        &exchange_value,
+                        &api_keys_value,
+                        &seed_exchanges,
+                        lang,
+                    );
+                    exchange_settings.set(exchange_form.exchanges);
+                    match save_cross_arb_settings(&token_value, &body).await {
+                        Ok(value) => {
+                            settings_dialog_open.set(false);
+                            message.set(format!(
+                                "{} {}",
+                                t(lang, "exchange_config_saved"),
+                                cross_arb_save_result_message(&value, lang)
+                            ));
+                        }
+                        Err(error) => message.set(error),
+                    }
+                }
                 Err(error) => message.set(error),
             }
         });
@@ -281,10 +365,18 @@ pub(crate) fn CrossArbPanel(
                 span { class: panel_data.source_tone, "{panel_data.source_label}" }
                 span { class: "muted", "{s(lang, \"latest_event\")}: {panel_data.latest_event_at}" }
             }
-            div { class: "grid cross-metrics",
+            div { class: "grid cross-metrics cross-ops-metrics",
+                Metric { label: s(lang, "monitored_pairs"), value: symbols.len().to_string() }
+                Metric { label: s(lang, "exchange"), value: exchanges.len().to_string() }
+                Metric { label: s(lang, "realtime_quotes"), value: market_snapshot_rows().len().to_string() }
+                Metric { label: s(lang, "running_time"), value: runtime_text.clone() }
+                Metric { label: s(lang, "server_cpu"), value: system_resources.cpu.clone() }
+                Metric { label: s(lang, "server_memory"), value: system_resources.memory.clone() }
+                Metric { label: s(lang, "process_cpu"), value: system_resources.process_cpu.clone() }
+                Metric { label: s(lang, "process_memory"), value: system_resources.process_memory.clone() }
+            }
+            div { class: "grid cross-metrics cross-detail-metrics",
                 Metric { label: s(lang, "data_source"), value: panel_data.data_source.clone() }
-                Metric { label: s(lang, "event_dir"), value: panel_data.event_dir.clone() }
-                Metric { label: s(lang, "event_files"), value: panel_data.event_file_count.to_string() }
                 Metric { label: s(lang, "event_count"), value: panel_data.valid_events.clone() }
                 Metric { label: s(lang, "parse_errors"), value: panel_data.parse_errors.clone() }
                 Metric { label: s(lang, "opportunity_count"), value: format!("{} / {}", panel_data.can_open_opportunities, opportunities.len()) }
@@ -292,11 +384,7 @@ pub(crate) fn CrossArbPanel(
                 Metric { label: s(lang, "hedge_records"), value: hedge_records.len().to_string() }
                 Metric { label: s(lang, "repair_tasks"), value: repair_tasks.len().to_string() }
                 Metric { label: s(lang, "strategy_estimated_profit"), value: signed_usdt(panel_data.estimated_edge_usdt) }
-                Metric { label: s(lang, "realized_pnl"), value: format!("{:.4}%", panel_data.realized_close_pct) }
                 Metric { label: s(lang, "open_orders"), value: open_orders.len().to_string() }
-                Metric { label: s(lang, "order_events"), value: panel_data.order_events.clone() }
-                Metric { label: s(lang, "positions"), value: position_bundles.len().to_string() }
-                Metric { label: s(lang, "closed_arbitrages"), value: arbitrage_results.len().to_string() }
                 Metric { label: s(lang, "cumulative_profit"), value: signed_usdt(panel_data.realized_profit_usdt) }
                 Metric { label: s(lang, "strategy_readiness"), value: readiness.strategy_text.clone() }
                 Metric { label: s(lang, "credential_readiness"), value: readiness.account_text.clone() }
@@ -310,119 +398,188 @@ pub(crate) fn CrossArbPanel(
                     div { class: "row-actions",
                         span { class: readiness.strategy_class, "{readiness.strategy_label}" }
                         button { class: "button", onclick: load_settings, {s(lang, "load_config")} }
-                        button { class: "button primary", onclick: save_settings, {s(lang, "save_config")} }
+                        button { class: "button primary", onclick: move |_| settings_dialog_open.set(true), {s(lang, "edit_config")} }
                     }
                 }
-                div { class: "cross-settings-grid",
-                    div { class: "settings-form",
-                        label { class: "check-row",
-                            input { r#type: "checkbox", checked: "{binance_enabled()}", onchange: move |event| binance_enabled.set(event.checked()) }
-                            span { "Binance" }
-                        }
-                        label { class: "form-field",
-                            span { "Binance Account" }
-                            CrossArbAccountSelect {
-                                value: binance_account(),
-                                options: binance_account_options.clone(),
-                                on_change: move |value: String| {
-                                    if let Some(env_prefix) = env_prefix_for_account(&binance_select_options, &value) {
-                                        binance_env.set(env_prefix);
-                                    }
-                                    binance_account.set(value);
-                                }
+                div { class: "settings-summary-strip",
+                    div {
+                        span { {s(lang, "enabled_exchanges")} }
+                        strong { "{enabled_exchange_summary(&exchange_settings())}" }
+                    }
+                    div {
+                        span { {s(lang, "execution_profile")} }
+                        strong { "{execution_profile()}" }
+                    }
+                    div {
+                        span { {s(lang, "per_arb_notional")} }
+                        strong { "{hedge_notional()}" }
+                    }
+                    div {
+                        span { {s(lang, "max_positions")} }
+                        strong { "{max_positions()}" }
+                    }
+                }
+            }
+            if settings_dialog_open() {
+                div { class: "modal-backdrop",
+                    div { class: "config-dialog", role: "dialog", "aria-modal": "true",
+                        div { class: "config-dialog-head",
+                            div {
+                                h2 { {s(lang, "edit_config")} }
+                                p { class: "muted", "{panel_data.settings_path}" }
+                            }
+                            div { class: "row-actions",
+                                button { class: "button primary", onclick: save_settings, {s(lang, "save_config")} }
+                                button { class: "button", onclick: move |_| settings_dialog_open.set(false), {s(lang, "close")} }
                             }
                         }
-                        label { class: "form-field",
-                            span { "Binance Env" }
-                            input { value: "{binance_env()}", oninput: move |event| binance_env.set(event.value()) }
-                        }
-                        label { class: "check-row",
-                            input { r#type: "checkbox", checked: "{bitget_enabled()}", onchange: move |event| bitget_enabled.set(event.checked()) }
-                            span { "Bitget" }
-                        }
-                        label { class: "form-field",
-                            span { "Bitget Account" }
-                            CrossArbAccountSelect {
-                                value: bitget_account(),
-                                options: bitget_account_options.clone(),
-                                on_change: move |value: String| {
-                                    if let Some(env_prefix) = env_prefix_for_account(&bitget_select_options, &value) {
-                                        bitget_env.set(env_prefix);
+                        div { class: "cross-settings-grid config-dialog-body",
+                            div { class: "settings-form exchange-config-list",
+                                div { class: "panel-title-row compact-title-row",
+                                    h3 { {s(lang, "target_exchanges")} }
+                                    button {
+                                        class: "button",
+                                        onclick: move |_| append_exchange_config_row(exchange_settings),
+                                        {s(lang, "add_config_exchange")}
                                     }
-                                    bitget_account.set(value);
+                                }
+                                for (index, row) in exchange_settings().iter().enumerate() {
+                                    {
+                                        let row_exchange = row.exchange.clone();
+                                        let row_label = row.label.clone();
+                                        let row_enabled = row.enabled;
+                                        let row_account = row.account_id.clone();
+                                        let row_env = row.env_prefix.clone();
+                                        let account_options = CredentialAccountOption::for_exchange(&api_keys, &row_exchange, &row_account, lang);
+                                        let account_select_options = account_options.clone();
+                                        let delete_token = token.clone();
+                                        let delete_api_keys = api_keys.clone();
+                                        let delete_seed_exchanges = exchanges.clone();
+                                        rsx! {
+                                            div { class: "exchange-config-row",
+                                                label { class: "form-field",
+                                                    span { {s(lang, "exchange")} }
+                                                    input {
+                                                        value: "{row_exchange}",
+                                                        oninput: move |event| update_exchange_name(exchange_settings, index, event.value())
+                                                    }
+                                                }
+                                                label { class: "check-row",
+                                                    input {
+                                                        r#type: "checkbox",
+                                                        checked: "{row_enabled}",
+                                                        onchange: move |event| update_exchange_enabled(exchange_settings, index, event.checked())
+                                                    }
+                                                    span { "{row_label}" }
+                                                }
+                                                label { class: "form-field",
+                                                    span { {s(lang, "account")} }
+                                                    CrossArbAccountSelect {
+                                                        value: row_account.clone(),
+                                                        options: account_options,
+                                                        on_change: move |value: String| {
+                                                            update_exchange_account(exchange_settings, index, value, &account_select_options);
+                                                        }
+                                                    }
+                                                }
+                                                label { class: "form-field",
+                                                    span { {s(lang, "credential_namespace")} }
+                                                    input {
+                                                        value: "{row_env}",
+                                                        oninput: move |event| update_exchange_env(exchange_settings, index, event.value())
+                                                    }
+                                                }
+                                                div { class: "row-actions exchange-row-actions",
+                                                    button {
+                                                        class: "mini-button danger",
+                                                        onclick: move |_| {
+                                                                delete_exchange_config_row(
+                                                                    row_exchange.clone(),
+                                                                    delete_token.clone(),
+                                                                    delete_api_keys.clone(),
+                                                                    delete_seed_exchanges.clone(),
+                                                                    exchange_settings,
+                                                                    message,
+                                                                    lang,
+                                                            );
+                                                        },
+                                                        {s(lang, "delete")}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        label { class: "form-field",
-                            span { "Bitget Env" }
-                            input { value: "{bitget_env()}", oninput: move |event| bitget_env.set(event.value()) }
-                        }
-                        label { class: "check-row",
-                            input { r#type: "checkbox", checked: "{gate_enabled()}", onchange: move |event| gate_enabled.set(event.checked()) }
-                            span { "Gate.io" }
-                        }
-                        label { class: "form-field",
-                            span { "Gate Account" }
-                            CrossArbAccountSelect {
-                                value: gate_account(),
-                                options: gate_account_options.clone(),
-                                on_change: move |value: String| {
-                                    if let Some(env_prefix) = env_prefix_for_account(&gate_select_options, &value) {
-                                        gate_env.set(env_prefix);
+                            div { class: "settings-form compact-settings",
+                                h3 { {s(lang, "trade_config_console")} }
+                                label { class: "form-field",
+                                    span { {s(lang, "execution_profile")} }
+                                    select {
+                                        value: "{execution_profile()}",
+                                        onchange: move |event| execution_profile.set(event.value()),
+                                        option { value: "live_small_dry_run", {s(lang, "live_small_dry_run")} }
+                                        option { value: "simulation", {s(lang, "simulation")} }
                                     }
-                                    gate_account.set(value);
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "per_arb_notional")} }
+                                    input { value: "{hedge_notional()}", oninput: move |event| hedge_notional.set(event.value()) }
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "max_arb_notional")} }
+                                    input { value: "{max_hedge_notional()}", oninput: move |event| max_hedge_notional.set(event.value()) }
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "max_positions")} }
+                                    input { value: "{max_positions()}", oninput: move |event| max_positions.set(event.value()) }
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "raw_spread")} }
+                                    input { value: "{min_open_spread()}", oninput: move |event| min_open_spread.set(event.value()) }
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "expected_edge")} }
+                                    input { value: "{min_net_edge()}", oninput: move |event| min_net_edge.set(event.value()) }
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "close_profit")} }
+                                    input { value: "{close_profit()}", oninput: move |event| close_profit.set(event.value()) }
+                                }
+                                label { class: "form-field",
+                                    span { {s(lang, "close_spread")} }
+                                    input { value: "{close_spread()}", oninput: move |event| close_spread.set(event.value()) }
                                 }
                             }
-                        }
-                        label { class: "form-field",
-                            span { "Gate Env" }
-                            input { value: "{gate_env()}", oninput: move |event| gate_env.set(event.value()) }
+                            label { class: "form-field symbol-editor",
+                                span { {s(lang, "monitored_pairs")} }
+                                textarea {
+                                    value: "{symbol_text()}",
+                                    oninput: move |event| symbol_text.set(event.value())
+                                }
+                            }
                         }
                     }
-                    div { class: "settings-form compact-settings",
-                        label { class: "form-field",
-                            span { {s(lang, "execution_profile")} }
-                            select {
-                                value: "{execution_profile()}",
-                                onchange: move |event| execution_profile.set(event.value()),
-                                option { value: "live_small_dry_run", {s(lang, "live_small_dry_run")} }
-                                option { value: "simulation", {s(lang, "simulation")} }
+                }
+            }
+            div { class: "panel exchange-status-panel",
+                h2 { {s(lang, "exchange_console")} }
+                div { class: "exchange-card-grid",
+                    for card in exchange_status_cards.iter() {
+                        div { class: "exchange-status-card",
+                            div { class: "exchange-card-head",
+                                strong { "{card.exchange}" }
+                                span { class: card.status_class, "{card.status_label}" }
                             }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "per_arb_notional")} }
-                            input { value: "{hedge_notional()}", oninput: move |event| hedge_notional.set(event.value()) }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "max_arb_notional")} }
-                            input { value: "{max_hedge_notional()}", oninput: move |event| max_hedge_notional.set(event.value()) }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "max_positions")} }
-                            input { value: "{max_positions()}", oninput: move |event| max_positions.set(event.value()) }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "raw_spread")} }
-                            input { value: "{min_open_spread()}", oninput: move |event| min_open_spread.set(event.value()) }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "expected_edge")} }
-                            input { value: "{min_net_edge()}", oninput: move |event| min_net_edge.set(event.value()) }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "close_profit")} }
-                            input { value: "{close_profit()}", oninput: move |event| close_profit.set(event.value()) }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "close_spread")} }
-                            input { value: "{close_spread()}", oninput: move |event| close_spread.set(event.value()) }
-                        }
-                    }
-                    label { class: "form-field symbol-editor",
-                        span { {s(lang, "monitored_pairs")} }
-                        textarea {
-                            value: "{symbol_text()}",
-                            oninput: move |event| symbol_text.set(event.value())
+                            dl {
+                                div { dt { {s(lang, "subscriptions")} } dd { "{card.subscriptions}" } }
+                                div { dt { {s(lang, "messages")} } dd { "{card.messages}" } }
+                                div { dt { {s(lang, "latency")} } dd { "{card.latency}" } }
+                                div { dt { {s(lang, "server_offset")} } dd { "{card.server_offset}" } }
+                                div { dt { {s(lang, "book_count")} } dd { "{card.book_count}" } }
+                                div { dt { {s(lang, "last_update")} } dd { "{card.last_update}" } }
+                                div { dt { {s(lang, "reconnects")} } dd { "{card.reconnects}" } }
+                            }
                         }
                     }
                 }
@@ -818,6 +975,197 @@ pub(crate) fn env_prefix_for_account(
             let env_prefix = option.env_prefix.trim();
             (!env_prefix.is_empty() && env_prefix != "-").then(|| env_prefix.to_string())
         })
+}
+
+fn append_exchange_config_row(mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>) {
+    let mut rows = exchange_settings();
+    rows.push(CrossArbExchangeFormData {
+        exchange: String::new(),
+        label: String::new(),
+        enabled: true,
+        account_id: String::new(),
+        env_prefix: String::new(),
+        private_rest_enabled: true,
+        private_ws_enabled: true,
+    });
+    exchange_settings.set(rows);
+}
+
+fn update_exchange_name(
+    mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>,
+    index: usize,
+    exchange: String,
+) {
+    let mut rows = exchange_settings();
+    if let Some(row) = rows.get_mut(index) {
+        row.exchange = exchange.trim().to_string();
+        row.label = if row.exchange.is_empty() {
+            String::new()
+        } else {
+            row.exchange.clone()
+        };
+    }
+    exchange_settings.set(rows);
+}
+
+fn update_exchange_enabled(
+    mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>,
+    index: usize,
+    enabled: bool,
+) {
+    let mut rows = exchange_settings();
+    if let Some(row) = rows.get_mut(index) {
+        row.enabled = enabled;
+    }
+    exchange_settings.set(rows);
+}
+
+fn update_exchange_account(
+    mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>,
+    index: usize,
+    account_id: String,
+    options: &[CredentialAccountOption],
+) {
+    let mut rows = exchange_settings();
+    if let Some(row) = rows.get_mut(index) {
+        if let Some(env_prefix) = env_prefix_for_account(options, &account_id) {
+            row.env_prefix = env_prefix;
+        }
+        row.account_id = account_id;
+    }
+    exchange_settings.set(rows);
+}
+
+fn update_exchange_env(
+    mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>,
+    index: usize,
+    env_prefix: String,
+) {
+    let mut rows = exchange_settings();
+    if let Some(row) = rows.get_mut(index) {
+        row.env_prefix = env_prefix;
+    }
+    exchange_settings.set(rows);
+}
+
+fn delete_exchange_config_row(
+    exchange: String,
+    token: String,
+    api_keys: Value,
+    seed_exchanges: Vec<String>,
+    mut exchange_settings: Signal<Vec<CrossArbExchangeFormData>>,
+    mut message: Signal<String>,
+    lang: Language,
+) {
+    if exchange.trim().is_empty() {
+        let mut rows = exchange_settings();
+        rows.retain(|row| !row.exchange.trim().is_empty());
+        exchange_settings.set(rows);
+        return;
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        match delete_cross_arb_exchange_config(&token, &exchange).await {
+            Ok(value) => {
+                let form = CrossArbSettingsFormData::from_settings(
+                    &value,
+                    &api_keys,
+                    &seed_exchanges,
+                    lang,
+                );
+                exchange_settings.set(form.exchanges);
+                message.set(t(lang, "exchange_config_deleted").to_string());
+            }
+            Err(error) => message.set(error),
+        }
+    });
+}
+
+fn enabled_exchange_summary(rows: &[CrossArbExchangeFormData]) -> String {
+    let labels = rows
+        .iter()
+        .filter(|row| row.enabled)
+        .map(|row| {
+            if row.label.trim().is_empty() || row.label == "-" {
+                row.exchange.clone()
+            } else {
+                row.label.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        "-".to_string()
+    } else {
+        labels.join(" / ")
+    }
+}
+
+fn optional_exchange_config_error(error: &str) -> bool {
+    error.contains("HTTP 404")
+        || error.contains("strategy_config_not_configured")
+        || error.contains("command_queue_not_configured")
+}
+
+fn cross_arb_runtime_text(processes: &Value, cross_arb: &Value) -> String {
+    let started_at = cross_arb
+        .get("started_at")
+        .and_then(timestamp_ms_from_value)
+        .or_else(|| {
+            as_array(processes).into_iter().find_map(|row| {
+                let strategy_kind = text_at(&row, "strategy_kind", Language::En);
+                let strategy_id = text_at(&row, "strategy_id", Language::En);
+                if strategy_kind == "cross_exchange_arbitrage"
+                    || strategy_id.to_ascii_lowercase().contains("cross_arb")
+                {
+                    row.get("started_at").and_then(timestamp_ms_from_value)
+                } else {
+                    None
+                }
+            })
+        });
+    started_at
+        .map(|started_at| format_elapsed_ms(js_sys::Date::now() - started_at))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn timestamp_ms_from_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(value) => value.as_f64().and_then(normalize_timestamp_ms),
+        Value::String(value) => {
+            let value = value.trim();
+            if value.is_empty() || value == "-" || value.eq_ignore_ascii_case("null") {
+                return None;
+            }
+            if let Ok(timestamp) = value.parse::<f64>() {
+                if let Some(timestamp_ms) = normalize_timestamp_ms(timestamp) {
+                    return Some(timestamp_ms);
+                }
+            }
+            let timestamp_ms = js_sys::Date::parse(value);
+            timestamp_ms.is_finite().then_some(timestamp_ms)
+        }
+        _ => None,
+    }
+}
+
+fn normalize_timestamp_ms(value: f64) -> Option<f64> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    let abs = value.abs();
+    if (1_000_000_000_000.0..100_000_000_000_000.0).contains(&abs) {
+        Some(value)
+    } else if (1_000_000_000.0..100_000_000_000.0).contains(&abs) {
+        Some(value * 1000.0)
+    } else {
+        None
+    }
+}
+
+fn format_elapsed_ms(value: f64) -> String {
+    if !value.is_finite() || value < 0.0 {
+        return "-".to_string();
+    }
+    format!("{:.3}s", value / 1000.0)
 }
 
 fn cross_arb_save_result_message(value: &Value, lang: Language) -> String {

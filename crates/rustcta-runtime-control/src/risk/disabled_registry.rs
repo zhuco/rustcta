@@ -333,7 +333,8 @@ where
     let value = String::deserialize(deserializer)?;
     match value.trim().to_ascii_lowercase().as_str() {
         "spot" => Ok(MarketType::Spot),
-        "perpetual" | "perp" | "futures" | "future" => Ok(MarketType::Perpetual),
+        "perpetual" | "perp" | "swap" => Ok(MarketType::Perpetual),
+        "futures" | "future" => Ok(MarketType::Futures),
         other => Err(serde::de::Error::custom(format!(
             "unsupported market_type: {other}"
         ))),
@@ -462,6 +463,35 @@ unmanaged_positions:
         assert_eq!(
             loaded.unmanaged_quantity("coinex", MarketType::Spot, "PONDUSDT", "POND"),
             5_000.0
+        );
+    }
+
+    #[test]
+    fn disabled_registry_config_should_preserve_derivative_market_types() {
+        let config = serde_yaml::from_str::<DisabledRegistryConfig>(
+            r#"
+disabled:
+  exchange_symbols:
+    - exchange: binance
+      market_type: perpetual
+      symbol: BTCUSDT
+      reason: "perp"
+    - exchange: gateio
+      market_type: futures
+      symbol: BTC_USDT_20261225
+      reason: "delivery"
+unmanaged_positions: []
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.disabled.exchange_symbols[0].market_type,
+            MarketType::Perpetual
+        );
+        assert_eq!(
+            config.disabled.exchange_symbols[1].market_type,
+            MarketType::Futures
         );
     }
 }

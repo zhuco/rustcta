@@ -5,11 +5,13 @@ use chrono::Utc;
 use rustcta_supervisor::LifecycleCommandRecord;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::{Mutex, OnceLock};
 
 use crate::{
     read_models, ControlApiConfigSummary, ControlApiState, ControlApiStateSnapshot,
     CreateStrategyRequest, CredentialStatusResponse, LegacyDashboardReadView, StrategyProcessView,
-    StrategySnapshotEnvelope, StrategySnapshotSource, WorkspaceSummary, CONTROL_API_SCHEMA_VERSION,
+    StrategySnapshotEnvelope, StrategySnapshotSource, SystemResourceSnapshot, WorkspaceSummary,
+    CONTROL_API_SCHEMA_VERSION,
 };
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -27,12 +29,18 @@ pub async fn health() -> Json<serde_json::Value> {
 
 pub async fn workspace(State(state): State<ControlApiState>) -> Json<WorkspaceSummary> {
     let snapshot = state.snapshot().await;
-    Json(workspace_summary_from_snapshot(snapshot))
+    Json(workspace_summary_from_snapshot(
+        snapshot,
+        SystemResourceSnapshot::default(),
+    ))
 }
 
 pub async fn status(State(state): State<ControlApiState>) -> Json<WorkspaceSummary> {
     let snapshot = state.snapshot().await;
-    Json(workspace_summary_from_snapshot(snapshot))
+    Json(workspace_summary_from_snapshot(
+        snapshot,
+        system_resource_snapshot(),
+    ))
 }
 
 pub async fn config_summary(State(state): State<ControlApiState>) -> Json<ControlApiConfigSummary> {
@@ -55,7 +63,10 @@ pub async fn config_summary(State(state): State<ControlApiState>) -> Json<Contro
     })
 }
 
-fn workspace_summary_from_snapshot(snapshot: crate::ControlApiStateSnapshot) -> WorkspaceSummary {
+fn workspace_summary_from_snapshot(
+    snapshot: crate::ControlApiStateSnapshot,
+    system: SystemResourceSnapshot,
+) -> WorkspaceSummary {
     WorkspaceSummary {
         schema_version: CONTROL_API_SCHEMA_VERSION,
         generated_at: snapshot.generated_at,
@@ -66,7 +77,182 @@ fn workspace_summary_from_snapshot(snapshot: crate::ControlApiStateSnapshot) -> 
         risk_status: snapshot.risk.status,
         active_risk_event_count: snapshot.risk.open_risk_event_count,
         log_event_count: snapshot.logs.events.len(),
+        system,
     }
+}
+
+#[derive(Clone, Copy)]
+struct CpuTotals {
+    idle: u64,
+    total: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ProcessCpuSample {
+    jiffies: u64,
+}
+
+#[derive(Default)]
+struct SystemResourceTracker {
+    last_cpu: Option<CpuTotals>,
+    last_process_cpu: Option<ProcessCpuSample>,
+}
+
+impl SystemResourceTracker {
+    fn snapshot(&mut self) -> SystemResourceSnapshot {
+        let cpu = read_cpu_totals();
+        let process_cpu = read_process_cpu_sample();
+        let cpu_count = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1) as f64;
+        let cpu_usage_pct = cpu
+            .zip(self.last_cpu)
+            .and_then(|(current, previous)| cpu_usage_pct(previous, current));
+        let process_cpu_usage_pct = process_cpu
+            .zip(self.last_process_cpu)
+            .zip(cpu.zip(self.last_cpu))
+            .and_then(
+                |((current_process, previous_process), (current_cpu, previous_cpu))| {
+                    process_cpu_usage_pct(
+                        previous_process,
+                        current_process,
+                        previous_cpu,
+                        current_cpu,
+                        cpu_count,
+                    )
+                },
+            );
+        if let Some(cpu) = cpu {
+            self.last_cpu = Some(cpu);
+        }
+        if let Some(process_cpu) = process_cpu {
+            self.last_process_cpu = Some(process_cpu);
+        }
+        let (memory_total_bytes, memory_available_bytes) = read_system_memory();
+        let memory_used_bytes = memory_total_bytes
+            .zip(memory_available_bytes)
+            .map(|(total, available)| total.saturating_sub(available));
+        let memory_usage_pct = memory_used_bytes
+            .zip(memory_total_bytes)
+            .and_then(|(used, total)| (total > 0).then(|| used as f64 / total as f64 * 100.0));
+        SystemResourceSnapshot {
+            cpu_usage_pct,
+            memory_used_bytes,
+            memory_total_bytes,
+            memory_usage_pct,
+            process_cpu_usage_pct,
+            process_memory_bytes: read_process_memory_bytes(),
+        }
+    }
+}
+
+fn system_resource_snapshot() -> SystemResourceSnapshot {
+    static TRACKER: OnceLock<Mutex<SystemResourceTracker>> = OnceLock::new();
+    TRACKER
+        .get_or_init(|| Mutex::new(SystemResourceTracker::default()))
+        .lock()
+        .map(|mut tracker| tracker.snapshot())
+        .unwrap_or_default()
+}
+
+fn read_cpu_totals() -> Option<CpuTotals> {
+    let raw = std::fs::read_to_string("/proc/stat").ok()?;
+    let line = raw.lines().find(|line| line.starts_with("cpu "))?;
+    let values = line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|item| item.parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    if values.len() < 4 {
+        return None;
+    }
+    let idle =
+        values.get(3).copied().unwrap_or_default() + values.get(4).copied().unwrap_or_default();
+    let total = values.iter().sum::<u64>();
+    Some(CpuTotals { idle, total })
+}
+
+fn cpu_usage_pct(previous: CpuTotals, current: CpuTotals) -> Option<f64> {
+    let total_delta = current.total.checked_sub(previous.total)?;
+    let idle_delta = current.idle.checked_sub(previous.idle)?;
+    if total_delta == 0 {
+        return None;
+    }
+    Some((1.0 - idle_delta as f64 / total_delta as f64).clamp(0.0, 1.0) * 100.0)
+}
+
+fn read_process_cpu_sample() -> Option<ProcessCpuSample> {
+    let raw = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let fields = raw
+        .rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let user_jiffies = fields.get(11)?.parse::<u64>().ok()?;
+    let system_jiffies = fields.get(12)?.parse::<u64>().ok()?;
+    Some(ProcessCpuSample {
+        jiffies: user_jiffies.saturating_add(system_jiffies),
+    })
+}
+
+fn process_cpu_usage_pct(
+    previous_process: ProcessCpuSample,
+    current_process: ProcessCpuSample,
+    previous_cpu: CpuTotals,
+    current_cpu: CpuTotals,
+    cpu_count: f64,
+) -> Option<f64> {
+    let process_delta = current_process
+        .jiffies
+        .checked_sub(previous_process.jiffies)?;
+    let total_delta = current_cpu.total.checked_sub(previous_cpu.total)?;
+    if total_delta == 0 {
+        return None;
+    }
+    Some((process_delta as f64 / total_delta as f64 * cpu_count * 100.0).max(0.0))
+}
+
+fn read_system_memory() -> (Option<u64>, Option<u64>) {
+    let raw = match std::fs::read_to_string("/proc/meminfo") {
+        Ok(raw) => raw,
+        Err(_) => return (None, None),
+    };
+    let mut total = None;
+    let mut available = None;
+    for line in raw.lines() {
+        if let Some(value) = line
+            .strip_prefix("MemTotal:")
+            .and_then(meminfo_kb_value_to_bytes)
+        {
+            total = Some(value);
+        } else if let Some(value) = line
+            .strip_prefix("MemAvailable:")
+            .and_then(meminfo_kb_value_to_bytes)
+        {
+            available = Some(value);
+        }
+        if total.is_some() && available.is_some() {
+            break;
+        }
+    }
+    (total, available)
+}
+
+fn read_process_memory_bytes() -> Option<u64> {
+    let raw = std::fs::read_to_string("/proc/self/status").ok()?;
+    raw.lines().find_map(|line| {
+        line.strip_prefix("VmRSS:")
+            .and_then(meminfo_kb_value_to_bytes)
+    })
+}
+
+fn meminfo_kb_value_to_bytes(value: &str) -> Option<u64> {
+    value
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()
+        .map(|kb| kb.saturating_mul(1024))
 }
 
 pub async fn agents(State(state): State<ControlApiState>) -> Json<Vec<crate::AgentSummary>> {

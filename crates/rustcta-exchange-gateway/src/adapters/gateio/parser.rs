@@ -25,6 +25,23 @@ pub fn parse_symbol_rules(
         .collect()
 }
 
+pub fn parse_perpetual_symbol_rules(
+    exchange_id: &ExchangeId,
+    value: &Value,
+) -> ExchangeApiResult<Vec<SymbolRules>> {
+    let contracts = value.as_array().ok_or_else(|| {
+        parse_error(
+            exchange_id.clone(),
+            "contracts response is not an array",
+            value,
+        )
+    })?;
+    contracts
+        .iter()
+        .map(|value| parse_perpetual_symbol_rule(exchange_id, value))
+        .collect()
+}
+
 fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResult<SymbolRules> {
     let exchange_symbol = required_str(exchange_id, value, "id")?.to_ascii_uppercase();
     let base_asset = required_str(exchange_id, value, "base")?.to_ascii_uppercase();
@@ -72,6 +89,74 @@ fn parse_symbol_rule(exchange_id: &ExchangeId, value: &Value) -> ExchangeApiResu
     })
 }
 
+fn parse_perpetual_symbol_rule(
+    exchange_id: &ExchangeId,
+    value: &Value,
+) -> ExchangeApiResult<SymbolRules> {
+    let exchange_symbol = required_str(exchange_id, value, "name")
+        .or_else(|_| required_str(exchange_id, value, "contract"))?
+        .to_ascii_uppercase();
+    let (base_asset, quote_asset) = split_gateio_pair(&exchange_symbol)?;
+    let canonical_symbol =
+        CanonicalSymbol::new(&base_asset, &quote_asset).map_err(validation_error)?;
+    let symbol = rustcta_exchange_api::SymbolScope {
+        exchange: exchange_id.clone(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(canonical_symbol),
+        exchange_symbol: ExchangeSymbol::new(
+            exchange_id.clone(),
+            MarketType::Perpetual,
+            exchange_symbol,
+        )
+        .map_err(validation_error)?,
+    };
+    let price_increment = string_or_number(
+        value
+            .get("order_price_round")
+            .or_else(|| value.get("mark_price_round")),
+    );
+    let quantity_increment =
+        string_or_number(value.get("order_size_round")).or_else(|| Some("1".to_string()));
+    let price_precision = price_increment
+        .as_deref()
+        .map(decimal_precision)
+        .or_else(|| integer_from_value(value.get("price_precision")));
+    let quantity_precision = quantity_increment
+        .as_deref()
+        .map(decimal_precision)
+        .or_else(|| integer_from_value(value.get("quantity_precision")));
+    let tradable = !value
+        .get("in_delisting")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && value
+            .get("trade_status")
+            .and_then(Value::as_str)
+            .is_none_or(|status| status.eq_ignore_ascii_case("tradable"));
+
+    Ok(SymbolRules {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        symbol,
+        base_asset,
+        quote_asset,
+        price_increment,
+        quantity_increment,
+        min_price: None,
+        max_price: None,
+        min_quantity: string_or_number(value.get("order_size_min")),
+        max_quantity: string_or_number(value.get("order_size_max")),
+        min_notional: None,
+        max_notional: None,
+        price_precision,
+        quantity_precision,
+        supports_market_orders: tradable,
+        supports_limit_orders: tradable,
+        supports_post_only: tradable,
+        supports_reduce_only: tradable,
+        updated_at: Utc::now(),
+    })
+}
+
 pub fn parse_orderbook_snapshot(
     exchange_id: &ExchangeId,
     symbol: rustcta_exchange_api::SymbolScope,
@@ -88,7 +173,7 @@ pub fn parse_orderbook_snapshot(
             })?;
     let mut snapshot = OrderBookSnapshot::new(
         exchange_id.clone(),
-        MarketType::Spot,
+        symbol.market_type,
         canonical_symbol,
         bids,
         asks,
@@ -120,6 +205,17 @@ pub fn normalize_gateio_symbol(symbol: &str) -> ExchangeApiResult<String> {
     split_compact_symbol(&normalized).ok_or_else(|| ExchangeApiError::InvalidRequest {
         message: format!("cannot infer Gate.io currency_pair from {symbol}"),
     })
+}
+
+pub fn split_gateio_pair(symbol: &str) -> ExchangeApiResult<(String, String)> {
+    let normalized = normalize_gateio_symbol(symbol)?;
+    let (base, quote) =
+        normalized
+            .split_once('_')
+            .ok_or_else(|| ExchangeApiError::InvalidRequest {
+                message: format!("cannot infer Gate.io base/quote from {symbol}"),
+            })?;
+    Ok((base.to_ascii_uppercase(), quote.to_ascii_uppercase()))
 }
 
 pub fn normalize_depth(depth: u32) -> u32 {
@@ -208,6 +304,14 @@ fn integer_from_value(value: Option<&Value>) -> Option<u32> {
         Value::Number(number) => number.as_u64().map(|number| number as u32),
         _ => None,
     })
+}
+
+fn decimal_precision(value: &str) -> u32 {
+    value
+        .trim()
+        .split_once('.')
+        .map(|(_, decimals)| decimals.trim_end_matches('0').len() as u32)
+        .unwrap_or(0)
 }
 
 fn number_from_value(value: &Value) -> Option<f64> {

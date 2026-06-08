@@ -16,6 +16,12 @@ Implemented:
 - Private balances, fees, open orders, recent fills, limit buy/sell, market buy/sell, and quote-value market buy request construction.
 - Offline request specs, signing vectors, and parser fixtures under `tests/fixtures/exchanges/coinspot/`.
 
+Official Core Trading Detail:
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。CoinSpot API/V2 页面列出 place buy/sell order、cancel buy/sell order、market buy/sell/cancel 和 advanced buy stop/limit。
+
+当前项目下单已有运行证据，但通用 cancel 在矩阵里缺实现证据；这应写 `项目未实现/证据未补齐撤单`，不能写成 `交易所不支持撤单`。后续要补 side-specific cancel runtime/fixture，或修正 mapping evidence 并完成 buy/sell cancel 对账。
+
 Explicit boundaries:
 
 - Non-AUD markets are rejected as unsupported.

@@ -45,6 +45,12 @@ Default REST base URL: `https://yobit.net`
 | Batch place/cancel | Not verified | Unsupported. |
 | WebSocket | 交易所不支持公共 WS 行情 | 官方 API v2/v3/TAPI/Defi API 覆盖 REST market data 和交易接口，未见公共订单簿 WS；REST reconciliation fallback documented for future private promotion. |
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。YoBit Trade API 明确用于创建和取消订单，并支持 `Trade`、`ActiveOrders`、`OrderInfo`、`CancelOrder`、`TradeHistory`。
+
+当前 private REST 是 request-spec-only，runtime 不启用。因此这是 `项目未实现 private trading runtime`，不是 `交易所不支持下单/撤单`。后续要补 TAPI HMAC-SHA512 auth smoke、Trade/CancelOrder/OrderInfo/ActiveOrders/TradeHistory parser 和 dry-run gate。
+
 ## Authentication
 
 YoBit Trade API signs the URL-encoded POST body with HMAC-SHA512 and sends:

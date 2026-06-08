@@ -49,6 +49,12 @@ HMAC-SHA256；fixture 位于：
 - `tests/fixtures/exchanges/latoken/signing_vectors/rest_place_order_hmac_sha256.json`
 - `tests/fixtures/exchanges/latoken/signing_vectors/ws_auth_hmac_sha256.json`
 
+## 官方核心交易边界
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。LATOKEN v2 官方 API 有 `/v2/auth/order/place`、`/v2/auth/order/cancel`、`/v2/auth/order/placeBulk`，API 权限说明也列出 `PLACE_ORDER` 和 `CANCEL_ORDER`。
+
+当前项目只保留 private REST request-spec/signing fixture，没有启用 live read/write runtime。这应写 `项目未实现核心交易 runtime`，不能写成 `交易所不支持下单/撤单`；后续要补 read-only auth smoke、order/cancel/bulk parser 和 live-dry-run 验证。
+
 ## Unsupported 边界
 
 - Perpetual、futures、margin、leverage、funding、open interest：当前 runtime

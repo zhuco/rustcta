@@ -6,6 +6,12 @@ Status: legacy `huobi` profile backed by the HTX gateway adapter implementation.
 
 Use `docs/交易所网关/适配器/htx_adapter.md` for the canonical endpoint and validation detail. Huobi-specific config is provided in `config/huobi_gateway_example.yml`, disabled by default.
 
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。HTX/Huobi USDT-M swap profile 有 `/linear-swap-api/v1/swap_cross_position_info` 和 `positions_cross` private stream 语义；但 `huobi` legacy profile 当前矩阵仍是 `get_positions=-`，不能直接把 `htx` runtime 算作 `huobi` 已实现。
+
+写法：官方支持，项目未实现/未启用。后续补 `huobi` profile 的 `get_positions` endpoint mapping、request spec/parser delegation 和 REST/WS reconciliation 后，再把矩阵改成运行实现。
+
 Validation:
 
 ```bash

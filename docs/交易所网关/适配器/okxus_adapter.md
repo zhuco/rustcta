@@ -42,6 +42,12 @@ audited; do not document them as `交易所不支持合约`.
 - The adapter does not read `RUSTCTA_OKXUS_API_KEY`, `RUSTCTA_OKXUS_API_SECRET`, `RUSTCTA_OKXUS_API_PASSPHRASE`, or global OKX credentials. This prevents accidental live trading on a regional profile whose credential scope has not been verified.
 - No web page endpoints, unofficial APIs, live orders, live cancels, withdrawals, or transfers are used.
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。OKX US profile 复用 OKX V5 Trade API 语义，官方/区域资料有 order/cancel 交易接口线索；Spot 至少支持 limit/market 和 `clOrdId`，但 eligibility、API domain 和产品 scope 需要单独审计。
+
+当前 adapter 禁用 private REST/WS 和真实下单撤单；这是 `项目未实现/未启用区域 private trading`，不是 `交易所不支持下单/撤单`。后续必须先补区域 private REST specs、signing vectors、credential scope guard 和 parser。
+
 ## Endpoint Mapping
 
 `crates/rustcta-exchange-gateway/src/adapters/okxus/endpoint_mapping.yaml` records:
@@ -50,6 +56,16 @@ audited; do not document them as `交易所不支持合约`.
 - OKX v5 Spot public market-data endpoints as supported/spec-covered.
 - Private account/order/fills endpoints as explicit `Unsupported`.
 - REST reconciliation fallback only for public stream resync; private reconciliation remains unsupported.
+
+## Official WebSocket Order Book Detail
+
+P9 official verification treats this as an OKX V5 regional profile. Public
+market data supports `bbo-tbt` at 10ms, `books5` at 100ms, and `books` at
+100ms; TBT depth channels are 10ms but require login/VIP eligibility. The U.S.
+public host is `wss://wsus.okx.com:8443/ws/v5/public`. Mapping must record the
+regional host, `books5`/`bbo-tbt`, 10ms/100ms intervals, OKX
+sequence/checksum semantics, REST `/api/v5/market/books` resync, and regional
+product eligibility caveats.
 
 ## Validation
 

@@ -9,6 +9,7 @@
 | 交易所 | 产品线 | 最快官方盘口 | 档位 | 订阅方式 | sequence/checksum | 项目处理 |
 | --- | --- | --- | --- | --- | --- | --- |
 | OKX | Spot/Swap/Futures/Option | `bbo-tbt` 10ms；`books-l2-tbt`/`books50-l2-tbt` 10ms 有登录/VIP 限制 | BBO、50、全量增量 | JSON subscribe | 需补 seq/checksum 细节 | `okx` 当前 public WS unsupported，先补 BBO/5 档；VIP 通道单独标限制。 |
+| MyOKX / OKX US | Spot regional profiles | OKX V5 `bbo-tbt` 10ms；`books5` 100ms；TBT 深度通道 10ms 有登录/VIP 限制 | BBO、5、400、50 TBT | 区域 host + JSON subscribe | OKX 增量语义有 `seqId/prevSeqId` 和 checksum；snapshot 通道按快照替换 | `myokx`/`okxus` 先补区域 host、`books5` 和 `bbo-tbt`，VIP 通道单独标限制。 |
 | Bybit | Spot/Linear/Inverse | `orderbook.1` 10ms；50 档 20ms；200 档 100ms；1000 档 200ms | 1/50/200/1000 | JSON topic `orderbook.{depth}.{symbol}` | 有 `u` 和 cross `seq`；L1 snapshot-only | 当前 spec_only，优先补 1 档 10ms 和 50 档 20ms。 |
 | Bybit EU | Spot/Linear/Inverse | 沿用 Bybit V5：`orderbook.1` 10ms；50 档 20ms；200 档 100ms；1000 档 200ms | 1/50/200/1000 | EU host + JSON topic `orderbook.{depth}.{symbol}` | 有 `u`、cross `seq`、`cts`；L1 snapshot-only | `bybiteu` 当前 spec_only，补 EU host 下 10ms L1 和 20ms 50 档。 |
 | Bitget | Spot | `books1` 10ms；`books`/`books5`/`books15` 200ms | 1/5/15/全量 | JSON subscribe `channel=books1/books5/...` | 有 `seq` 和 CRC32 | 当前 public WS unsupported，优先补 `books1`。 |
@@ -34,6 +35,8 @@
 | Gemini | Spot | bookTicker real-time；partial/diff depth 可选 100ms 或 1s | BBO、partial 5/10/20、diff depth | `{symbol}@bookTicker`、`{symbol}@depth10@100ms`、`{symbol}@depth@100ms` | `lastUpdateId`、`U/u`；未见 checksum | 当前 native 但缺结构化字段，补 100ms、5/10/20 和 `U/u`。 |
 | HitBTC / FMFW.io | Spot | `orderbook/top/100ms` BBO；`orderbook/D5-D20/100ms` partial | BBO、D5/D10/D20 | JSON-RPC `subscribe` channel `orderbook/top/100ms` 或 `orderbook/D5/100ms` | partial 有 sequence `s`；未见 checksum | 当前 spec_only，补 100ms BBO/partial 和 REST snapshot fallback。 |
 | KuCoin Futures | Perpetual | increment real-time；5/50 档 100ms；UTA BBO real-time | increment、1/5/50 | classic `/contractMarket/level2*` 或 UTA `channel=obu` | `sequence`/`sequenceStart`/`sequenceEnd`；未见 checksum | 当前 native，补 channels、100ms 和 REST snapshot replay。 |
+| OX.FUN | Option/Perpetual | `depthUpdate` incremental order book 100ms | 官方未给固定最大档位 | JSON `depthUpdate:<marketCode>` | `seqNum` 递增，payload 有 checksum；先 snapshot 后 diff | 当前 spec_only，补 100ms、seqNum/checksum 和断档 resubscribe。 |
+| Pacifica | Perpetual | `book` 每 100ms；`bbo` 顶层变化推送 | `agg_level` 1/10/100/1000/10000；BBO 1 档 | JSON `source=book` 或 `source=bbo` | `li` last order id 可排序；未见 checksum | 当前 spec_only，补 100ms、BBO 和 `li` ordering。 |
 
 ## 高速但官方未给固定毫秒
 
@@ -62,6 +65,16 @@
 | HashKey Global | Spot/Perpetual | depth topic 300ms | 最多 200 档 | JSON `topic=depth,event=sub` | 未见 sequence/checksum | spec/parser ready，补 300ms、200 档和 REST depth fallback。 |
 | GRVT | Perpetual/Option | selector 示例 500ms | 示例 50 档 | JSON-RPC `stream=v1.book.s`, selector `instrument@500-50` | `sequence_number`/`prev_sequence_number`；未见 checksum | parser_only，补 selector、sequence 和 gap resubscribe。 |
 | Kraken Futures | Perpetual | `book` feed snapshot+delta，官方未给固定毫秒 | 官方未给固定 depth | JSON `feed=book` | 有 `seq`；未见 checksum | native，补 `seq` 连续性和 snapshot/delta。 |
+| One Trading | Spot/Futures boundary | `ORDER_BOOK` snapshot/update 和 `BOOK_TICKER` BBO，官方未给固定毫秒 | full order book update；BBO | JSON `SUBSCRIBE` channel | 未见 sequence/checksum；重新订阅拿 snapshot | spec_only，补 BBO 和无 sequence 风险。 |
+| NDAX | Spot | Level1/Level2 WSGateway，官方未给固定毫秒 | L1/BBO；L2 snapshot 可指定 Depth | WSGateway `SubscribeLevel1`/`SubscribeLevel2` | 未见 book checksum；断线后重新 snapshot | payload_helper，补 Level1/Level2 和 Depth。 |
+| NovaDAX | Spot | depth data 每秒一次 | 官方未给可选档位 | Socket.IO `MARKET.{symbol}.DEPTH.LEVEL0` | 未见 sequence/checksum | payload_helper，补 1s 和重新订阅全量替换。 |
+| Tapbit | Spot/Perpetual | orderBook 变化推送，官方未给固定毫秒 | 5/10/50/100/200 | JSON `spot/orderBook.*` / `usdt/orderBook.*` | `version` 严格递增；未见 checksum | spec_only，补 version 连续性和 5s ping。 |
+| Tokocrypto | Spot | partial/diff depth 可 100ms 或 1000ms | partial 5/10/20；diff depth | raw/combined stream | `U/u` + REST `lastUpdateId` | spec_only，补 Binance-family snapshot + delta buffer。 |
+| Toobit | Spot/Perpetual | `depth` 300ms；`diffDepth` 每秒；USDT-M BBO 实时 | depth 双边 300 档；BBO | JSON `topic=depth/diffDepth/wholeBookTicker` | 版本 `v` 不保证唯一；未见 checksum | native，补 300ms/1s 和版本风险。 |
+| WavesExchange | Spot | matcher order book updates 100ms | 订阅参数 `d` 指定 depth | JSON `obs/obu` | update id `U`；未见 checksum | spec_only，补 100ms、depth `d` 和订阅上限。 |
+| WEEX | Spot/Perpetual | depth channel，官方未给固定毫秒 | 15/200 | JSON `<symbol>@depth15/200` | `U/u`，`SNAPSHOT/CHANGED`；缺包重订阅 | native，补 update id 和无固定 ms 风险。 |
+| XT | Spot/Perpetual | `depth_update`，项目已有 1000ms 证据 | REST snapshot 常用 500 | topic `depth_update@symbol` | Spot `fi/i`，Futures `fu/u` | parser_only，补 snapshot + diff 重建。 |
+| Zaif | Spot | 实时板信息，官方未给固定毫秒 | 官方未给固定 depth | URL query `stream?currency_pair=` | 未见 sequence/checksum | native，补 REST depth fallback。 |
 
 ## 落地字段
 
@@ -86,6 +99,7 @@ websocket:
 | 交易所 | 官方来源 |
 | --- | --- |
 | OKX | <https://app.okx.com/docs-v5/trick_en/> |
+| MyOKX / OKX US | <https://app.okx.com/docs-v5/trick_en/> |
 | Bybit | <https://bybit-exchange.github.io/docs/v5/websocket/public/orderbook> |
 | Bitget | <https://www.bitget.com/api-doc/spot/websocket/public/Depth-Channel> |
 | MEXC | <https://mexcdevelop.github.io/apidocs/spot_v3_en/> |
@@ -130,3 +144,15 @@ websocket:
 | HashKey Global | <https://hashkeyglobal-apidoc.readme.io/reference/websocket-api> |
 | GRVT | <https://api-docs.grvt.io/market_data_streams/> |
 | Kraken Futures | <https://docs.kraken.com/api/docs/futures-api/websocket/book/> |
+| NDAX | <https://github.com/NDAXlO/ndax-api-documentation> |
+| NovaDAX | <https://doc.novadax.com/en-US/> |
+| One Trading | <https://docs.onetrading.com/websocket> |
+| OX.FUN | <https://oxoxox.gitbook.io/ox-docs/api/websocket/subscriptions-public/incremental-order-book> |
+| Pacifica | <https://docs.pacifica.fi/api-documentation/api/websocket/subscriptions/orderbook> |
+| Tapbit | <https://www.tapbit.com/openapi-docs/spot/ws/order_book/> |
+| Tokocrypto | <https://www.tokocrypto.com/apidocs/> |
+| Toobit | <https://api-docs.toobit.com/api/spot-websocket-market-data> |
+| WavesExchange / WX Network | <https://docs.waves.exchange/en/waves-matcher/matcher-websocket-api-common-streams> |
+| WEEX | <https://www.weex.com/api-doc/spot/Websocket/public/Depth-Channel> |
+| XT | <https://github.com/XtApis/xt-api> |
+| Zaif | <https://zaif-api-document.readthedocs.io/ja/latest/WebSocket_API.html> |

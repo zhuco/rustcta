@@ -39,6 +39,7 @@ pub struct BinanceGatewayAdapter {
     exchange_id: ExchangeId,
     config: BinanceGatewayConfig,
     rest: BinancePublicRest,
+    futures_rest: BinancePublicRest,
 }
 
 impl BinanceGatewayAdapter {
@@ -49,10 +50,16 @@ impl BinanceGatewayAdapter {
             config.rest_base_url.clone(),
             config.request_timeout_ms,
         )?;
+        let futures_rest = BinancePublicRest::new(
+            exchange_id.clone(),
+            config.futures_rest_base_url.clone(),
+            config.request_timeout_ms,
+        )?;
         Ok(Self {
             exchange_id,
             config,
             rest,
+            futures_rest,
         })
     }
 
@@ -74,6 +81,15 @@ impl BinanceGatewayAdapter {
         if market_type != MarketType::Spot {
             return Err(ExchangeApiError::Unsupported {
                 operation: "binance.non_spot_market_type",
+            });
+        }
+        Ok(())
+    }
+
+    fn ensure_supported_market(&self, market_type: MarketType) -> ExchangeApiResult<()> {
+        if !matches!(market_type, MarketType::Spot | MarketType::Perpetual) {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "binance.unsupported_market_type",
             });
         }
         Ok(())
@@ -114,6 +130,19 @@ impl BinanceGatewayAdapter {
             .await
     }
 
+    async fn send_signed_get_for_market(
+        &self,
+        operation: &'static str,
+        market_type: MarketType,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
+        self.rest_for_market(market_type)?
+            .send_signed_get(endpoint, params, api_key, api_secret, recv_window_ms)
+            .await
+    }
+
     async fn send_signed_post(
         &self,
         operation: &'static str,
@@ -122,6 +151,19 @@ impl BinanceGatewayAdapter {
     ) -> ExchangeApiResult<serde_json::Value> {
         let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
         self.rest
+            .send_signed_post(endpoint, params, api_key, api_secret, recv_window_ms)
+            .await
+    }
+
+    async fn send_signed_post_for_market(
+        &self,
+        operation: &'static str,
+        market_type: MarketType,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
+        self.rest_for_market(market_type)?
             .send_signed_post(endpoint, params, api_key, api_secret, recv_window_ms)
             .await
     }
@@ -138,6 +180,19 @@ impl BinanceGatewayAdapter {
             .await
     }
 
+    async fn send_signed_delete_for_market(
+        &self,
+        operation: &'static str,
+        market_type: MarketType,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, recv_window_ms) = self.private_credentials(operation)?;
+        self.rest_for_market(market_type)?
+            .send_signed_delete(endpoint, params, api_key, api_secret, recv_window_ms)
+            .await
+    }
+
     async fn send_signed_put(
         &self,
         operation: &'static str,
@@ -148,6 +203,16 @@ impl BinanceGatewayAdapter {
         self.rest
             .send_signed_put(endpoint, params, api_key, api_secret, recv_window_ms)
             .await
+    }
+
+    fn rest_for_market(&self, market_type: MarketType) -> ExchangeApiResult<&BinancePublicRest> {
+        match market_type {
+            MarketType::Spot => Ok(&self.rest),
+            MarketType::Perpetual => Ok(&self.futures_rest),
+            _ => Err(ExchangeApiError::Unsupported {
+                operation: "binance.unsupported_market_type",
+            }),
+        }
     }
 
     fn context_account(
@@ -186,7 +251,7 @@ impl GatewayAdapter for BinanceGatewayAdapter {
             private_stream_connected: false,
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
-            message: Some("binance spot public REST gateway adapter".to_string()),
+            message: Some("binance spot and USD-M perpetual REST gateway adapter".to_string()),
         }
     }
 }
@@ -199,23 +264,27 @@ impl ExchangeClient for BinanceGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
-        capabilities.market_types = vec![MarketType::Spot];
+        let private_rest_enabled = self.config.private_rest_enabled();
+        capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
-        capabilities.supports_private_rest = self.config.private_rest_enabled();
+        capabilities.supports_private_rest = private_rest_enabled;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
-        capabilities.supports_balances = self.config.private_rest_enabled();
-        capabilities.supports_fees = self.config.private_rest_enabled();
-        capabilities.supports_place_order = self.config.private_rest_enabled();
-        capabilities.supports_cancel_order = self.config.private_rest_enabled();
-        capabilities.supports_query_order = self.config.private_rest_enabled();
-        capabilities.supports_open_orders = self.config.private_rest_enabled();
-        capabilities.supports_recent_fills = self.config.private_rest_enabled();
-        capabilities.supports_cancel_all_orders = self.config.private_rest_enabled();
-        capabilities.supports_quote_market_order = self.config.private_rest_enabled();
-        capabilities.supports_amend_order = self.config.private_rest_enabled();
-        capabilities.supports_order_list = self.config.private_rest_enabled();
+        capabilities.supports_balances = private_rest_enabled;
+        capabilities.supports_positions = private_rest_enabled;
+        capabilities.supports_fees = private_rest_enabled;
+        capabilities.supports_place_order = private_rest_enabled;
+        capabilities.supports_cancel_order = private_rest_enabled;
+        capabilities.supports_query_order = private_rest_enabled;
+        capabilities.supports_open_orders = private_rest_enabled;
+        capabilities.supports_recent_fills = private_rest_enabled;
+        capabilities.supports_cancel_all_orders = private_rest_enabled;
+        capabilities.supports_quote_market_order = private_rest_enabled;
+        capabilities.supports_amend_order = private_rest_enabled;
+        capabilities.supports_order_list = private_rest_enabled;
         capabilities.supports_client_order_id = true;
+        capabilities.supports_reduce_only = true;
+        capabilities.supports_post_only = true;
         capabilities.supports_time_in_force =
             vec![TimeInForce::GTC, TimeInForce::IOC, TimeInForce::FOK];
         capabilities.supports_order_types = vec![
@@ -228,10 +297,7 @@ impl ExchangeClient for BinanceGatewayAdapter {
         capabilities.max_order_book_depth = Some(20);
         capabilities.order_book =
             rustcta_exchange_api::OrderBookCapability::snapshot_only(Some(20));
-        toolchain::apply_toolchain_capabilities(
-            &mut capabilities,
-            self.config.private_rest_enabled(),
-        );
+        toolchain::apply_toolchain_capabilities(&mut capabilities, private_rest_enabled);
         capabilities
     }
 
@@ -241,9 +307,9 @@ impl ExchangeClient for BinanceGatewayAdapter {
 
     async fn get_positions(
         &self,
-        _request: PositionsRequest,
+        request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private("binance.get_positions")
+        self.get_positions_impl(request).await
     }
 
     async fn get_symbol_rules(

@@ -34,6 +34,23 @@ The V5 integration guidance lists `https://api.bybit.eu` for EEA users and state
 - The adapter does not read `RUSTCTA_BYBITEU_API_KEY`, `RUSTCTA_BYBITEU_API_SECRET`, or Bybit global credentials. This prevents accidental live trading on a regulatory profile whose credential scope has not been verified.
 - No web page endpoints, unofficial APIs, live orders, live cancels, withdrawals, or transfers are used.
 
+## Official Core Trading Detail
+
+P0 core-trading verification confirms Bybit EU UTA help material maps order
+creation to `/v5/order/create` and order deletion to `/v5/order/cancel`. Bybit
+V5 official docs support Spot, Margin, linear/inverse derivatives, and options
+order creation, cancel, and cancel-all. Supported TIF values include `GTC`,
+`IOC`, `FOK`, `PostOnly`, and `RPI`; `orderLinkId` is supported up to 36
+characters. This adapter keeps private trading disabled until regional API
+eligibility and credential scope are audited, so the correct status is
+`项目未实现核心交易接口`, not `交易所不支持下单/撤单`.
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。Bybit V5 position API 支持 `GET /v5/position/list`，category 覆盖 linear、inverse、option，支持 `symbol`、`baseCoin`、`settleCoin` 和 cursor pagination。
+
+因此 Bybit EU 仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成区域 credential scope 审计、`/v5/position/list` request spec、cursor pagination、position side/margin mode parser 和 read-only guard。
+
 ## Endpoint Mapping
 
 `crates/rustcta-exchange-gateway/src/adapters/bybiteu/endpoint_mapping.yaml` records:

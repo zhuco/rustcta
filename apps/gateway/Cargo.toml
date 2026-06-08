@@ -9,6 +9,7 @@ anyhow.workspace = true
 axum.workspace = true
 rustcta-exchange-api.workspace = true
 rustcta-exchange-gateway.workspace = true
+rustcta-cross-arb-live-runner = { path = "../../crates/rustcta-cross-arb-live-runner" }
 tokio.workspace = true
 
 [dev-dependencies]
@@ -23,3 +24,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "rustcta-gateway"
 path = "src/main.rs"
+
+[[bin]]
+name = "cross-exchange-arbitrage-live-runner"
+path = "src/bin/cross_exchange_arbitrage_live_runner.rs"

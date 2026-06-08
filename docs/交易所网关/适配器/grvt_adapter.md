@@ -62,6 +62,18 @@ GRVT public order-book WS sequence rule is recorded in fixtures: snapshots use
 sequence `0`; deltas are expected to increase by one, and gaps require
 reconnect/resubscribe. This task does not claim production low-latency runtime.
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。GRVT trading/auth 资料支持 session、EIP-712/external signer、create/cancel/bulk orders。
+
+因此下单/撤单/批量是 `官方支持，项目未实现/未启用`。当前 market/trade endpoints 仍是 session-spec-only；补交易接口前必须完成 session-cookie auth、EIP-712/external signer fixtures、create/cancel/bulk parser、private WS/readback 对账和 live-dry-run guard。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。GRVT API docs 有 positions request schema，trading/auth 资料使用 session/account 模型。
+
+因此 GRVT 仓位接口写 `官方支持，项目未实现/未启用`。补仓位前必须完成 session-cookie auth、positions request spec/parser、account/sub-account scope 和 private WS/readback reconciliation。
+
 ## Official WebSocket Order Book Detail
 
 官方核验见 [WebSocket 官方核验 P8 补充交易所盘口细项三](../WebSocket官方核验_P8_补充交易所盘口细项三.md)。GRVT market data WS 支持 `v1.book.s` snapshot-style 和 `v1.book.d` delta-style orderbook。官方示例 selector `BTC_USDT_Perp@500-50` 表示 500ms、50 档。

@@ -39,6 +39,12 @@ Endpoint mapping:
 - Private endpoints are mapped for request-spec and reconciliation boundaries but remain runtime `Unsupported`.
 - Fixture coverage includes public REST samples, private write/read request specs, HS256 signing vectors, a private parser sample, WS parser sample, and `unsupported_boundary.json`.
 
+Official Core Trading Detail:
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。HitBTC v3 Spot 支持 `POST /api/3/spot/order`、`DELETE /api/3/spot/order`、查单、open/history/trade；支持 limit、market、stop/take-profit、GTC/IOC/FOK 和 `client_order_id`。
+
+当前项目仍把 private trading runtime 关在 `Unsupported` 边界内，所以这是 `项目未实现下单/撤单`，不能写成 `交易所不支持下单/撤单`。后续要补 Spot order/cancel/query/open/fills request specs、HMAC auth、parser 和 private trading runtime。
+
 WebSocket boundary:
 
 - Public order book subscribe/unsubscribe payloads are covered by tests.

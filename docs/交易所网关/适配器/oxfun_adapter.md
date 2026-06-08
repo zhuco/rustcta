@@ -58,6 +58,18 @@ Sanitized vectors:
   The official test WebSocket URL is documented, but this task does not enable
   live trading, private streams, or public stream runtime on either environment.
 
+P9 official verification adds the missing structure: `depthUpdate:<marketCode>`
+has a 100ms channel update frequency. Clients subscribe with
+`{"op":"subscribe","args":["depthUpdate:BTC-USD-SWAP-LIN"]}`, wait for the
+`depthUpdate` snapshot, then apply `depthUpdate-diff` absolute-quantity updates
+by increasing `seqNum`; payloads include `checksum`.
+
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。当前 adapter 仅保留离线 spec/parser；private account/orders/positions/funding 仍未验证，`get_positions` 保持 unsupported。
+
+写法：`交易所不支持当前仓位接口 runtime`。只有在官方 private positions endpoint、签名权限、分页/字段和 live auth 全部验证后，才重新核验是否补 runtime。
+
 ## Capability Boundary
 
 Unsupported or spec-only:

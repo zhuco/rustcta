@@ -47,6 +47,7 @@ impl MexcGatewayAdapter {
         let rest = MexcPublicRest::new(
             exchange_id.clone(),
             config.rest_base_url.clone(),
+            config.contract_rest_base_url.clone(),
             config.request_timeout_ms,
         )?;
         Ok(Self {
@@ -75,6 +76,25 @@ impl MexcGatewayAdapter {
             return Err(ExchangeApiError::Unsupported {
                 operation: "mexc.non_spot_market_type",
             });
+        }
+        Ok(())
+    }
+
+    fn ensure_market_type(&self, market_type: MarketType) -> ExchangeApiResult<()> {
+        if !matches!(market_type, MarketType::Spot | MarketType::Perpetual) {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "mexc.unsupported_market_type",
+            });
+        }
+        Ok(())
+    }
+
+    fn ensure_optional_market_type(
+        &self,
+        market_type: Option<MarketType>,
+    ) -> ExchangeApiResult<()> {
+        if let Some(market_type) = market_type {
+            self.ensure_market_type(market_type)?;
         }
         Ok(())
     }
@@ -138,6 +158,31 @@ impl MexcGatewayAdapter {
             .await
     }
 
+    async fn send_contract_signed_get(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, _) = self.private_credentials(operation)?;
+        self.rest
+            .send_contract_signed_get(endpoint, params, api_key, api_secret)
+            .await
+    }
+
+    async fn send_contract_signed_post(
+        &self,
+        operation: &'static str,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+        body: Option<&serde_json::Value>,
+    ) -> ExchangeApiResult<serde_json::Value> {
+        let (api_key, api_secret, _) = self.private_credentials(operation)?;
+        self.rest
+            .send_contract_signed_post(endpoint, params, body, api_key, api_secret)
+            .await
+    }
+
     fn context_account(
         &self,
         context: &rustcta_exchange_api::RequestContext,
@@ -187,12 +232,13 @@ impl ExchangeClient for MexcGatewayAdapter {
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let private = self.config.private_rest_enabled();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
-        capabilities.market_types = vec![MarketType::Spot];
+        capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
+        capabilities.supports_positions = private;
         capabilities.supports_fees = private;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
@@ -305,9 +351,9 @@ impl ExchangeClient for MexcGatewayAdapter {
 
     async fn get_positions(
         &self,
-        _request: PositionsRequest,
+        request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private("mexc.get_positions")
+        self.get_positions_impl(request).await
     }
 
     async fn get_symbol_rules(

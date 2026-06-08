@@ -38,6 +38,18 @@ The authoritative mapping lives in
 | `cancel_order` | `DELETE /orders/{order_id}` | request-spec-only / Unsupported runtime | `tests/fixtures/exchanges/bsx/request_specs/cancel_order_unsupported.json` |
 | private write/batch/cancel-all | account scoped REST | Unsupported runtime | `tests/fixtures/exchanges/bsx/unsupported_boundary.json` |
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。BSX 官方 REST 支持 `POST /orders` 和 `DELETE /orders/{order_id}`，但订单需要 account headers 和 EIP-712 order signature。
+
+因此下单/撤单是 `官方支持，项目未实现/未启用`。当前 request-spec-only 不可进入实盘；补交易接口前必须完成 account header 审计、EIP-712 signer、cancel runtime、private readback parser 和 dry-run guard。
+
+## Official Position Detail
+
+官方核验见 [仓位接口官方核验 P0 第一批](../仓位接口官方核验_P0_第一批.md)。当前 BSX 官方 API 文档能核到 orders、trade-history、account/order WS，但未核到稳定 positions endpoint 和 position schema。
+
+因此当前写 `交易所不支持当前仓位接口 runtime`。保留 public REST/order request specs；只有出现稳定官方 positions endpoint 后再重核并补 parser。
+
 ## Official WebSocket Order Book Detail
 
 官方核验见 [WebSocket 官方核验 P7 补充交易所盘口细项二](../WebSocket官方核验_P7_补充交易所盘口细项二.md)。BSX public WS 主网为 `wss://ws.bsx.exchange/ws`，订单簿 channel 是 `book`，订阅 payload 为 `{"op":"sub","channel":"book","product":"BTC-PERP"}`。

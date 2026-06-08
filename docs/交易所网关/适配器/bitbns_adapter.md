@@ -54,6 +54,12 @@ The official SDK signs private POST requests with:
 
 `X-BITBNS-PAYLOAD` is base64 JSON containing `symbol`, `timeStamp_nonce`, and `body`; signature is HMAC-SHA512 over that payload. The adapter includes an offline signing vector, but all private REST operations return explicit `Unsupported` until KYC/region/account readback validation is done.
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。Bitbns 官方 SDK/site 有 API Trading、私有签名和交易接口线索，且产品线里 Margin Trading 写 `项目未实现`。
+
+因此下单/撤单不能写成 `交易所不支持`。当前项目只是 public REST scan-only；private REST、order/cancel/query/fills 都是项目未实现/未启用。补交易接口前必须完成 private signing、read-only auth smoke、KYC/region guard、order/cancel parser 和 dry-run guard。
+
 ## WebSocket Boundary
 
 Official SDK Socket.IO helpers show:

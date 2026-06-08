@@ -73,6 +73,10 @@ TMPDIR=$PWD/target/tmp CARGO_TARGET_DIR=target/gateway-clean-check cargo test -p
 
 Latest targeted validation: 41 Kraken tests passed with existing workspace warnings.
 
+## Official Position Detail
+
+仓位接口核验见 [仓位接口官方核验 P1 第二批](../仓位接口官方核验_P1_第二批.md)。Kraken Futures `openpositions` REST 和 private WS `open_positions` 已由当前项目覆盖；Spot balances 没有仓位语义。
+
 ## Known Boundaries
 
 - Spot symbol-scoped cancel-all remains unsupported because the adapter only exposes Kraken `CancelAll`.

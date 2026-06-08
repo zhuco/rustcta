@@ -7,7 +7,7 @@ strategy:
 
 market:
   quote_asset: USDT
-  market_type: futures
+  market_type: perpetual
   depth_levels: 5
   stale_quote_ms: 5000
   min_common_exchanges: 1

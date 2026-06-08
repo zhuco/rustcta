@@ -29,6 +29,21 @@ Status date: 2026-06-08
 - Request-spec fixtures verify the two public REST builders offline.
 - Public WS helpers build `obs` subscribe and `obu` unsubscribe payloads, but runtime streaming is not enabled.
 
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms matcher WebSocket common streams update every
+100ms. Order book subscription uses
+`{"T":"obs","S":"amountAsset-priceAsset","d":10}`, where `d` is price depth.
+Incoming order book messages include update id `U`, asks `a`, bids `b`,
+optional last trade `t`, and subscription id `S`; no checksum is documented.
+One connection currently allows 10 order book subscriptions.
+
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P2 第三批](../核心交易官方核验_P2_第三批.md)。WX Network matcher API 支持 Place Limit Order、Place Market Order、Cancel Order、Cancel All、Get Order Status、Order History 和 Tradable Balance；订单签名是 Waves order/public-key signature，不是 API-key HMAC。
+
+当前 adapter 只做 public matcher REST scan，signed order placement/cancel 仍是 `项目未实现`。后续要补 Waves signed order payload、public-key cancellation signature、order status/history parser 和 matcher fee/rate 对账。
+
 ## Unsupported Boundary
 
 - Balances require Waves address/node balance mapping and are not represented as gateway account balances yet.

@@ -46,6 +46,12 @@ Default REST base URL: `https://api.p2pb2b.com`
 | Batch place/cancel | Not verified | Unsupported. |
 | WebSocket | `wss://apiws.p2pb2b.com/` | Public/private streams unsupported in runtime; official public depth support is a `项目未实现公共 WS 行情` task. |
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。P2B 官方 REST API 支持 `POST /api/v2/order/new`、`POST /api/v2/order/cancel`、`POST /api/v2/orders` 和 `POST /api/v2/account/order_history`。
+
+当前 private endpoints 只是 request-spec-only，runtime 仍返回 unsupported。因此这是 `项目未实现 signed private runtime`，不是 `交易所不支持下单/撤单`。后续要补 order lifecycle request specs/parser、签名运行路径和撤单/未成交/成交对账。
+
 ## Authentication
 
 Private REST examples require a JSON body containing `request` and `nonce`.

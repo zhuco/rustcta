@@ -2,6 +2,10 @@
 
 Status date: 2026-06-07
 
+Archived status: this task split predates the final root `src/` cleanup. Keep it
+as historical context only; current entrypoints are the workspace apps listed in
+`docs/README.md`.
+
 This document splits the remaining industrial workspace migration into 10
 parallel AI task packets. Each packet is intended to be assigned to one AI in a
 separate working branch/session.

@@ -10,12 +10,16 @@ use rustcta_types::{
 };
 use serde_json::Value;
 
-use super::parser::{normalize_okx_symbol, required_str, string_or_number, validation_error};
+use super::parser::{
+    normalize_okx_symbol_for_market, required_str, split_okx_inst_id, string_or_number,
+    validation_error,
+};
 
 pub fn parse_balances(
     exchange_id: &ExchangeId,
     tenant_id: TenantId,
     account_id: AccountId,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<Balance>> {
     let accounts = value.as_array().ok_or_else(|| {
@@ -57,7 +61,7 @@ pub fn parse_balances(
                 tenant_id: tenant_id.clone(),
                 account_id: account_id.clone(),
                 exchange_id: exchange_id.clone(),
-                market_type: MarketType::Spot,
+                market_type,
                 balances: assets,
                 observed_at: Utc::now(),
             });
@@ -173,13 +177,13 @@ fn parse_order_state(
     Ok(OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: symbol.market_type,
         canonical_symbol: symbol.canonical_symbol.clone(),
         exchange_symbol: symbol.exchange_symbol,
         client_order_id: string_or_number(value.get("clOrdId")).filter(|value| !value.is_empty()),
         exchange_order_id: string_or_number(value.get("ordId")).filter(|value| !value.is_empty()),
         side: parse_side(exchange_id, required_str(exchange_id, value, "side")?)?,
-        position_side: Some(PositionSide::None),
+        position_side: parse_position_side(value.get("posSide").and_then(Value::as_str)),
         order_type,
         time_in_force: parse_time_in_force(value.get("ordType").and_then(Value::as_str)),
         status: value
@@ -198,7 +202,10 @@ fn parse_order_state(
         .unwrap_or_else(|| "0".to_string()),
         average_fill_price: string_or_number(value.get("avgPx"))
             .filter(|value| !is_zero_decimal(value)),
-        reduce_only: false,
+        reduce_only: value
+            .get("reduceOnly")
+            .and_then(value_as_bool)
+            .unwrap_or(false),
         post_only: matches!(order_type, OrderType::PostOnly),
         created_at: value
             .get("cTime")
@@ -248,7 +255,7 @@ fn parse_fill(
         tenant_id,
         account_id,
         exchange_id: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: symbol.market_type,
         canonical_symbol,
         exchange_symbol: Some(symbol.exchange_symbol),
         order_id: string_or_number(value.get("ordId")).filter(|value| !value.is_empty()),
@@ -256,7 +263,8 @@ fn parse_fill(
         fill_id: string_or_number(value.get("tradeId").or_else(|| value.get("fillIdx")))
             .filter(|value| !value.is_empty()),
         side: parse_side(exchange_id, required_str(exchange_id, value, "side")?)?,
-        position_side: PositionSide::None,
+        position_side: parse_position_side(value.get("posSide").and_then(Value::as_str))
+            .unwrap_or(PositionSide::None),
         status: FillStatus::Confirmed,
         liquidity_role: parse_liquidity_role(
             value.get("execType").or_else(|| value.get("liquidity")),
@@ -280,19 +288,22 @@ fn symbol_scope_from_inst_id(
     exchange_id: &ExchangeId,
     inst_id: &str,
 ) -> ExchangeApiResult<SymbolScope> {
-    let normalized = normalize_okx_symbol(inst_id)?;
+    let market_type = if inst_id.to_ascii_uppercase().ends_with("-SWAP") {
+        MarketType::Perpetual
+    } else {
+        MarketType::Spot
+    };
+    let normalized = normalize_okx_symbol_for_market(inst_id, market_type)?;
     let (base, quote) =
-        normalized
-            .split_once('-')
-            .ok_or_else(|| ExchangeApiError::InvalidRequest {
-                message: format!("OKX Spot symbol missing dash: {normalized}"),
-            })?;
+        split_okx_inst_id(&normalized).ok_or_else(|| ExchangeApiError::InvalidRequest {
+            message: format!("OKX symbol missing base/quote: {normalized}"),
+        })?;
     let canonical_symbol = CanonicalSymbol::new(base, quote).map_err(validation_error)?;
     Ok(SymbolScope {
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol: Some(canonical_symbol),
-        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), MarketType::Spot, normalized)
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, normalized)
             .map_err(validation_error)?,
     })
 }
@@ -367,6 +378,24 @@ fn is_zero_decimal(value: &str) -> bool {
 
 fn value_as_i64(value: &Value) -> Option<i64> {
     value.as_i64().or_else(|| value.as_str()?.parse().ok())
+}
+
+fn value_as_bool(value: &Value) -> Option<bool> {
+    value.as_bool().or_else(|| match value.as_str()? {
+        "true" | "TRUE" | "1" => Some(true),
+        "false" | "FALSE" | "0" => Some(false),
+        _ => None,
+    })
+}
+
+fn parse_position_side(pos_side: Option<&str>) -> Option<PositionSide> {
+    match pos_side.unwrap_or("net").to_ascii_lowercase().as_str() {
+        "long" => Some(PositionSide::Long),
+        "short" => Some(PositionSide::Short),
+        "net" => Some(PositionSide::Net),
+        "" => Some(PositionSide::None),
+        _ => Some(PositionSide::None),
+    }
 }
 
 fn parse_error(exchange_id: ExchangeId, message: &str, value: &Value) -> ExchangeApiError {

@@ -3,6 +3,7 @@ exchange: gateio
 adapter: rustcta_exchange_gateway::adapters::gateio
 market_types:
   - spot
+  - perpetual
 rest:
   base_url: https://api.gateio.ws/api/v4
   testnet_base_url: ""
@@ -32,6 +33,7 @@ reconciliation:
   private_stream_fallback: rest
   readbacks:
     - get_balances
+    - get_positions
     - query_order
     - get_open_orders
     - get_recent_fills
@@ -191,3 +193,111 @@ endpoints:
     rate_limit_bucket: private_uid
     weight: 1
     request_spec_required: true
+  - operation: get_symbol_rules
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/contracts
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/order_book
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/positions/{contract}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/contracts/{contract}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: false
+  - operation: place_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /futures/usdt/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /futures/usdt/orders/{order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /futures/usdt/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/orders/{order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: false
+  - operation: get_recent_fills
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /futures/usdt/my_trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_uid
+    weight: 1
+    request_spec_required: false

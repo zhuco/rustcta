@@ -1,0 +1,20 @@
+{
+  "exchange": "gateio",
+  "operation": "cancel_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/futures/usdt/orders/15675394",
+  "auth": "signed",
+  "query": {
+    "contract": { "match": "exact", "value": "BTC_USDT" }
+  },
+  "headers": {
+    "KEY": { "match": "exact", "value": "gate-key" },
+    "Timestamp": { "match": "non_empty" },
+    "SIGN": { "match": "non_empty" },
+    "X-Gate-Size-Decimal": { "match": "exact", "value": "1" }
+  },
+  "forbid_header_values_containing": ["gate-secret"],
+  "signing_vector": "gateio/place_order_limit"
+}

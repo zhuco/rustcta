@@ -2,6 +2,10 @@
 
 Status date: 2026-06-07
 
+Archived status: this plan preserves old tools/ops migration context. Do not use
+retired-root binary names here as current run commands unless a current
+workspace app/tool command also documents them.
+
 This is the first practical migration plan for `tools/ops`. It follows
 `docs/industrial_directory_migration_plan.md`: directory ownership first,
 behavior compatibility first, and no exchange API development in this slice.

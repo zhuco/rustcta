@@ -46,6 +46,12 @@ Default REST base URL: `https://bit.team`
 | Batch place/cancel | Not verified | Unsupported. |
 | WebSocket | 交易所不支持公共 WS 行情 | 当前官方 docs/OpenAPI 只给 REST/CCXT-style endpoints，未给 WSS endpoint 和订单簿订阅规格；REST reconciliation fallback documented for future private promotion. |
 
+## Official Core Trading Detail
+
+官方核验见 [核心交易官方核验 P3 第四批](../核心交易官方核验_P3_第四批.md)。BIT.TEAM OpenAPI 列出 `ordercreate`、`cancelorder`、open orders 和 user trades，所以不能写成 `交易所不支持下单/撤单`。
+
+当前 public REST 已接，private endpoints 仍是 request-spec-only。补交易接口前必须完成 Basic auth private runtime、read-only credential validation、order/cancel/open/fills parser 和 live-dry-run guard。
+
 ## Authentication
 
 BIT.TEAM documents HTTP Basic authorization for CCXT methods. The adapter has

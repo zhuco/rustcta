@@ -8,8 +8,8 @@ use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
 use serde_json::json;
 
 use super::test_support::{
-    assert_signed_request, assert_signed_request_method, context, exchange_id, spawn_rest_server,
-    symbol_scope,
+    assert_signed_request, assert_signed_request_method, context, exchange_id,
+    perpetual_symbol_scope, spawn_rest_server, symbol_scope,
 };
 use super::{MexcGatewayAdapter, MexcGatewayConfig};
 use crate::request_spec::RequestSpec;
@@ -288,6 +288,67 @@ async fn mexc_adapter_should_route_private_order_mutations() {
         requests[3].query.get("symbol").map(String::as_str),
         Some("BTCUSDT")
     );
+}
+
+#[tokio::test]
+async fn mexc_adapter_should_place_perpetual_order_on_contract_api() {
+    let (base_url, seen) = spawn_rest_server(vec![json!({
+        "success": true,
+        "code": 0,
+        "data": {"orderId": "3001", "externalOid": "PERP1"}
+    })])
+    .await;
+    let adapter = MexcGatewayAdapter::new(MexcGatewayConfig {
+        contract_rest_base_url: base_url,
+        api_key: Some("key".to_string()),
+        api_secret: Some("secret".to_string()),
+        enabled_private_rest: true,
+        ..MexcGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let response = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-place"),
+            symbol: perpetual_symbol_scope(),
+            client_order_id: Some("PERP1".to_string()),
+            side: OrderSide::Sell,
+            position_side: None,
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::GTC),
+            quantity: "2".to_string(),
+            price: Some("65000".to_string()),
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        })
+        .await
+        .expect("perp place");
+
+    assert_eq!(response.order.market_type, MarketType::Perpetual);
+    let request = seen.lock().unwrap()[0].clone();
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, "/api/v1/private/order/submit");
+    assert_eq!(
+        request.headers.get("apikey").map(String::as_str),
+        Some("key")
+    );
+    assert!(request
+        .headers
+        .get("request-time")
+        .is_some_and(|value| !value.is_empty()));
+    assert!(request
+        .headers
+        .get("signature")
+        .is_some_and(|value| !value.is_empty()));
+    let body = request.body.as_ref().expect("contract order body");
+    assert_eq!(body["symbol"], "BTC_USDT");
+    assert_eq!(body["side"], 4);
+    assert_eq!(body["type"], 1);
+    assert_eq!(body["vol"], "2");
+    assert_eq!(body["price"], "65000");
+    assert_eq!(body["externalOid"], "PERP1");
 }
 
 #[test]

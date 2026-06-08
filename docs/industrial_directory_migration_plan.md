@@ -2,6 +2,10 @@
 
 Status date: 2026-06-07
 
+Archived status: this plan predates the final root `src/` removal. Keep it as a
+historical ownership record only; do not use its retired-root paths as current
+run commands.
+
 This document inventories the current runtime entry boundaries under
 `retired root bin directory`, `apps/`, and `crates/`, then assigns each retired binary to a target
 application category.

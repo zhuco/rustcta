@@ -1,15 +1,15 @@
 use rustcta_exchange_api::{
     AmendOrderRequest, BalancesRequest, BatchExecutionMode, CancelAllOrdersRequest,
     CancelOrderRequest, CapabilitySupport, CredentialScope, ExchangeApiError, ExchangeClient,
-    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, QueryOrderRequest, QuoteMarketOrderRequest,
-    RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    FeesRequest, OpenOrdersRequest, PlaceOrderRequest, PositionsRequest, QueryOrderRequest,
+    QuoteMarketOrderRequest, RecentFillsRequest, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
 };
-use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType};
+use rustcta_types::{ExchangeSymbol, MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::json;
 
 use super::test_support::{
-    assert_signed_request, assert_signed_request_method, context, exchange_id, spawn_rest_server,
-    symbol_scope,
+    assert_signed_request, assert_signed_request_method, context, exchange_id,
+    perpetual_symbol_scope, spawn_rest_server, symbol_scope,
 };
 use super::{GateIoGatewayAdapter, GateIoGatewayConfig};
 use crate::request_spec::RequestSpec;
@@ -42,6 +42,19 @@ fn gateio_adapter_should_declare_capabilities_v2_for_toolchain_audit() {
     })
     .expect("adapter");
     let capabilities = adapter.capabilities();
+    assert_eq!(
+        capabilities.market_types,
+        vec![MarketType::Spot, MarketType::Perpetual]
+    );
+    assert!(capabilities.supports_positions);
+    assert!(capabilities.supports_reduce_only);
+    assert!(capabilities.supports_post_only);
+    assert!(capabilities
+        .supports_time_in_force
+        .contains(&TimeInForce::IOC));
+    assert!(capabilities
+        .supports_time_in_force
+        .contains(&TimeInForce::FOK));
     assert!(matches!(
         &capabilities.capabilities_v2.public_rest,
         CapabilitySupport::Native
@@ -119,6 +132,145 @@ fn signing_vector(path: &str) -> serde_json::Value {
     );
     let text = std::fs::read_to_string(path).expect("signing vector fixture");
     serde_json::from_str(&text).expect("signing vector fixture")
+}
+
+fn gate_fixture(path: &str) -> serde_json::Value {
+    let path = format!(
+        "{}/../../tests/fixtures/exchanges/gate/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("gate fixture");
+    serde_json::from_str(&text).expect("gate fixture json")
+}
+
+#[tokio::test]
+async fn gateio_adapter_should_route_perpetual_place_cancel_and_positions() {
+    let (base_url, seen) = spawn_rest_server(vec![
+        json!({
+            "id": "15675394",
+            "contract": "BTC_USDT",
+            "size": -100,
+            "left": 100,
+            "price": "65000.1",
+            "tif": "ioc",
+            "text": "t-PERP1",
+            "status": "open",
+            "is_reduce_only": true,
+            "create_time_ms": "1743054549000"
+        }),
+        json!({
+            "id": "15675394",
+            "contract": "BTC_USDT",
+            "size": -100,
+            "left": 0,
+            "price": "65000.1",
+            "text": "t-PERP1",
+            "finish_as": "cancelled",
+            "status": "finished",
+            "is_reduce_only": true,
+            "create_time_ms": "1743054549000"
+        }),
+        gate_fixture("position.json"),
+    ])
+    .await;
+    let adapter = GateIoGatewayAdapter::new(GateIoGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("gate-key".to_string()),
+        api_secret: Some("gate-secret".to_string()),
+        enabled_private_rest: true,
+        ..GateIoGatewayConfig::default()
+    })
+    .expect("adapter");
+
+    let symbol = perpetual_symbol_scope("BTCUSDT");
+    let placed = adapter
+        .place_order(PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-place"),
+            symbol: symbol.clone(),
+            client_order_id: Some("PERP1".to_string()),
+            side: OrderSide::Sell,
+            position_side: Some(PositionSide::Short),
+            order_type: OrderType::Limit,
+            time_in_force: Some(TimeInForce::IOC),
+            quantity: "100".to_string(),
+            price: Some("65000.1".to_string()),
+            quote_quantity: None,
+            reduce_only: true,
+            post_only: false,
+        })
+        .await
+        .expect("place perpetual order");
+    assert_eq!(placed.order.market_type, MarketType::Perpetual);
+    assert_eq!(placed.order.side, OrderSide::Sell);
+    assert_eq!(placed.order.position_side, Some(PositionSide::Short));
+    assert!(placed.order.reduce_only);
+    assert_eq!(placed.order.quantity, "100");
+
+    let cancelled = adapter
+        .cancel_order(CancelOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-cancel"),
+            symbol: symbol.clone(),
+            client_order_id: None,
+            exchange_order_id: Some("15675394".to_string()),
+        })
+        .await
+        .expect("cancel perpetual order");
+    assert!(cancelled.cancelled);
+    assert_eq!(cancelled.order.status, OrderStatus::Cancelled);
+
+    let positions = adapter
+        .get_positions(PositionsRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("perp-positions"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Perpetual),
+            symbols: vec![
+                ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, "BTCUSDT")
+                    .expect("position symbol"),
+            ],
+        })
+        .await
+        .expect("positions");
+    assert_eq!(positions.positions.len(), 1);
+    assert_eq!(positions.positions[0].market_type, MarketType::Perpetual);
+    assert_eq!(positions.positions[0].side, PositionSide::Long);
+    assert_eq!(positions.positions[0].quantity, 100.0);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    assert_signed_request_method(&requests[0], "POST", "/futures/usdt/orders");
+    load_request_spec("perpetual_place_order.json")
+        .assert_matches(&requests[0].actual_http_request())
+        .expect("perpetual place order request spec");
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-gate-size-decimal")
+            .map(String::as_str),
+        Some("1")
+    );
+    let body = requests[0].body.as_ref().expect("perp place body");
+    assert_eq!(body["contract"], "BTC_USDT");
+    assert_eq!(body["size"], "-100");
+    assert_eq!(body["tif"], "ioc");
+    assert_eq!(body["text"], "t-PERP1");
+    assert_eq!(body["reduce_only"], true);
+
+    assert_signed_request_method(&requests[1], "DELETE", "/futures/usdt/orders/15675394");
+    load_request_spec("perpetual_cancel_order.json")
+        .assert_matches(&requests[1].actual_http_request())
+        .expect("perpetual cancel order request spec");
+    assert_eq!(
+        requests[1].query.get("contract").map(String::as_str),
+        Some("BTC_USDT")
+    );
+
+    assert_signed_request_method(&requests[2], "GET", "/futures/usdt/positions/BTC_USDT");
+    load_request_spec("perpetual_positions.json")
+        .assert_matches(&requests[2].actual_http_request())
+        .expect("perpetual positions request spec");
 }
 
 #[tokio::test]
@@ -406,7 +558,7 @@ async fn gateio_adapter_should_sign_private_readback_requests_and_parse_response
     assert_eq!(queried.exchange_order_id.as_deref(), Some("1001"));
     assert_eq!(queried.client_order_id.as_deref(), Some("t-CLIENT1"));
     assert_eq!(queried.side, OrderSide::Buy);
-    assert_eq!(queried.status, OrderStatus::New);
+    assert_eq!(queried.status, OrderStatus::PartiallyFilled);
     assert_eq!(queried.quantity, "0.01");
     assert_eq!(queried.filled_quantity, "0.006");
     assert_eq!(queried.average_fill_price.as_deref(), Some("65010"));

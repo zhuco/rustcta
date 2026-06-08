@@ -11,6 +11,12 @@ Paymium is implemented as a BTC/EUR spot public REST first adapter for task A-33
 
 Paymium's public API documents ticker, trades and market depth without authentication. Authenticated user and trading endpoints require API-token/OAuth permissions, so this adapter keeps them as offline request specs until live validation and risk controls are promoted.
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。Paymium 支持 `POST /api/v1/user/orders`、订单取消、user orders/history；支持 `LimitOrder`、`MarketOrder` 和 buy/sell。
+
+当前 adapter 只提升 public REST，private trading 仍是 `项目未实现`。不能写成 `交易所不支持下单/撤单`；后续要补 BTC/EUR private auth、order/cancel specs、parser 和 dry-run guard。
+
 ## Unsupported Boundaries
 
 - Non BTC/EUR pairs

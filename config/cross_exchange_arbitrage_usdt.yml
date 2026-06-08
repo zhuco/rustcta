@@ -1,34 +1,66 @@
 mode: live_small
-trading_mode: paper
-enable_live_trading: false
-max_live_notional_per_trade: null
+trading_mode: live
+enable_live_trading: true
+max_live_notional_per_trade: 5.5
 enabled_symbols: []
-enabled_exchanges: []
+enabled_exchanges:
+- binance
+- gate
+- bitget
+market_type: perpetual
+excluded_bases:
+- BTC
+- ETH
+- BNB
+- SOL
+- XRP
+- ADA
+- DOGE
+- TRX
+- TON
+- LTC
 strategy:
   name: cross_exchange_arbitrage_usdt_perp
   mode: live_small
   log_level: INFO
 market:
   quote_asset: USDT
-  market_type: futures
-  depth_levels: 5
-  stale_quote_ms: 30000
+  market_type: perpetual
+  depth_levels: 1
+  stale_quote_ms: 500
   min_common_exchanges: 2
   public_book_speed: fastest
-  public_book_trigger_profile: fastest_l1
+  public_book_trigger_profile: fastest_l1_10ms
   public_book_validation_profile: fastest_depth
-  public_book_depth: 5
+  public_book_depth: 1
   allow_top_of_book_only: true
   top_of_book_capacity_ratio: 0.8
 thresholds:
   min_display_raw_spread: 0.001
   min_open_raw_spread: 0.005
   min_open_maker_taker_net_edge: 0.005
-  max_open_raw_spread: 0.1
+  max_open_raw_spread: 0.05
   route_overrides: []
+  close_min_net_profit_pct: 0.0005
   lock_profit_dual_taker_pct: 0.0005
   strong_lock_profit_dual_taker_pct: 0.001
   max_close_spread_pct: 0.0005
+dual_taker:
+  target_notional_usdt: 5.5
+  min_open_spread_pct: 0.005
+  max_open_spread_pct: 0.05
+  taker_slippage_pct: 0.0005
+  close_min_net_profit_pct: 0.0005
+  expected_close_spread_pct: 0.001
+  top_of_book_capacity_ratio: 0.8
+  orderbook_stale_ms: 500
+  min_orderbook_levels: 1
+  single_leg_timeout_ms: 600
+  max_consecutive_single_leg_fills: 3
+  max_positions_per_exchange: 10
+  max_active_bundles_per_symbol: 1
+  symbol_cooldown_secs: 300
+  max_hold_secs: 86400
 sizing:
   min_notional_usdt: 5.5
   target_notional_usdt: 5.5
@@ -71,7 +103,7 @@ exchanges:
     position_mode: hedge
     ws_batch_size: 80
     env_prefix: GATE
-    account_id: default
+    account_id: GATE
     demo_trading: false
     private_rest_base_url: null
     private_ws_url: null
@@ -98,7 +130,7 @@ exchanges:
     position_mode: hedge
     ws_batch_size: 50
     env_prefix: BITGET
-    account_id: default
+    account_id: BITGET
     demo_trading: false
     private_rest_base_url: null
     private_ws_url: null
@@ -151,8 +183,8 @@ exchanges:
     operating_mode: enabled
     position_mode: hedge
     ws_batch_size: 80
-    env_prefix: BINANCE__HCR_
-    account_id: hcr
+    env_prefix: BINANCE_0
+    account_id: BINANCE_0
     demo_trading: false
     private_rest_base_url: null
     private_ws_url: null
@@ -175,14 +207,15 @@ exchanges:
       rest_private:
       - https://fapi.binance.com
 routing:
-  ws_stale_limit_ms: 30000
+  ws_stale_limit_ms: 500
   order_latency_p95_degrade_ms: 1200
   order_error_rate_degrade: 0.05
   auto_failover: true
   degraded_mode_blocks_new_entries: true
 execution:
-  dry_run: true
+  dry_run: false
   max_hedge_retries: 1
+  single_leg_timeout_ms: 600
   maker_order_ttl_ms: 5000
   max_concurrent_maker_orders: 10
   maker_price_offset_ticks: 0
@@ -191,8 +224,8 @@ execution:
   maker_aggressive_max_ticks: 2
   maker_cooldown_after_cancels: 10
   maker_cooldown_ms: 120000
-  taker_ioc_slippage_limit_pct: 0.003
-  open_execution_style: maker_taker
+  taker_ioc_slippage_limit_pct: 0.0005
+  open_execution_style: dual_taker
   close_execution_style: dual_taker
 controls:
   start_paused_new_entries: false
@@ -204,10 +237,10 @@ reconciliation:
   quantity_tolerance: 1e-8
   orphan_tolerance: 1e-6
 risk:
-  stale_quote_ms: 30000
-  max_book_age_ms: 30000
+  stale_quote_ms: 500
+  max_book_age_ms: 500
   taker_slippage_buffer: 0.0005
-  max_taker_slippage_pct: 0.003
+  max_taker_slippage_pct: 0.0005
   maker_non_fill_penalty: 0.001
   safety_buffer: 0.001
   max_notional_per_symbol_usdt: 5.5
@@ -220,7 +253,9 @@ risk:
   max_daily_loss_usdt: 500.0
   max_drawdown_usdt: 1000.0
   max_spread_loss_bps: 25.0
-  max_hold_seconds: 300
+  max_hold_seconds: 86400
+  max_consecutive_single_leg_fills: 3
+  symbol_cooldown_after_close_secs: 300
   max_rest_failure_rate: 0.05
   max_order_reject_rate: 0.02
   max_cancel_failure_rate: 0.02
@@ -232,6 +267,19 @@ risk:
   orphan_close_only_after_count: 1
   private_resync_blocks_new_entries: true
   restored_position_blocks_new_entries: true
+logging:
+  persist_only_key_events: true
+  max_file_bytes: 104857600
+  retained_files: 5
+volatility_universe:
+  enabled: true
+  top_gainers_per_exchange: 20
+  top_losers_per_exchange: 20
+  min_abs_change_pct: 0.05
+  min_quote_volume_usdt: 1000000.0
+  refresh_secs: 60
+  max_dynamic_symbols: 120
+  monitor_orderbook: true
 persistence:
   enabled: true
   jsonl_dir: logs/cross_exchange_arbitrage
@@ -250,8 +298,8 @@ alerts:
 universe:
   enabled_exchanges:
   - binance
-  - bitget
   - gate
+  - bitget
   symbols:
   - EDGE/USDT
   - ESPORTS/USDT
@@ -653,9 +701,29 @@ universe:
   - JCT/USDT
   - JST/USDT
   - KAIA/USDT
-  mode: curated_400_three_venues
-  target_symbol_count: 400
-  max_symbol_count: 400
+  - VELVET/USDT
+  - STG/USDT
+  - BTW/USDT
+  - HYPE/USDT
+  - SIREN/USDT
+  - KAS/USDT
+  - FHE/USDT
+  - EDEN/USDT
+  - VVV/USDT
+  - ZEST/USDT
+  - LUNC/USDT
+  - HMSTR/USDT
+  - GUA/USDT
+  - BLUAI/USDT
+  - AIOT/USDT
+  - AGT/USDT
+  - NXPC/USDT
+  - PORTAL/USDT
+  - LIGHT/USDT
+  - AERGO/USDT
+  mode: curated_420_three_venues_with_hot_volatility
+  target_symbol_count: 420
+  max_symbol_count: 420
   include_symbols: []
   exclude_symbols: []
   min_24h_quote_volume: null
@@ -663,9 +731,9 @@ detection:
   enabled: false
   exchanges: []
   symbols: []
-  depth_levels: 5
-  stale_book_ms: 2000
-  estimated_notional_usdt: 100.0
+  depth_levels: 1
+  stale_book_ms: 500
+  estimated_notional_usdt: 5.5
   estimated_slippage_bps: 0.0
   safety_buffer_bps: 0.0
   min_net_spread_bps: 5.0

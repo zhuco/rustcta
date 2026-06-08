@@ -119,7 +119,8 @@ where
     let value = String::deserialize(deserializer)?;
     match value.trim().to_ascii_lowercase().as_str() {
         "spot" => Ok(MarketType::Spot),
-        "perpetual" | "perp" | "futures" | "future" => Ok(MarketType::Perpetual),
+        "perpetual" | "perp" | "swap" => Ok(MarketType::Perpetual),
+        "futures" | "future" => Ok(MarketType::Futures),
         other => Err(serde::de::Error::custom(format!(
             "unsupported market_type: {other}"
         ))),
@@ -131,13 +132,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_preflight_config_should_accept_legacy_market_type_spellings() {
+    fn live_preflight_config_should_preserve_derivative_market_types() {
         for (market_type, expected) in [
             ("Spot", MarketType::Spot),
             ("spot", MarketType::Spot),
             ("Perpetual", MarketType::Perpetual),
             ("perp", MarketType::Perpetual),
-            ("futures", MarketType::Perpetual),
+            ("swap", MarketType::Perpetual),
+            ("futures", MarketType::Futures),
+            ("future", MarketType::Futures),
         ] {
             let config = serde_yaml::from_str::<LivePreflightConfig>(&format!(
                 "enabled: true\nmarket_type: {market_type}\n"

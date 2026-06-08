@@ -6,7 +6,8 @@ use rustcta_exchange_api::{
 };
 
 use super::parser::{
-    normalize_depth, normalize_gateio_symbol, parse_orderbook_snapshot, parse_symbol_rules,
+    normalize_depth, normalize_gateio_symbol, parse_orderbook_snapshot,
+    parse_perpetual_symbol_rules, parse_symbol_rules,
 };
 use super::GateIoGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -25,21 +26,56 @@ impl GateIoGatewayAdapter {
         self.ensure_exchange(&exchange)?;
         for symbol in &request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_supported_market(symbol.market_type)?;
         }
 
-        let response = self
-            .rest
-            .send_public_request("/spot/currency_pairs", &HashMap::new())
-            .await?;
-        let requested = request
+        let wants_spot = request.symbols.is_empty()
+            || request
+                .symbols
+                .iter()
+                .any(|symbol| symbol.market_type == rustcta_types::MarketType::Spot);
+        let wants_perpetual = request
             .symbols
             .iter()
+            .any(|symbol| symbol.market_type == rustcta_types::MarketType::Perpetual);
+        let requested_spot = request
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.market_type == rustcta_types::MarketType::Spot)
             .map(|symbol| normalize_gateio_symbol(&symbol.exchange_symbol.symbol))
             .collect::<ExchangeApiResult<Vec<_>>>()?;
-        let mut rules = parse_symbol_rules(&self.exchange_id, &response)?;
-        if !requested.is_empty() {
-            rules.retain(|rule| requested.contains(&rule.symbol.exchange_symbol.symbol));
+        let requested_perpetual = request
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.market_type == rustcta_types::MarketType::Perpetual)
+            .map(|symbol| normalize_gateio_symbol(&symbol.exchange_symbol.symbol))
+            .collect::<ExchangeApiResult<Vec<_>>>()?;
+
+        let mut rules = Vec::new();
+        if wants_spot {
+            let response = self
+                .rest
+                .send_public_request("/spot/currency_pairs", &HashMap::new())
+                .await?;
+            let mut spot_rules = parse_symbol_rules(&self.exchange_id, &response)?;
+            if !requested_spot.is_empty() {
+                spot_rules
+                    .retain(|rule| requested_spot.contains(&rule.symbol.exchange_symbol.symbol));
+            }
+            rules.extend(spot_rules);
+        }
+        if wants_perpetual {
+            let response = self
+                .rest
+                .send_public_request("/futures/usdt/contracts", &HashMap::new())
+                .await?;
+            let mut perpetual_rules = parse_perpetual_symbol_rules(&self.exchange_id, &response)?;
+            if !requested_perpetual.is_empty() {
+                perpetual_rules.retain(|rule| {
+                    requested_perpetual.contains(&rule.symbol.exchange_symbol.symbol)
+                });
+            }
+            rules.extend(perpetual_rules);
         }
 
         Ok(SymbolRulesResponse {
@@ -55,18 +91,29 @@ impl GateIoGatewayAdapter {
     ) -> ExchangeApiResult<OrderBookResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
         let depth = normalize_depth(request.depth.unwrap_or(5));
         let mut params = HashMap::new();
-        params.insert(
-            "currency_pair".to_string(),
-            normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
-        );
         params.insert("limit".to_string(), depth.to_string());
-        let value = self
-            .rest
-            .send_public_request("/spot/order_book", &params)
-            .await?;
+        let endpoint = match request.symbol.market_type {
+            rustcta_types::MarketType::Spot => {
+                params.insert(
+                    "currency_pair".to_string(),
+                    normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+                );
+                "/spot/order_book"
+            }
+            rustcta_types::MarketType::Perpetual => {
+                params.insert(
+                    "contract".to_string(),
+                    normalize_gateio_symbol(&request.symbol.exchange_symbol.symbol)?,
+                );
+                params.insert("with_id".to_string(), "true".to_string());
+                "/futures/usdt/order_book"
+            }
+            _ => unreachable!("checked by ensure_supported_market"),
+        };
+        let value = self.rest.send_public_request(endpoint, &params).await?;
         let order_book = parse_orderbook_snapshot(&self.exchange_id, request.symbol, &value)?;
         Ok(OrderBookResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,

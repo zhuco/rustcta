@@ -12,7 +12,9 @@ use rustcta_exchange_api::{
 use rustcta_types::{MarketType, OrderSide, OrderStatus, OrderType, PositionSide};
 use serde_json::Value;
 
-use super::parser::normalize_okx_symbol;
+use super::parser::{
+    normalize_okx_symbol, normalize_okx_symbol_for_market, okx_inst_type, okx_td_mode,
+};
 use super::types::{parse_balances, parse_fees, parse_fills, parse_order, parse_orders};
 use super::OkxGatewayAdapter;
 use crate::adapters::{ensure_exchange_api_schema, response_metadata};
@@ -24,7 +26,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_market_type(request.symbol.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.place_order",
             "okxus.place_order",
@@ -50,7 +52,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<PlaceOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_market_type(request.symbol.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.place_quote_market_order",
             "okxus.place_quote_market_order",
@@ -76,7 +78,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<CancelOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_market_type(request.symbol.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.cancel_order",
             "okxus.cancel_order",
@@ -103,7 +105,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_market_type(request.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.cancel_all_orders",
             "okxus.cancel_all_orders",
@@ -116,12 +118,15 @@ impl OkxGatewayAdapter {
                 message: "okx.cancel_all_orders requires symbol".to_string(),
             })?;
         self.ensure_exchange(&symbol.exchange)?;
-        self.ensure_spot(symbol.market_type)?;
+        self.ensure_market_type(symbol.market_type)?;
         let mut params = HashMap::new();
-        params.insert("instType".to_string(), "SPOT".to_string());
+        params.insert(
+            "instType".to_string(),
+            okx_inst_type(symbol.market_type)?.to_string(),
+        );
         params.insert(
             "instId".to_string(),
-            normalize_okx_symbol(&symbol.exchange_symbol.symbol)?,
+            normalize_okx_symbol_for_market(&symbol.exchange_symbol.symbol, symbol.market_type)?,
         );
         let pending = self
             .rest
@@ -156,7 +161,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<AmendOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_market_type(request.symbol.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.amend_order",
             "okxus.amend_order",
@@ -182,7 +187,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_market_type(request.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.get_balances",
             "okxus.get_balances",
@@ -213,7 +218,14 @@ impl OkxGatewayAdapter {
             .iter()
             .map(|asset| asset.to_ascii_uppercase())
             .collect::<Vec<_>>();
-        let mut balances = parse_balances(&self.exchange_id, tenant_id, account_id, &value)?;
+        let market_type = request.market_type.unwrap_or(MarketType::Spot);
+        let mut balances = parse_balances(
+            &self.exchange_id,
+            tenant_id,
+            account_id,
+            market_type,
+            &value,
+        )?;
         if !requested_assets.is_empty() {
             for balance in &mut balances {
                 balance
@@ -247,12 +259,18 @@ impl OkxGatewayAdapter {
         let mut fees = Vec::new();
         for symbol in &request.symbols {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_market_type(symbol.market_type)?;
             let mut params = HashMap::new();
-            params.insert("instType".to_string(), "SPOT".to_string());
+            params.insert(
+                "instType".to_string(),
+                okx_inst_type(symbol.market_type)?.to_string(),
+            );
             params.insert(
                 "instId".to_string(),
-                normalize_okx_symbol(&symbol.exchange_symbol.symbol)?,
+                normalize_okx_symbol_for_market(
+                    &symbol.exchange_symbol.symbol,
+                    symbol.market_type,
+                )?,
             );
             let value = self
                 .rest
@@ -273,7 +291,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
-        self.ensure_spot(request.symbol.market_type)?;
+        self.ensure_market_type(request.symbol.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.query_order",
             "okxus.query_order",
@@ -282,7 +300,10 @@ impl OkxGatewayAdapter {
         let mut params = HashMap::new();
         params.insert(
             "instId".to_string(),
-            normalize_okx_symbol(&request.symbol.exchange_symbol.symbol)?,
+            normalize_okx_symbol_for_market(
+                &request.symbol.exchange_symbol.symbol,
+                request.symbol.market_type,
+            )?,
         );
         match (&request.exchange_order_id, &request.client_order_id) {
             (Some(exchange_order_id), _) => {
@@ -316,20 +337,37 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_market_type(request.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.get_open_orders",
             "okxus.get_open_orders",
             "myokx.get_open_orders",
         ))?;
         let mut params = HashMap::new();
-        params.insert("instType".to_string(), "SPOT".to_string());
+        let market_type = request
+            .market_type
+            .or_else(|| request.symbol.as_ref().map(|symbol| symbol.market_type))
+            .unwrap_or(MarketType::Spot);
+        params.insert(
+            "instType".to_string(),
+            okx_inst_type(market_type)?.to_string(),
+        );
         if let Some(symbol) = &request.symbol {
             self.ensure_exchange(&symbol.exchange)?;
-            self.ensure_spot(symbol.market_type)?;
+            self.ensure_market_type(symbol.market_type)?;
+            if symbol.market_type != market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message:
+                        "okx.get_open_orders symbol market_type conflicts with request market_type"
+                            .to_string(),
+                });
+            }
             params.insert(
                 "instId".to_string(),
-                normalize_okx_symbol(&symbol.exchange_symbol.symbol)?,
+                normalize_okx_symbol_for_market(
+                    &symbol.exchange_symbol.symbol,
+                    symbol.market_type,
+                )?,
             );
         }
         let value = self
@@ -350,7 +388,7 @@ impl OkxGatewayAdapter {
     ) -> ExchangeApiResult<RecentFillsResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        self.ensure_optional_spot(request.market_type)?;
+        self.ensure_optional_market_type(request.market_type)?;
         self.ensure_private_rest(self.profile_operation(
             "okx.get_recent_fills",
             "okxus.get_recent_fills",
@@ -363,12 +401,24 @@ impl OkxGatewayAdapter {
                 message: "okx.get_recent_fills requires symbol".to_string(),
             })?;
         self.ensure_exchange(&symbol.exchange)?;
-        self.ensure_spot(symbol.market_type)?;
+        self.ensure_market_type(symbol.market_type)?;
+        if let Some(request_market_type) = request.market_type {
+            if request_market_type != symbol.market_type {
+                return Err(ExchangeApiError::InvalidRequest {
+                    message:
+                        "okx.get_recent_fills symbol market_type conflicts with request market_type"
+                            .to_string(),
+                });
+            }
+        }
         let mut params = HashMap::new();
-        params.insert("instType".to_string(), "SPOT".to_string());
+        params.insert(
+            "instType".to_string(),
+            okx_inst_type(symbol.market_type)?.to_string(),
+        );
         params.insert(
             "instId".to_string(),
-            normalize_okx_symbol(&symbol.exchange_symbol.symbol)?,
+            normalize_okx_symbol_for_market(&symbol.exchange_symbol.symbol, symbol.market_type)?,
         );
         if let Some(exchange_order_id) = &request.exchange_order_id {
             params.insert("ordId".to_string(), exchange_order_id.clone());
@@ -427,11 +477,15 @@ fn okx_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value>
     let mut body = serde_json::Map::new();
     body.insert(
         "instId".to_string(),
-        Value::String(normalize_okx_symbol(
+        Value::String(normalize_okx_symbol_for_market(
             &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
         )?),
     );
-    body.insert("tdMode".to_string(), Value::String("cash".to_string()));
+    body.insert(
+        "tdMode".to_string(),
+        Value::String(okx_td_mode(request.symbol.market_type).to_string()),
+    );
     body.insert(
         "side".to_string(),
         Value::String(okx_side(request.side).to_string()),
@@ -448,10 +502,12 @@ fn okx_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value>
             "sz".to_string(),
             Value::String(non_empty("quantity", &request.quantity)?),
         );
-        body.insert(
-            "tgtCcy".to_string(),
-            Value::String(okx_market_target(&request.symbol)?),
-        );
+        if request.symbol.market_type == MarketType::Spot {
+            body.insert(
+                "tgtCcy".to_string(),
+                Value::String(okx_market_target(&request.symbol)?),
+            );
+        }
     } else {
         body.insert(
             "sz".to_string(),
@@ -471,10 +527,18 @@ fn okx_place_order_body(request: &PlaceOrderRequest) -> ExchangeApiResult<Value>
             Value::String(non_empty("client_order_id", client_order_id)?),
         );
     }
-    if request.reduce_only {
+    if request.reduce_only && request.symbol.market_type != MarketType::Perpetual {
         return Err(ExchangeApiError::InvalidRequest {
             message: "okx spot order does not support reduce_only".to_string(),
         });
+    }
+    if request.reduce_only {
+        body.insert("reduceOnly".to_string(), Value::Bool(true));
+    }
+    if request.symbol.market_type == MarketType::Perpetual {
+        if let Some(pos_side) = request.position_side.and_then(okx_position_side) {
+            body.insert("posSide".to_string(), Value::String(pos_side.to_string()));
+        }
     }
     Ok(Value::Object(body))
 }
@@ -483,8 +547,9 @@ fn okx_quote_market_order_body(request: &QuoteMarketOrderRequest) -> ExchangeApi
     let mut body = serde_json::Map::new();
     body.insert(
         "instId".to_string(),
-        Value::String(normalize_okx_symbol(
+        Value::String(normalize_okx_symbol_for_market(
             &request.symbol.exchange_symbol.symbol,
+            MarketType::Spot,
         )?),
     );
     body.insert("tdMode".to_string(), Value::String("cash".to_string()));
@@ -511,8 +576,9 @@ fn okx_cancel_order_body(request: &CancelOrderRequest) -> ExchangeApiResult<Valu
     let mut body = serde_json::Map::new();
     body.insert(
         "instId".to_string(),
-        Value::String(normalize_okx_symbol(
+        Value::String(normalize_okx_symbol_for_market(
             &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
         )?),
     );
     insert_okx_order_identity(
@@ -528,8 +594,9 @@ fn okx_amend_order_body(request: &AmendOrderRequest) -> ExchangeApiResult<Value>
     let mut body = serde_json::Map::new();
     body.insert(
         "instId".to_string(),
-        Value::String(normalize_okx_symbol(
+        Value::String(normalize_okx_symbol_for_market(
             &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
         )?),
     );
     insert_okx_order_identity(
@@ -569,7 +636,10 @@ fn okx_cancel_all_body(
         let mut row = serde_json::Map::new();
         row.insert(
             "instId".to_string(),
-            Value::String(normalize_okx_symbol(inst_id)?),
+            Value::String(normalize_okx_symbol_for_market(
+                inst_id,
+                symbol.market_type,
+            )?),
         );
         if let Some(ord_id) = value_text(order.get("ordId")) {
             row.insert("ordId".to_string(), Value::String(ord_id));
@@ -637,7 +707,7 @@ fn order_state_from_place_ack(
     OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: request.symbol.market_type,
         canonical_symbol: request.symbol.canonical_symbol.clone(),
         exchange_symbol: request.symbol.exchange_symbol.clone(),
         client_order_id: value_text(ack.get("clOrdId")).or_else(|| request.client_order_id.clone()),
@@ -651,7 +721,7 @@ fn order_state_from_place_ack(
         price: request.price.clone(),
         filled_quantity: "0".to_string(),
         average_fill_price: None,
-        reduce_only: false,
+        reduce_only: request.reduce_only,
         post_only: ord_type == "post_only",
         created_at: Some(Utc::now()),
         updated_at: Utc::now(),
@@ -666,7 +736,7 @@ fn order_state_from_quote_ack(
     OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: request.symbol.market_type,
         canonical_symbol: request.symbol.canonical_symbol.clone(),
         exchange_symbol: request.symbol.exchange_symbol.clone(),
         client_order_id: value_text(ack.get("clOrdId")).or_else(|| request.client_order_id.clone()),
@@ -703,7 +773,7 @@ fn order_state_from_cancel_ack_fields(
     OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: symbol.market_type,
         canonical_symbol: symbol.canonical_symbol.clone(),
         exchange_symbol: symbol.exchange_symbol.clone(),
         client_order_id: value_text(ack.get("clOrdId")),
@@ -732,7 +802,7 @@ fn order_state_from_amend_ack(
     OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: request.symbol.market_type,
         canonical_symbol: request.symbol.canonical_symbol.clone(),
         exchange_symbol: request.symbol.exchange_symbol.clone(),
         client_order_id: value_text(ack.get("clOrdId"))
@@ -819,6 +889,15 @@ fn okx_time_in_force(ord_type: &str) -> Option<TimeInForce> {
         "post_only" => Some(TimeInForce::GTX),
         "limit" => Some(TimeInForce::GTC),
         _ => None,
+    }
+}
+
+fn okx_position_side(position_side: PositionSide) -> Option<&'static str> {
+    match position_side {
+        PositionSide::Long => Some("long"),
+        PositionSide::Short => Some("short"),
+        PositionSide::Net => Some("net"),
+        PositionSide::None => None,
     }
 }
 

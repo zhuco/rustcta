@@ -2,6 +2,10 @@
 
 Status date: 2026-06-07
 
+Archived status: this file preserves migration history from before the final
+root `src/` cleanup. For current control-panel entrypoints use
+`docs/dioxus_control_panel.md` and `docs/control_web_directory_migration_plan.md`.
+
 This file tracks implementation progress against
 `docs/industrial_cta_platform_architecture_assessment.md`.
 Directory/runtime migration details are now split into:
@@ -24,9 +28,9 @@ has landed so far and what remains.
 
 ## Current Result
 
-The repository now has the target workspace shape and the first industrial
-contracts are compiling and tested. The old `rustcta` package is still present
-for compatibility and still owns most concrete runtime behavior.
+The repository now has the target workspace shape. The old root `src/` tree has
+been removed in the current checkout; older compatibility notes below are kept
+only as migration history.
 
 Latest cleanup note:
 

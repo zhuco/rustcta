@@ -92,6 +92,15 @@ own a native Tapbit WebSocket task:
 }
 ```
 
+## Official WebSocket Order Book Detail
+
+P9 official verification confirms both Spot and USDT perpetual public WS expose
+order book topics. Spot uses `spot/orderBook.{instrument_id}.[depth]`; USDT
+perpetual uses `usdt/orderBook.{instrument_id}.[depth]`. Supported depths are
+5, 10, 50, 100, and 200. Payloads include a strictly increasing `version` that
+can be used for continuity checks; official docs do not state a fixed push
+interval or checksum.
+
 ## Explicit Unsupported
 
 Spot market, quote-sized market, post-only, IOC, FOK, client order id, Spot

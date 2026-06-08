@@ -71,10 +71,19 @@ impl GateIoGatewayAdapter {
         Ok(())
     }
 
+    fn ensure_supported_market(&self, market_type: MarketType) -> ExchangeApiResult<()> {
+        if !matches!(market_type, MarketType::Spot | MarketType::Perpetual) {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "gateio.unsupported_market_type",
+            });
+        }
+        Ok(())
+    }
+
     fn ensure_spot(&self, market_type: MarketType) -> ExchangeApiResult<()> {
         if market_type != MarketType::Spot {
             return Err(ExchangeApiError::Unsupported {
-                operation: "gateio.non_spot_market_type",
+                operation: "gateio.spot_only_operation",
             });
         }
         Ok(())
@@ -84,9 +93,12 @@ impl GateIoGatewayAdapter {
         Err(ExchangeApiError::Unsupported { operation })
     }
 
-    fn ensure_optional_spot(&self, market_type: Option<MarketType>) -> ExchangeApiResult<()> {
+    fn ensure_optional_supported_market(
+        &self,
+        market_type: Option<MarketType>,
+    ) -> ExchangeApiResult<()> {
         if let Some(market_type) = market_type {
-            self.ensure_spot(market_type)?;
+            self.ensure_supported_market(market_type)?;
         }
         Ok(())
     }
@@ -198,9 +210,9 @@ impl GatewayAdapter for GateIoGatewayAdapter {
             rate_limit_used: None,
             message: Some(
                 if self.config.private_rest_enabled() {
-                    "gateio public + private readback REST gateway adapter"
+                    "gateio spot + USDT perpetual public/private REST gateway adapter"
                 } else {
-                    "gateio public REST gateway adapter"
+                    "gateio spot + USDT perpetual public REST gateway adapter"
                 }
                 .to_string(),
             ),
@@ -217,12 +229,13 @@ impl ExchangeClient for GateIoGatewayAdapter {
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let private = self.config.private_rest_enabled();
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
-        capabilities.market_types = vec![MarketType::Spot];
+        capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = private;
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = private;
+        capabilities.supports_positions = private;
         capabilities.supports_fees = private;
         capabilities.supports_place_order = private;
         capabilities.supports_cancel_order = private;
@@ -233,6 +246,8 @@ impl ExchangeClient for GateIoGatewayAdapter {
         capabilities.supports_open_orders = private;
         capabilities.supports_recent_fills = private;
         capabilities.supports_client_order_id = true;
+        capabilities.supports_reduce_only = true;
+        capabilities.supports_post_only = true;
         capabilities.supports_time_in_force = vec![
             TimeInForce::GTC,
             TimeInForce::IOC,
@@ -340,9 +355,9 @@ impl ExchangeClient for GateIoGatewayAdapter {
 
     async fn get_positions(
         &self,
-        _request: PositionsRequest,
+        request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private("gateio.get_positions")
+        self.get_positions_impl(request).await
     }
 
     async fn get_symbol_rules(

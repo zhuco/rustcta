@@ -56,6 +56,12 @@ funding, and open interest. These are `项目未实现` for this `myokx` profile
 should be delegated to the main `okx` adapter after a regional scope audit; they
 must not be documented as `交易所不支持合约`.
 
+## Official Core Trading Detail
+
+官方核心交易核验见 [核心交易官方核验 P1 第二批](../核心交易官方核验_P1_第二批.md)。MyOKX regional profile 使用 OKX V5 Trade API 语义，官方支持 `POST /api/v5/trade/order`、`POST /api/v5/trade/cancel-order`、batch order/cancel、orders-pending/history，并支持 `clOrdId`。
+
+当前 adapter 禁用 private trading runtime，且区域凭证 scope 还未审计；这是 `项目未实现/未启用区域 private trading`，不是 `交易所不支持下单/撤单`。未完成 credential scope guard、signing vectors、order/cancel parser 前继续保持 runtime disabled。
+
 ## Endpoint Mapping
 
 `crates/rustcta-exchange-gateway/src/adapters/myokx/endpoint_mapping.yaml`
@@ -65,6 +71,16 @@ records:
 - Spot public REST endpoints inherited from OKX V5.
 - Derivatives and private trading as explicit `Unsupported`.
 - REST order book snapshot as the public WebSocket resync path.
+
+## Official WebSocket Order Book Detail
+
+P9 official verification treats this as an OKX V5 regional profile. Public
+market data supports `bbo-tbt` at 10ms, `books5` at 100ms, and `books` at
+100ms; `books-l2-tbt`/`books50-l2-tbt` are 10ms depth channels but require
+login/VIP eligibility. The MyOKX public host is
+`wss://wseea.okx.com:8443/ws/v5/public`. Mapping must record `books`,
+`books5`, `bbo-tbt`, 10ms/100ms intervals, OKX sequence/checksum semantics, and
+REST `/api/v5/market/books` snapshot resync.
 
 ## Validation
 

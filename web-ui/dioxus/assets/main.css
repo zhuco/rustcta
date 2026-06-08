@@ -152,6 +152,14 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.topbar > div:first-child {
+  flex: 0 0 auto;
 }
 
 .button {
@@ -331,6 +339,7 @@ select {
 }
 
 .settings-form input,
+.settings-form select,
 .symbol-editor textarea {
   width: 100%;
   min-width: 0;
@@ -361,6 +370,88 @@ select {
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.45;
+}
+
+.settings-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-summary-strip div {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.settings-summary-strip span {
+  color: #617083;
+  font-size: 12px;
+}
+
+.settings-summary-strip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-dialog {
+  width: min(1180px, 100%);
+  max-height: min(86vh, 900px);
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  background: #fff;
+  color: #18212f;
+  box-shadow: 0 24px 70px rgba(8, 15, 22, 0.35);
+  padding: 14px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.config-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-dialog-head h2,
+.config-dialog-head p {
+  margin: 0;
+}
+
+.config-dialog-body {
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.exchange-config-list {
+  max-height: 640px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.exchange-config-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(110px, 0.6fr) minmax(150px, 1fr) minmax(150px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.compact-title-row {
+  margin-bottom: 8px;
+}
+
+.exchange-row-actions {
+  align-self: end;
+  justify-content: flex-end;
 }
 
 .segmented {
@@ -1194,6 +1285,8 @@ body {
   margin: 0;
   color: #f2f7fa;
   font-size: 18px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .topbar-message {
@@ -1733,6 +1826,116 @@ tbody tr:hover td,
   font-size: 20px;
 }
 
+.cross-ops-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.cross-detail-metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.cross-detail-metrics .metric {
+  min-height: 68px;
+}
+
+.cross-detail-metrics .metric strong {
+  font-size: 15px;
+}
+
+.settings-summary-strip div,
+.exchange-config-row {
+  border-color: #2a3d4d;
+  background: #101a23;
+}
+
+.settings-summary-strip span {
+  color: #91a6b4;
+}
+
+.settings-summary-strip strong {
+  color: #f4f9fb;
+}
+
+.settings-form input,
+.settings-form select,
+.symbol-editor textarea {
+  border-color: #314352;
+  background: #0c131a;
+  color: #e7eef4;
+}
+
+.config-dialog {
+  border-color: #314352;
+  background: #13202a;
+  color: #d9e6ee;
+}
+
+.config-dialog-head h2 {
+  color: #f4f9fb;
+}
+
+.exchange-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.exchange-status-card {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  border: 1px solid #2a3d4d;
+  border-radius: 6px;
+  background: #111d27;
+  padding: 12px;
+}
+
+.exchange-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.exchange-card-head strong {
+  overflow: hidden;
+  color: #f4f9fb;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exchange-status-card dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.exchange-status-card dl div {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.8fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.exchange-status-card dt,
+.exchange-status-card dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.exchange-status-card dt {
+  color: #91a6b4;
+}
+
+.exchange-status-card dd {
+  color: #dbe8ef;
+  text-align: right;
+}
+
 .balance-bar {
   background: #223443;
 }
@@ -1876,7 +2079,9 @@ pre {
   .grid,
   .two,
   .api-key-form,
-  .cross-settings-grid {
+  .cross-settings-grid,
+  .settings-summary-strip,
+  .exchange-config-row {
     grid-template-columns: 1fr;
   }
 
@@ -1903,6 +2108,11 @@ pre {
 
   .industrial-status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cross-ops-metrics,
+  .cross-detail-metrics {
+    grid-template-columns: 1fr;
   }
 
   .operator-filter-bar {
@@ -1942,6 +2152,12 @@ pre {
 
   .cross-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-summary-strip,
+  .cross-ops-metrics,
+  .cross-detail-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .symbol-detail-grid {

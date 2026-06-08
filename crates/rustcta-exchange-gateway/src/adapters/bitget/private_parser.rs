@@ -17,6 +17,7 @@ pub fn parse_balances(
     tenant_id: TenantId,
     account_id: AccountId,
     requested_assets: &[String],
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<Balance>> {
     let assets = value
@@ -54,6 +55,7 @@ pub fn parse_balances(
         let locked =
             decimal_as_f64(asset.get("frozen").or_else(|| asset.get("locked"))).unwrap_or(0.0);
         let total = decimal_as_f64(asset.get("equity").or_else(|| asset.get("totalAmount")))
+            .or_else(|| decimal_as_f64(asset.get("accountEquity")))
             .unwrap_or(available + locked);
         if total > 0.0 || available > 0.0 || locked > 0.0 || !requested.is_empty() {
             balances.push(
@@ -67,7 +69,7 @@ pub fn parse_balances(
         tenant_id,
         account_id,
         exchange_id: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         balances,
         observed_at: Utc::now(),
     }])
@@ -76,6 +78,7 @@ pub fn parse_balances(
 pub fn parse_order(
     exchange_id: &ExchangeId,
     fallback_symbol: Option<&SymbolScope>,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Option<OrderState>> {
     let data = value.get("data").unwrap_or(value);
@@ -89,6 +92,7 @@ pub fn parse_order(
     Ok(Some(parse_order_state(
         exchange_id,
         fallback_symbol,
+        market_type,
         order,
     )?))
 }
@@ -96,11 +100,15 @@ pub fn parse_order(
 pub fn parse_orders(
     exchange_id: &ExchangeId,
     fallback_symbol: Option<&SymbolScope>,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<OrderState>> {
-    let orders = value
-        .get("data")
-        .unwrap_or(value)
+    let data = value.get("data").unwrap_or(value);
+    let orders = data
+        .get("entrustedList")
+        .or_else(|| data.get("orderList"))
+        .or_else(|| data.get("list"))
+        .unwrap_or(data)
         .as_array()
         .ok_or_else(|| {
             parse_error(
@@ -111,7 +119,7 @@ pub fn parse_orders(
         })?;
     orders
         .iter()
-        .map(|order| parse_order_state(exchange_id, fallback_symbol, order))
+        .map(|order| parse_order_state(exchange_id, fallback_symbol, market_type, order))
         .collect()
 }
 
@@ -120,7 +128,11 @@ pub fn parse_fees(
     symbol: &SymbolScope,
     value: &Value,
 ) -> ExchangeApiResult<Vec<FeeRateSnapshot>> {
-    let item = value.get("data").unwrap_or(value);
+    let data = value.get("data").unwrap_or(value);
+    let item = data
+        .as_array()
+        .and_then(|items| items.first())
+        .unwrap_or(data);
     Ok(vec![FeeRateSnapshot {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         symbol: symbol.clone(),
@@ -136,6 +148,7 @@ pub fn parse_fills(
     tenant_id: TenantId,
     account_id: AccountId,
     fallback_symbol: Option<&SymbolScope>,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Vec<Fill>> {
     let data = value.get("data").unwrap_or(value);
@@ -152,8 +165,96 @@ pub fn parse_fills(
                 tenant_id.clone(),
                 account_id.clone(),
                 fallback_symbol,
+                market_type,
                 fill,
             )
+        })
+        .collect()
+}
+
+pub fn parse_positions(
+    exchange_id: &ExchangeId,
+    tenant_id: TenantId,
+    account_id: AccountId,
+    requested_symbols: &[rustcta_types::ExchangeSymbol],
+    value: &Value,
+) -> ExchangeApiResult<Vec<rustcta_types::ExchangePosition>> {
+    let requested = requested_symbols
+        .iter()
+        .map(|symbol| normalize_bitget_symbol(&symbol.symbol))
+        .collect::<ExchangeApiResult<Vec<_>>>()?;
+    let positions = value
+        .get("data")
+        .unwrap_or(value)
+        .as_array()
+        .ok_or_else(|| {
+            parse_error(
+                exchange_id.clone(),
+                "positions response is not an array",
+                value,
+            )
+        })?;
+    positions
+        .iter()
+        .filter_map(|position| {
+            let symbol_text = required_str(exchange_id, position, "symbol")
+                .or_else(|_| required_str(exchange_id, position, "instId"))
+                .ok()?
+                .to_ascii_uppercase();
+            if !requested.is_empty() && !requested.contains(&symbol_text) {
+                return None;
+            }
+            let quantity = decimal_as_f64(
+                position
+                    .get("total")
+                    .or_else(|| position.get("size"))
+                    .or_else(|| position.get("available")),
+            )
+            .unwrap_or(0.0)
+            .abs();
+            if quantity == 0.0 {
+                return None;
+            }
+            let (base, quote) = split_compact_symbol(&symbol_text)
+                .unwrap_or_else(|| ("UNKNOWN".to_string(), "USDT".to_string()));
+            let canonical_symbol = CanonicalSymbol::new(base, quote).ok()?;
+            let exchange_symbol =
+                ExchangeSymbol::new(exchange_id.clone(), MarketType::Perpetual, symbol_text)
+                    .ok()?;
+            Some(Ok(rustcta_types::ExchangePosition {
+                schema_version: SchemaVersion::current(),
+                tenant_id: tenant_id.clone(),
+                account_id: account_id.clone(),
+                exchange_id: exchange_id.clone(),
+                market_type: MarketType::Perpetual,
+                canonical_symbol,
+                exchange_symbol: Some(exchange_symbol),
+                side: parse_position_side(
+                    string_or_number(
+                        position
+                            .get("holdSide")
+                            .or_else(|| position.get("posSide"))
+                            .or_else(|| position.get("side")),
+                    )
+                    .as_deref(),
+                ),
+                quantity,
+                entry_price: decimal_as_f64(
+                    position
+                        .get("openPriceAvg")
+                        .or_else(|| position.get("averageOpenPrice"))
+                        .or_else(|| position.get("entryPrice")),
+                ),
+                mark_price: decimal_as_f64(position.get("markPrice")),
+                liquidation_price: decimal_as_f64(position.get("liquidationPrice")),
+                unrealized_pnl: decimal_as_f64(
+                    position
+                        .get("unrealizedPL")
+                        .or_else(|| position.get("unrealizedPnl")),
+                ),
+                leverage: decimal_as_f64(position.get("leverage")),
+                observed_at: Utc::now(),
+            }))
         })
         .collect()
 }
@@ -161,13 +262,13 @@ pub fn parse_fills(
 fn parse_order_state(
     exchange_id: &ExchangeId,
     fallback_symbol: Option<&SymbolScope>,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<OrderState> {
     let exchange_symbol_text = required_str(exchange_id, value, "symbol")?.to_ascii_uppercase();
-    let symbol = fallback_symbol
-        .cloned()
-        .map(Ok)
-        .unwrap_or_else(|| symbol_scope_from_exchange_symbol(exchange_id, &exchange_symbol_text))?;
+    let symbol = fallback_symbol.cloned().map(Ok).unwrap_or_else(|| {
+        symbol_scope_from_exchange_symbol(exchange_id, market_type, &exchange_symbol_text)
+    })?;
     let force = value.get("force").and_then(Value::as_str);
     let order_type = parse_order_type(
         value
@@ -179,13 +280,13 @@ fn parse_order_state(
     Ok(OrderState {
         schema_version: EXCHANGE_API_SCHEMA_VERSION,
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: symbol.market_type,
         canonical_symbol: symbol.canonical_symbol,
         exchange_symbol: symbol.exchange_symbol,
         client_order_id: string_or_number(value.get("clientOid")).filter(|value| !value.is_empty()),
         exchange_order_id: string_or_number(value.get("orderId")).filter(|value| !value.is_empty()),
         side: parse_side(exchange_id, required_str(exchange_id, value, "side")?)?,
-        position_side: Some(PositionSide::None),
+        position_side: Some(position_side_from_order(value)),
         order_type,
         time_in_force: parse_time_in_force(force),
         status: value
@@ -199,6 +300,7 @@ fn parse_order_state(
         filled_quantity: string_or_number(
             value
                 .get("filledSize")
+                .or_else(|| value.get("accBaseVolume"))
                 .or_else(|| value.get("baseVolume"))
                 .or_else(|| value.get("fillSz")),
         )
@@ -207,7 +309,7 @@ fn parse_order_state(
             value.get("priceAvg").or_else(|| value.get("avgPrice")),
         )
         .filter(|value| !is_zero_decimal(value)),
-        reduce_only: false,
+        reduce_only: is_reduce_only(value),
         post_only: matches!(order_type, OrderType::PostOnly),
         created_at: first_timestamp_millis(value, &["cTime", "createTime"]),
         updated_at: first_timestamp_millis(value, &["uTime", "updateTime"])
@@ -220,13 +322,13 @@ fn parse_fill(
     tenant_id: TenantId,
     account_id: AccountId,
     fallback_symbol: Option<&SymbolScope>,
+    market_type: MarketType,
     value: &Value,
 ) -> ExchangeApiResult<Fill> {
     let exchange_symbol_text = required_str(exchange_id, value, "symbol")?.to_ascii_uppercase();
-    let symbol = fallback_symbol
-        .cloned()
-        .map(Ok)
-        .unwrap_or_else(|| symbol_scope_from_exchange_symbol(exchange_id, &exchange_symbol_text))?;
+    let symbol = fallback_symbol.cloned().map(Ok).unwrap_or_else(|| {
+        symbol_scope_from_exchange_symbol(exchange_id, market_type, &exchange_symbol_text)
+    })?;
     let canonical_symbol =
         symbol
             .canonical_symbol
@@ -234,15 +336,22 @@ fn parse_fill(
             .ok_or_else(|| ExchangeApiError::InvalidRequest {
                 message: "bitget fill requires canonical_symbol".to_string(),
             })?;
-    let price = decimal_as_f64(value.get("price")).unwrap_or(0.0);
-    let quantity = decimal_as_f64(value.get("size")).unwrap_or(0.0);
+    let price =
+        decimal_as_f64(value.get("price").or_else(|| value.get("fillPrice"))).unwrap_or(0.0);
+    let quantity = decimal_as_f64(
+        value
+            .get("size")
+            .or_else(|| value.get("fillSize"))
+            .or_else(|| value.get("baseVolume")),
+    )
+    .unwrap_or(0.0);
     let quote_quantity = (price > 0.0 && quantity > 0.0).then_some(price * quantity);
     Ok(Fill {
         schema_version: SchemaVersion::current(),
         tenant_id,
         account_id,
         exchange_id: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type: symbol.market_type,
         canonical_symbol,
         exchange_symbol: Some(symbol.exchange_symbol),
         order_id: string_or_number(value.get("orderId")).filter(|value| !value.is_empty()),
@@ -250,11 +359,12 @@ fn parse_fill(
         fill_id: string_or_number(value.get("tradeId").or_else(|| value.get("fillId")))
             .filter(|value| !value.is_empty()),
         side: parse_side(exchange_id, required_str(exchange_id, value, "side")?)?,
-        position_side: PositionSide::None,
+        position_side: position_side_from_order(value),
         status: FillStatus::Confirmed,
         liquidity_role: match value
             .get("tradeScope")
             .or_else(|| value.get("execType"))
+            .or_else(|| value.get("role"))
             .and_then(Value::as_str)
             .unwrap_or_default()
         {
@@ -264,18 +374,24 @@ fn parse_fill(
         },
         price,
         quantity,
-        quote_quantity,
-        fee_asset: string_or_number(value.get("feeCcy")).filter(|value| !value.is_empty()),
-        fee_amount: decimal_as_f64(value.get("fee")).map(f64::abs),
+        quote_quantity: decimal_as_f64(value.get("quoteVolume")).or(quote_quantity),
+        fee_asset: string_or_number(value.get("feeCcy").or_else(|| value.get("feeCoin")))
+            .or_else(|| fee_detail(value).and_then(|detail| detail.1))
+            .filter(|value| !value.is_empty()),
+        fee_amount: decimal_as_f64(value.get("fee"))
+            .or_else(|| fee_detail(value).and_then(|detail| detail.0))
+            .map(f64::abs),
         fee_rate: None,
-        realized_pnl: None,
-        filled_at: first_timestamp_millis(value, &["cTime", "uTime"]).unwrap_or_else(Utc::now),
+        realized_pnl: decimal_as_f64(value.get("profit").or_else(|| value.get("realizedPnl"))),
+        filled_at: first_timestamp_millis(value, &["tradeTime", "cTime", "uTime"])
+            .unwrap_or_else(Utc::now),
         received_at: Utc::now(),
     })
 }
 
 fn symbol_scope_from_exchange_symbol(
     exchange_id: &ExchangeId,
+    market_type: MarketType,
     symbol: &str,
 ) -> ExchangeApiResult<SymbolScope> {
     let normalized = normalize_bitget_symbol(symbol)?;
@@ -283,9 +399,9 @@ fn symbol_scope_from_exchange_symbol(
         .unwrap_or_else(|| ("UNKNOWN".to_string(), "USDT".to_string()));
     Ok(SymbolScope {
         exchange: exchange_id.clone(),
-        market_type: MarketType::Spot,
+        market_type,
         canonical_symbol: Some(CanonicalSymbol::new(base, quote).map_err(validation_error)?),
-        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), MarketType::Spot, normalized)
+        exchange_symbol: ExchangeSymbol::new(exchange_id.clone(), market_type, normalized)
             .map_err(validation_error)?,
     })
 }
@@ -339,13 +455,75 @@ fn parse_time_in_force(force: Option<&str>) -> Option<TimeInForce> {
 
 fn map_bitget_order_status(status: &str) -> OrderStatus {
     match status.to_ascii_lowercase().as_str() {
-        "live" | "new" => OrderStatus::New,
+        "live" | "new" | "open" => OrderStatus::New,
         "partially_filled" | "partial-fill" => OrderStatus::PartiallyFilled,
         "filled" | "full-fill" => OrderStatus::Filled,
         "cancelled" | "canceled" => OrderStatus::Cancelled,
         "rejected" => OrderStatus::Rejected,
         _ => OrderStatus::Unknown,
     }
+}
+
+fn parse_position_side(value: Option<&str>) -> PositionSide {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
+        "long" => PositionSide::Long,
+        "short" => PositionSide::Short,
+        "net" | "both" => PositionSide::Net,
+        _ => PositionSide::None,
+    }
+}
+
+fn position_side_from_order(value: &Value) -> PositionSide {
+    if let Some(side) = string_or_number(
+        value
+            .get("holdSide")
+            .or_else(|| value.get("posSide"))
+            .or_else(|| value.get("positionSide")),
+    ) {
+        return parse_position_side(Some(&side));
+    }
+    let trade_side = value
+        .get("tradeSide")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let side = value
+        .get("side")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match (
+        trade_side.to_ascii_lowercase().as_str(),
+        side.to_ascii_lowercase().as_str(),
+    ) {
+        ("open", "buy") | ("close", "sell") => PositionSide::Long,
+        ("open", "sell") | ("close", "buy") => PositionSide::Short,
+        _ => PositionSide::None,
+    }
+}
+
+fn is_reduce_only(value: &Value) -> bool {
+    value
+        .get("tradeSide")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case("close"))
+        || string_or_number(value.get("reduceOnly")).is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "true" | "yes" | "y" | "1"
+            )
+        })
+}
+
+fn fee_detail(value: &Value) -> Option<(Option<f64>, Option<String>)> {
+    let detail = value.get("feeDetail")?.as_array()?.first()?;
+    Some((
+        decimal_as_f64(
+            detail
+                .get("totalFee")
+                .or_else(|| detail.get("fee"))
+                .or_else(|| detail.get("totalDeductionFee")),
+        ),
+        string_or_number(detail.get("feeCoin").or_else(|| detail.get("feeCcy"))),
+    ))
 }
 
 fn first_timestamp_millis(value: &Value, fields: &[&str]) -> Option<DateTime<Utc>> {

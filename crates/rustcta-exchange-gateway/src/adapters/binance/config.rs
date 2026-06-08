@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct BinanceGatewayConfig {
     pub rest_base_url: String,
+    pub futures_rest_base_url: String,
     pub api_key: Option<String>,
     pub api_secret: Option<String>,
     pub recv_window_ms: u64,
@@ -13,9 +14,12 @@ impl Default for BinanceGatewayConfig {
     fn default() -> Self {
         Self {
             rest_base_url: "https://api.binance.com".to_string(),
+            futures_rest_base_url: "https://fapi.binance.com".to_string(),
             api_key: non_empty_env("BINANCE_SPOT_API_KEY")
+                .or_else(|| non_empty_env("BINANCE_USDM_API_KEY"))
                 .or_else(|| non_empty_env("BINANCE_API_KEY")),
             api_secret: non_empty_env("BINANCE_SPOT_API_SECRET")
+                .or_else(|| non_empty_env("BINANCE_USDM_API_SECRET"))
                 .or_else(|| non_empty_env("BINANCE_API_SECRET")),
             recv_window_ms: env_u64("BINANCE_SPOT_RECV_WINDOW_MS").unwrap_or(5_000),
             enabled_private_rest: env_bool("BINANCE_SPOT_PRIVATE_REST_ENABLED").unwrap_or(true),

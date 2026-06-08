@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Core Rust crates live in `src/`; additional binaries sit under `src/bin/` (e.g., `supervisor`, `web-server`, `order_sync`).
+- Workspace Rust crates live in `crates/`; runnable apps live in `apps/`; strategy packages live in `strategies/`; operational utilities live in `tools/`.
+- The old root `src/` tree has been removed. Do not add new runbooks or code paths that reference `src/bin/*` or `src/web/*`.
 - Integration and regression fixtures are in `tests/`; consult `docs/` for feature notes and design records.
 - Configuration templates reside in `config/`, `format_schemas/`, and `preprocessed_configs/`; SQL seeds go in `sql/`.
 - Automation helpers are under `scripts/`; logs and ad-hoc validation outputs belong in `logs/`.

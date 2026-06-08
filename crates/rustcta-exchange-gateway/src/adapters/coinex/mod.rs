@@ -84,6 +84,25 @@ impl CoinExGatewayAdapter {
         Ok(())
     }
 
+    fn ensure_market_type(&self, market_type: MarketType) -> ExchangeApiResult<()> {
+        if !matches!(market_type, MarketType::Spot | MarketType::Perpetual) {
+            return Err(ExchangeApiError::Unsupported {
+                operation: "coinex.unsupported_market_type",
+            });
+        }
+        Ok(())
+    }
+
+    fn ensure_optional_market_type(
+        &self,
+        market_type: Option<MarketType>,
+    ) -> ExchangeApiResult<()> {
+        if let Some(market_type) = market_type {
+            self.ensure_market_type(market_type)?;
+        }
+        Ok(())
+    }
+
     fn unsupported_private<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
@@ -198,7 +217,7 @@ impl ExchangeClient for CoinExGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
-        capabilities.market_types = vec![MarketType::Spot];
+        capabilities.market_types = vec![MarketType::Spot, MarketType::Perpetual];
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = self.config.private_rest_enabled();
         capabilities.supports_public_streams = true;
@@ -209,6 +228,7 @@ impl ExchangeClient for CoinExGatewayAdapter {
         capabilities.supports_symbol_rules = true;
         capabilities.supports_order_book_snapshot = true;
         capabilities.supports_balances = self.config.private_rest_enabled();
+        capabilities.supports_positions = self.config.private_rest_enabled();
         capabilities.supports_fees = self.config.private_rest_enabled();
         capabilities.supports_place_order = self.config.private_rest_enabled();
         capabilities.supports_cancel_order = self.config.private_rest_enabled();
@@ -251,9 +271,9 @@ impl ExchangeClient for CoinExGatewayAdapter {
 
     async fn get_positions(
         &self,
-        _request: PositionsRequest,
+        request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private("coinex.get_positions")
+        self.get_positions_impl(request).await
     }
 
     async fn get_symbol_rules(

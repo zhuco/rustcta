@@ -83,6 +83,17 @@ impl OkxGatewayAdapter {
         Ok(())
     }
 
+    fn ensure_market_type(&self, market_type: MarketType) -> ExchangeApiResult<()> {
+        if market_type != MarketType::Spot
+            && !(market_type == MarketType::Perpetual && self.exchange_id.as_str() == "okx")
+        {
+            return Err(ExchangeApiError::Unsupported {
+                operation: self.config.unsupported_market_type_operation,
+            });
+        }
+        Ok(())
+    }
+
     fn unsupported_private<T>(&self, operation: &'static str) -> ExchangeApiResult<T> {
         Err(ExchangeApiError::Unsupported { operation })
     }
@@ -97,6 +108,16 @@ impl OkxGatewayAdapter {
     fn ensure_optional_spot(&self, market_type: Option<MarketType>) -> ExchangeApiResult<()> {
         if let Some(market_type) = market_type {
             self.ensure_spot(market_type)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_optional_market_type(
+        &self,
+        market_type: Option<MarketType>,
+    ) -> ExchangeApiResult<()> {
+        if let Some(market_type) = market_type {
+            self.ensure_market_type(market_type)?;
         }
         Ok(())
     }
@@ -144,7 +165,11 @@ impl ExchangeClient for OkxGatewayAdapter {
 
     fn capabilities(&self) -> ExchangeClientCapabilities {
         let mut capabilities = ExchangeClientCapabilities::new(self.exchange_id.clone());
-        capabilities.market_types = vec![MarketType::Spot];
+        capabilities.market_types = if self.exchange_id.as_str() == "okx" {
+            vec![MarketType::Spot, MarketType::Perpetual]
+        } else {
+            vec![MarketType::Spot]
+        };
         capabilities.supports_public_rest = true;
         capabilities.supports_private_rest = self.config.private_rest_available();
         capabilities.supports_symbol_rules = true;

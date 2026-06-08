@@ -75,7 +75,6 @@ crates/      reusable platform crates and API contracts
 strategies/  strategy wrapper crates and migrating strategy cores
 tools/       operator tools and migration inventory
 web-ui/      Dioxus control panel
-src/         legacy root crate, compatibility runtime, strategy implementation
 config/      active runtime configuration examples and supervisor specs
 docs/        active architecture, operations, migration, and reference docs
 scripts/     local automation and validation helpers
@@ -148,22 +147,34 @@ industrial boundary checks.
 
 ## Control Panel
 
-For the current legacy local dry-run console, use:
+The active Web control panel has one frontend and one local entrypoint:
+
+- Frontend source: `web-ui/dioxus/`
+- Backend app: `apps/control-api` binary `rustcta-control-api`
+- Public API contract: `crates/rustcta-control-api`
+
+The old root `src/` entrypoints have been removed from this checkout. Do not use
+root-package or legacy-bin instructions as control-panel runbooks.
+
+Run the local control API with:
 
 ```bash
-export RUSTCTA_MONITOR_TOKEN="$(openssl rand -hex 32)"
-scripts/separated_control_panel.sh build
-scripts/separated_control_panel.sh start
-```
-
-Open `http://127.0.0.1:8091` and paste the monitor token into the UI. This
-script still launches the legacy local control API path by default.
-
-The migrating workspace control API entrypoint is:
-
-```bash
+RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091 \
+RUSTCTA_CONTROL_API_AGENT_ID=local-agent \
+RUSTCTA_CONTROL_API_TENANT_ID=local \
+RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=run/supervisor/registry.json \
+RUSTCTA_CONTROL_API_EXCHANGE_API_KEY_STORE=data/control_api/exchange_api_keys.env \
+RUSTCTA_CONTROL_API_ACCOUNTS_CONFIG=config/accounts.yml \
+RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \
 cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```
+
+Open `http://127.0.0.1:8091`.
+
+The exchange configuration page is backed by `config/accounts.yml` plus the
+local env-store at `data/control_api/exchange_api_keys.env`. The Web UI lists
+account-manager accounts, writes only the local env-store, and returns redacted
+credential status to the browser.
 
 See `docs/dioxus_control_panel.md` and
 `docs/control_web_directory_migration_plan.md` before changing control-plane
