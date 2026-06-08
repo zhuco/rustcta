@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "method": "subscription",
+  "params": {
+    "channel": "private.orders",
+    "data": {
+      "subaccount_id": "fixture-subaccount",
+      "instrument_name": "BTC-PERP",
+      "order_id": "fixture-order-id",
+      "label": "fixture-client-order-id",
+      "order_status": "open",
+      "direction": "buy",
+      "amount": "0.01",
+      "limit_price": "65000"
+    }
+  }
+}

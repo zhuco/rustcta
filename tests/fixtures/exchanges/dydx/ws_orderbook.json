@@ -1,0 +1,9 @@
+{
+  "type": "channel_data",
+  "channel": "v4_orderbook",
+  "id": "BTC-USD",
+  "contents": {
+    "bids": [["65000.0", "1.25"]],
+    "asks": [["65000.5", "0.8"]]
+  }
+}

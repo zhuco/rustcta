@@ -689,7 +689,6 @@ fn stream_runtime_capability_should_serialize_heartbeat_auth_and_resync() {
             direction: StreamHeartbeatDirection::ClientPing,
             interval_ms: Some(30_000),
             timeout_ms: Some(10_000),
-            ..Default::default()
         },
         reconnect: ReconnectCapability {
             supported: true,

@@ -1,0 +1,21 @@
+{
+  "exchange": "bitmart",
+  "operation": "place_order",
+  "market_type": "spot",
+  "method": "POST",
+  "path": "/spot/v2/submit_order",
+  "headers": {
+    "X-BM-KEY": "test-key",
+    "X-BM-TIMESTAMP": "1700000000000",
+    "X-BM-BROKER-ID": "test-memo"
+  },
+  "body": {
+    "symbol": "BTC_USDT",
+    "side": "buy",
+    "type": "limit",
+    "size": "0.01",
+    "price": "65000",
+    "client_order_id": "CLIENT1"
+  },
+  "dry_run_only": true
+}

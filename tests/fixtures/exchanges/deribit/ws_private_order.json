@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "subscription",
+  "params": {
+    "channel": "user.orders.option.raw",
+    "data": {
+      "order_id": "ETH-123",
+      "label": "client-1",
+      "instrument_name": "BTC-28JUN24-70000-C",
+      "direction": "buy",
+      "order_type": "limit",
+      "order_state": "open",
+      "amount": 1,
+      "price": 0.083,
+      "filled_amount": 0,
+      "creation_timestamp": 1719400000100
+    }
+  }
+}

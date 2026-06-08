@@ -66,36 +66,26 @@ pub enum CredentialScope {
     Withdraw,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointTransport {
+    #[default]
     Rest,
     WebSocket,
     SocketIo,
     JsonRpc,
 }
 
-impl Default for EndpointTransport {
-    fn default() -> Self {
-        Self::Rest
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EndpointAuth {
+    #[default]
     None,
     ApiKey,
     Hmac,
     Jwt,
     Bearer,
     ListenKey,
-}
-
-impl Default for EndpointAuth {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,37 +114,27 @@ pub struct EndpointCapability {
     pub supports_testnet: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchExecutionMode {
     Native,
     ComposedSequential,
     ComposedConcurrent,
+    #[default]
     Unsupported,
 }
 
-impl Default for BatchExecutionMode {
-    fn default() -> Self {
-        Self::Unsupported
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchAtomicity {
     Atomic,
     NonAtomic,
     Partial,
+    #[default]
     Unknown,
 }
 
-impl Default for BatchAtomicity {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatchCapability {
     #[serde(default)]
     pub support: CapabilitySupport,
@@ -172,21 +152,6 @@ pub struct BatchCapability {
     pub supports_client_order_id: bool,
     #[serde(default)]
     pub supports_partial_failure: bool,
-}
-
-impl Default for BatchCapability {
-    fn default() -> Self {
-        Self {
-            support: CapabilitySupport::default(),
-            mode: BatchExecutionMode::default(),
-            atomicity: BatchAtomicity::default(),
-            max_items: None,
-            same_symbol_required: false,
-            same_market_type_required: false,
-            supports_client_order_id: false,
-            supports_partial_failure: false,
-        }
-    }
 }
 
 impl BatchCapability {
@@ -208,7 +173,7 @@ impl BatchCapability {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryCapability {
     #[serde(default)]
     pub support: CapabilitySupport,
@@ -226,21 +191,6 @@ pub struct HistoryCapability {
     pub max_limit: Option<u32>,
     #[serde(default)]
     pub max_window_ms: Option<i64>,
-}
-
-impl Default for HistoryCapability {
-    fn default() -> Self {
-        Self {
-            support: CapabilitySupport::default(),
-            supports_since: false,
-            supports_until: false,
-            supports_limit: false,
-            supports_cursor: false,
-            supports_from_id: false,
-            max_limit: None,
-            max_window_ms: None,
-        }
-    }
 }
 
 impl HistoryCapability {

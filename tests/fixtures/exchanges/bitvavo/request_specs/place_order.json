@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "path": "/order",
+  "body": {
+    "market": "BTC-EUR",
+    "side": "buy",
+    "orderType": "limit",
+    "amount": "0.01",
+    "price": "30000.00",
+    "postOnly": true
+  },
+  "headers": ["Bitvavo-Access-Key", "Bitvavo-Access-Timestamp", "Bitvavo-Access-Signature", "Bitvavo-Access-Window"]
+}

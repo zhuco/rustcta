@@ -1,0 +1,9 @@
+{
+  "exchange": "lighter",
+  "operation": "send_tx",
+  "supported": false,
+  "reason": "Lighter order writes require SDK-compatible signed tx payloads, API-key private key handling, and per-key nonce vectors; this adapter does not synthesize signed txs.",
+  "expected_error": "lighter.signed_tx_unavailable",
+  "contains_api_private_key": false,
+  "contains_auth_token": false
+}

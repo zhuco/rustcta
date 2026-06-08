@@ -1,0 +1,21 @@
+{
+  "exchange": "coinbaseexchange",
+  "operation": "coinbaseexchange.place_order",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "hmac",
+  "headers": {
+    "CB-ACCESS-KEY": "fixture-key",
+    "CB-ACCESS-TIMESTAMP": "1700000000",
+    "CB-ACCESS-PASSPHRASE": "fixture-passphrase"
+  },
+  "body": {
+    "product_id": "BTC-USD",
+    "side": "buy",
+    "type": "limit",
+    "size": "0.01",
+    "price": "65000",
+    "client_oid": "LIMIT1",
+    "time_in_force": "GTC"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "url": "wss://ws.luno.com/api/1/stream/XBTZAR",
+  "pair": "XBTZAR",
+  "kind": "orderbook"
+}

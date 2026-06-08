@@ -1,0 +1,25 @@
+{
+  "operation": "cancel_all_orders",
+  "method": "POST",
+  "path": "/exchange",
+  "auth": "composed_open_orders_then_hyperliquid_eip712_secp256k1_batch_cancel",
+  "readback": {
+    "method": "POST",
+    "path": "/info",
+    "body": {
+      "type": "openOrders",
+      "user": "0x1111111111111111111111111111111111111111"
+    }
+  },
+  "mutation": {
+    "action": {
+      "type": "cancel",
+      "cancels": [
+        {
+          "a": 0,
+          "o": 123456789
+        }
+      ]
+    }
+  }
+}

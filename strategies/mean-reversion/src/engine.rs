@@ -36,21 +36,16 @@ impl Default for MeanReversionEngineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MeanReversionMarketType {
+    #[default]
     Spot,
     Margin,
     Perpetual,
     Futures,
     Option,
     Custom(String),
-}
-
-impl Default for MeanReversionMarketType {
-    fn default() -> Self {
-        Self::Spot
-    }
 }
 
 impl From<MeanReversionMarketType> for MarketType {
@@ -727,7 +722,7 @@ fn build_order_plan(
         OrderSide::Sell => liquidity.ask_price,
     };
     let reference_price = if best_price > 0.0 {
-        best_price * (1.0 + direction * improve * -1.0)
+        best_price * (1.0 - direction * improve)
     } else if side == OrderSide::Buy {
         price_ref * (1.0 - improve)
     } else {

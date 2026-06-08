@@ -1,0 +1,222 @@
+schema_version: 1
+exchange: delta
+adapter: rustcta_exchange_gateway::adapters::delta
+metadata:
+  status: validated
+  notes: "Task 4 Delta adapter for options/perpetual/futures common REST trading surface. Option chain, greeks, and funding are adapter-specific helpers."
+market_types:
+  - option
+  - perpetual
+  - futures
+products:
+  - option
+  - perpetual
+  - futures
+base_urls:
+  rest: https://api.delta.exchange
+  public_ws: wss://socket.delta.exchange
+  private_ws: wss://socket.delta.exchange
+auth:
+  rest:
+    algorithm: "HMAC-SHA256 hex"
+    prehash: "method + timestamp + request_path + query_string + body"
+    headers: [api-key, timestamp, signature]
+  websocket:
+    algorithm: "key-auth payload"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 20
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 10
+    orders:
+      scope: orders
+      interval: 1s
+      limit: 10
+    websocket:
+      scope: websocket
+      interval: 1s
+      limit: 20
+pagination:
+  recent_fills:
+    style: limit_with_offset_or_time
+    endpoint: /v2/fills
+    limit_param: page_size
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  triggers:
+    - place_order_timeout
+    - cancel_order_timeout
+    - private_stream_disconnected
+batch:
+  place_orders:
+    support: composed_sequential
+    endpoint: /v2/orders
+    atomicity: non_atomic
+    partial_failure: true
+  cancel_orders:
+    support: composed_sequential
+    endpoint: /v2/orders
+    atomicity: non_atomic
+    partial_failure: true
+websocket:
+  public:
+    support: native
+    channels: [l2_orderbook, all_trades, v2/ticker, candlestick_1m]
+    heartbeat:
+      request: '{"type":"ping"}'
+      accepts: ['{"type":"pong"}']
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    channels: [orders, v2/user_trades, wallet, positions]
+    auth: key-auth
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: option
+    transport: rest
+    method: GET
+    path: /v2/products
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/products.json
+  - operation: get_order_book
+    product: option
+    transport: rest
+    method: GET
+    path: /v2/l2orderbook/{symbol}
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/orderbook.json
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v2/wallet/balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/delta/request_specs/get_balances.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/balances.json
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v2/positions/margined
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/positions.json
+  - operation: place_order
+    product: option
+    transport: rest
+    method: POST
+    path: /v2/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/delta/request_specs/place_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/place_ack.json
+  - operation: cancel_order
+    product: option
+    transport: rest
+    method: DELETE
+    path: /v2/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/delta/request_specs/cancel_order.json
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/cancel_ack.json
+  - operation: query_order
+    product: option
+    transport: rest
+    method: GET
+    path: /v2/orders/{order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/order.json
+  - operation: get_open_orders
+    product: option
+    transport: rest
+    method: GET
+    path: /v2/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/open_orders.json
+  - operation: get_recent_fills
+    product: option
+    transport: rest
+    method: GET
+    path: /v2/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/fills.json
+  - operation: adapter_specific_option_chain
+    product: option
+    transport: rest
+    method: GET
+    path: /v2/products
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/delta/option_chain.json
+    notes: "Adapter-specific helper, not a shared trait method."
+  - operation: adapter_specific_funding_rates
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v2/tickers
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    notes: "Adapter-specific helper until shared funding model is added."
+unsupported:
+  - transfers
+  - withdrawals
+  - portfolio_margin_mutation

@@ -1,0 +1,18 @@
+{
+  "exchange": "htx",
+  "operation": "htx.get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/order/openOrders",
+  "auth": "signed",
+  "query": {
+    "AccessKeyId": { "match": "exact", "value": "test-key" },
+    "SignatureMethod": { "match": "exact", "value": "HmacSHA256" },
+    "SignatureVersion": { "match": "exact", "value": "2" },
+    "Timestamp": { "match": "non_empty" },
+    "Signature": { "match": "non_empty" },
+    "symbol": { "match": "exact", "value": "btcusdt" }
+  },
+  "forbid_query_values_containing": ["real_", "sk_live", "token_"]
+}

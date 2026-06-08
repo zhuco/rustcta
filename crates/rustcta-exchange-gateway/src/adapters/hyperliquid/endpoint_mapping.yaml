@@ -1,0 +1,174 @@
+schema_version: 1
+exchange: hyperliquid
+adapter: rustcta_exchange_gateway::adapters::hyperliquid
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: docs/hyperliquid_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: USDC perpetual DEX gateway adapter. Public and private read REST use POST /info; signed writes use POST /exchange with L1 action signing.
+market_types: [perpetual]
+products: [perpetual]
+rest:
+  base_url: https://api.hyperliquid.xyz
+  testnet_base_url: https://api.hyperliquid-testnet.xyz
+base_urls:
+  public_ws: wss://api.hyperliquid.xyz/ws
+  private_ws: wss://api.hyperliquid.xyz/ws
+auth:
+  private_rest: L1 action secp256k1 signing over msgpack action hash plus EIP-712 Agent domain; API wallet private key must come from env/runtime secret storage only.
+  private_ws: address-scoped user subscriptions; signed post requests use same action payload as REST.
+rate_limits:
+  info: { scope: ip_and_address, retry_after: http_429, default_weight: 2 }
+  exchange: { scope: address, retry_after: http_429, default_weight: 1 }
+pagination:
+  recent_fills: { mode: time_range, since_param: startTime, until_param: endTime, max_limit: 2000 }
+  open_orders: { mode: none }
+reconciliation:
+  private_state: rest_fallback
+  after_place: Query orderStatus, openOrders, then userFillsByTime.
+  after_cancel: Query orderStatus and openOrders; userFillsByTime resolves race with fills.
+  stream_recovery: Resubscribe orderUpdates/userFills/userEvents, then reconcile clearinghouseState, openOrders, and userFillsByTime.
+batch:
+  place_orders: { support: native, endpoint: /exchange action=order, atomicity: partial, partial_failure: true }
+  cancel_orders: { support: native, endpoint: /exchange action=cancel, atomicity: partial, partial_failure: true }
+websocket:
+  public:
+    support: native
+    channels: [l2Book, trades, bbo, candle, allMids, activeAssetCtx]
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 90000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: native_when_wallet_configured
+    channels: [orderUpdates, userFills, userEvents, userFundings, userNonFundingLedgerUpdates]
+    auth_renewal: { mode: address_subscription }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /info type=meta
+    auth: none
+    rate_limit_bucket: hyperliquid_info
+    weight: 2
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /info type=l2Book
+    auth: none
+    rate_limit_bucket: hyperliquid_info
+    weight: 2
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /info type=clearinghouseState
+    auth: api_key
+    rate_limit_bucket: hyperliquid_info
+    weight: 2
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /info type=clearinghouseState
+    auth: api_key
+    rate_limit_bucket: hyperliquid_info
+    weight: 2
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /exchange action=order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hyperliquid_exchange
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /exchange action=cancel|cancelByCloid
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hyperliquid_exchange
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /info type=openOrders
+    auth: api_key
+    rate_limit_bucket: hyperliquid_info
+    weight: 2
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /info type=userFills|userFillsByTime
+    auth: api_key
+    rate_limit_bucket: hyperliquid_info
+    weight: 2
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: private_websocket
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: SUBSCRIBE
+    path: orderUpdates|userFills|userEvents
+    auth: api_key
+    rate_limit_bucket: hyperliquid_ws
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only

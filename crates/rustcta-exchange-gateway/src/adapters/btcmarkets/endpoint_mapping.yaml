@@ -1,0 +1,196 @@
+schema_version: 1
+exchange: btcmarkets
+adapter: rustcta_exchange_gateway::adapters::btcmarkets
+metadata:
+  status: validated
+  source: https://docs.btcmarkets.net/
+  notes: "Australian AUD spot adapter. Private REST is credential-gated; fiat funding and tax/reporting APIs remain outside the gateway boundary."
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.btcmarkets.net
+  websocket: wss://socket.btcmarkets.net/v2
+rest:
+  base_url: https://api.btcmarkets.net
+auth:
+  rest:
+    scheme: hmac_sha512
+    headers: [BM-AUTH-APIKEY, BM-AUTH-TIMESTAMP, BM-AUTH-SIGNATURE]
+    signing_payload: "UPPER_METHOD + path_with_query + timestamp_ms + json_body"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 10
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 5
+    orders:
+      scope: orders
+      interval: 1s
+      limit: 5
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+websocket:
+  public:
+    support: spec_only
+    url: wss://socket.btcmarkets.net/v2
+    channels: [orderbook, trade]
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    channels: [order_change, fund_change]
+    fallback: rest_reconciliation
+unsupported:
+  - positions
+  - amend_order
+  - order_list
+  - fiat_deposit_withdrawal_runtime
+  - bank_payment_rails
+  - tax_reporting
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/markets
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/markets/{marketId}/orderbook
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/accounts/me/balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/accounts/me/trading-fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v3/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcmarkets/request_specs/place_order.json
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v3/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /v3/orders/{orderId}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcmarkets/request_specs/cancel_order.json
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v3/batchorders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: non_atomic
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcmarkets/request_specs/batch_place_orders.json
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v3/batchorders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: non_atomic
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /v3/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/orders/{orderId}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /v3/trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcmarkets/request_specs/get_recent_fills.json

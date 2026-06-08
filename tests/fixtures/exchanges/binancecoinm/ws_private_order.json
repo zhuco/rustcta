@@ -1,0 +1,16 @@
+{
+  "e": "ORDER_TRADE_UPDATE",
+  "E": 1710000000000,
+  "o": {
+    "s": "BTCUSD_PERP",
+    "c": "cli-place",
+    "S": "BUY",
+    "o": "LIMIT",
+    "f": "GTC",
+    "q": "2",
+    "p": "25000.0",
+    "X": "NEW",
+    "i": 30,
+    "ps": "LONG"
+  }
+}

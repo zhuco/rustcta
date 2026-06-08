@@ -1,0 +1,21 @@
+{
+  "channel": "order_book:0",
+  "last_updated_at": 1774884082400000,
+  "offset": 1558400,
+  "order_book": {
+    "code": 0,
+    "asks": [],
+    "bids": [
+      {
+        "price": "2064.52",
+        "size": "0.5000"
+      }
+    ],
+    "offset": 1558400,
+    "nonce": 9182390040,
+    "last_updated_at": 1774884082400000,
+    "begin_nonce": 9182390025
+  },
+  "timestamp": 1774884082400,
+  "type": "update/order_book"
+}

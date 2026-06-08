@@ -1,0 +1,8 @@
+{
+  "api_key": "bitbank-test-key",
+  "api_secret": "bitbank-test-secret",
+  "nonce": "1710000000123",
+  "method": "POST",
+  "body": "{\"pair\":\"btc_jpy\",\"side\":\"buy\",\"type\":\"limit\",\"price\":\"3000000\",\"amount\":\"0.01\",\"post_only\":true}",
+  "expected_signature": "7c90cb2433addc04fdf3b5a539544aa85422fa11a4ee66bd0553c108e32187e0"
+}

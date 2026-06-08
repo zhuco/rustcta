@@ -1,0 +1,12 @@
+{
+  "exchange": "pacifica",
+  "operation": "get_positions",
+  "method": "GET",
+  "path": "/api/v1/positions",
+  "query": {
+    "account": "42trU9A5..."
+  },
+  "auth": "account_query",
+  "request_spec_only": true,
+  "trade_enabled": false
+}

@@ -1,0 +1,14 @@
+{
+  "exchange": "coinspot",
+  "operation": "coinspot.get_balances",
+  "method": "POST",
+  "path": "/api/v2/ro/my/balances",
+  "headers": {
+    "Content-Type": "application/json",
+    "key": "test-key",
+    "sign": "<hmac_sha512_json_body>"
+  },
+  "body": {},
+  "credential_scope": "read_only",
+  "unsupported_boundary": "fiat deposit/withdrawal is not a runtime operation"
+}

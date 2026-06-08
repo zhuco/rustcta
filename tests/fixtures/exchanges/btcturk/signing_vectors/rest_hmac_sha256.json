@@ -1,0 +1,7 @@
+{
+  "api_key": "public-key",
+  "secret_base64": "dGVzdC1zZWNyZXQ=",
+  "stamp_ms": 1700000000000,
+  "payload": "public-key1700000000000",
+  "signature": "+SnO0CxNQWHcwr3HM2sieexZuruIuuUInDpNb2Yh0vk="
+}

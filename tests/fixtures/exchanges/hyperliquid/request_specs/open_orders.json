@@ -1,0 +1,13 @@
+{
+  "operation": "open_orders",
+  "method": "POST",
+  "path": "/info",
+  "auth": "address_scoped_read",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "type": "openOrders",
+    "user": "0x1111111111111111111111111111111111111111"
+  }
+}

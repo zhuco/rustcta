@@ -1,0 +1,24 @@
+{
+  "exchange": "pacifica",
+  "operation": "create_order",
+  "method": "POST",
+  "path": "/api/v1/orders/create",
+  "auth": "ed25519_body_signature",
+  "operation_type": "create_order",
+  "body": {
+    "account": "42trU9A5...",
+    "agent_wallet": "69trU9A5...",
+    "signature": "redacted-base58-signature",
+    "timestamp": 1748970123456,
+    "expiry_window": 5000,
+    "symbol": "BTC",
+    "price": "100000",
+    "amount": "0.1",
+    "side": "bid",
+    "tif": "GTC",
+    "reduce_only": false,
+    "client_order_id": "12345678-1234-1234-1234-123456789abc"
+  },
+  "request_spec_only": true,
+  "trade_enabled": false
+}

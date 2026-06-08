@@ -1,0 +1,13 @@
+{
+  "operation": "positions",
+  "method": "POST",
+  "path": "/info",
+  "auth": "address_scoped_read",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "type": "clearinghouseState",
+    "user": "0x1111111111111111111111111111111111111111"
+  }
+}

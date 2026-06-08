@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "token": "USDC",
+      "balance": "10000.25",
+      "available": "9300.25",
+      "locked": "700.0"
+    }
+  ]
+}

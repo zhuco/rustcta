@@ -1,0 +1,8 @@
+{
+  "exchange": "pacifica",
+  "operation": "create_order",
+  "secret_encoding": "base64",
+  "secret_note": "test vector uses 32 bytes of value 7, not a real key",
+  "payload": "{\"data\":{\"amount\":\"0.1\",\"client_order_id\":\"12345678-1234-1234-1234-123456789abc\",\"price\":\"100000\",\"reduce_only\":false,\"side\":\"bid\",\"symbol\":\"BTC\",\"tif\":\"GTC\"},\"expiry_window\":5000,\"timestamp\":1748970123456,\"type\":\"create_order\"}",
+  "signature": "2VkGp5vUNunGJveBnx9bEnLyUpENUeRkSS61XvbgnfbKpFLuBZ47JWXygk7JuWBEYVJi963Wz2r2fsQMierqcj6h"
+}

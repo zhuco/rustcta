@@ -1,0 +1,11 @@
+{
+  "operation": "bitvavo.get_fees",
+  "method": "GET",
+  "path": "/v2/account/fees",
+  "headers": [
+    "Bitvavo-Access-Key",
+    "Bitvavo-Access-Timestamp",
+    "Bitvavo-Access-Signature",
+    "Bitvavo-Access-Window"
+  ]
+}

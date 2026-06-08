@@ -1,0 +1,13 @@
+{
+  "name": "private_get_open_orders",
+  "algorithm": "hmac_sha256_base64_using_base64_encoded_secret",
+  "timestamp": "2026-06-08T00:00:00.000Z",
+  "method": "GET",
+  "path": "/api/v3/open-orders?limit=100&page=1&symbol=BTC-USDT",
+  "data": "",
+  "payload": "2026-06-08T00:00:00.000ZGET/api/v3/open-orders?limit=100&page=1&symbol=BTC-USDT",
+  "secret": "test-secret",
+  "secret_encoding": "plain_utf8_fixture_secret",
+  "expected_signature": "cE2BbrdjYi6MIBZOsloR5RG9mzF9gGO4BCav2U31fyA=",
+  "expected_signature_shape": "base64_hmac_sha256"
+}

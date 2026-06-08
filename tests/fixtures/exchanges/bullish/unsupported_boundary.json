@@ -1,0 +1,16 @@
+{
+  "exchange": "bullish",
+  "trade_enabled": false,
+  "scan_only": false,
+  "private_write_mode": "offline_request_spec_only",
+  "unsupported": [
+    "bullish.place_order_offline_request_spec_only",
+    "bullish.cancel_order_offline_request_spec_only",
+    "bullish.batch_place_orders_unverified",
+    "bullish.batch_cancel_orders_unverified",
+    "bullish.cancel_all_orders_unverified",
+    "bullish.quote_market_order_unverified",
+    "bullish.order_list_unverified",
+    "bullish.fees_offline_request_spec_only"
+  ]
+}

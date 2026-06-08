@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "message": null,
+  "code": 0,
+  "data": [
+    {
+      "id": 987654321,
+      "orderId": 123456789,
+      "symbol": "BTC",
+      "pairSymbol": "BTCTRY",
+      "type": "buy",
+      "price": "2500000.00",
+      "amount": "0.01000000",
+      "fee": "25.00",
+      "tax": "0.00",
+      "date": 1700000000000
+    }
+  ]
+}

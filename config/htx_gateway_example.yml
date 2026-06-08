@@ -1,0 +1,58 @@
+# HTX industrial gateway adapter example.
+# Credentials are read from environment variables by default:
+# HTX_API_KEY, HTX_API_SECRET, and optional HTX_SPOT_ACCOUNT_ID.
+
+exchange: htx
+adapter: htx
+enabled: false
+market_types:
+  - spot
+  - perpetual
+
+api_key: ${HTX_API_KEY}
+api_secret: ${HTX_API_SECRET}
+spot_account_id: ${HTX_SPOT_ACCOUNT_ID}
+
+spot_rest_base_url: https://api.huobi.pro
+linear_rest_base_url: https://api.hbdm.com
+spot_public_ws_url: wss://api.huobi.pro/ws
+spot_private_ws_url: wss://api.huobi.pro/ws/v2
+linear_public_ws_url: wss://api.hbdm.com/linear-swap-ws
+private_ws_url: wss://api.hbdm.com/linear-swap-notification
+testnet: false
+sandbox: false
+
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 150
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+  perpetual:
+    - BTC-USDT
+    - ETH-USDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  optional:
+    - fee_rate
+    - positions
+
+notes:
+  - HTX REST signing uses AccessKeyId, SignatureMethod=HmacSHA256, SignatureVersion=2, Timestamp, and Signature query parameters.
+  - Spot symbols are compact lowercase, for example btcusdt. USDT perpetual contract_code symbols are dashed uppercase, for example BTC-USDT.
+  - Spot balances require a configured spot account id because the official balance endpoint is account-id scoped.
+  - Spot private WebSocket sessions authenticate on /ws/v2; USDT perpetual private sessions authenticate on /linear-swap-notification.

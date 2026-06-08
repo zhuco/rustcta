@@ -1,0 +1,9 @@
+[
+  151,
+  {
+    "type": 151,
+    "channel": "orderbook",
+    "event": "BTCTRY",
+    "join": true
+  }
+]

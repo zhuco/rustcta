@@ -1,0 +1,18 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "list": [
+      {
+        "symbol": "BTCUSDT",
+        "side": "Buy",
+        "size": "0.01",
+        "avgPrice": "25000",
+        "markPrice": "25100",
+        "liqPrice": "20000",
+        "unrealisedPnl": "1.0",
+        "leverage": "3"
+      }
+    ]
+  }
+}

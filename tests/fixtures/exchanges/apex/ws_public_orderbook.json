@@ -1,0 +1,20 @@
+{
+  "subscribe": {
+    "op": "subscribe",
+    "args": ["orderBook200.H.BTCUSDT"]
+  },
+  "ping": {
+    "op": "ping",
+    "args": ["1700000000000"]
+  },
+  "snapshot": {
+    "channel": "orderBook200.H.BTCUSDT",
+    "type": "snapshot",
+    "data": {
+      "s": "BTCUSDT",
+      "u": 123456789,
+      "b": [["64999.5", "1.25"]],
+      "a": [["65000.0", "0.75"]]
+    }
+  }
+}

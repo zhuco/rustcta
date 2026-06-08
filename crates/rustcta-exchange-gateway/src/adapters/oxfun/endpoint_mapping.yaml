@@ -1,0 +1,190 @@
+schema_version: 1
+exchange: oxfun
+adapter: OxfunGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/oxfun_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 10 conservative audit shell. OX.FUN trading is mostly WebSocket based; live resync and private routing remain disabled.
+market_types: [perpetual, option]
+products: [perpetual, options]
+base_urls:
+  rest: https://api.ox.fun
+  public_ws: wss://api.ox.fun/v2/websocket
+  private_ws: wss://api.ox.fun/v2/websocket
+  testnet_public_ws: wss://stgapi.ox.fun/v2/websocket
+  testnet_private_ws: wss://stgapi.ox.fun/v2/websocket
+auth:
+  private_rest: AccessKey/Timestamp/Nonce/Signature HMAC-SHA256 base64
+  private_ws: login payload signs timestamp + GET/auth/self/verify
+rate_limits:
+  websocket_orders: { scope: account, interval_ms: 1000, limit: 50 }
+  unverified_rest: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  private_history: { mode: unsupported_unverified }
+reconciliation:
+  private_state: rest_fallback_required
+  notes: Public depthUpdate requires snapshot then monotonic seqNum diffs; runtime resync is not enabled until live validation.
+batch:
+  place: { support: spec_only, reason: websocket placeorders documented but runtime disabled }
+  cancel: { support: spec_only, reason: websocket batch cancel documented but runtime disabled }
+websocket:
+  public:
+    support: spec_only
+    channels: [market, depthUpdate, trade, ticker, candles]
+    heartbeat: { mode: text_ping, interval_ms: 20000, timeout_ms: 45000, stale_message_ms: 60000 }
+    resync: snapshot_then_seqnum_diffs
+  private:
+    support: spec_only
+    auth_renewal: { mode: login_payload }
+streams:
+  - operation: ws_market_snapshot
+    transport: websocket
+    channel: market:all
+    support: parser_only
+    resync: symbol_rules
+  - operation: ws_depth_update
+    transport: websocket
+    channel: depthUpdate:<marketCode>
+    support: parser_only
+    resync: order_book
+    notes: Accepts official object-shaped snapshot/diff payloads and legacy array fixture shape.
+  - operation: ws_heartbeat
+    transport: websocket
+    channel: text:ping
+    support: spec_only
+  - operation: ws_login
+    transport: websocket
+    channel: login
+    support: spec_only
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: subscribe
+    path: market:all
+    auth: none
+    rate_limit_bucket: oxfun_ws_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: parser_only
+    official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/subscriptions-public/market
+    reason: oxfun.symbol_rules_rest_unverified_ws_market_parser_only
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: subscribe
+    path: depthUpdate:<marketCode>
+    auth: none
+    rate_limit_bucket: oxfun_ws_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: parser_only
+    official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/subscriptions-public/incremental-order-book
+    reason: oxfun.order_book_rest_unverified_ws_resync_required
+  - operation: ws_login
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: login
+    path: /v2/websocket
+    auth: hmac
+    rate_limit_bucket: oxfun_ws_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_login.json
+    official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/authentication
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: placeorder
+    path: /v2/websocket
+    auth: hmac
+    rate_limit_bucket: oxfun_ws_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_place_order.json
+    official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/order-commands/place-limit-order
+    reason: oxfun.place_order_ws_request_spec_only
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: placeorders
+    path: /v2/websocket
+    auth: hmac
+    rate_limit_bucket: oxfun_ws_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_batch_place_orders.json
+    official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/order-commands/place-batch-market-order
+    reason: oxfun.batch_place_orders_ws_request_spec_only
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual, options]
+    transport: rest
+    method: cancelorder
+    path: /v2/websocket
+    auth: hmac
+    rate_limit_bucket: oxfun_ws_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/oxfun/request_specs/ws_cancel_order.json
+    official_doc: https://oxoxox.gitbook.io/ox-docs/api/websocket/order-commands/cancel-order
+    reason: oxfun.cancel_order_ws_request_spec_only
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/oxfun/positions
+    auth: unsupported
+    rate_limit_bucket: oxfun_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: oxfun.positions_unverified
+  - operation: funding
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/oxfun/funding
+    auth: unsupported
+    rate_limit_bucket: oxfun_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: oxfun.funding_unverified

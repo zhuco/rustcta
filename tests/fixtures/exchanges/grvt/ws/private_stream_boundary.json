@@ -1,0 +1,20 @@
+{
+  "exchange": "grvt",
+  "operation": "private_order_stream",
+  "status": "unsupported_unverified",
+  "ws_url": "wss://trades.grvt.io/ws/full",
+  "auth": {
+    "Cookie": "<redacted-session-cookie>",
+    "X-Grvt-Account-Id": "<redacted-account-id>"
+  },
+  "subscribe": {
+    "stream": "v1/order",
+    "feed": ["<redacted-sub-account-id>"],
+    "method": "subscribe",
+    "is_full": true
+  },
+  "requires_rest_reconciliation": true,
+  "reconciliation_status": "unsupported_until_session_cookie_fixtures_exist",
+  "trade_enabled": false,
+  "expected_error": "grvt.private_stream_session_spec_only"
+}

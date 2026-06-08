@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 #[path = "common/legacy_tools_ops_shim.rs"]
 mod legacy_tools_ops_shim;
 

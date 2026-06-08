@@ -1,0 +1,15 @@
+{
+  "channel": "account_order_updates",
+  "data": {
+    "order_id": 315979358,
+    "client_order_id": "add9a4b5-c7f7-4124-b57f-86982d86d479",
+    "symbol": "BTC",
+    "side": "bid",
+    "price": "100000",
+    "amount": "0.1",
+    "filled_amount": "0",
+    "order_status": "open",
+    "updated_at": 1759224706737,
+    "li": 1557370337
+  }
+}

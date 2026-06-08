@@ -1,0 +1,16 @@
+{
+  "success": 1,
+  "return": [
+    {
+      "trade_id": "98765",
+      "order_id": "12345",
+      "pair": "btc_idr",
+      "type": "buy",
+      "price": "100000000",
+      "amount": "0.01000000",
+      "fee": "0.00001",
+      "fee_currency": "btc",
+      "trade_time": 1700000100
+    }
+  ]
+}

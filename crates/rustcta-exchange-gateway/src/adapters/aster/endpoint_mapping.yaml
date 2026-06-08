@@ -1,0 +1,239 @@
+schema_version: 1
+exchange: aster
+adapter: rustcta_exchange_gateway::adapters::aster
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: Aster Futures V3 API docs and Task 11 local implementation
+  last_reviewed: "2026-06-08"
+  notes: Perpetual-only Aster adapter. Private REST uses EIP-712 AsterSignTransaction signing but is classified as signed auth for the shared mapping schema.
+market_types: [perpetual]
+products: [perpetual]
+rest:
+  base_url: https://fapi.asterdex.com
+auth:
+  private_rest: EIP-712 AsterSignTransaction with user, signer, nonce, and signature fields
+  domain:
+    name: AsterSignTransaction
+    version: "1"
+    chain_id: 1666
+    verifying_contract: "0x0000000000000000000000000000000000000000"
+rate_limits:
+  public_ip: { scope: ip, default_weight: 1 }
+  signed_uid: { scope: account, default_weight: 1 }
+websocket:
+  public:
+    url: wss://fstream.asterdex.com/ws
+    channels: [depth, depth20, aggTrade, ticker, kline]
+  private:
+    url: wss://fstream.asterdex.com/ws/{listen_key}
+    channels: [ACCOUNT_UPDATE, ORDER_TRADE_UPDATE, listenKeyExpired]
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/exchangeInfo
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 10
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 5
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: funding_mark_price
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/premiumIndex
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: funding_history
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/fundingRate
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: eip712_v3_query
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/positionRisk
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: eip712_v3_query
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/commissionRate
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: eip712_v3_query
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /fapi/v3/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    sign_path: eip712_v3_form
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /fapi/v3/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    sign_path: eip712_v3_form
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /fapi/v3/allOpenOrders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: native
+    sign_path: eip712_v3_form
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/order
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 4
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: eip712_v3_query
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/openOrders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 6
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: eip712_v3_query
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /fapi/v3/userTrades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    max_items: 1000
+    sign_path: eip712_v3_query
+unsupported:
+  - spot
+  - futures_coin_m
+  - quote_sized_market_order
+  - order_list
+  - amend_order
+  - transfers

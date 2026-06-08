@@ -1,0 +1,14 @@
+{
+  "result": "success",
+  "error_code": "0",
+  "markets": [
+    {
+      "quote_currency": "KRW",
+      "target_currency": "BTC",
+      "price_unit": "1000",
+      "qty_unit": "0.00000001",
+      "min_order_amount": "5000",
+      "trade_status": "NORMAL"
+    }
+  ]
+}

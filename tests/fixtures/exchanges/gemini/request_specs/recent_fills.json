@@ -1,0 +1,12 @@
+{
+  "operation": "get_recent_fills",
+  "method": "POST",
+  "path": "/v1/mytrades",
+  "auth": "gemini_payload_hmac_sha384",
+  "payload": {
+    "request": "/v1/mytrades",
+    "nonce": "1717200000000000",
+    "symbol": "btcusd",
+    "limit_trades": 100
+  }
+}

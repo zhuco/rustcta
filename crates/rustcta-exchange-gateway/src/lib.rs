@@ -1,3 +1,35 @@
+// Gateway adapters share a rich ExchangeApiError payload and venue-specific
+// request builders whose signatures mirror exchange API fields.
+#![allow(
+    clippy::bind_instead_of_map,
+    clippy::bool_assert_comparison,
+    clippy::nonminimal_bool,
+    clippy::collapsible_if,
+    clippy::collapsible_str_replace,
+    clippy::derivable_impls,
+    clippy::excessive_precision,
+    clippy::field_reassign_with_default,
+    clippy::if_same_then_else,
+    clippy::large_enum_variant,
+    clippy::manual_range_patterns,
+    clippy::manual_repeat_n,
+    clippy::manual_strip,
+    clippy::needless_borrows_for_generic_args,
+    clippy::needless_lifetimes,
+    clippy::needless_question_mark,
+    clippy::needless_update,
+    clippy::redundant_closure,
+    clippy::result_large_err,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_filter_map,
+    clippy::unnecessary_get_then_check,
+    clippy::unnecessary_lazy_evaluations,
+    clippy::unnecessary_map_or,
+    clippy::unnecessary_sort_by,
+    clippy::useless_format
+)]
+
 mod adapters;
 mod batch;
 mod client;
@@ -16,16 +48,27 @@ mod status;
 pub mod streams;
 
 pub use adapters::{
-    AdapterBackedGateway, AscendexGatewayConfig, BackpackGatewayConfig, BiconomyGatewayConfig,
-    BigOneGatewayConfig, BinanceGatewayConfig, BingxGatewayConfig, BitgetGatewayConfig,
-    BitkanGatewayConfig, BitmexGatewayConfig, BitrueGatewayConfig, BitunixGatewayConfig,
-    BlofinGatewayConfig, CoinDcxGatewayConfig, CoinExGatewayConfig, CoinbaseGatewayConfig,
-    CoinstoreGatewayConfig, CointrGatewayConfig, CoinwGatewayConfig, CryptoComGatewayConfig,
-    DeepcoinGatewayConfig, DigiFinexGatewayConfig, GateIoGatewayConfig, GatewayAdapter,
-    HashKeyGlobalGatewayConfig, KrakenGatewayConfig, KuCoinGatewayConfig, LBankGatewayConfig,
-    MexcGatewayConfig, OkxGatewayConfig, OrangeXGatewayConfig, PhemexGatewayConfig,
-    PoloniexGatewayConfig, TapbitGatewayConfig, ToobitGatewayConfig, WeexGatewayConfig,
-    WhiteBitGatewayConfig, WooGatewayConfig, XtGatewayConfig,
+    AdapterBackedGateway, ApexGatewayConfig, AscendexGatewayConfig, AsterGatewayConfig,
+    BackpackGatewayConfig, BiconomyGatewayConfig, BigOneGatewayConfig, BinanceCoinMGatewayConfig,
+    BinanceGatewayConfig, BingxGatewayConfig, BitbankGatewayConfig, BitfinexGatewayConfig,
+    BitflyerGatewayConfig, BitgetGatewayConfig, BithumbGatewayConfig, BitkanGatewayConfig,
+    BitmartGatewayConfig, BitmexGatewayConfig, BitrueGatewayConfig, BitsoGatewayConfig,
+    BitstampGatewayConfig, BitunixGatewayConfig, BitvavoGatewayConfig, BlofinGatewayConfig,
+    BtcMarketsGatewayConfig, BtcTurkGatewayConfig, BullishGatewayConfig, BybitGatewayConfig,
+    CoinDcxGatewayConfig, CoinExGatewayConfig, CoinbaseExchangeGatewayConfig,
+    CoinbaseGatewayConfig, CoincheckGatewayConfig, CoinoneGatewayConfig, CoinsPhGatewayConfig,
+    CoinspotGatewayConfig, CoinstoreGatewayConfig, CointrGatewayConfig, CoinwGatewayConfig,
+    CryptoComGatewayConfig, DeepcoinGatewayConfig, DeltaGatewayConfig, DeribitGatewayConfig,
+    DeriveGatewayConfig, DigiFinexGatewayConfig, DydxGatewayConfig, GateIoGatewayConfig,
+    GatewayAdapter, GeminiGatewayConfig, GrvtGatewayConfig, HashKeyGlobalGatewayConfig,
+    HtxGatewayConfig, HuobiGatewayConfig, HyperliquidGatewayConfig,
+    IndependentReserveGatewayConfig, IndodaxGatewayConfig, KrakenFuturesGatewayConfig,
+    KrakenGatewayConfig, KuCoinFuturesGatewayConfig, KuCoinGatewayConfig, LBankGatewayConfig,
+    LighterGatewayConfig, LunoGatewayConfig, MercadoGatewayConfig, MexcGatewayConfig,
+    OkxGatewayConfig, OrangeXGatewayConfig, OxfunGatewayConfig, PacificaGatewayConfig,
+    ParadexGatewayConfig, PhemexGatewayConfig, PoloniexGatewayConfig, TapbitGatewayConfig,
+    ToobitGatewayConfig, UpbitGatewayConfig, WeexGatewayConfig, WhiteBitGatewayConfig,
+    WooGatewayConfig, XtGatewayConfig,
 };
 pub use batch::{BatchExecutionChunk, BatchExecutionPlan, BatchOperationKind, BatchPlanner};
 pub use client::{ExchangeGateway, GatewayClient, InProcessGatewayClient, LocalGateway};

@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "private/subscribe",
+  "params": {
+    "subaccount_id": 1001,
+    "channels": ["orders", "trades", "positions"],
+    "session_key": "derive_session_key_fixture"
+  }
+}

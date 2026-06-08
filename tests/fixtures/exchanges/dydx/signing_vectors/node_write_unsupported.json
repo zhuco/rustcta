@@ -1,0 +1,4 @@
+{
+  "supported": false,
+  "expected_error": "dydx.node_signing_requires_wallet_subaccount"
+}

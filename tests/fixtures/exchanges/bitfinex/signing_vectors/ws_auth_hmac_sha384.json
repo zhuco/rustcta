@@ -1,0 +1,9 @@
+{
+  "exchange": "bitfinex",
+  "name": "ws_auth_hmac_sha384",
+  "algorithm": "hmac_sha384_hex",
+  "secret": "bitfinex-test-secret",
+  "nonce": "1700000000000000",
+  "payload": "AUTH1700000000000000",
+  "expected_signature": "ff096b8d62735f42c0ce8f455e79d9425e635534b5970e3f5cdf224711864c03549aa62e57b3c888f819e69655073ea1"
+}

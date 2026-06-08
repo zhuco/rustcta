@@ -1,0 +1,13 @@
+{
+  "operation": "upbit.cancel_order",
+  "method": "DELETE",
+  "path": "/v1/order",
+  "auth": "jwt_hs256_query_hash",
+  "query": {
+    "uuid": "upbit-order-1"
+  },
+  "headers": {
+    "Authorization": "Bearer <jwt>"
+  },
+  "dry_run": true
+}

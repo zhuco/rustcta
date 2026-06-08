@@ -1,0 +1,13 @@
+{
+  "result": {
+    "subaccount_id": "fixture-subaccount",
+    "positions": [
+      {
+        "instrument_name": "BTC-PERP",
+        "amount": "0.25",
+        "average_price": "64000",
+        "unrealized_pnl": "250.00"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "uuid": "upbit-order-uuid",
+  "side": "bid",
+  "ord_type": "limit",
+  "price": "50000000",
+  "state": "wait",
+  "market": "KRW-BTC",
+  "created_at": "2025-03-27T04:29:08+00:00",
+  "volume": "0.001",
+  "remaining_volume": "0.001",
+  "reserved_fee": "25",
+  "remaining_fee": "25",
+  "paid_fee": "0",
+  "locked": "50025",
+  "executed_volume": "0",
+  "trades_count": 0,
+  "identifier": "CLIENTLIMIT1"
+}

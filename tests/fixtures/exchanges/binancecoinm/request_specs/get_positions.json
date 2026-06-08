@@ -1,0 +1,24 @@
+{
+  "exchange": "binancecoinm",
+  "operation": "get_positions",
+  "product": "futures",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/dapi/v1/positionRisk",
+  "auth": "signed",
+  "query": {
+    "pair": { "match": "exact", "value": "BTCUSD" },
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "binancecoinm/place_order_limit"
+}

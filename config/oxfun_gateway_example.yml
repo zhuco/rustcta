@@ -1,0 +1,31 @@
+# OX.FUN gateway adapter example. Disabled by default.
+exchange: oxfun
+adapter: oxfun
+enabled: false
+
+rest_base_url: https://api.ox.fun
+public_websocket_url: wss://api.ox.fun/v2/websocket
+private_websocket_url: wss://api.ox.fun/v2/websocket
+testnet_public_websocket_url: wss://stgapi.ox.fun/v2/websocket
+testnet_private_websocket_url: wss://stgapi.ox.fun/v2/websocket
+use_testnet_env: OXFUN_USE_TESTNET
+
+credentials:
+  api_key_env: OXFUN_API_KEY
+  api_secret_env: OXFUN_API_SECRET
+  private_rest_enabled_env: OXFUN_PRIVATE_REST_ENABLED
+
+streams:
+  public_streams_enabled_env: OXFUN_PUBLIC_STREAMS_ENABLED
+  heartbeat_interval_ms: 20000
+  pong_timeout_ms: 45000
+  stale_message_ms: 60000
+
+safety:
+  live_trading_enabled: false
+  private_stream_runtime_enabled: false
+  request_spec_only: true
+  notes:
+    - OX.FUN private order commands are WebSocket request-spec fixtures only.
+    - Do not set real API credentials in this file.
+    - Enable live validation only through a dedicated dry-run task.

@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/v4/accounts/<accountId>/balances",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

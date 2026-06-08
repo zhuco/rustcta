@@ -1,0 +1,16 @@
+{
+  "secret": "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg==",
+  "api_key": "key",
+  "endpoint_path": "/derivatives/api/v3/sendorder",
+  "nonce": "1616492376594",
+  "params": {
+    "cliOrdId": "client-1",
+    "limitPrice": "37500",
+    "orderType": "lmt",
+    "side": "buy",
+    "size": "0.01",
+    "symbol": "PF_XBTUSDT"
+  },
+  "expected_query_or_body": "cliOrdId=client-1&limitPrice=37500&orderType=lmt&side=buy&size=0.01&symbol=PF_XBTUSDT",
+  "expected_authent": "csSkgeo5K478YDVwrjzsQ9oOIjiUp7mWX43LeX8V95fVad97Vde9ng5kBjsvIX+c1dBiAmXZLAZcF0iDhzF4Bw=="
+}

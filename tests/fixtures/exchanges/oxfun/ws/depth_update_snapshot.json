@@ -1,0 +1,14 @@
+{
+  "table": "depthUpdate",
+  "data": [
+    {
+      "marketCode": "BTC-USD-SWAP-LIN",
+      "action": "partial",
+      "seqNum": "101",
+      "checksum": "7654321",
+      "timestamp": "1700000000000",
+      "bids": [["64000", "1.25"], ["63999.5", "0.5"]],
+      "asks": [["64001", "2.1"], ["64001.5", "0.75"]]
+    }
+  ]
+}

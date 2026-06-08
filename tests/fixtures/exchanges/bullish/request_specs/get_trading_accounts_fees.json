@@ -1,0 +1,9 @@
+{
+  "operation": "fees",
+  "method": "GET",
+  "path": "/trading-api/v1/accounts/trading-accounts",
+  "auth": "bearer_jwt",
+  "supported": false,
+  "expected_error": "bullish.fees_offline_request_spec_only",
+  "notes": "Fee derivation uses tradeFeeRate plus market feeGroupId; runtime fee query is not promoted."
+}

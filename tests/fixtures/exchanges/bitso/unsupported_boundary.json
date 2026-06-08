@@ -1,0 +1,9 @@
+{
+  "exchange": "bitso",
+  "products": ["spot"],
+  "fiat_quotes": ["MXN", "BRL", "ARS", "COP", "USD"],
+  "funding_operations": "unsupported",
+  "fiat_ledger": "read_audit_only",
+  "private_write_mode": "offline_request_spec_only",
+  "forbid_real_credentials": true
+}

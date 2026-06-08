@@ -1,0 +1,14 @@
+{
+  "exchange": "indodax",
+  "operation": "get_open_orders",
+  "method": "POST",
+  "path": "/tapi",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Key": "test-key",
+    "Sign": "<hmac_sha512_form_body>"
+  },
+  "body": "method=openOrders&nonce=1700000000000&pair=btc_idr",
+  "credential_scope": "read_only",
+  "boundary": "pair-scoped readback; all-pair runtime is not exposed"
+}

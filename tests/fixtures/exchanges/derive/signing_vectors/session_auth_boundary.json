@@ -1,0 +1,11 @@
+{
+  "exchange": "derive",
+  "purpose": "document session-key and wallet-signature boundary without real secrets",
+  "wallet_address": "fixture-wallet",
+  "session_key": "derive_session_key_fixture",
+  "timestamp_ms": 1700000000000,
+  "canonical_message": "1700000000000.private/get_open_orders.{\"subaccount_id\":1001}",
+  "signature_algorithm": "fixture_hmac_sha256_only_not_derive_production",
+  "signature": "9f44eb75891b55fe8cbcff06b1c7c1d9f0a59e0f3440cf1767fd9590298f8ed4",
+  "note": "Production Derive EVM/session signatures are supplied by wallet/session tooling and are not generated from this fixture."
+}

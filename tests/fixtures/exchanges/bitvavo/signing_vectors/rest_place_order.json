@@ -1,0 +1,8 @@
+{
+  "secret": "test-secret",
+  "timestamp": "1548172481125",
+  "method": "POST",
+  "path": "/order",
+  "body": "{\"market\":\"BTC-EUR\",\"side\":\"buy\"}",
+  "algorithm": "hmac_sha256_hex"
+}

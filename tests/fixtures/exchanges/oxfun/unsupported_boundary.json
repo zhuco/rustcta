@@ -1,0 +1,14 @@
+{
+  "exchange": "oxfun",
+  "status": "audit_shell",
+  "api_maturity": "audit_shell",
+  "unsupported_reasons": [
+    "oxfun.symbol_rules_rest_unverified_ws_market_parser_only",
+    "oxfun.order_book_rest_unverified_ws_resync_required",
+    "oxfun.place_order_ws_request_spec_only",
+    "oxfun.batch_place_orders_ws_request_spec_only",
+    "oxfun.private_stream_runtime_unverified"
+  ],
+  "scan_only": false,
+  "trade_enabled": false
+}

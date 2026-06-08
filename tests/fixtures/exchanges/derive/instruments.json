@@ -1,0 +1,25 @@
+{
+  "result": {
+    "instruments": [
+      {
+        "instrument_name": "BTC-PERP",
+        "instrument_type": "perp",
+        "currency": "BTC",
+        "settlement_currency": "USDC",
+        "tick_size": "0.5",
+        "amount_step": "0.001"
+      },
+      {
+        "instrument_name": "BTC-20260626-70000-C",
+        "instrument_type": "option",
+        "currency": "BTC",
+        "settlement_currency": "USDC",
+        "tick_size": "0.1",
+        "amount_step": "0.01",
+        "expiry": "2026-06-26",
+        "strike": "70000",
+        "option_type": "call"
+      }
+    ]
+  }
+}

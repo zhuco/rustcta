@@ -1,0 +1,23 @@
+{
+  "exchange": "oxfun",
+  "operation": "place_order",
+  "transport": "websocket",
+  "url": "wss://api.ox.fun/v2/websocket",
+  "payload": {
+    "op": "placeorder",
+    "tag": 123,
+    "data": {
+      "timestamp": 1638237934061,
+      "recvWindow": 500,
+      "clientOrderId": 1,
+      "marketCode": "BTC-USD-SWAP-LIN",
+      "side": "BUY",
+      "orderType": "LIMIT",
+      "quantity": 1.5,
+      "timeInForce": "GTC",
+      "price": 9431.48
+    }
+  },
+  "request_spec_only": true,
+  "trade_enabled": false
+}

@@ -1,0 +1,19 @@
+{
+  "subscribe": {
+    "jsonrpc": "2.0",
+    "type": "command",
+    "method": "subscribe",
+    "params": {
+      "topic": "l2Orderbook",
+      "symbol": "BTCUSDC"
+    },
+    "id": "1"
+  },
+  "keepalive": {
+    "jsonrpc": "2.0",
+    "type": "command",
+    "method": "keepalivePing",
+    "params": {},
+    "id": "2"
+  }
+}

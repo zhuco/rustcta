@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::process::Command;
 
 #[test]

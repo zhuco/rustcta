@@ -1,0 +1,20 @@
+gateway:
+  adapters:
+    - coinspot
+
+coinspot:
+  enabled: false
+  rest_base_url: "https://www.coinspot.com.au"
+  public_rest_base_url: "https://www.coinspot.com.au"
+  private_rest_base_url: "https://www.coinspot.com.au"
+  read_only_rest_base_url: "https://www.coinspot.com.au"
+  private_rest_enabled: false
+  credentials:
+    api_key_env: COINSPOT_API_KEY
+    api_secret_env: COINSPOT_API_SECRET
+  unsupported_runtime:
+    - fiat_deposit
+    - fiat_withdrawal
+    - payment_rails
+    - streams
+    - generic_cancel_order

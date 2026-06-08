@@ -1,0 +1,11 @@
+{
+  "exchange": "coincheck",
+  "operation": "coincheck.cancel_order",
+  "method": "DELETE",
+  "path": "/api/exchange/orders/2001",
+  "auth": "hmac",
+  "headers": {
+    "ACCESS-KEY": "fixture-key",
+    "ACCESS-NONCE": "1700000000000"
+  }
+}

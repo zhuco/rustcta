@@ -1,0 +1,5 @@
+{
+  "secret": "secret",
+  "payload": "1700000000000GET/api/v1/account-overview",
+  "expected_signature": "85MDzsMS16JIxL8GHgkrh71dh3dChnVs37cR4MBPPKc="
+}

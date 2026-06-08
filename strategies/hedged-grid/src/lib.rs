@@ -1236,7 +1236,7 @@ mod tests {
             let Some(open_order) = engine
                 .buy_orders()
                 .into_iter()
-                .chain(engine.sell_orders().into_iter())
+                .chain(engine.sell_orders())
                 .find(|order| order.intent.is_open())
             else {
                 break;

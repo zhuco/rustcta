@@ -1,0 +1,54 @@
+{
+  "exchange": "binancecoinm",
+  "operation": "amend_order",
+  "product": "futures",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/dapi/v1/order",
+  "auth": "signed",
+  "query": {
+    "symbol": {
+      "match": "exact",
+      "value": "BTCUSD_PERP"
+    },
+    "orderId": {
+      "match": "exact",
+      "value": "33"
+    },
+    "quantity": {
+      "match": "exact",
+      "value": "1"
+    },
+    "newClientOrderId": {
+      "match": "exact",
+      "value": "cli-amend"
+    },
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "recvWindow": {
+      "match": "exact",
+      "value": "5000"
+    },
+    "signature": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "X-MBX-APIKEY": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "binancecoinm/place_order_limit"
+}

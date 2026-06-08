@@ -1,0 +1,14 @@
+{
+  "exchange": "lighter",
+  "status": "session_spec_only",
+  "unsupported_reasons": [
+    "lighter.symbol_rules_session_spec_only",
+    "lighter.order_book_session_spec_only",
+    "lighter.send_tx_signing_unverified",
+    "lighter.send_tx_batch_signing_unverified",
+    "lighter.private_stream_session_spec_only"
+  ],
+  "checksum": "unsupported",
+  "scan_only": false,
+  "trade_enabled": false
+}

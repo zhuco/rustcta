@@ -1,0 +1,12 @@
+{
+  "exchange": "binancecoinm",
+  "name": "place_order_limit",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/dapi/v1/order",
+  "payload": "newClientOrderId=cli-place&price=25000.0&quantity=2&recvWindow=5000&side=BUY&symbol=BTCUSD_PERP&timeInForce=GTC&timestamp=1710000000000&type=LIMIT",
+  "expected_signature": "501b588912a8a35dd54f6bffb92e0056c9a4b4245b99d1d224fd3895dcbb26ac",
+  "payload_format": "raw_payload"
+}

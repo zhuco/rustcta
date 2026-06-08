@@ -1,0 +1,116 @@
+schema_version: 1
+exchange: coinspot
+adapter: rustcta_exchange_gateway::adapters::coinspot
+metadata:
+  status: validated
+  source: https://www.coinspot.com.au/v2/api
+  notes: "Task 20 AUD spot mapping. Trading REST is credential-gated; side-specific cancel/query APIs remain unsupported."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://www.coinspot.com.au
+rate_limits:
+  buckets:
+    coinspot_public:
+      scope: rest
+      interval: 1m
+      limit: 120
+    coinspot_private:
+      scope: rest
+      interval: 1m
+      limit: 120
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_open_orders, get_recent_fills]
+  unknown_order_policy: unsupported_query_order_side_specific
+unsupported:
+  - positions
+  - amend_order
+  - order_list
+  - batch_place_orders
+  - batch_cancel_orders
+  - cancel_all_orders
+  - cancel_order_side_specific
+  - query_order_side_specific
+  - public_streams
+  - private_streams
+  - fiat_deposit_withdrawal_runtime
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /pubapi/v2/markets
+    auth: none
+    rate_limit_bucket: coinspot_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /pubapi/v2/orders/open?cointype={coin}&markettype=aud
+    auth: none
+    rate_limit_bucket: coinspot_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/ro/my/balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinspot_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinspot/request_specs/get_balances.json
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/ro/my/fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinspot_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinspot/request_specs/get_fees.json
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/my/{buy|sell|buy/now|sell/now}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinspot_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinspot/request_specs/place_order_limit_buy.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/ro/my/orders/open
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinspot_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinspot/request_specs/get_open_orders.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v2/ro/my/transactions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinspot_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinspot/request_specs/get_recent_fills.json

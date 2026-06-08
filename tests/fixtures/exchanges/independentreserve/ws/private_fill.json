@@ -1,0 +1,21 @@
+{
+  "event": "trade",
+  "channel": "trades",
+  "Data": [
+    {
+      "TradeGuid": "trade-guid-ws-1",
+      "OrderGuid": "order-guid-1",
+      "ClientOrderIdentifier": "client-1",
+      "PrimaryCurrencyCode": "Xbt",
+      "SecondaryCurrencyCode": "Sgd",
+      "OrderType": "LimitOffer",
+      "Price": "90000.00",
+      "Volume": "0.02",
+      "Value": "1800.00",
+      "Fee": "1.80",
+      "FeeCurrencyCode": "Sgd",
+      "LiquidityType": "Taker",
+      "TradeTimestampUtc": "2026-06-08T00:02:00Z"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+# Pacifica gateway adapter example. Disabled by default.
+exchange: pacifica
+adapter: pacifica
+enabled: false
+
+rest_base_url: https://api.pacifica.fi
+testnet_rest_base_url: https://test-api.pacifica.fi
+public_websocket_url: wss://ws.pacifica.fi/ws
+testnet_public_websocket_url: wss://test-ws.pacifica.fi/ws
+use_testnet_env: PACIFICA_USE_TESTNET
+
+credentials:
+  account_env: PACIFICA_ACCOUNT
+  agent_wallet_env: PACIFICA_AGENT_WALLET
+  agent_private_key_env: PACIFICA_AGENT_PRIVATE_KEY
+  private_rest_enabled_env: PACIFICA_PRIVATE_REST_ENABLED
+
+streams:
+  public_streams_enabled_env: PACIFICA_PUBLIC_STREAMS_ENABLED
+  heartbeat_interval_ms: 30000
+  pong_timeout_ms: 60000
+  force_reconnect_ms: 86400000
+
+safety:
+  live_trading_enabled: false
+  private_stream_runtime_enabled: false
+  request_spec_only_private_writes: true
+  notes:
+    - Public REST market info and order book are implemented.
+    - Private write endpoints require signed agent-wallet dry-run validation before runtime enablement.
+    - Do not set real wallet keys in this file.

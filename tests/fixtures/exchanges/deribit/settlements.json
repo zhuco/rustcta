@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "settlements": [
+      {
+        "instrument_name": "BTC-28JUN24-70000-C",
+        "type": "settlement",
+        "session_bankruptcy": 0,
+        "session_profit_loss": 0.012,
+        "socialized": 0,
+        "funded": 0,
+        "timestamp": 1719561600000
+      }
+    ]
+  }
+}

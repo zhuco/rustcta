@@ -1,0 +1,19 @@
+{
+  "marginSummary": {
+    "accountValue": "1250.5"
+  },
+  "withdrawable": "1000.25",
+  "assetPositions": [
+    {
+      "type": "oneWay",
+      "position": {
+        "coin": "BTC",
+        "szi": "0.02",
+        "entryPx": "64000",
+        "markPx": "65000",
+        "unrealizedPnl": "20.0",
+        "leverage": { "type": "cross", "value": 3 }
+      }
+    }
+  ]
+}

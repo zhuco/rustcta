@@ -1,0 +1,9 @@
+{
+  "operation": "kucoinfutures.get_private_funding_fee_history",
+  "method": "GET",
+  "path": "/api/v1/funding-history",
+  "auth": "hmac",
+  "query": {
+    "symbol": "XBTUSDTM"
+  }
+}

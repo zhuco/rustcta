@@ -1,0 +1,11 @@
+{
+  "exchange": "coinbaseexchange",
+  "algorithm": "hmac_sha256_base64_decoded_secret",
+  "secret": "c2VjcmV0",
+  "timestamp": "1700000000",
+  "method": "GET",
+  "request_path": "/accounts",
+  "body": "",
+  "payload": "1700000000GET/accounts",
+  "expected_signature": "p4Xa5K4NJ1AtiEBmUbme6DmXWbRF8pYDmPmpNMdWvvc="
+}

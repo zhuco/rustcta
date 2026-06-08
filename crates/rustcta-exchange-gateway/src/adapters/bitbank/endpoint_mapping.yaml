@@ -1,0 +1,225 @@
+schema_version: 1
+exchange: bitbank
+adapter: rustcta_exchange_gateway::adapters::bitbank
+metadata:
+  status: validated
+  notes: "Task 13 bitbank half: Japanese Spot markets, lowercase underscore pairs such as btc_jpy, JPY quotes explicit, no fiat funding operations."
+market_types:
+  - spot
+products:
+  - spot
+base_urls:
+  public_rest: https://public.bitbank.cc
+  private_rest: https://api.bitbank.cc/v1
+rest:
+  base_url: https://api.bitbank.cc/v1
+auth:
+  rest:
+    scheme: hmac_sha256
+    headers: [ACCESS-KEY, ACCESS-NONCE, ACCESS-SIGNATURE]
+    signing_payload:
+      get: "nonce + /v1 + path + sorted_query"
+      post: "nonce + json_body"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 5
+      burst: 10
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 5
+      burst: 10
+    orders:
+      scope: orders
+      interval: 1s
+      limit: 5
+      burst: 5
+    socketio:
+      scope: websocket
+      interval: 1m
+      limit: 100
+pagination:
+  recent_fills:
+    style: count_since_end_or_order_id
+    limit_param: count
+    max_limit: 1000
+    since_param: since
+    until_param: end
+    cursor_param: order_id
+    unsupported_cursors:
+      - offset
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: unsupported
+  cancel_orders:
+    support: native
+    mode: single_pair_order_ids
+    atomicity: non_atomic
+    partial_failure: true
+websocket:
+  public:
+    support: native
+    url: wss://stream.bitbank.cc/socket.io/?EIO=4&transport=websocket
+    protocol: socket.io
+    rooms:
+      order_book_snapshot: depth_whole_{pair}
+      order_book_delta: depth_diff_{pair}
+      trades: transactions_{pair}
+      ticker: ticker_{pair}
+      candles: candlestick_{pair}_{interval}
+    heartbeat:
+      direction: server_ping_client_pong
+      interval_ms: 25000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    protocol: pubnub
+    token_endpoint: /user/subscribe
+    auth: rest_get_user_subscribe_token
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/pairs
+    auth: none
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: false
+    notes: "Unauthenticated endpoint on api.bitbank.cc/v1; fallback in code can parse /spot/status."
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /{pair}/depth
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /user/assets
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/pairs
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /user/spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/place_order_limit.json
+    notes: "No client_order_id support; post_only is a boolean field for limit orders."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /user/spot/cancel_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitbank/request_specs/cancel_order.json
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /user/spot/cancel_orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /user/spot/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    params:
+      - name: pair
+      - name: order_id
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /user/spot/active_orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /user/spot/trade_history
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    params:
+      - name: pair
+      - name: order_id
+      - name: count
+      - name: since
+      - name: end
+  - operation: get_private_stream_token
+    product: spot
+    transport: rest
+    method: GET
+    path: /user/subscribe
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+unsupported:
+  - operation: fiat_funding
+    reason: "Bank transfer, fiat deposit, fiat withdrawal, and ledger write operations are out of gateway runtime scope."
+  - operation: client_order_id
+    reason: "bitbank Spot REST order endpoints are order_id based."
+  - operation: amend_order
+    reason: "No standard in-place amend endpoint is exposed."
+  - operation: futures
+    reason: "Task 13 bitbank half is Japanese Spot/Jpy markets only."

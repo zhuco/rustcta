@@ -1,0 +1,10 @@
+gateway:
+  adapters:
+    - bitvavo
+bitvavo:
+  enabled: false
+  rest_base_url: "https://api.bitvavo.com/v2"
+  ws_url: "wss://ws.bitvavo.com/v2"
+  enabled_private_rest: false
+  api_key_env: "RUSTCTA_BITVAVO_API_KEY"
+  api_secret_env: "RUSTCTA_BITVAVO_API_SECRET"

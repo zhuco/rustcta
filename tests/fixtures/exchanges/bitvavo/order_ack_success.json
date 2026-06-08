@@ -1,0 +1,15 @@
+{
+  "orderId": "order-1",
+  "market": "BTC-EUR",
+  "clientOrderId": "CLIENTLIMIT1",
+  "created": 1743054548000,
+  "updated": 1743054548123,
+  "side": "buy",
+  "orderType": "limit",
+  "status": "new",
+  "amount": "0.02",
+  "filledAmount": "0",
+  "price": "65000",
+  "timeInForce": "GTC",
+  "postOnly": false
+}

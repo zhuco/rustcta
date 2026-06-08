@@ -1,0 +1,10 @@
+{
+  "operation": "get_positions",
+  "product": "perpetual",
+  "method": "GET",
+  "path": "/contract/private/position",
+  "query": {
+    "symbol": "BTCUSDT"
+  },
+  "auth": "x-bm-hmac-sha256"
+}

@@ -1,0 +1,49 @@
+{
+  "success": true,
+  "result": [
+    {
+      "id": 6001,
+      "symbol": "C-BTC-65000-280626",
+      "contract_type": "call_options",
+      "underlying_asset": { "symbol": "BTC" },
+      "quoting_asset": { "symbol": "USDT" },
+      "settling_asset": { "symbol": "USDT" },
+      "strike_price": "65000",
+      "settlement_time": "2026-06-28T08:00:00Z",
+      "contract_value": "0.001",
+      "mark_price": "2025.5",
+      "spot_price": "65100.0",
+      "greeks": {
+        "delta": "0.52",
+        "gamma": "0.00004",
+        "theta": "-32.5",
+        "vega": "105.2",
+        "rho": "4.8",
+        "iv": "0.64"
+      },
+      "open_interest": "120"
+    },
+    {
+      "id": 6002,
+      "symbol": "P-BTC-65000-280626",
+      "contract_type": "put_options",
+      "underlying_asset": { "symbol": "BTC" },
+      "quoting_asset": { "symbol": "USDT" },
+      "settling_asset": { "symbol": "USDT" },
+      "strike_price": "65000",
+      "settlement_time": "2026-06-28T08:00:00Z",
+      "contract_value": "0.001",
+      "mark_price": "1900.0",
+      "spot_price": "65100.0",
+      "g": {
+        "d": "-0.48",
+        "g": "0.00005",
+        "t": "-31.2",
+        "v": "101.7",
+        "r": "-4.1",
+        "iv": "0.66"
+      },
+      "oi": "96"
+    }
+  ]
+}

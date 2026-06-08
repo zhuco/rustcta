@@ -1,0 +1,7 @@
+{
+  "secret": "test-secret",
+  "timestamp": "1548175200641",
+  "method": "GET",
+  "path": "/websocket",
+  "algorithm": "hmac_sha256_hex"
+}

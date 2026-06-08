@@ -1,0 +1,7 @@
+{
+  "exchange": "dydx",
+  "operation": "place_order",
+  "status": "unsupported",
+  "reason": "dYdX writes are signed dYdX Chain transactions, not CEX-style API-key REST requests.",
+  "secret_material": "redacted_none"
+}

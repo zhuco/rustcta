@@ -1,0 +1,17 @@
+{
+  "exchange": "coincheck",
+  "operation": "coincheck.place_order",
+  "method": "POST",
+  "path": "/api/exchange/orders",
+  "auth": "hmac",
+  "headers": {
+    "ACCESS-KEY": "fixture-key",
+    "ACCESS-NONCE": "1700000000000"
+  },
+  "body": {
+    "pair": "btc_jpy",
+    "order_type": "buy",
+    "rate": "10000000",
+    "amount": "0.01"
+  }
+}

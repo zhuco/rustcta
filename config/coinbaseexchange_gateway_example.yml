@@ -1,0 +1,12 @@
+enabled: false
+adapter: coinbaseexchange
+rest_base_url: https://api.exchange.coinbase.com
+websocket_url: wss://ws-feed.exchange.coinbase.com
+private_rest_enabled: false
+credentials:
+  api_key_env: COINBASE_EXCHANGE_API_KEY
+  api_secret_env: COINBASE_EXCHANGE_API_SECRET
+  api_passphrase_env: COINBASE_EXCHANGE_API_PASSPHRASE
+notes:
+  - "Coinbase Exchange spot-only adapter; separate from existing coinbase Advanced Trade/INTX."
+  - "Do not place live orders from this disabled example."

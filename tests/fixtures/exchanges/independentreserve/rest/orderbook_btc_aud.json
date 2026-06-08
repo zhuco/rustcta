@@ -1,0 +1,12 @@
+{
+  "BuyOrders": [
+    { "Price": "100000.00", "Volume": "0.50" },
+    { "Price": "99990.00", "Volume": "0.20" }
+  ],
+  "SellOrders": [
+    { "Price": "100010.00", "Volume": "0.40" },
+    { "Price": "100020.00", "Volume": "0.10" }
+  ],
+  "Nonce": 42,
+  "CreatedTimestampUtc": "2026-06-08T00:00:00Z"
+}

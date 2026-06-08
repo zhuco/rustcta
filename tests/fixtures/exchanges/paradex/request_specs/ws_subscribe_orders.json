@@ -1,0 +1,14 @@
+{
+  "exchange": "paradex",
+  "operation": "ws_subscribe_orders",
+  "transport": "websocket",
+  "payload": {
+    "jsonrpc": "2.0",
+    "method": "subscribe",
+    "params": {
+      "channel": "orders.BTC-USD-PERP"
+    },
+    "id": 1
+  },
+  "secret_free": true
+}

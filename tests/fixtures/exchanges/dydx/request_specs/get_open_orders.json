@@ -1,0 +1,15 @@
+{
+  "exchange": "dydx",
+  "operation": "open_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders",
+  "auth": "none",
+  "query": {
+    "address": { "match": "exact", "value": "dydx1testaddress000000000000000000000000000000" },
+    "subaccountNumber": { "match": "exact", "value": "0" },
+    "status": { "match": "exact", "value": "OPEN" }
+  },
+  "strict_query": true
+}

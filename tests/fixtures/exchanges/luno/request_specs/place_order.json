@@ -1,0 +1,17 @@
+{
+  "method": "POST",
+  "path": "/api/1/postorder",
+  "auth": "http_basic_api_key",
+  "headers": {
+    "Authorization": "Basic <redacted>",
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "form": {
+    "pair": "XBTZAR",
+    "type": "BID",
+    "volume": "0.01",
+    "price": "1200000",
+    "base_account_id": "<redacted>",
+    "counter_account_id": "<redacted>"
+  }
+}

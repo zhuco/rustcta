@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "subscribe",
+  "params": {
+    "channel": "user.orders"
+  },
+  "id": 1
+}

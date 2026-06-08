@@ -1,0 +1,11 @@
+{
+  "secret": "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg==",
+  "api_key": "key",
+  "endpoint_path": "/derivatives/api/v3/batchorder",
+  "nonce": "1616492376594",
+  "params": {
+    "batchOrder": "[{\"order\":\"send\",\"params\":{\"cliOrdId\":\"fut-batch-1\",\"limitPrice\":\"37500\",\"orderType\":\"lmt\",\"side\":\"buy\",\"size\":\"0.01\",\"symbol\":\"PF_XBTUSDT\"}}]"
+  },
+  "expected_query_or_body": "batchOrder=%5B%7B%22order%22%3A%22send%22%2C%22params%22%3A%7B%22cliOrdId%22%3A%22fut-batch-1%22%2C%22limitPrice%22%3A%2237500%22%2C%22orderType%22%3A%22lmt%22%2C%22side%22%3A%22buy%22%2C%22size%22%3A%220.01%22%2C%22symbol%22%3A%22PF_XBTUSDT%22%7D%7D%5D",
+  "expected_authent": "TLyJiN0+8DY/fuTWAH2+B0q/A2Z4UYYSYUZk0Uz4C8O5/lYSHR/Wjo4k5xGYFjeioO0FW3/hM6DjcrseLUeeag=="
+}

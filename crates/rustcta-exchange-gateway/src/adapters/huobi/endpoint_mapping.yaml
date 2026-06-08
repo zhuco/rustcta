@@ -1,0 +1,174 @@
+schema_version: 1
+exchange: huobi
+adapter: rustcta-exchange-gateway::adapters::huobi
+metadata:
+  status: validated
+  source: HTX/Huobi official Spot and USDT-margined swap API docs
+  last_reviewed: "2026-06-08"
+  notes: Huobi legacy profile reuses HTX adapter signing, parser, transport and endpoint semantics while returning exchange id huobi for gateway registration.
+market_types: [spot, linear_perp]
+products: [spot, linear_perp]
+rest:
+  base_url: https://api.huobi.pro
+base_urls:
+  spot_rest_base_url: https://api.huobi.pro
+  linear_rest_base_url: https://api.hbdm.com
+  spot_public_ws_url: wss://api.huobi.pro/ws
+  spot_private_ws_url: wss://api.huobi.pro/ws/v2
+  linear_public_ws_url: wss://api.hbdm.com/linear-swap-ws
+  private_ws_url: wss://api.hbdm.com/linear-swap-notification
+auth:
+  rest:
+    mode: hmac_sha256_base64_query_v2
+    query: [AccessKeyId, SignatureMethod, SignatureVersion, Timestamp, Signature]
+    payload: uppercase_method + newline + lowercase_host + newline + path + newline + ascii_sorted_urlencoded_query
+rate_limits:
+  plan: fixed_window_conservative
+  buckets:
+    huobi.rest.public: { scope: ip, limit: 60, window_ms: 60000, burst: 10 }
+    huobi.rest.private: { scope: account, limit: 30, window_ms: 60000, burst: 5 }
+    huobi.orders: { scope: orders, limit: 20, window_ms: 60000, burst: 5 }
+    huobi.ws: { scope: websocket, limit: 60, window_ms: 60000, burst: 10 }
+websocket:
+  transport: websocket
+  compression: gzip
+  public:
+    supports_subscribe: true
+    supports_unsubscribe: true
+    channels: [depth, trade, ticker, kline]
+    heartbeat: { direction: server_ping, ping_interval_ms: 20000, pong_timeout_ms: 30000, stale_message_ms: 30000 }
+  private:
+    supports_subscribe: true
+    supports_unsubscribe: true
+    channels: [spot_orders, spot_fills, spot_accounts, orders_cross, match_orders_cross, accounts_cross, positions_cross]
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /v1/common/symbols | /linear-swap-api/v1/swap_contract_info
+    auth: none
+    rate_limit_bucket: huobi.rest.public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /market/depth | /linear-swap-ex/market/depth
+    auth: none
+    rate_limit_bucket: huobi.rest.public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/account/accounts/{account-id}/balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_balances
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_account_info
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: linear_perp
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /v1/order/orders/place | /linear-swap-api/v1/swap_cross_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: huobi.orders
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: linear_perp
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /v1/order/orders/{order-id}/submitcancel | /linear-swap-api/v1/swap_cross_cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: huobi.orders
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/order/orders/{order-id}
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_order_info
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/order/openOrders
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_openorders
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/order/matchresults
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v3/swap_cross_matchresults
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: huobi.rest.private
+    weight: 1
+    request_spec_required: true

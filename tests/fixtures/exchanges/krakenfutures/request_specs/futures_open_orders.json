@@ -1,0 +1,6 @@
+{
+  "operation": "krakenfutures.get_open_orders.perpetual",
+  "method": "GET",
+  "path": "/derivatives/api/v3/openorders",
+  "auth": "hmac"
+}

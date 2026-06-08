@@ -1,0 +1,9 @@
+{
+  "operation": "kucoinfutures.query_order",
+  "method": "GET",
+  "path": "/api/v1/orders/1001",
+  "auth": "hmac",
+  "query": {
+    "symbol": "XBTUSDTM"
+  }
+}

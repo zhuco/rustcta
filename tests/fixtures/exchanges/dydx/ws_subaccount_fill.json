@@ -1,0 +1,20 @@
+{
+  "type": "channel_data",
+  "channel": "v4_subaccounts",
+  "id": "dydx1testaddress000000000000000000000000000000/0",
+  "contents": {
+    "fills": [
+      {
+        "id": "fill-fixture-1",
+        "orderId": "order-fixture-1",
+        "ticker": "BTC-USD",
+        "side": "BUY",
+        "liquidity": "TAKER",
+        "price": "65000",
+        "size": "0.02",
+        "fee": "0.13",
+        "createdAt": "2026-06-08T00:01:00Z"
+      }
+    ]
+  }
+}

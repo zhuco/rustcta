@@ -1,0 +1,9 @@
+{
+  "api_key": "test-key",
+  "secret": "c2VjcmV0",
+  "method": "POST",
+  "path": "/v3/orders",
+  "timestamp": "1567410781745",
+  "body": "{\"marketId\":\"BTC-AUD\",\"price\":\"100.12\",\"amount\":\"1.034\",\"type\":\"Limit\",\"side\":\"Bid\",\"clientOrderId\":\"cli-123\"}",
+  "expected_signature": "mk4dXuMvgQ3zeLCpQA8M3mo4Scstd5l3YRmVZSR4KFsutsWHNqdPapaWMMNNI8iYsSiUay8BGuVYdkE+csbQ3A=="
+}

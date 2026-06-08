@@ -1,0 +1,173 @@
+schema_version: 1
+exchange: bithumb
+adapter: rustcta_exchange_gateway::adapters::bithumb
+metadata:
+  status: validated
+  notes: "Task 12 Korean Spot adapter; market codes use QUOTE-BASE such as KRW-BTC. public_limit_per_second: 150; private_limit_per_second: 140; private_stream_requires_jwt_credentials."
+market_types:
+  - spot
+products:
+  - spot
+rest:
+  base_url: https://api.bithumb.com
+rate_limits:
+  buckets:
+    bithumb_rest:
+      scope: rest
+      interval: 1s
+      limit: 10
+      burst: 10
+    bithumb_orders:
+      scope: orders
+      interval: 1s
+      limit: 5
+      burst: 5
+    bithumb_ws:
+      scope: websocket
+      interval: 1m
+      limit: 100
+      burst: 10
+pagination:
+  get_open_orders:
+    style: limit
+    limit_param: limit
+    max_limit: 100
+  get_recent_fills:
+    style: limit_with_time_or_order_id
+    limit_param: limit
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
+batch:
+  place_orders:
+    support: unsupported
+    atomicity: unknown
+    max_items: 1
+  cancel_orders:
+    support: unsupported
+    atomicity: unknown
+    max_items: 1
+websocket:
+  public:
+    support: native
+    url: wss://ws-api.bithumb.com/websocket/v1
+    heartbeat:
+      method: ping
+      direction: client_ping
+      interval_ms: 30000
+      timeout_ms: 90000
+    resync: rest_order_book_snapshot
+  private:
+    support: native_specs_only
+    url: wss://ws-api.bithumb.com/websocket/v1/private
+    auth: authorization_bearer_jwt
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/market/all
+    auth: none
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/orderbook
+    auth: none
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/accounts
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/orders/chance
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2/orders
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: bithumb_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bithumb/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /v2/order
+    auth: jwt
+    credential_scopes: [trade]
+    rate_limit_bucket: bithumb_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bithumb/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/order
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/orders/open
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/orders/closed
+    auth: jwt
+    credential_scopes: [read_only]
+    rate_limit_bucket: bithumb_rest
+    weight: 1
+    request_spec_required: true
+unsupported:
+  - operation: get_positions
+    reason: "Bithumb Spot has no standard derivative position model."
+  - operation: amend_order
+    reason: "No verified native amend endpoint mapped to the shared Spot amend contract."
+  - operation: cancel_all_orders
+    reason: "No account-wide native cancel-all mapped; use explicit order reconciliation."
+  - operation: batch_place_orders
+    reason: "No native atomic batch order endpoint confirmed."
+  - operation: batch_cancel_orders
+    reason: "No native atomic batch cancel endpoint confirmed."

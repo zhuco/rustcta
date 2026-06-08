@@ -1,0 +1,12 @@
+{
+  "operation": "kucoinfutures.get_recent_fills",
+  "method": "GET",
+  "path": "/api/v1/fills",
+  "auth": "hmac",
+  "query": {
+    "symbol": "XBTUSDTM",
+    "orderId": "1001",
+    "pageSize": "100",
+    "currentPage": "3"
+  }
+}

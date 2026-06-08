@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 mod support;
 
 use rustcta::exchanges::{GateIoSpotClient, GateIoSpotConfig};

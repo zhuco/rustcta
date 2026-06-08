@@ -1,0 +1,10 @@
+{
+  "id": "01HCDAA7YJ68ZJ0FTEPR7DYDS1",
+  "instrument": "BTC-BRL",
+  "side": "buy",
+  "type": "limit",
+  "qty": "0.01",
+  "limitPrice": 350000,
+  "externalId": "offline-fixture",
+  "status": "created"
+}

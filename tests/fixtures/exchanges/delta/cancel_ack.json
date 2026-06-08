@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "result": {
+    "id": 2001,
+    "product_symbol": "BTCUSDT",
+    "contract_type": "perpetual_futures",
+    "size": 2,
+    "unfilled_size": 2,
+    "side": "buy",
+    "order_type": "limit_order",
+    "client_order_id": "cid-1",
+    "state": "cancelled"
+  }
+}

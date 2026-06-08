@@ -1,0 +1,11 @@
+{
+  "mid_price": 30000,
+  "bids": [
+    { "price": 29999, "size": 0.25 },
+    { "price": 29998, "size": 0.5 }
+  ],
+  "asks": [
+    { "price": 30001, "size": 0.3 },
+    { "price": 30002, "size": 0.4 }
+  ]
+}

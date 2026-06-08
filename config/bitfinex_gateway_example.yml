@@ -1,0 +1,57 @@
+# Bitfinex gateway adapter example.
+# Credentials are read from environment variables by default:
+# BITFINEX_API_KEY and BITFINEX_API_SECRET.
+
+exchange: bitfinex
+adapter: bitfinex
+enabled: false
+
+market_types:
+  - spot
+  - margin
+  - perpetual
+
+api_key: ${BITFINEX_API_KEY}
+api_secret: ${BITFINEX_API_SECRET}
+
+public_rest_base_url: https://api-pub.bitfinex.com
+private_rest_base_url: https://api.bitfinex.com
+public_ws_url: wss://api-pub.bitfinex.com/ws/2
+private_ws_url: wss://api.bitfinex.com/ws/2
+testnet: false
+sandbox: false
+
+# Keep private REST and streams disabled until read-only preflight,
+# permissions, notional limits, and audit logging are validated.
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+request_timeout_ms: 10000
+orderbook_depth: 25
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - tBTCUSD
+    - tETHUSD
+  margin:
+    - tBTCUSD
+  perpetual:
+    - tBTCF0:USTF0
+    - tETHF0:USTF0
+
+permissions:
+  required:
+    - read_account
+    - trade
+  excluded_runtime:
+    - margin_loan
+    - funding_book
+    - withdraw
+    - transfer
+
+notes:
+  - Spot order types use EXCHANGE LIMIT/EXCHANGE MARKET; margin and derivatives use LIMIT/MARKET.
+  - Client-id cancel/query requires cid_date and is Unsupported in the shared request shape.
+  - Funding offers/loans, funding books, withdrawals, and wallet transfers are intentionally outside runtime.

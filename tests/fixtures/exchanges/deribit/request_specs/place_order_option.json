@@ -1,0 +1,20 @@
+{
+  "exchange": "deribit",
+  "operation": "place_order",
+  "product": "option",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v2/private/buy",
+  "auth": "signed",
+  "query": {
+    "instrument_name": { "match": "exact", "value": "BTC-28JUN24-70000-C" },
+    "amount": { "match": "exact", "value": "1" },
+    "type": { "match": "exact", "value": "limit" },
+    "price": { "match": "exact", "value": "0.083" },
+    "label": { "match": "exact", "value": "client-1" }
+  },
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "forbid_header_values_containing": ["client_secret"]
+}

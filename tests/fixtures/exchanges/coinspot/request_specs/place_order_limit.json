@@ -1,0 +1,19 @@
+{
+  "exchange": "coinspot",
+  "operation": "coinspot.place_order",
+  "method": "POST",
+  "path": "/api/v2/my/buy",
+  "headers": {
+    "Content-Type": "application/json",
+    "key": "test-key",
+    "sign": "<hmac_sha512_json_body>"
+  },
+  "body": {
+    "cointype": "btc",
+    "markettype": "aud",
+    "amount": "0.01",
+    "rate": "100000"
+  },
+  "credential_scope": "trade",
+  "runtime_default": "disabled_until_private_credentials"
+}

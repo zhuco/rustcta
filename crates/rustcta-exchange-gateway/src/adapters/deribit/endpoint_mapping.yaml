@@ -1,0 +1,164 @@
+schema_version: 1
+exchange: deribit
+adapter: rustcta_exchange_gateway::adapters::deribit
+metadata:
+  status: validated
+  notes: "Task 4 mapping for Deribit options, futures, and perpetual common gateway surface. Option greeks/settlements are adapter-specific helpers."
+market_types: [option, futures, perpetual]
+products: [option, futures, perpetual]
+base_urls:
+  rest: https://www.deribit.com
+  websocket: wss://www.deribit.com/ws/api/v2
+auth:
+  rest:
+    algorithm: oauth_client_credentials
+    token_endpoint: /api/v2/public/auth
+    headers: [Authorization]
+  websocket:
+    algorithm: jsonrpc_public_auth_client_credentials
+rate_limits:
+  buckets:
+    non_matching_engine:
+      scope: rest
+      interval: 1s
+      limit: 20
+    matching_engine:
+      scope: orders
+      interval: 1s
+      limit: 20
+    ws_private:
+      scope: user_stream
+      interval: 1s
+      limit: 5
+pagination:
+  recent_fills:
+    style: count_cursor_or_time
+    endpoint: /api/v2/private/get_user_trades_by_instrument
+    limit_param: count
+    cursor_param: continuation
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  triggers: [place_order_timeout, cancel_order_timeout, private_stream_disconnected]
+batch:
+  place_orders:
+    support: composed
+    endpoint: /api/v2/private/buy|sell
+    atomicity: non_atomic
+  cancel_orders:
+    support: composed
+    endpoint: /api/v2/private/cancel
+    atomicity: non_atomic
+websocket:
+  public:
+    support: native
+    heartbeat:
+      accepts: ['{"method":"heartbeat"}']
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    auth: client_credentials
+    channels: [user.orders.any.any.100ms, user.trades.any.any.100ms, user.portfolio.any]
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/public/get_instruments
+    auth: none
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/deribit/instruments_options.json
+  - operation: get_order_book
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/public/get_order_book
+    auth: none
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/deribit/orderbook_option.json
+  - operation: get_balances
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/private/get_account_summary
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/deribit/request_specs/get_positions.json
+  - operation: get_positions
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/private/get_positions
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/deribit/positions.json
+  - operation: place_order
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/private/buy|sell
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: matching_engine
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/deribit/request_specs/place_order_option.json
+  - operation: cancel_order
+    product: mixed
+    transport: rest
+    method: GET
+    path: /api/v2/private/cancel
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: matching_engine
+    weight: 1
+    request_spec_required: true
+  - operation: option_chain_helper
+    product: option
+    transport: rest
+    method: GET
+    path: /api/v2/public/get_instruments
+    auth: none
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: false
+    notes: "Adapter-specific helper; not exposed as unified ExchangeClient option model."
+  - operation: greeks_helper
+    product: option
+    transport: rest
+    method: GET
+    path: /api/v2/public/ticker
+    auth: none
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/deribit/greeks_ticker.json
+  - operation: settlement_helper
+    product: option
+    transport: rest
+    method: GET
+    path: /api/v2/public/get_last_settlements_by_instrument
+    auth: none
+    rate_limit_bucket: non_matching_engine
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/deribit/settlements.json

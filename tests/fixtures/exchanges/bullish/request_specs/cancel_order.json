@@ -1,0 +1,11 @@
+{
+  "operation": "cancel_order",
+  "method": "POST",
+  "path": "/trading-api/v2/command",
+  "auth": "bearer_jwt_plus_bx_signature",
+  "body": {
+    "commandType": "V3CancelOrder",
+    "orderId": "offline-order-id",
+    "symbol": "BTCUSDC"
+  }
+}

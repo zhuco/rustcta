@@ -1,0 +1,19 @@
+{
+  "exchange": "coinsph",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/openapi/v1/openOrders",
+  "auth": "signed",
+  "query": {
+    "symbol": {"match": "exact", "value": "BTCPHP"},
+    "timestamp": {"match": "present"},
+    "recvWindow": {"match": "exact", "value": "5000"},
+    "signature": {"match": "present"}
+  },
+  "headers": {
+    "x-coins-apikey": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["coins-test-secret"]
+}

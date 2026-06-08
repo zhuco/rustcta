@@ -1,0 +1,8 @@
+{
+  "type": "accepted",
+  "order_id": "18834",
+  "client_order_id": "client-1",
+  "symbol": "btcusd",
+  "side": "buy",
+  "order_type": "exchange limit"
+}

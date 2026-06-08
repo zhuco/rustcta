@@ -23,6 +23,9 @@ url.workspace = true
 uuid.workspace = true
 urlencoding = "2.1"
 ed25519-dalek = { version = "2.1", features = ["std"] }
+sha3 = "0.10"
+secp256k1 = { version = "0.27", features = ["recovery"] }
+rmp-serde = "1.1"
 rustcta-exchange-api.workspace = true
 rustcta-types.workspace = true
 

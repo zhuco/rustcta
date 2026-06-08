@@ -1,0 +1,8 @@
+{
+  "api_key": "bitbank-test-key",
+  "api_secret": "bitbank-test-secret",
+  "nonce": "1710000000123",
+  "method": "GET",
+  "path": "/v1/user/assets",
+  "expected_signature": "fc85ce442fb6406e5e520b693e3b7679b356adf5bff313ce2835e1cb219107d2"
+}

@@ -1,0 +1,25 @@
+{
+  "result": [
+    {
+      "instrument": "BTC_USDT_Perp",
+      "instrument_type": "PERPETUAL",
+      "base": "BTC",
+      "quote": "USDT",
+      "tick_size": "0.1",
+      "lot_size": "0.001",
+      "min_size": "0.001",
+      "max_size": "100",
+      "status": "ACTIVE"
+    },
+    {
+      "instrument": "BTC_USDT_20260626_80000_C",
+      "instrument_type": "CALL",
+      "base": "BTC",
+      "quote": "USDT",
+      "tick_size": "0.1",
+      "lot_size": "0.001",
+      "min_size": "0.001",
+      "status": "ACTIVE"
+    }
+  ]
+}

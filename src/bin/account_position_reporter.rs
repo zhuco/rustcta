@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use clap::Parser;

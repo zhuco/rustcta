@@ -1,0 +1,8 @@
+{
+  "api_key": "test-key",
+  "secret": "c2VjcmV0",
+  "method": "GET",
+  "path": "/v3/orders",
+  "timestamp": "1567410781745",
+  "expected_signature": "QRv6E1+XPGU9JOazDs1HDC2wAzyA7dE+rmpBabqztXHNw4E9BqLEzhP0VRuHwD4/35LOjygXbu/24K906172kw=="
+}

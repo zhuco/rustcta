@@ -1,0 +1,27 @@
+{
+  "code": "0",
+  "data": {
+    "id": "offline-account",
+    "ethereumAddress": "0x0000000000000000000000000000000000000000",
+    "l2Key": "offline-l2-key",
+    "contractAccount": {
+      "accountId": "12345",
+      "availableBalance": "1000.00",
+      "equity": "1000.00"
+    },
+    "contractWallets": [
+      {
+        "token": "USDT",
+        "balance": "1000.00"
+      }
+    ],
+    "positions": [
+      {
+        "symbol": "BTC-USDT",
+        "side": "LONG",
+        "size": "0.01",
+        "entryPrice": "65000"
+      }
+    ]
+  }
+}

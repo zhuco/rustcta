@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "currency": "BTC",
+    "equity": 2.5,
+    "balance": 2.4,
+    "available_funds": 2.1,
+    "available_withdrawal_funds": 2.0,
+    "maker_commission": 0.0001,
+    "taker_commission": 0.0005
+  }
+}

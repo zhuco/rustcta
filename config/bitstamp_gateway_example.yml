@@ -1,0 +1,41 @@
+# Bitstamp gateway adapter example. Disabled by default.
+# Credentials are read from environment variables by default:
+# BITSTAMP_API_KEY, BITSTAMP_API_SECRET and optional BITSTAMP_SUBACCOUNT_ID.
+
+exchange: bitstamp
+adapter: bitstamp
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://www.bitstamp.net
+public_ws_url: wss://ws.bitstamp.net
+
+api_key: ${BITSTAMP_API_KEY}
+api_secret: ${BITSTAMP_API_SECRET}
+subaccount_id: ${BITSTAMP_SUBACCOUNT_ID}
+
+# Keep private REST and streams disabled until read-only preflight,
+# subaccount routing, permissions and order limits are validated.
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+request_timeout_ms: 10000
+orderbook_depth: 25
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - btcusd
+    - ethusd
+
+safety:
+  live_trading_enabled: false
+  unsupported_runtime:
+    - derivatives
+    - positions
+    - sell_quote_market_order
+    - order_list
+    - batch_place

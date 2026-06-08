@@ -1,0 +1,13 @@
+{
+  "exchange": "dydx",
+  "operation": "open_orders",
+  "method": "GET",
+  "path": "/v4/orders",
+  "auth": "wallet_address_subaccount",
+  "query": {
+    "address": "dydx1testaddress000000000000000000000000000",
+    "subaccountNumber": "0",
+    "status": "OPEN"
+  },
+  "secret_free": true
+}

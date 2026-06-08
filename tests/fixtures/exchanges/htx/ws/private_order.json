@@ -1,0 +1,18 @@
+{
+  "op": "notify",
+  "topic": "orders_cross.BTC-USDT",
+  "ts": 1780876800000,
+  "data": {
+    "contract_code": "BTC-USDT",
+    "order_id": 1001,
+    "order_id_str": "1001",
+    "client_order_id": "CID1",
+    "direction": "buy",
+    "offset": "open",
+    "order_price_type": "limit",
+    "status": "submitted",
+    "volume": "1",
+    "price": "65000",
+    "trade_volume": "0"
+  }
+}

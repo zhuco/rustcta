@@ -1,0 +1,41 @@
+# Luno gateway adapter example. Disabled by default.
+
+exchange: luno
+adapter: luno
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://api.luno.com
+public_ws_url: wss://ws.luno.com/api/1/stream
+private_ws_url: wss://ws.luno.com/api/1/stream
+
+api_key_id: ${LUNO_API_KEY_ID}
+api_key_secret: ${LUNO_API_KEY_SECRET}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+request_timeout_ms: 10000
+
+fiat_markets:
+  examples:
+    - XBTZAR
+    - XBTMYR
+    - XBTNGN
+    - XBTIDR
+
+unsupported:
+  - beneficiaries
+  - fiat_withdrawals
+  - fiat_deposits
+  - bank_payment_rails
+  - crypto_addresses
+  - send
+
+notes:
+  - Luno availability and pairs vary by customer region; enable only markets validated for the account region.
+  - Private order and fill endpoints are fixture/request-spec only until live-dry-run gates are added.
+  - Do not put real credentials in this file.

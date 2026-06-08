@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "message": null,
+  "code": 0,
+  "data": {
+    "id": 123456789,
+    "price": "2500000.00",
+    "amount": "0.01000000",
+    "quantity": "0.01000000",
+    "pairSymbol": "BTCTRY",
+    "pairSymbolNormalized": "BTC_TRY",
+    "type": "buy",
+    "method": "limit",
+    "orderClientId": "offline-fixture"
+  }
+}

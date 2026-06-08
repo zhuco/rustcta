@@ -1,0 +1,38 @@
+[
+  {
+    "id": "btc_idr",
+    "symbol": "BTCIDR",
+    "base_currency": "idr",
+    "traded_currency": "btc",
+    "traded_currency_unit": "BTC",
+    "description": "BTC/IDR",
+    "ticker_id": "btc_idr",
+    "volume_precision": 8,
+    "price_precision": 0,
+    "price_round": 0,
+    "trade_min_base_currency": "10000",
+    "trade_min_traded_currency": "0.00000001",
+    "has_memo": false
+  },
+  {
+    "id": "eth_idr",
+    "symbol": "ETHIDR",
+    "base_currency": "idr",
+    "traded_currency": "eth",
+    "traded_currency_unit": "ETH",
+    "description": "ETH/IDR",
+    "ticker_id": "eth_idr",
+    "volume_precision": 8,
+    "price_precision": 0,
+    "price_round": 0,
+    "trade_min_base_currency": "10000",
+    "trade_min_traded_currency": "0.00000001",
+    "has_memo": false
+  },
+  {
+    "id": "btc_usdt",
+    "base_currency": "usdt",
+    "traded_currency": "btc",
+    "trade_min_base_currency": "1"
+  }
+]

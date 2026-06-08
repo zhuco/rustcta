@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/v1/me/cancelchildorder",
+  "body": {
+    "product_code": "BTC_JPY",
+    "child_order_acceptance_id": "JRF20260608-000000-000001"
+  }
+}

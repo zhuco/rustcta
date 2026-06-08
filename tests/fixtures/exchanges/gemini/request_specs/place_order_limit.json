@@ -1,0 +1,21 @@
+{
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/v1/order/new",
+  "auth": "gemini_payload_hmac_sha384",
+  "payload": {
+    "request": "/v1/order/new",
+    "nonce": "1717200000000000",
+    "symbol": "btcusd",
+    "amount": "0.25",
+    "price": "30500.00",
+    "side": "buy",
+    "type": "exchange limit",
+    "client_order_id": "cli-18834"
+  },
+  "headers": [
+    "Gemini-APIKey",
+    "Gemini-Payload",
+    "Gemini-Signature"
+  ]
+}

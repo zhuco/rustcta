@@ -1,0 +1,22 @@
+{
+  "exchange": "coinsph",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/openapi/v1/myTrades",
+  "auth": "signed",
+  "query": {
+    "symbol": {"match": "exact", "value": "BTCPHP"},
+    "orderId": {"match": "exact", "value": "100234"},
+    "fromId": {"match": "exact", "value": "28457"},
+    "limit": {"match": "exact", "value": "50"},
+    "timestamp": {"match": "present"},
+    "recvWindow": {"match": "exact", "value": "5000"},
+    "signature": {"match": "present"}
+  },
+  "headers": {
+    "x-coins-apikey": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["coins-test-secret"]
+}

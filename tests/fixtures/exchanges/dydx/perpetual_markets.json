@@ -1,0 +1,11 @@
+{
+  "markets": {
+    "BTC-USD": {
+      "ticker": "BTC-USD",
+      "market": "BTC-USD",
+      "status": "ACTIVE",
+      "tickSize": "0.1",
+      "stepSize": "0.0001"
+    }
+  }
+}

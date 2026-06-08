@@ -1,0 +1,6 @@
+{
+  "secret": "secret",
+  "payload_json": "{\"request\":\"/v1/order/new\",\"nonce\":\"1717200000000000\",\"symbol\":\"btcusd\",\"amount\":\"0.25\",\"price\":\"30500.00\",\"side\":\"buy\",\"type\":\"exchange limit\",\"client_order_id\":\"cli-18834\"}",
+  "payload_base64": "eyJyZXF1ZXN0IjoiL3YxL29yZGVyL25ldyIsIm5vbmNlIjoiMTcxNzIwMDAwMDAwMDAwMCIsInN5bWJvbCI6ImJ0Y3VzZCIsImFtb3VudCI6IjAuMjUiLCJwcmljZSI6IjMwNTAwLjAwIiwic2lkZSI6ImJ1eSIsInR5cGUiOiJleGNoYW5nZSBsaW1pdCIsImNsaWVudF9vcmRlcl9pZCI6ImNsaS0xODgzNCJ9",
+  "signature_hex": "b0cc0c824b2b9e38a369aa93ef7a91f69ae02f604c297243841b169c36c375a530a943e078f27a156311527ab0ff62a0"
+}

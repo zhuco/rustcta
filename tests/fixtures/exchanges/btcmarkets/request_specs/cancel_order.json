@@ -1,0 +1,5 @@
+{
+  "method": "DELETE",
+  "path": "/v3/orders/7524",
+  "body": null
+}

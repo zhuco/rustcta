@@ -1,0 +1,132 @@
+exchange: gemini
+schema_version: 1
+websocket:
+  public:
+    support: native
+    url: wss://api.gemini.com/v1/marketdata
+    channels: [marketdata]
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://api.gemini.com/v1/order/events
+    auth: hmac_headers
+    channels: [order_events]
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/symbols/details
+    auth: none
+    rate_limit_bucket: rest_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/market-data#get-symbol-details
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/book/{symbol}
+    auth: none
+    rate_limit_bucket: rest_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/market-data#get-current-order-book
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/balances
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/account#get-available-balances
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/new
+    auth: hmac
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/orders#new-order
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/cancel
+    auth: hmac
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/orders#cancel-order
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/cancel/session
+    auth: hmac
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/orders#cancel-all-session-orders
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/status
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/orders#get-order-status
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/orders
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/orders#get-active-orders
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/mytrades
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://docs.gemini.com/rest/orders#get-past-trades

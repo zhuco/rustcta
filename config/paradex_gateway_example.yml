@@ -1,0 +1,16 @@
+# Paradex gateway adapter example. Disabled by default; secrets must come from env.
+enabled: false
+adapter: paradex
+rest_base_url: https://api.prod.paradex.trade/v1
+public_ws_url: wss://ws.api.prod.paradex.trade/v1
+private_ws_url: wss://ws.api.prod.paradex.trade/v1
+private_rest_enabled: false
+private_streams_enabled: false
+credentials:
+  starknet_account_env: RUSTCTA_PARADEX_STARKNET_ACCOUNT
+  stark_private_key_env: RUSTCTA_PARADEX_STARK_PRIVATE_KEY
+  jwt_env: RUSTCTA_PARADEX_JWT
+notes:
+  - Do not put wallet private keys, JWTs, or chain account fixtures in this file.
+  - Private write routes are offline request-spec only until Stark signing is live-validated.
+  - Options metadata remains adapter-specific and does not expand shared traits.

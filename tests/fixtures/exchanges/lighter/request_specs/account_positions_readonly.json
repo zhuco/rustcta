@@ -1,0 +1,15 @@
+{
+  "exchange": "lighter",
+  "operation": "positions",
+  "status": "unsupported_unverified",
+  "method": "GET",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/account",
+  "query": {
+    "account_index": "redacted-account-index"
+  },
+  "auth": "bearer",
+  "request_spec_required": true,
+  "expected_error": "lighter.positions_auth_token_unverified",
+  "trade_enabled": false
+}

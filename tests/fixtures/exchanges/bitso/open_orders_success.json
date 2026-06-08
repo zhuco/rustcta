@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "payload": [
+    {
+      "oid": "offline-open-order-1",
+      "book": "btc_mxn",
+      "side": "buy",
+      "type": "limit",
+      "status": "open",
+      "original_amount": "0.01",
+      "unfilled_amount": "0.01",
+      "price": "650000.00",
+      "origin_id": "offline-fixture"
+    }
+  ]
+}

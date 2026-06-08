@@ -1,0 +1,9 @@
+{
+  "operation": "krakenfutures.query_order.perpetual",
+  "method": "GET",
+  "path": "/derivatives/api/v3/orders",
+  "auth": "hmac",
+  "query": {
+    "orderIds": "FUT-ORDER-1"
+  }
+}

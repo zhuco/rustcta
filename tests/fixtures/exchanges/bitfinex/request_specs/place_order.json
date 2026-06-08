@@ -1,0 +1,25 @@
+{
+  "exchange": "bitfinex",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v2/auth/w/order/submit",
+  "auth": "signed",
+  "headers": {
+    "bfx-apikey": { "match": "exact", "value": "key" },
+    "bfx-nonce": { "match": "non_empty" },
+    "bfx-signature": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "type": "EXCHANGE LIMIT",
+    "symbol": "tBTCUSD",
+    "amount": "0.01",
+    "price": "65000",
+    "cid": 1575289350475
+  },
+  "forbid_header_values_containing": [
+    "bitfinex-test-secret"
+  ],
+  "signing_vector": "rest_place_order_hmac_sha384"
+}

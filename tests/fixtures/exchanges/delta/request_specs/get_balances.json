@@ -1,0 +1,7 @@
+{
+  "exchange": "delta",
+  "name": "get_balances",
+  "method": "GET",
+  "path": "/v2/wallet/balances",
+  "required_headers": ["api-key", "signature", "timestamp"]
+}

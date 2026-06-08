@@ -1,0 +1,145 @@
+schema_version: 1
+exchange: coincheck
+adapter: rustcta_exchange_gateway::adapters::coincheck
+metadata:
+  status: validated
+  notes: "Task 15 Coincheck Japan spot-only adapter; lending/deposit/withdraw excluded."
+market_types:
+  - spot
+products:
+  - spot
+rest:
+  base_url: https://coincheck.com
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 10
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 10
+    websocket:
+      scope: websocket
+      interval: 1m
+      limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: get_open_orders
+  after_unknown_cancel: get_open_orders
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+websocket:
+  public:
+    support: native
+    url: wss://ws-api.coincheck.com/
+    channels: ["{pair}-trades", "{pair}-orderbook"]
+    heartbeat:
+      direction: transport_ping_pong
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    fallback: rest_reconciliation
+    reason: "No adapter-verified private websocket auth/user stream."
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: local
+    path: static_pair_catalog
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 0
+    request_spec_required: false
+    notes: "Coincheck public docs expose pairs through endpoint-specific pair parameters; adapter ships conservative static BTC/ETH/XRP JPY catalog."
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/order_books
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://coincheck.com/ja/documents/exchange/api
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/accounts/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/exchange/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coincheck/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/exchange/orders/{id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coincheck/request_specs/cancel_order.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/exchange/orders/opens
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/exchange/orders/transactions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+unsupported:
+  - operation: query_order
+    reason: "Single order query not mapped to a verified current official endpoint."
+  - operation: cancel_all_orders
+    reason: "No verified native cancel-all endpoint."
+  - operation: amend_order
+    reason: "No verified native amend endpoint."
+  - operation: private_websocket
+    reason: "Private WS auth/user stream not adapter-verified; use REST reconciliation."
+  - operation: lending_deposit_withdraw
+    reason: "Funding and lending operations are outside trading runtime."

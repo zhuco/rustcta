@@ -1,0 +1,18 @@
+{
+  "orders": [
+    {
+      "id": "order-1",
+      "ticker": "BTC-USD",
+      "side": "BUY",
+      "type": "LIMIT",
+      "status": "OPEN",
+      "size": "0.01",
+      "price": "65000",
+      "totalFilled": "0",
+      "reduceOnly": false,
+      "postOnly": false,
+      "createdAt": "2026-06-08T00:00:00Z",
+      "updatedAt": "2026-06-08T00:00:01Z"
+    }
+  ]
+}

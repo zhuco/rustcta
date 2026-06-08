@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use clap::Parser;
 
 #[tokio::main]

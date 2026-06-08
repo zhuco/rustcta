@@ -1,0 +1,20 @@
+{
+  "exchange": "derive",
+  "operation": "get_open_orders",
+  "transport": "json_rpc",
+  "method": "POST",
+  "path": "/private/get_open_orders",
+  "auth": "session_key",
+  "headers": {
+    "Authorization": "Bearer derive_session_token_fixture"
+  },
+  "body": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "private/get_open_orders",
+    "params": {
+      "subaccount_id": 1001,
+      "instrument_name": "BTC-USD-PERP"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "operation": "krakenfutures.get_positions",
+  "method": "GET",
+  "path": "/derivatives/api/v3/openpositions",
+  "auth": "hmac"
+}

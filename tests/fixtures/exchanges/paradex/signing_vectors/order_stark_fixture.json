@@ -1,0 +1,7 @@
+{
+  "exchange": "paradex",
+  "algorithm": "starknet_order_canonical_payload_fixture",
+  "canonical_payload": "paradex.order:market=BTC-USD-PERP:side=BUY:type=LIMIT:size=0.01:price=65000:nonce=1700000000000000000",
+  "expected_signature": "<fixture-stark-signature>",
+  "notes": "Production order signing requires Paradex/Stark key material and is intentionally not reproduced with a real private key."
+}

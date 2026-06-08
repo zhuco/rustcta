@@ -1,0 +1,16 @@
+{
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/api/v3/order",
+  "auth": "apex_api_key_hmac_plus_zklink_l2_signature",
+  "supported": false,
+  "expected_error": "apex.place_order_requires_zklink_l2_signature",
+  "body_shape": {
+    "symbol": "BTC-USDT",
+    "side": "BUY",
+    "type": "LIMIT",
+    "price": "65000",
+    "size": "0.01",
+    "signature": "<zklink-l2-signature-required>"
+  }
+}

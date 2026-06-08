@@ -1,0 +1,229 @@
+schema_version: 1
+exchange: grvt
+adapter: GrvtGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/grvt_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 9 conservative GRVT gateway shell. Official public market-data API is audited; runtime REST trading stays disabled until parser/request-spec coverage is promoted.
+market_types: [perpetual, option]
+products: [perpetual, option]
+base_urls:
+  market_data_rest: https://market-data.grvt.io/full
+  market_data_rest_testnet: https://market-data.testnet.grvt.io/full
+  trading_rest: https://trades.grvt.io/full
+  trading_rest_testnet: https://trades.testnet.grvt.io/full
+  auth_rest: https://edge.grvt.io/auth
+  auth_rest_testnet: https://edge.testnet.grvt.io/auth
+  public_ws: wss://market-data.grvt.io/ws/full
+  private_ws: wss://trades.grvt.io/ws/full
+auth:
+  public_rest: none
+  private_rest: session cookie plus X-Grvt-Account-Id after API-key login
+  private_write: EIP-712/external signer required; unsupported in this adapter
+rate_limits:
+  account_pair: { scope: account_pair, interval_ms: 10000, limit: 0 }
+pagination:
+  private_history: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: Private order/fill/position reconciliation requires authenticated session-cookie fixtures before runtime promotion.
+batch:
+  place: { support: unsupported, reason: grvt.bulk_orders_session_spec_only }
+  cancel: { support: unsupported, reason: grvt.bulk_orders_session_spec_only }
+websocket:
+  public:
+    support: parser_only
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+    sequence: snapshots use sequence_number 0; deltas increase by 1 and gaps require reconnect/resubscribe
+    channels:
+      book_snapshot: { path: v1.book.s, support: parser_only, fixture: tests/fixtures/exchanges/grvt/ws/book_delta.json }
+  private:
+    support: unsupported
+    auth_renewal: { mode: session_cookie, status: unsupported }
+    channels:
+      orders: { path: v1/order, support: unsupported_unverified, auth: api_key, reason: grvt.private_stream_session_spec_only }
+      positions: { path: v1/positions, support: unsupported_unverified, auth: api_key, reason: grvt.private_stream_session_spec_only }
+      fills: { path: v1/fill, support: unsupported_unverified, auth: api_key, reason: grvt.private_stream_session_spec_only }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: POST
+    path: /v1/all_instruments
+    auth: none
+    rate_limit_bucket: grvt_market_data
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: grvt.symbol_rules_session_spec_only
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/book
+    auth: none
+    rate_limit_bucket: grvt_market_data
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: grvt.order_book_session_spec_only
+  - operation: funding_rate
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/funding
+    auth: none
+    rate_limit_bucket: grvt_market_data
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: adapter_specific_fixture_only
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/positions
+    auth: api_key
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.positions_session_spec_only
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/open_orders
+    auth: api_key
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.open_orders_session_spec_only
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/order
+    auth: api_key
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.query_order_session_spec_only
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/fills
+    auth: api_key
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.recent_fills_session_spec_only
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/create_order
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: requires EIP-712 order signing and authenticated session boundary
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/cancel_order
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.cancel_order_session_spec_only
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/cancel_all_orders
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.cancel_all_orders_session_spec_only
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/amend_order
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.amend_order_session_spec_only
+  - operation: bulk_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/bulk_orders
+    auth: signed
+    rate_limit_bucket: grvt_account_pair
+    weight: 0
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: unsupported_unverified
+    reason: grvt.bulk_orders_session_spec_only

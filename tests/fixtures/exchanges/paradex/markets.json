@@ -1,0 +1,25 @@
+{
+  "results": [
+    {
+      "symbol": "BTC-USD-PERP",
+      "market_kind": "PERP",
+      "base_currency": "BTC",
+      "quote_currency": "USD",
+      "settlement_currency": "USDC",
+      "tick_size": "0.5",
+      "step_size": "0.001"
+    },
+    {
+      "symbol": "BTC-USD-20260626-70000-C",
+      "market_kind": "OPTION",
+      "base_currency": "BTC",
+      "quote_currency": "USD",
+      "settlement_currency": "USDC",
+      "tick_size": "0.1",
+      "step_size": "0.01",
+      "expiry": "2026-06-26",
+      "strike_price": "70000",
+      "option_kind": "CALL"
+    }
+  ]
+}

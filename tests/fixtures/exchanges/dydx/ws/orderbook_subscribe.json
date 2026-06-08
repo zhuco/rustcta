@@ -1,0 +1,6 @@
+{
+  "type": "subscribe",
+  "channel": "v4_orderbook",
+  "id": "BTC-USD",
+  "batched": false
+}

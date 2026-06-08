@@ -1,0 +1,27 @@
+{
+  "exchange": "hyperliquid",
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/exchange",
+  "auth": "l1_action_signature",
+  "body": {
+    "action": {
+      "type": "order",
+      "orders": [
+        {
+          "a": 0,
+          "b": true,
+          "p": "65000",
+          "s": "0.001",
+          "r": false,
+          "t": { "limit": { "tif": "Gtc" } },
+          "c": "0x00000000000000000000000000000001"
+        }
+      ],
+      "grouping": "na"
+    },
+    "nonce": 1700000000000,
+    "signature": "<deterministic-offline-vector>"
+  },
+  "secret_free": true
+}

@@ -1,0 +1,21 @@
+{
+  "result": {
+    "orders": [
+      {
+        "order_id": "derive_order_fixture_001",
+        "instrument_name": "BTC-USD-PERP",
+        "side": "buy",
+        "order_type": "limit",
+        "order_status": "open",
+        "amount": "0.10",
+        "filled_amount": "0",
+        "limit_price": "69000",
+        "label": "derive_client_fixture_001",
+        "creation_timestamp": 1700000000000,
+        "last_update_timestamp": 1700000000000,
+        "reduce_only": false,
+        "post_only": true
+      }
+    ]
+  }
+}

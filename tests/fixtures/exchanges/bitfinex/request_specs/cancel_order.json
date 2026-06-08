@@ -1,0 +1,17 @@
+{
+  "exchange": "bitfinex",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v2/auth/w/order/cancel",
+  "auth": "signed",
+  "headers": {
+    "bfx-apikey": { "match": "present" },
+    "bfx-nonce": { "match": "non_empty" },
+    "bfx-signature": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "id": 1185815100
+  }
+}

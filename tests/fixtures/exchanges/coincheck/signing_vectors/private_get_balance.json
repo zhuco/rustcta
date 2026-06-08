@@ -1,0 +1,10 @@
+{
+  "exchange": "coincheck",
+  "algorithm": "hmac_sha256_hex",
+  "nonce": "1700000000000",
+  "url": "https://coincheck.com/api/accounts/balance",
+  "body": "",
+  "payload": "1700000000000https://coincheck.com/api/accounts/balance",
+  "secret": "secret",
+  "expected_signature": "6d7520d4e11144f460fa832c8a498b3d89806edb2f893d0a10d4a13d2773aa82"
+}

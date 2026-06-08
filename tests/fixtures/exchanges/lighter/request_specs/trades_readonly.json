@@ -1,0 +1,16 @@
+{
+  "exchange": "lighter",
+  "operation": "recent_fills",
+  "status": "unsupported_unverified",
+  "method": "GET",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/trades",
+  "query": {
+    "account_index": "redacted-account-index",
+    "market_id": "0"
+  },
+  "auth": "bearer",
+  "request_spec_required": true,
+  "expected_error": "lighter.trades_auth_token_unverified",
+  "trade_enabled": false
+}

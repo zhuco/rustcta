@@ -1,0 +1,13 @@
+{
+  "exchange": "pacifica",
+  "status": "public_rest_with_private_specs",
+  "testnet_verified": true,
+  "unsupported_reasons": [
+    "pacifica.place_order_request_spec_only",
+    "pacifica.cancel_order_request_spec_only",
+    "pacifica.private_stream_runtime_unverified",
+    "pacifica.batch_orders_request_spec_only"
+  ],
+  "scan_only": true,
+  "trade_enabled": false
+}

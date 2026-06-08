@@ -1,0 +1,20 @@
+{
+  "exchange": "grvt",
+  "operation": "cancel_order",
+  "status": "unsupported_unverified",
+  "method": "POST",
+  "base_url": "https://trades.testnet.grvt.io/full",
+  "path": "/v1/cancel_order",
+  "headers": {
+    "Cookie": "<redacted-session-cookie>",
+    "X-Grvt-Account-Id": "<redacted-account-id>"
+  },
+  "body": {
+    "order_id": "<redacted-order-id>",
+    "signature": "<external-eip712-signature-required>"
+  },
+  "auth": "session_cookie_plus_external_signer",
+  "request_spec_required": true,
+  "trade_enabled": false,
+  "expected_error": "grvt.cancel_order_session_spec_only"
+}

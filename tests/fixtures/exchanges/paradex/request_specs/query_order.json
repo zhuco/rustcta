@@ -1,0 +1,13 @@
+{
+  "exchange": "paradex",
+  "operation": "query_order",
+  "method": "GET",
+  "path": "/orders/fixture-order-001",
+  "query": {},
+  "body": null,
+  "headers": {
+    "Accept": "application/json",
+    "Authorization": "Bearer fixture.jwt.token"
+  },
+  "secret_free": true
+}

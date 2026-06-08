@@ -1,0 +1,9 @@
+{
+  "operation": "kucoinfutures.cancel_all_orders",
+  "method": "DELETE",
+  "path": "/api/v1/orders",
+  "auth": "hmac",
+  "query": {
+    "symbol": "XBTUSDTM"
+  }
+}

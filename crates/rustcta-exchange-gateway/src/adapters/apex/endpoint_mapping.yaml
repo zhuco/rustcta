@@ -1,0 +1,295 @@
+schema_version: 1
+exchange: apex
+adapter: rustcta_exchange_gateway::adapters::apex
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: api-docs.pro.apex.exchange official ApeX Omni API documentation
+  last_reviewed: "2026-06-08"
+  notes: Task 7 G1 implementation. Public perpetual symbol-rules/order-book REST is wired; private writes remain unsupported until zkLink/L2 order signing has deterministic Rust vectors.
+market_types: [perpetual]
+products: [perpetual]
+rest:
+  base_url: https://omni.apex.exchange
+  testnet_base_url: https://testnet.omni.apex.exchange
+base_urls:
+  public_ws: wss://quote.omni.apex.exchange/realtime_public?v=2&timestamp=<ts>
+  private_ws: wss://quote.omni.apex.exchange/realtime_private?v=2&timestamp=<ts>
+auth:
+  private_rest: APEX-SIGNATURE, APEX-TIMESTAMP, APEX-API-KEY, APEX-PASSPHRASE
+  private_write_extra: zkKeys/L2 payload signature is required for order creation, transfers and withdrawals
+rate_limits:
+  public_ip: { scope: ip, interval_ms: 60000, limit: 600 }
+  private_get: { scope: account, interval_ms: 60000, limit: 600 }
+  private_post: { scope: account, interval_ms: 60000, limit: 300 }
+  orders: { scope: user, limit: 200 }
+pagination:
+  open_orders: { mode: page_limit, max_limit: 100 }
+  fills: { mode: page_limit_time, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  stream_recovery: Re-auth private WS, subscribe ws_zk_accounts_v3, then reconcile /v3/account, /v3/open-orders and /v3/fills.
+batch:
+  place_orders: { support: unsupported, reason: no official native batch place endpoint found }
+  cancel_orders: { support: unsupported, reason: no official native batch cancel endpoint found }
+websocket:
+  public:
+    support: native
+    channels: [orderBook200, recentlyTrade, instrumentInfo, candle]
+    heartbeat: { mode: client_ping, interval_ms: 15000, timeout_ms: 15000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: api_key_login
+    channels: [ws_zk_accounts_v3]
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/symbols
+    auth: none
+    rate_limit_bucket: apex_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/apex/symbols_perpetual.json }
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/depth
+    auth: none
+    rate_limit_bucket: apex_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/apex/depth_btcusdt.json }
+  - operation: balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/account-balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: apex_private_get
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_account_balance.json }
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/account
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: apex_private_get
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_account.json }
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/open-orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: apex_private_get
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_open_orders.json }
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: apex_private_get
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/query_order.json }
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v3/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: apex_private_get
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/get_fills.json }
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v3/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: apex_private_post
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: unsupported
+    reason: order creation requires zkKeys/L2 payload signature not implemented in Rust gateway
+    request_spec: { status: unsupported, fixture: tests/fixtures/exchanges/apex/request_specs/place_order_unsupported_zk.json }
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v3/delete-order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: apex_private_post
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/cancel_all_orders.json }
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/apex/request_specs/cancel_order.json }
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/apex/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: apex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official native batch place endpoint found
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/apex/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: apex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official native batch cancel endpoint found
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v3/delete-open-orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: apex_private_post
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    notes: Official endpoint exists, but runtime private write is not promoted.
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/apex/amend_order
+    auth: unsupported
+    rate_limit_bucket: apex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official amend/replace endpoint found
+  - operation: order_list
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/apex/order_list
+    auth: unsupported
+    rate_limit_bucket: apex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official OCO/OTO order-list endpoint found
+  - operation: quote_market_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/apex/quote_market_order
+    auth: unsupported
+    rate_limit_bucket: apex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: ApeX market orders still require signed price/worst-price semantics and zkLink order signature
+  - operation: fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/apex/fees
+    auth: unsupported
+    rate_limit_bucket: apex_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no verified private fee-tier endpoint mapped to the shared fee model

@@ -1,0 +1,15 @@
+{
+  "method": "DELETE",
+  "path": "/api/v1/order",
+  "auth": "btcturk_hmac_sha256_base64",
+  "headers": {
+    "X-PCK": "<redacted-api-key>",
+    "X-Stamp": "<milliseconds>",
+    "X-Signature": "<base64-hmac-sha256>",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "id": "123456789",
+    "pairSymbol": "BTCTRY"
+  }
+}

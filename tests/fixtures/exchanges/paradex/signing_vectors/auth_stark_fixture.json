@@ -1,0 +1,10 @@
+{
+  "exchange": "paradex",
+  "algorithm": "starknet_auth_canonical_payload_fixture_digest",
+  "account": "fixture-paradex-account",
+  "timestamp_ms": "1700000000000",
+  "expiration_ms": "1700000300000",
+  "canonical_payload": "paradex.auth:account=fixture-paradex-account:timestamp=1700000000000:expiration=1700000300000",
+  "fixture_digest": "7f0b38b55c152dc068a93e1dda5925de36abb406b37ff1596028f9020347e24a",
+  "notes": "Digest is a deterministic fixture sentinel, not a production Stark signature. No wallet key is included."
+}

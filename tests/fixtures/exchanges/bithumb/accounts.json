@@ -1,0 +1,18 @@
+[
+  {
+    "currency": "BTC",
+    "balance": "0.25",
+    "locked": "0.05",
+    "avg_buy_price": "65000000",
+    "avg_buy_price_modified": false,
+    "unit_currency": "KRW"
+  },
+  {
+    "currency": "KRW",
+    "balance": "1000000",
+    "locked": "50000",
+    "avg_buy_price": "0",
+    "avg_buy_price_modified": false,
+    "unit_currency": "KRW"
+  }
+]

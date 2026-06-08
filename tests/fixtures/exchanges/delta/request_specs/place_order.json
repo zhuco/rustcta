@@ -1,0 +1,14 @@
+{
+  "exchange": "delta",
+  "name": "place_order",
+  "method": "POST",
+  "path": "/v2/orders",
+  "required_headers": ["api-key", "signature", "timestamp"],
+  "json_body": {
+    "product_symbol": "BTCUSDT",
+    "side": "buy",
+    "order_type": "limit_order",
+    "size": "2",
+    "limit_price": "65000"
+  }
+}

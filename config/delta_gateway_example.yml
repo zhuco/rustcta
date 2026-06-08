@@ -1,0 +1,15 @@
+enabled: false
+adapter: delta
+rest_base_url: https://api.delta.exchange
+public_ws_url: wss://socket.delta.exchange
+private_ws_url: wss://socket.delta.exchange
+enabled_private_rest: false
+enabled_public_stream: true
+enabled_private_stream: false
+request_timeout_ms: 10000
+credentials:
+  api_key_env: DELTA_API_KEY
+  api_secret_env: DELTA_API_SECRET
+notes:
+  - "Disabled example only; do not put Delta API secrets in this file."
+  - "Option chain and greeks fixtures remain adapter-specific until the unified option model exists."

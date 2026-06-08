@@ -1,0 +1,12 @@
+{
+  "table": "depthUpdate",
+  "data": {
+    "marketCode": "BTC-USD-SWAP-LIN",
+    "action": "increment",
+    "seqNum": "102",
+    "checksum": "7654322",
+    "timestamp": "1700000001000",
+    "bids": [["64000.5", "0.75"]],
+    "asks": [["64001", "0"]]
+  }
+}

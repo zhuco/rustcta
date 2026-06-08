@@ -1,0 +1,35 @@
+{
+  "success": true,
+  "result": [
+    {
+      "id": 27,
+      "symbol": "BTCUSDT",
+      "contract_type": "perpetual_futures",
+      "underlying_asset": { "symbol": "BTC" },
+      "quoting_asset": { "symbol": "USDT" },
+      "settling_asset": { "symbol": "USDT" },
+      "tick_size": "0.5",
+      "contract_value": "0.001",
+      "min_order_size": "1",
+      "max_order_size": "100000",
+      "maker_commission_rate": "0.0002",
+      "taker_commission_rate": "0.0005",
+      "state": "live"
+    },
+    {
+      "id": 6001,
+      "symbol": "C-BTC-65000-280626",
+      "contract_type": "call_options",
+      "underlying_asset": { "symbol": "BTC" },
+      "quoting_asset": { "symbol": "USDT" },
+      "settling_asset": { "symbol": "USDT" },
+      "strike_price": "65000",
+      "settlement_time": "2026-06-28T08:00:00Z",
+      "tick_size": "0.1",
+      "contract_value": "0.001",
+      "maker_commission_rate": "0.0003",
+      "taker_commission_rate": "0.0006",
+      "state": "live"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# ApeX Omni gateway adapter example.
+# Disabled by default. Private writes require zkLink/L2 signatures and are not
+# promoted by the current adapter.
+
+exchange: apex
+adapter: apex
+enabled: false
+
+market_types:
+  - perpetual
+
+rest_base_url: https://omni.apex.exchange
+testnet_rest_base_url: https://testnet.omni.apex.exchange
+public_ws_url: wss://quote.omni.apex.exchange/realtime_public?v=2&timestamp=<ts>
+private_ws_url: wss://quote.omni.apex.exchange/realtime_private?v=2&timestamp=<ts>
+
+api_key: ${APEX_API_KEY}
+api_secret: ${APEX_API_SECRET}
+passphrase: ${APEX_PASSPHRASE}
+l2_key: ${APEX_L2_KEY}
+
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 200
+log_raw_messages: false
+
+permissions:
+  required: []
+  optional:
+    - read_account
+    - trade
+
+notes:
+  - This is a Task 7 offline audit shell, not a production ApeX trading adapter.
+  - REST testnet host differs between docs and SDK constants; keep it configurable.
+  - Order creation remains unsupported until Rust zkLink/L2 signing has official vectors.

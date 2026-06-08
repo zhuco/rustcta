@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::Utc;
 use rustcta::exchanges::unified::{
     ExchangeClientError, ExchangeError, ExchangeErrorClass, MarketType, OrderBookLevel,

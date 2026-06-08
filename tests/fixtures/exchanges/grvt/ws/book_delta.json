@@ -1,0 +1,10 @@
+{
+  "stream": "v1.book.s",
+  "feed": "BTC_USDT_Perp@500-1-10",
+  "event_time": "2026-06-08T00:00:00.123456Z",
+  "sequence_number": 1,
+  "data": {
+    "bids": [["64000.0", "1.25"]],
+    "asks": [["64001.0", "0.75"]]
+  }
+}

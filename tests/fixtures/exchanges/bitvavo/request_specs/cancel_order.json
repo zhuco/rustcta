@@ -1,0 +1,9 @@
+{
+  "operation": "bitvavo.cancel_order",
+  "method": "DELETE",
+  "path": "/v2/order",
+  "body": {
+    "market": "BTC-EUR",
+    "orderId": "order-1"
+  }
+}

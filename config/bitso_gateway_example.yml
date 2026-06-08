@@ -1,0 +1,11 @@
+gateway:
+  adapter: bitso
+  enabled: false
+  rest_base_url: https://api.bitso.com/api/v3
+  public_ws_url: wss://ws.bitso.com
+  private_rest_enabled: false
+  private_streams_enabled: false
+  notes:
+    - Spot-only Latin America markets.
+    - Keep API credentials in environment variables; do not place secrets in this file.
+    - Fiat ledger is read-audit-only; withdrawals, bank payments, and transfers are unsupported.

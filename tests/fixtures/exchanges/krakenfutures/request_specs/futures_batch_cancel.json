@@ -1,0 +1,9 @@
+{
+  "operation": "krakenfutures.batch_cancel_orders.perpetual",
+  "method": "POST",
+  "path": "/derivatives/api/v3/batchorder",
+  "auth": "hmac",
+  "form": {
+    "batchOrder": "[{\"order\":\"cancel\",\"params\":{\"order_id\":\"FUT-BATCH-1\"}}]"
+  }
+}

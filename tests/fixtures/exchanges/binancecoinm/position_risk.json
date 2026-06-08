@@ -1,0 +1,12 @@
+[
+  {
+    "symbol": "BTCUSD_PERP",
+    "positionAmt": "2",
+    "entryPrice": "25000.0",
+    "markPrice": "25100.0",
+    "unRealizedProfit": "0.02",
+    "liquidationPrice": "20000.0",
+    "leverage": "3",
+    "positionSide": "LONG"
+  }
+]

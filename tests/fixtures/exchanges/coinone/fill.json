@@ -1,0 +1,17 @@
+{
+  "result": "success",
+  "error_code": "0",
+  "fills": [
+    {
+      "trade_id": "T-1",
+      "order_id": "O-1",
+      "user_order_id": "C-1",
+      "side": "BUY",
+      "qty": "0.01",
+      "price": "100000000",
+      "fee": "1000",
+      "fee_currency": "KRW",
+      "timestamp": 1710000000000
+    }
+  ]
+}

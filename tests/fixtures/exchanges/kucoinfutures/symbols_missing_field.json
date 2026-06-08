@@ -1,0 +1,12 @@
+{
+  "code": "200000",
+  "data": [
+    {
+      "symbol": "XBTUSDTM",
+      "quoteCurrency": "USDT",
+      "tickSize": "0.1",
+      "lotSize": "1",
+      "enableTrading": true
+    }
+  ]
+}

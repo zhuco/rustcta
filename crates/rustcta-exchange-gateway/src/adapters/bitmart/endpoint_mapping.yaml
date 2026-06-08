@@ -1,0 +1,229 @@
+schema_version: 1
+exchange: bitmart
+adapter: BitmartGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bitmart_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 3 mapping for Spot and USDT perpetual REST plus WS spec/parser helpers.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  spot_rest: https://api-cloud.bitmart.com
+  futures_rest: https://api-cloud-v2.bitmart.com
+  spot_public_ws: wss://ws-manager-compress.bitmart.com/api?protocol=1.1
+  futures_public_ws: wss://openapi-ws-v2.bitmart.com/api?protocol=1.1
+auth:
+  private_rest: BitMart X-BM-KEY, X-BM-TIMESTAMP and X-BM-SIGN HMAC headers; memo maps to broker id.
+rate_limits:
+  public_rest: { scope: ip, interval_ms: 1000, limit: 10 }
+  private_rest: { scope: api_key, interval_ms: 1000, limit: 5 }
+pagination:
+  order_book: { mode: limit, max_limit: 200 }
+  open_orders: { mode: limit, max_limit: 100 }
+  recent_fills: { mode: limit, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  endpoint_operation: open_orders
+  notes: Use REST wallet, positions, open orders, order detail and fills after WS reconnect.
+batch:
+  place: { support: unsupported, reason: "Futures submit-plan-order is a trigger/plan order endpoint, not shared regular batch-place semantics." }
+  cancel: { support: native, atomicity: non_atomic, max_items: null, same_market_type_required: true, partial_failure: true }
+websocket:
+  public:
+    support: spec_only
+    heartbeat: { mode: client_ping_text, interval_ms: 15000, timeout_ms: 30000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: spec_only
+    heartbeat: { mode: client_ping_text, interval_ms: 15000, timeout_ms: 30000 }
+    auth_renewal: { mode: relogin }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /spot/v1/symbols/details
+    auth: none
+    rate_limit_bucket: bitmart_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: Perpetual symbols use /contract/public/details.
+  - operation: order_book
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /spot/v1/symbols/book
+    auth: none
+    rate_limit_bucket: bitmart_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: Perpetual order book uses /contract/public/depth.
+  - operation: account
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /spot/v1/wallet
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/bitmart/request_specs/place_order.json }
+    notes: Perpetual account uses /contract/private/assets-detail.
+  - operation: positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /contract/private/position
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: place_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /spot/v2/submit_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/bitmart/request_specs/place_order.json }
+    notes: Perpetual order submit uses /contract/private/submit-order.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /spot/v3/cancel_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /contract/private/cancel-orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    notes: Official futures endpoint is "Batch Cancel Contract Orders"; Spot batch cancel is not mapped to the shared runtime.
+  - operation: cancel_all_orders
+    product: mixed
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /spot/v3/cancel_orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    notes: Perpetual all/symbol cancel uses /contract/private/cancel-orders.
+  - operation: quote_market_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /spot/v2/submit_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    notes: Shared quote-sized market order maps only to Spot market buy with notional/quote_quantity.
+  - operation: query_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /spot/v2/order_detail
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: open_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /spot/v2/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: recent_fills
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /spot/v2/trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitmart_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native

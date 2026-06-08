@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use clap::Parser;
 use rustcta::backtest::runtime::{
     render_command_output, run_short_ladder_mtf_grid, BacktestCommandOutput, ShortLadderMtfGridArgs,

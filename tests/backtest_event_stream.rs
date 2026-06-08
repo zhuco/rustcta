@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rustcta::backtest::replay::MergedReplay;
 use rustcta::backtest::schema::{

@@ -1,0 +1,12 @@
+{
+  "operation": "bitbank.place_order",
+  "method": "POST",
+  "path": "/user/spot/order",
+  "body": {
+    "pair": "btc_jpy",
+    "side": "buy",
+    "type": "limit",
+    "amount": "0.01",
+    "price": "6500000"
+  }
+}

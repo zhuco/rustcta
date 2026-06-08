@@ -1,0 +1,102 @@
+use std::collections::HashMap;
+
+use rustcta_exchange_api::{
+    ExchangeApiResult, OrderBookRequest, OrderBookResponse, SymbolRulesRequest,
+    SymbolRulesResponse, EXCHANGE_API_SCHEMA_VERSION,
+};
+use rustcta_types::MarketType;
+
+use super::parser::{normalize_bitfinex_symbol, parse_orderbook_snapshot, parse_symbol_rules};
+use super::BitfinexGatewayAdapter;
+use crate::adapters::{ensure_exchange_api_schema, response_metadata};
+
+impl BitfinexGatewayAdapter {
+    pub(super) async fn get_symbol_rules_impl(
+        &self,
+        request: SymbolRulesRequest,
+    ) -> ExchangeApiResult<SymbolRulesResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        for symbol in &request.symbols {
+            self.ensure_exchange(&symbol.exchange)?;
+            self.ensure_supported_market(symbol.market_type)?;
+        }
+        let markets = if request.symbols.is_empty() {
+            vec![MarketType::Spot, MarketType::Margin, MarketType::Perpetual]
+        } else {
+            request
+                .symbols
+                .iter()
+                .map(|symbol| symbol.market_type)
+                .fold(Vec::new(), |mut markets, market| {
+                    if !markets.contains(&market) {
+                        markets.push(market);
+                    }
+                    markets
+                })
+        };
+        let mut rules = Vec::new();
+        for market_type in markets {
+            let endpoint = match market_type {
+                MarketType::Spot => "/v2/conf/pub:list:pair:exchange",
+                MarketType::Margin => "/v2/conf/pub:list:pair:margin",
+                MarketType::Perpetual => "/v2/conf/pub:list:pair:futures",
+                _ => unreachable!("checked by ensure_supported_market"),
+            };
+            let response = self.rest.send_public_get(endpoint, &HashMap::new()).await?;
+            rules.extend(parse_symbol_rules(
+                &self.exchange_id,
+                market_type,
+                &response,
+            )?);
+        }
+        if !request.symbols.is_empty() {
+            let requested = request
+                .symbols
+                .iter()
+                .map(|symbol| {
+                    normalize_bitfinex_symbol(&symbol.exchange_symbol.symbol, symbol.market_type)
+                        .map(|normalized| (symbol.market_type, normalized))
+                })
+                .collect::<ExchangeApiResult<Vec<_>>>()?;
+            rules.retain(|rule| {
+                requested.contains(&(
+                    rule.symbol.market_type,
+                    rule.symbol.exchange_symbol.symbol.clone(),
+                ))
+            });
+        }
+        Ok(SymbolRulesResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            rules,
+        })
+    }
+
+    pub(super) async fn get_order_book_impl(
+        &self,
+        request: OrderBookRequest,
+    ) -> ExchangeApiResult<OrderBookResponse> {
+        ensure_exchange_api_schema(request.schema_version)?;
+        self.ensure_exchange(&request.symbol.exchange)?;
+        self.ensure_supported_market(request.symbol.market_type)?;
+        let symbol = normalize_bitfinex_symbol(
+            &request.symbol.exchange_symbol.symbol,
+            request.symbol.market_type,
+        )?;
+        let mut params = HashMap::new();
+        params.insert(
+            "len".to_string(),
+            request.depth.unwrap_or(25).clamp(1, 250).to_string(),
+        );
+        let response = self
+            .rest
+            .send_public_get(&format!("/v2/book/{symbol}/P0"), &params)
+            .await?;
+        let order_book = parse_orderbook_snapshot(&self.exchange_id, request.symbol, &response)?;
+        Ok(OrderBookResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: response_metadata(self.exchange_id.clone(), request.context.request_id),
+            order_book,
+        })
+    }
+}

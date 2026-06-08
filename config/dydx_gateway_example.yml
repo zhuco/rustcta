@@ -1,0 +1,20 @@
+enabled: false
+adapter: dydx
+market_types:
+  - perpetual
+indexer_rest_base_url: https://indexer.dydx.trade
+testnet_indexer_rest_base_url: https://indexer.v4testnet.dydx.exchange
+indexer_websocket_url: wss://indexer.dydx.trade/v4/ws
+node_rest_base_url: https://dydx-mainnet.node.validator.network
+credentials:
+  wallet_address_env: DYDX_WALLET_ADDRESS
+  subaccount_number_env: DYDX_SUBACCOUNT_NUMBER
+controls:
+  private_indexer_rest_enabled_env: DYDX_PRIVATE_INDEXER_REST_ENABLED
+  node_private_write_enabled_env: DYDX_NODE_PRIVATE_WRITE_ENABLED
+  public_streams_enabled_env: DYDX_PUBLIC_STREAMS_ENABLED
+  private_streams_enabled_env: DYDX_PRIVATE_STREAMS_ENABLED
+  live_ordering_default: disabled
+notes:
+  - Do not put mnemonics, private keys, validator credentials, or production account ids in this file.
+  - Node private writes remain unsupported until wallet transaction signing is implemented and audited.

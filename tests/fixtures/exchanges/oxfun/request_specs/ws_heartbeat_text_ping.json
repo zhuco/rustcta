@@ -1,0 +1,10 @@
+{
+  "exchange": "oxfun",
+  "operation": "ws_heartbeat",
+  "transport": "websocket",
+  "payload_type": "text",
+  "payload": "ping",
+  "expected_response": "pong",
+  "interval_ms": 20000,
+  "timeout_ms": 45000
+}

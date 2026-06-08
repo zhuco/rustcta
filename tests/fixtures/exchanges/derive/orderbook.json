@@ -1,0 +1,8 @@
+{
+  "result": {
+    "instrument_name": "BTC-PERP",
+    "bids": [["64999.5", "2.1"]],
+    "asks": [["65000.5", "0.8"]],
+    "timestamp": 1700000000000
+  }
+}

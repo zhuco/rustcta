@@ -1,0 +1,16 @@
+enabled: false
+adapter: upbit
+rest_base_url: https://api.upbit.com
+public_ws_url: wss://api.upbit.com/websocket/v1
+private_ws_url: wss://api.upbit.com/websocket/v1/private
+market_types:
+  - spot
+private_rest:
+  enabled: false
+  api_key_env: UPBIT_API_KEY
+  api_secret_env: UPBIT_API_SECRET
+private_streams:
+  enabled: false
+notes:
+  - "Disabled by default; do not store credentials in this file."
+  - "Upbit uses KRW, BTC, and USDT QUOTE-BASE markets such as KRW-BTC."

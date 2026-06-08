@@ -1,0 +1,10 @@
+{
+  "code": 1000,
+  "message": "success",
+  "data": {
+    "wallet": [
+      {"id": "USDT", "available": "100.5", "frozen": "1.5"},
+      {"id": "BTC", "available": "0", "frozen": "0"}
+    ]
+  }
+}

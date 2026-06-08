@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/v1/user/spot/order",
+  "body": {
+    "pair": "btc_jpy",
+    "side": "buy",
+    "type": "limit",
+    "price": "3000000",
+    "amount": "0.01",
+    "post_only": true
+  }
+}

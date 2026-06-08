@@ -1,0 +1,9 @@
+{
+  "operation": "recent_fills",
+  "method": "GET",
+  "path": "/trading-api/v1/trades?tradingAccountId=offline-account&symbol=BTCUSDC",
+  "auth": "bearer_jwt",
+  "headers": {
+    "Authorization": "Bearer <redacted>"
+  }
+}

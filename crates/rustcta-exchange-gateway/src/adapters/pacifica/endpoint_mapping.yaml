@@ -1,0 +1,156 @@
+schema_version: 1
+exchange: pacifica
+adapter: PacificaGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/pacifica_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 10 initial adapter. Public REST is implemented; private writes remain offline request-spec/signing only.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://api.pacifica.fi
+  testnet_rest: https://test-api.pacifica.fi
+  public_ws: wss://ws.pacifica.fi/ws
+  testnet_public_ws: wss://test-ws.pacifica.fi/ws
+auth:
+  private_rest: Ed25519 compact sorted JSON signature; signature field in body
+  private_ws: signed per action payload; subscriptions use account address
+rate_limits:
+  credit_window: { scope: ip_or_account, interval_ms: 60000, base_credits: 125 }
+pagination:
+  history: { mode: cursor, cursor_field: cursor, next_cursor_field: next_cursor }
+reconciliation:
+  private_state: rest_snapshot_spec_only
+  notes: REST /api/v1/orders gives open-order snapshot; account_order_updates WS supplies updates; runtime reconciliation remains disabled pending signed live validation.
+batch:
+  place: { support: spec_only, reason: batch endpoint signs each child operation independently }
+  cancel: { support: spec_only, reason: no shared batch cancel mapping enabled }
+websocket:
+  public:
+    support: spec_only
+    channels: [prices, book, bbo, trades, candle, mark_candle]
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 60000, stale_message_ms: 60000, force_reconnect_ms: 86400000 }
+    resync: REST /api/v1/book snapshot plus last_order_id ordering where present
+  private:
+    support: spec_only
+    channels: [account_positions, account_order_updates, account_trades]
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/info
+    auth: none
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://pacifica.gitbook.io/docs/api-documentation/api/rest-api/markets/get-market-info
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/book
+    auth: none
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://pacifica.gitbook.io/docs/api-documentation/api/rest-api/markets/get-orderbook
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/positions
+    auth: none
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/pacifica/request_specs/get_positions.json
+    official_doc: https://docs.pacifica.fi/api-documentation/api/last-order-id
+    reason: pacifica.positions_request_spec_only
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /api/v1/orders
+    auth: none
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    official_doc: https://docs.pacifica.fi/api-documentation/api/rest-api/orders/get-open-orders
+    reason: pacifica.open_orders_request_spec_only
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/orders/create
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/pacifica/request_specs/create_order.json
+    official_doc: https://docs.pacifica.fi/api-documentation/api/rest-api/orders/create-limit-order
+    reason: pacifica.place_order_request_spec_only
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/orders/cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/pacifica/request_specs/cancel_order.json
+    official_doc: https://docs.pacifica.fi/api-documentation/api/signing/operation-types
+    reason: pacifica.cancel_order_request_spec_only
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /api/v1/orders/cancel_all
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: pacifica_credit
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: spec_only
+    request_spec_fixture: tests/fixtures/exchanges/pacifica/request_specs/cancel_all_orders.json
+    official_doc: https://docs.pacifica.fi/api-documentation/api/rest-api/orders/cancel-all-orders
+    reason: pacifica.cancel_all_orders_request_spec_only

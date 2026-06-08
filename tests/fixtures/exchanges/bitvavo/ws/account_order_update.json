@@ -1,0 +1,23 @@
+{
+  "event": "account",
+  "market": "BTC-EUR",
+  "orderId": "order-1",
+  "clientOrderId": "CLIENTLIMIT1",
+  "side": "buy",
+  "orderType": "limit",
+  "status": "filled",
+  "amount": "0.02",
+  "filledAmount": "0.02",
+  "price": "65000",
+  "timestamp": 1743054550000,
+  "trades": [
+    {
+      "id": "trade-1",
+      "amount": "0.02",
+      "price": "65000",
+      "fee": "3.25",
+      "feeCurrency": "EUR",
+      "taker": true
+    }
+  ]
+}

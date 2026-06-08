@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "instrument_name": "BTC-PERPETUAL",
+      "size": 100,
+      "average_price": 67000,
+      "mark_price": 67100,
+      "estimated_liquidation_price": 51000,
+      "floating_profit_loss": 0.02,
+      "leverage": 10
+    },
+    {
+      "instrument_name": "BTC-28JUN24-70000-C",
+      "size": -2,
+      "average_price": 0.08,
+      "mark_price": 0.083,
+      "floating_profit_loss": -0.003
+    }
+  ]
+}

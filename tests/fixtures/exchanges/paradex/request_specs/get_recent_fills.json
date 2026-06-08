@@ -1,0 +1,16 @@
+{
+  "exchange": "paradex",
+  "operation": "get_recent_fills",
+  "method": "GET",
+  "path": "/fills",
+  "query": {
+    "market": "BTC-USD-PERP",
+    "page_size": "100"
+  },
+  "body": null,
+  "headers": {
+    "Accept": "application/json",
+    "Authorization": "Bearer fixture.jwt.token"
+  },
+  "secret_free": true
+}

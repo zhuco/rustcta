@@ -1,0 +1,13 @@
+{
+  "exchange": "btcturk",
+  "fiat_markets_documented": ["TRY"],
+  "trade_enabled": false,
+  "private_write_mode": "offline_request_spec_only",
+  "excluded": [
+    "fiat_withdrawals",
+    "fiat_deposits",
+    "bank_payment_rails",
+    "crypto_deposit_addresses",
+    "transfers"
+  ]
+}

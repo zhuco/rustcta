@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "result": [
+    {
+      "asset_symbol": "USDT",
+      "balance": "1250",
+      "available_balance": "1000"
+    }
+  ]
+}

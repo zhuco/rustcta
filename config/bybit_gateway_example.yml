@@ -1,0 +1,18 @@
+enabled: false
+adapter: bybit
+rest_base_url: https://api.bybit.com
+testnet_rest_base_url: https://api-testnet.bybit.com
+public_ws_url: wss://stream.bybit.com/v5/public/linear
+private_ws_url: wss://stream.bybit.com/v5/private
+private_rest:
+  enabled: false
+  api_key_env: RUSTCTA_BYBIT_API_KEY
+  api_secret_env: RUSTCTA_BYBIT_API_SECRET
+  recv_window_ms: 5000
+products:
+  - spot
+  - perpetual
+  - futures
+notes:
+  - Uses Bybit V5 unified account endpoints.
+  - WebSocket payloads are fixture/spec covered; REST reconciliation is the fallback.

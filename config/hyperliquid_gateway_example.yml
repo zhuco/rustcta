@@ -1,0 +1,19 @@
+enabled: false
+adapter: hyperliquid
+market_types:
+  - perpetual
+rest_base_url: https://api.hyperliquid.xyz
+testnet_rest_base_url: https://api.hyperliquid-testnet.xyz
+websocket_url: wss://api.hyperliquid.xyz/ws
+credentials:
+  wallet_address_env: HYPERLIQUID_ACCOUNT_ADDRESS
+  vault_address_env: HYPERLIQUID_VAULT_ADDRESS
+  agent_private_key_env: HYPERLIQUID_AGENT_PRIVATE_KEY
+controls:
+  private_rest_enabled_env: HYPERLIQUID_PRIVATE_REST_ENABLED
+  public_streams_enabled_env: HYPERLIQUID_PUBLIC_STREAMS_ENABLED
+  private_streams_enabled_env: HYPERLIQUID_PRIVATE_STREAMS_ENABLED
+  live_ordering_default: disabled
+notes:
+  - Do not put wallet private keys, mnemonics, vault addresses, or production account ids in this file.
+  - Signed writes require API wallet key management outside repository config.

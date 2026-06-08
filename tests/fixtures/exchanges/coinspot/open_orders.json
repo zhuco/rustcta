@@ -1,0 +1,19 @@
+{
+  "status": "ok",
+  "buyorders": [
+    {
+      "id": "9001",
+      "amount": "0.01",
+      "rate": "99000",
+      "status": "open"
+    }
+  ],
+  "sellorders": [
+    {
+      "id": "9002",
+      "amount": "0.02",
+      "rate": "101000",
+      "status": "open"
+    }
+  ]
+}

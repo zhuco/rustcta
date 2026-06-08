@@ -1,0 +1,15 @@
+{
+  "volume30Day": "12.5",
+  "feeByMarkets": [
+    {
+      "makerFeeRate": "0.0085",
+      "takerFeeRate": "0.0085",
+      "marketId": "BTC-AUD"
+    },
+    {
+      "makerFeeRate": "0.0085",
+      "takerFeeRate": "0.0085",
+      "marketId": "ETH-AUD"
+    }
+  ]
+}

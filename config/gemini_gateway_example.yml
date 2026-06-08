@@ -1,0 +1,11 @@
+gateway:
+  adapters:
+    - gemini
+gemini:
+  enabled: false
+  rest_base_url: "https://api.gemini.com"
+  public_ws_base_url: "wss://api.gemini.com/v1/marketdata"
+  private_ws_url: "wss://api.gemini.com/v1/order/events"
+  enabled_private_rest: false
+  api_key_env: "RUSTCTA_GEMINI_API_KEY"
+  api_secret_env: "RUSTCTA_GEMINI_API_SECRET"

@@ -1,0 +1,19 @@
+{
+  "operation": "upbit.place_order",
+  "method": "POST",
+  "path": "/v1/orders",
+  "auth": "jwt_hs256_query_hash",
+  "body": {
+    "market": "KRW-BTC",
+    "side": "bid",
+    "ord_type": "limit",
+    "price": "70000000",
+    "volume": "0.01",
+    "identifier": "CLIENT-UPBIT-1"
+  },
+  "headers": {
+    "Authorization": "Bearer <jwt>",
+    "Content-Type": "application/json"
+  },
+  "dry_run": true
+}

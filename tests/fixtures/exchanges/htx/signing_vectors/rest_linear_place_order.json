@@ -1,0 +1,17 @@
+{
+  "exchange": "htx",
+  "name": "rest-linear-place-order",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "test-secret",
+  "method": "POST",
+  "host": "api.hbdm.com",
+  "request_path": "/linear-swap-api/v1/swap_cross_order",
+  "query": {
+    "AccessKeyId": "test-key",
+    "SignatureMethod": "HmacSHA256",
+    "SignatureVersion": "2",
+    "Timestamp": "2026-06-08T00:00:00"
+  },
+  "payload": "POST\napi.hbdm.com\n/linear-swap-api/v1/swap_cross_order\nAccessKeyId=test-key&SignatureMethod=HmacSHA256&SignatureVersion=2&Timestamp=2026-06-08T00%3A00%3A00",
+  "expected_signature": "JTFz/3x4IJ5Ud59ZhRbbOGbOZiDS9jmPwr+xMCO0+a4="
+}

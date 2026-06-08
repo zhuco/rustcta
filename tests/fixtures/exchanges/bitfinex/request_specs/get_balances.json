@@ -1,0 +1,15 @@
+{
+  "exchange": "bitfinex",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v2/auth/r/wallets",
+  "auth": "signed",
+  "headers": {
+    "bfx-apikey": { "match": "present" },
+    "bfx-nonce": { "match": "non_empty" },
+    "bfx-signature": { "match": "non_empty" }
+  },
+  "body": {}
+}

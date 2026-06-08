@@ -1,0 +1,8 @@
+{
+  "request_type": "SUBSCRIBE",
+  "channel": "ORDER",
+  "auth_headers": {
+    "X-COINONE-PAYLOAD": "<base64-json>",
+    "X-COINONE-SIGNATURE": "<hmac-sha512-hex>"
+  }
+}

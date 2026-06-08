@@ -1,0 +1,10 @@
+{
+  "symbols": [
+    {
+      "symbol": "BTCPHP",
+      "status": "TRADING",
+      "quoteAsset": "PHP",
+      "filters": []
+    }
+  ]
+}

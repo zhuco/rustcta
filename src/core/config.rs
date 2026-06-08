@@ -137,30 +137,40 @@ impl ApiKeys {
 
         let exchange_upper = exchange.to_uppercase();
 
-        let api_key = std::env::var(format!("{}_API_KEY", exchange_upper)).map_err(|_| {
+        let api_key = env_secret(format!("{}_API_KEY", exchange_upper)).ok_or_else(|| {
             ExchangeError::ConfigError(format!("未找到{}的API_KEY环境变量", exchange))
         })?;
 
         // 尝试两种格式的密钥名称
-        let api_secret = std::env::var(format!("{}_API_SECRET", exchange_upper))
-            .or_else(|_| std::env::var(format!("{}_SECRET_KEY", exchange_upper)))
-            .or_else(|_| std::env::var(format!("{}_SECRET", exchange_upper)))
-            .map_err(|_| {
-                ExchangeError::ConfigError(format!(
-                    "未找到{}的API_SECRET或SECRET_KEY环境变量",
-                    exchange
-                ))
-            })?;
+        let api_secret = [
+            format!("{}_API_SECRET", exchange_upper),
+            format!("{}_SECRET_KEY", exchange_upper),
+            format!("{}_SECRET", exchange_upper),
+        ]
+        .into_iter()
+        .find_map(env_secret)
+        .ok_or_else(|| {
+            ExchangeError::ConfigError(format!(
+                "未找到{}的API_SECRET或SECRET_KEY环境变量",
+                exchange
+            ))
+        })?;
 
         // 尝试多种格式的passphrase名称
-        let passphrase = std::env::var(format!("{}_PASSPHRASE", exchange_upper))
-            .or_else(|_| std::env::var(format!("{}_API_PASSWORD", exchange_upper)))
-            .ok();
+        let passphrase = [
+            format!("{}_PASSPHRASE", exchange_upper),
+            format!("{}_API_PASSWORD", exchange_upper),
+        ]
+        .into_iter()
+        .find_map(env_secret);
 
         // 尝试多种格式的memo名称
-        let memo = std::env::var(format!("{}_MEMO", exchange_upper))
-            .or_else(|_| std::env::var(format!("{}_API_MEMO", exchange_upper)))
-            .ok();
+        let memo = [
+            format!("{}_MEMO", exchange_upper),
+            format!("{}_API_MEMO", exchange_upper),
+        ]
+        .into_iter()
+        .find_map(env_secret);
 
         Ok(ApiKeys {
             api_key,
@@ -173,17 +183,53 @@ impl ApiKeys {
 
 fn load_dotenv_lenient() {
     dotenv::dotenv().ok();
-    for path in [".env", "data/control_api/exchange_api_keys.env"] {
-        load_dotenv_file_lenient(path);
-    }
+    load_dotenv_file_lenient(".env", false);
+    load_dotenv_file_lenient("data/control_api/exchange_api_keys.env", true);
     for key in ["RUSTCTA_EXCHANGE_API_KEY_STORE", "EXCHANGE_API_KEY_STORE"] {
         if let Ok(path) = std::env::var(key) {
-            load_dotenv_file_lenient(&path);
+            load_dotenv_file_lenient(&path, true);
         }
     }
 }
 
-fn load_dotenv_file_lenient(path: &str) {
+fn env_secret(key: impl AsRef<str>) -> Option<String> {
+    std::env::var(key.as_ref())
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn load_dotenv_file_lenient(path: &str, override_existing: bool) {
+    let explicit_env_keys = if override_existing {
+        dotenv_file_keys(".env")
+    } else {
+        Default::default()
+    };
+    load_dotenv_file_lenient_with_explicit_keys(path, override_existing, &explicit_env_keys);
+}
+
+fn dotenv_file_keys(path: &str) -> std::collections::HashSet<String> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return Default::default();
+    };
+    raw.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (key, _) = line.split_once('=')?;
+            let key = key.trim().strip_prefix("export ").unwrap_or(key.trim());
+            is_valid_env_key(key).then(|| key.to_string())
+        })
+        .collect()
+}
+
+fn load_dotenv_file_lenient_with_explicit_keys(
+    path: &str,
+    override_existing: bool,
+    explicit_env_keys: &std::collections::HashSet<String>,
+) {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return;
     };
@@ -197,18 +243,25 @@ fn load_dotenv_file_lenient(path: &str) {
             continue;
         };
         let key = key.trim().strip_prefix("export ").unwrap_or(key.trim());
-        if key.is_empty()
-            || key
-                .chars()
-                .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
-        {
+        if !is_valid_env_key(key) {
             continue;
         }
-        if std::env::var_os(key).is_some() {
+        if !override_existing && std::env::var_os(key).is_some() {
+            continue;
+        }
+        if override_existing && std::env::var_os(key).is_some() && !explicit_env_keys.contains(key)
+        {
             continue;
         }
         std::env::set_var(key, parse_dotenv_value(value.trim()));
     }
+}
+
+fn is_valid_env_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 fn parse_dotenv_value(value: &str) -> String {
@@ -267,6 +320,77 @@ mod tests {
         std::env::remove_var("BITGET_TEST_API_KEY");
         std::env::remove_var("BITGET_TEST_API_SECRET");
         std::env::remove_var("BITGET_TEST_PASSPHRASE");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn api_keys_from_env_should_prefer_control_panel_key_store_over_dotenv() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-key-store-priority-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("data/control_api")).unwrap();
+        std::fs::write(
+            temp_dir.join(".env"),
+            "BINANCE_3_API_KEY=dotenv-key\nBINANCE_3_API_SECRET=dotenv-secret\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.join("data/control_api/exchange_api_keys.env"),
+            "BINANCE_3_API_KEY=panel-key\nBINANCE_3_API_SECRET=panel-secret\n",
+        )
+        .unwrap();
+
+        std::env::remove_var("BINANCE_3_API_KEY");
+        std::env::remove_var("BINANCE_3_API_SECRET");
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let keys = ApiKeys::from_env("binance_3").unwrap();
+
+        assert_eq!(keys.api_key, "panel-key");
+        assert_eq!(keys.api_secret, "panel-secret");
+
+        std::env::set_current_dir(cwd).unwrap();
+        std::env::remove_var("BINANCE_3_API_KEY");
+        std::env::remove_var("BINANCE_3_API_SECRET");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn api_keys_from_env_should_treat_empty_key_store_values_as_deleted() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-key-store-delete-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("data/control_api")).unwrap();
+        std::fs::write(
+            temp_dir.join(".env"),
+            "BINANCE_3_API_KEY=dotenv-key\nBINANCE_3_API_SECRET=dotenv-secret\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp_dir.join("data/control_api/exchange_api_keys.env"),
+            "BINANCE_3_API_KEY=''\nBINANCE_3_API_SECRET=''\n",
+        )
+        .unwrap();
+
+        std::env::remove_var("BINANCE_3_API_KEY");
+        std::env::remove_var("BINANCE_3_API_SECRET");
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let error = ApiKeys::from_env("binance_3").unwrap_err();
+
+        assert!(error.to_string().contains("API_KEY"));
+
+        std::env::set_current_dir(cwd).unwrap();
+        std::env::remove_var("BINANCE_3_API_KEY");
+        std::env::remove_var("BINANCE_3_API_SECRET");
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

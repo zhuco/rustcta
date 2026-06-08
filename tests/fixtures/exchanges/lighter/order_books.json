@@ -1,0 +1,24 @@
+{
+  "order_books": [
+    {
+      "market_id": 0,
+      "symbol": "ETH-USD",
+      "market_type": "perp",
+      "base": "ETH",
+      "quote": "USD",
+      "price_tick": "0.01",
+      "size_tick": "0.0001",
+      "min_base_amount": "0.001",
+      "status": "active"
+    },
+    {
+      "market_id": 1000,
+      "symbol": "ETH-USDC",
+      "market_type": "spot",
+      "base": "ETH",
+      "quote": "USDC",
+      "price_tick": "0.01",
+      "size_tick": "0.0001"
+    }
+  ]
+}

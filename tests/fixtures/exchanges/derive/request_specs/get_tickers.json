@@ -1,0 +1,16 @@
+{
+  "exchange": "derive",
+  "operation": "get_tickers",
+  "transport": "json_rpc",
+  "method": "POST",
+  "path": "/public/get_tickers",
+  "auth": "none",
+  "body": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "public/get_tickers",
+    "params": {
+      "instrument_name": "BTC-USD-PERP"
+    }
+  }
+}

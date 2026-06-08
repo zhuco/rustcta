@@ -1,6 +1,10 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
+// The legacy root crate still hosts large pre-workspace modules. Keep clippy
+// debt isolated here so workspace-wide warning gates can run while newer crates
+// enforce focused lint cleanup locally.
+#![allow(clippy::all)]
 
 pub mod analysis;
 pub mod backtest;

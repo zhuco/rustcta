@@ -1,0 +1,9 @@
+{
+  "code": "200000",
+  "data": {
+    "accountEquity": "125.00",
+    "availableBalance": "123.45",
+    "marginBalance": "125.00",
+    "accountEquityCurrency": "USDT"
+  }
+}

@@ -1,0 +1,178 @@
+schema_version: 1
+exchange: dydx
+adapter: rustcta_exchange_gateway::adapters::dydx
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: docs/dydx_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: dYdX v4 perpetual DEX adapter. Public and private read data use Indexer REST/WS; Node transaction signing remains explicit Unsupported.
+market_types: [perpetual]
+products: [perpetual]
+rest:
+  base_url: https://indexer.dydx.trade
+  testnet_base_url: https://indexer.v4testnet.dydx.exchange
+base_urls:
+  public_ws: wss://indexer.dydx.trade/v4/ws
+  private_ws: wss://indexer.dydx.trade/v4/ws
+auth:
+  private_rest: Indexer readback is wallet address plus subaccount number; Node writes require wallet transaction signing and are not enabled.
+  private_ws: v4_subaccounts subscription id is "{wallet}/{subaccount_number}".
+rate_limits:
+  indexer_public: { scope: ip, retry_after: http_429, default_weight: 1 }
+  indexer_private: { scope: ip, retry_after: http_429, default_weight: 1 }
+pagination:
+  open_orders: { mode: cursor_or_page, limit_param: limit, max_limit: 100 }
+  recent_fills: { mode: cursor_or_page, limit_param: limit, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  after_place: Unsupported until Node write signing is implemented.
+  stream_recovery: Resubscribe v4_subaccounts and reconcile subaccount, positions, orders, and fills through Indexer REST.
+batch:
+  place_orders: { support: unsupported, reason: dydx.batch_place_requires_node_tx_signing }
+  cancel_orders: { support: unsupported, reason: dydx.batch_cancel_requires_node_tx_signing }
+websocket:
+  public:
+    support: native
+    channels: [v4_orderbook, v4_trades, v4_markets, v4_candles]
+    heartbeat: { mode: server_or_transport_ping, interval_ms: 30000, timeout_ms: 90000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: native_when_wallet_configured
+    channels: [v4_subaccounts]
+    auth_renewal: { mode: address_subscription }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/perpetualMarkets
+    auth: none
+    rate_limit_bucket: dydx_indexer_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/orderbooks/perpetualMarket/{ticker}
+    auth: none
+    rate_limit_bucket: dydx_indexer_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+  - operation: balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/addresses/{address}/subaccountNumber/{subaccountNumber}
+    auth: none
+    rate_limit_bucket: dydx_indexer_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: Address/subaccount-scoped Indexer read. No API key or wallet secret is sent.
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/perpetualPositions
+    auth: none
+    rate_limit_bucket: dydx_indexer_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: Address/subaccount-scoped Indexer read. No API key or wallet secret is sent.
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: node private Place Order transaction
+    auth: unsupported
+    rate_limit_bucket: dydx_node_private
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    support: unsupported
+    reason: dydx.node_order_signing_requires_wallet_tx_authenticator
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: node private Cancel Order transaction
+    auth: unsupported
+    rate_limit_bucket: dydx_node_private
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: unknown
+    testnet: true
+    support: unsupported
+    reason: dydx.node_cancel_signing_requires_wallet_tx_authenticator
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/orders
+    auth: none
+    rate_limit_bucket: dydx_indexer_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: Address/subaccount-scoped Indexer read. No API key or wallet secret is sent.
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v4/fills
+    auth: none
+    rate_limit_bucket: dydx_indexer_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    notes: Address/subaccount-scoped Indexer read. No API key or wallet secret is sent.
+streams:
+  - operation: public_order_book_stream
+    product: perpetual
+    channel: v4_orderbook
+    support: native
+    resync: { endpoint_operation: order_book }
+  - operation: public_trades_stream
+    product: perpetual
+    channel: v4_trades
+    support: spec_only
+  - operation: private_user_stream
+    product: perpetual
+    channel: v4_subaccounts
+    support: native_when_wallet_configured
+    resync: { endpoint_operation: open_orders }

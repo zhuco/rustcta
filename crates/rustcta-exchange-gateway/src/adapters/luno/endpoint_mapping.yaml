@@ -1,0 +1,159 @@
+schema_version: 1
+exchange: luno
+adapter: rustcta_exchange_gateway::adapters::luno
+metadata:
+  status: validated
+  source: docs/luno_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "Task 18 multi-region fiat spot adapter; ZAR/MYR/NGN/IDR examples documented, payment rails excluded."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.luno.com
+base_urls:
+  public_ws: wss://ws.luno.com/api/1/stream
+auth:
+  private_rest: HTTP Basic auth with key id as username and key secret as password.
+rate_limits:
+  buckets:
+    luno_rest:
+      scope: rest
+      interval: 1m
+      limit: 300
+      burst: 30
+    luno_orders:
+      scope: orders
+      interval: 1m
+      limit: 60
+      burst: 10
+pagination:
+  get_recent_fills:
+    style: time_window_or_sequence
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
+batch:
+  place_orders: { support: unsupported, reason: luno.batch_place_orders_unverified }
+  cancel_orders: { support: unsupported, reason: luno.batch_cancel_orders_unverified }
+websocket:
+  public:
+    support: native
+    url: wss://ws.luno.com/api/1/stream/{pair}
+    heartbeat: { direction: server_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    url: wss://ws.luno.com/api/1/stream/{pair}
+    auth: basic_auth_payload
+    fallback: rest_reconciliation
+unsupported:
+  - beneficiaries
+  - fiat_withdrawals
+  - fiat_deposits
+  - bank_payment_rails
+  - crypto_addresses
+  - send
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/tickers
+    auth: none
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/luno/tickers.json
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/orderbook_top
+    auth: none
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: false
+    params:
+      - name: pair
+    response_parser:
+      fixture: tests/fixtures/exchanges/luno/orderbook_top.json
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/balance
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/fee_info
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/1/postorder
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: luno_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/place_order.json
+    notes: Signing vector tests/fixtures/exchanges/luno/signing_vectors/basic_auth.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/1/stoporder
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: luno_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/luno/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/orders/{id}
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/listorders
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/listtrades
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: luno_rest
+    weight: 1
+    request_spec_required: true

@@ -1,0 +1,155 @@
+schema_version: 1
+exchange: bitso
+adapter: BitsoGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bitso_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Latin America spot adapter. Live private write REST remains offline request-spec only.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.bitso.com/api/v3
+  sandbox_rest: https://api-sandbox.bitso.com/api/v3
+  public_ws: wss://ws.bitso.com
+auth:
+  private_rest: HMAC-SHA256 over nonce + method + /api/v3 path + exact JSON body, Authorization Bitso key:nonce:signature
+rate_limits:
+  public: { scope: ip, interval_ms: 60000, limit: 60 }
+  private: { scope: account, interval_ms: 60000, limit: 300 }
+pagination:
+  private_history: { mode: cursor_or_time, notes: audit before live promotion }
+reconciliation:
+  private_state: rest_fallback
+  notes: Private streams are not promoted; orders/fills reconcile through private REST request specs.
+batch:
+  place: { support: unsupported, reason: bitso.native_batch_place_unsupported }
+  cancel: { support: cancel_all_only, reason: bitso.delete_orders_all_available_but_offline_only }
+websocket:
+  public:
+    support: payload_helper
+    channels: [trades, orders, diff-orders]
+    heartbeat: { mode: connection, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /available_books
+    auth: none
+    rate_limit_bucket: bitso_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /order_book
+    auth: none
+    rate_limit_bucket: bitso_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /orders/{oid}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /open_orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders/{oid}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /user_trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitso_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only

@@ -1,0 +1,236 @@
+schema_version: 1
+exchange: kucoinfutures
+adapter: rustcta_exchange_gateway::adapters::kucoinfutures
+metadata:
+  status: validated
+  notes: "Task 6 KuCoin Futures split adapter. Spot remains in the kucoin adapter; this mapping covers USDT/USD futures-perpetual contracts."
+market_types:
+  - perpetual
+products:
+  - perpetual
+rest:
+  base_url: https://api-futures.kucoin.com
+rate_limits:
+  buckets:
+    futures_public:
+      scope: rest
+      interval: 3s
+      limit: 30
+    futures_private:
+      scope: account
+      interval: 3s
+      limit: 45
+    futures_orders:
+      scope: orders
+      interval: 3s
+      limit: 45
+    websocket:
+      scope: websocket
+      interval: 1m
+      limit: 100
+pagination:
+  open_orders:
+    style: currentPage_pageSize
+    cursor: offset_or_page_number_token
+    limit_param: pageSize
+    page_param: currentPage
+    max_limit: 500
+  recent_fills:
+    style: currentPage_pageSize_with_time_window
+    cursor: offset_or_page_number_token
+    since_param: startAt
+    until_param: endAt
+    limit_param: pageSize
+    page_param: currentPage
+    max_limit: 500
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+    - get_positions
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+websocket:
+  public:
+    support: native
+    url: wss://ws-api-futures.kucoin.com/endpoint
+    heartbeat:
+      direction: client_ping
+      interval_ms: 20000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    token_endpoint: /api/v1/bullet-private
+    auth: rest_bullet_token
+    renewal: refresh_before_expiry
+    renew_before_expiry_ms: 3600000
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/contracts/active
+    auth: none
+    rate_limit_bucket: futures_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/level2/snapshot
+    auth: none
+    rate_limit_bucket: futures_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/account-overview
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/account_overview.json
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/positions.json
+  - operation: get_fees
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/trade-fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/trade_fees.json
+  - operation: get_private_funding_fee_history
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/funding-history
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/funding_history.json
+    notes: "Funding history is documented and mapped for reconciliation/audit; no shared gateway funding model exists yet."
+  - operation: place_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /api/v1/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: perpetual
+    transport: rest
+    method: DELETE
+    path: /api/v1/orders/{orderId}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: perpetual
+    transport: rest
+    method: DELETE
+    path: /api/v1/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/cancel_all_orders.json
+  - operation: query_order
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/orders/{orderId}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/query_order.json
+  - operation: get_open_orders
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/open_orders.json
+  - operation: get_recent_fills
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /api/v1/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/recent_fills.json
+  - operation: get_private_bullet_token
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /api/v1/bullet-private
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/kucoinfutures/request_specs/bullet_private.json

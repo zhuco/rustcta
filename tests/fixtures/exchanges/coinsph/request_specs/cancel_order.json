@@ -1,0 +1,21 @@
+{
+  "exchange": "coinsph",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/openapi/v1/order",
+  "auth": "signed",
+  "query": {
+    "symbol": {"match": "exact", "value": "BTCPHP"},
+    "orderId": {"match": "exact", "value": "30"},
+    "origClientOrderId": {"match": "exact", "value": "cli-place"},
+    "timestamp": {"match": "present"},
+    "recvWindow": {"match": "exact", "value": "5000"},
+    "signature": {"match": "present"}
+  },
+  "headers": {
+    "x-coins-apikey": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["coins-test-secret"]
+}

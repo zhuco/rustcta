@@ -1,0 +1,11 @@
+{
+  "exchange": "delta",
+  "name": "cancel_order",
+  "method": "DELETE",
+  "path": "/v2/orders",
+  "required_headers": ["api-key", "signature", "timestamp"],
+  "json_body": {
+    "product_symbol": "BTCUSDT",
+    "id": "2001"
+  }
+}

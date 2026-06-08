@@ -1,0 +1,141 @@
+schema_version: 1
+exchange: coinsph
+adapter: rustcta_exchange_gateway::adapters::coinsph
+metadata:
+  status: validated
+  source: https://docs.pro.coins.ph/
+  notes: "Philippines PHP spot adapter. Binance-like payloads are mapped to the local Coins.ph host, paths and X-COINS-APIKEY header."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.pro.coins.ph
+rate_limits:
+  buckets:
+    public_ip:
+      scope: rest
+      interval: 1m
+      limit: 1200
+    signed_uid:
+      scope: account
+      interval: 1m
+      limit: 1200
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+unsupported:
+  - cancel_all_orders
+  - quote_market_order
+  - amend_order
+  - order_list
+  - batch_place_orders
+  - batch_cancel_orders
+  - public_streams
+  - private_streams
+  - payment_wallet_fiat_transfer
+  - withdraw
+  - sub_account_transfer
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/v1/exchangeInfo
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 10
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/quote/v1/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 5
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/v1/account
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/get_balances.json
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/v1/asset/tradeFee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/get_fees.json
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /openapi/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/place_order.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /openapi/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/v1/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 4
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/query_order.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/v1/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 6
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/get_open_orders.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /openapi/v1/myTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinsph/request_specs/get_recent_fills.json

@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use clap::Parser;
 use rustcta::backtest::runtime::{BacktestCli, BacktestCommand};
 

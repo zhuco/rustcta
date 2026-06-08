@@ -1,0 +1,14 @@
+{
+  "code": "200000",
+  "data": [
+    {
+      "symbol": "XBTUSDTM",
+      "currentQty": 2,
+      "avgEntryPrice": "65000",
+      "markPrice": "65120",
+      "liquidationPrice": "50000",
+      "unrealisedPnl": "0.24",
+      "realLeverage": "3"
+    }
+  ]
+}

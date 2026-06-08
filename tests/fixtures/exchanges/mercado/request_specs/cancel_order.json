@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v4/accounts/<accountId>/BTC-BRL/orders/01HCDAA7YJ68ZJ0FTEPR7DYDS1",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

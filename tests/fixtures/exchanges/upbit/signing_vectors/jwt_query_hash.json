@@ -1,0 +1,14 @@
+{
+  "name": "upbit-jwt-query-hash-open-orders",
+  "algorithm": "jwt_hs256_with_sha512_query_hash",
+  "access_key": "test-access",
+  "secret_key": "test-secret",
+  "nonce": "00000000-0000-4000-8000-000000000002",
+  "params": [
+    {"key": "market", "value": "KRW-BTC"},
+    {"key": "limit", "value": "10"}
+  ],
+  "query_string": "market=KRW-BTC&limit=10",
+  "query_hash": "d8214a07d0b7181ac91485f885d4349e9de6733bbd0806fec3102519a0ba1479b9be54245055706da413a6e916a8a978c1fc1a79e8e459d54c4de8fbe2bc70cd",
+  "jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3Nfa2V5IjoidGVzdC1hY2Nlc3MiLCJub25jZSI6IjAwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMiIsInF1ZXJ5X2hhc2giOiJkODIxNGEwN2QwYjcxODFhYzkxNDg1Zjg4NWQ0MzQ5ZTlkZTY3MzNiYmQwODA2ZmVjMzEwMjUxOWEwYmExNDc5YjliZTU0MjQ1MDU1NzA2ZGE0MTNhNmU5MTZhOGE5NzhjMWZjMWE3OWU4ZTQ1OWQ1NGM0ZGU4ZmJlMmJjNzBjZCIsInF1ZXJ5X2hhc2hfYWxnIjoiU0hBNTEyIn0.nuos7KgC5DErrrQnytLCUMv-9-jx5EVnj2iEqyBqiTU"
+}

@@ -1,0 +1,11 @@
+{
+  "operation": "bitvavo.get_open_orders",
+  "method": "GET",
+  "path": "/v2/ordersOpen?market=BTC-EUR",
+  "headers": [
+    "Bitvavo-Access-Key",
+    "Bitvavo-Access-Timestamp",
+    "Bitvavo-Access-Signature",
+    "Bitvavo-Access-Window"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "operation": "bitvavo.cancel_all_orders",
+  "method": "DELETE",
+  "path": "/v2/orders?market=BTC-EUR",
+  "headers": [
+    "Bitvavo-Access-Key",
+    "Bitvavo-Access-Timestamp",
+    "Bitvavo-Access-Signature",
+    "Bitvavo-Access-Window"
+  ]
+}

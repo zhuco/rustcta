@@ -1,0 +1,20 @@
+{
+  "method": "POST",
+  "path": "/api/v1/order",
+  "auth": "btcturk_hmac_sha256_base64",
+  "headers": {
+    "X-PCK": "<redacted-api-key>",
+    "X-Stamp": "<milliseconds>",
+    "X-Signature": "<base64-hmac-sha256>",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "quantity": "0.01",
+    "price": "2500000",
+    "stopPrice": "0",
+    "newOrderClientId": "offline-fixture",
+    "orderMethod": "limit",
+    "orderType": "buy",
+    "pairSymbol": "BTCTRY"
+  }
+}

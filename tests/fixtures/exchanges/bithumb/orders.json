@@ -1,0 +1,22 @@
+[
+  {
+    "uuid": "C0101000000001799625",
+    "client_order_id": "my-order-001",
+    "side": "ask",
+    "ord_type": "limit",
+    "price": "84001000",
+    "state": "wait",
+    "market": "KRW-BTC",
+    "created_at": "2024-07-12T16:30:01+09:00",
+    "volume": "0.2",
+    "remaining_volume": "0.2",
+    "reserved_fee": "0",
+    "remaining_fee": "0",
+    "paid_fee": "0",
+    "locked": "0.2",
+    "executed_volume": "0",
+    "executed_funds": "0",
+    "trades_count": 0,
+    "stp_type": "cancel_taker"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "code": 1000,
+  "message": "OK",
+  "data": {
+    "symbols": [
+      {
+        "symbol": "BTC_USDT",
+        "base_currency": "BTC",
+        "quote_currency": "USDT",
+        "price_precision": 2,
+        "base_min_size": "0.000001",
+        "min_buy_amount": "5",
+        "trade_status": "trading"
+      }
+    ]
+  }
+}

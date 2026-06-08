@@ -1,0 +1,34 @@
+{
+  "name": "hyperliquid_order_action_local_vector",
+  "secret_key": "0x0101010101010101010101010101010101010101010101010101010101010101",
+  "account_address": "0x1111111111111111111111111111111111111111",
+  "vault_address": "0x1111111111111111111111111111111111111111",
+  "is_mainnet": true,
+  "nonce": 1750000000000,
+  "action": {
+    "type": "order",
+    "orders": [
+      {
+        "a": 0,
+        "b": true,
+        "p": "64900.0",
+        "s": "0.10",
+        "r": false,
+        "t": {
+          "limit": {
+            "tif": "Gtc"
+          }
+        },
+        "c": "0x00000000000000000000000000000001"
+      }
+    ],
+    "grouping": "na"
+  },
+  "canonical_algorithm": "MessagePack action with struct-map ordering, nonce big-endian, vault flag/address, Keccak-256, EIP-712 Exchange/Agent domain, recoverable secp256k1 signature",
+  "signature_shape": {
+    "r": "0x<32-byte-hex>",
+    "s": "0x<32-byte-hex>",
+    "v": "27_or_28"
+  },
+  "sanitization": "Local deterministic vector; no production wallet key or account id."
+}

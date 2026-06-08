@@ -1,0 +1,9 @@
+{
+  "operation": "krakenfutures.cancel_all_orders.perpetual",
+  "method": "POST",
+  "path": "/derivatives/api/v3/cancelallorders",
+  "auth": "hmac",
+  "form": {
+    "symbol": "PF_XBTUSDT"
+  }
+}

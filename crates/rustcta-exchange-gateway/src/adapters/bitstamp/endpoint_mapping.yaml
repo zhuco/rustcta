@@ -1,0 +1,239 @@
+schema_version: 1
+exchange: bitstamp
+adapter: rustcta_exchange_gateway::adapters::bitstamp
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: Bitstamp REST/WebSocket API docs and Task 11 local implementation
+  last_reviewed: "2026-06-08"
+  notes: Spot-only Bitstamp adapter. Private REST uses Bitstamp HMAC-SHA256 v2 headers but is classified as hmac auth for the shared mapping schema.
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://www.bitstamp.net
+auth:
+  private_rest: HMAC-SHA256 v2 over BITSTAMP-prefixed canonical payload
+  headers: [X-Auth, X-Auth-Signature, X-Auth-Nonce, X-Auth-Timestamp, X-Auth-Version]
+rate_limits:
+  public_rest: { scope: ip, default_weight: 1 }
+  private_rest: { scope: account, default_weight: 1 }
+  private_order: { scope: account, default_weight: 1 }
+websocket:
+  public:
+    url: wss://ws.bitstamp.net
+    channels: [order_book, diff_order_book, live_trades]
+  private:
+    token_endpoint: /api/v2/websockets_token/
+    channels: [private-my_orders, private-user]
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v2/markets/
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v2/order_book/{market_symbol}/
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/account_balances/
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/fees/trading/{market_symbol}/
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/{buy_or_sell}/{market_symbol}/
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: place_market_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/{buy_or_sell}/market/{market_symbol}/
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/cancel_order/
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/cancel_all_orders/
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/replace_order/
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/order_status/
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/open_orders/{market_symbol}/
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/user_transactions/{market_symbol}/
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    max_items: 1000
+    sign_path: bitstamp_v2_form
+  - operation: websockets_token
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /api/v2/websockets_token/
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    sign_path: bitstamp_v2_form
+unsupported:
+  - derivatives
+  - positions
+  - sell_quote_market_order
+  - order_list
+  - batch_orders

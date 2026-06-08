@@ -1,0 +1,16 @@
+{
+  "exchange": "deribit",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v2/private/get_positions",
+  "auth": "signed",
+  "query": {
+    "currency": { "match": "exact", "value": "BTC" },
+    "kind": { "match": "exact", "value": "future" }
+  },
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  }
+}

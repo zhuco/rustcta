@@ -1,0 +1,162 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use rustcta_exchange_api::{RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION};
+use rustcta_types::{AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, TenantId};
+use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+use crate::request_spec::ActualHttpRequest;
+
+use super::BinanceCoinMGatewayConfig;
+
+#[derive(Debug, Clone)]
+pub(super) struct SeenRequest {
+    pub(super) method: String,
+    pub(super) path: String,
+    pub(super) query: HashMap<String, String>,
+    headers: HashMap<String, String>,
+}
+
+impl SeenRequest {
+    pub(super) fn header(&self, key: &str) -> Option<&str> {
+        self.headers
+            .get(&key.to_ascii_lowercase())
+            .map(String::as_str)
+    }
+
+    pub(super) fn actual_http_request(&self) -> ActualHttpRequest {
+        ActualHttpRequest::new(self.method.clone(), self.path.clone())
+            .with_query(self.query.clone())
+            .with_headers(self.headers.clone())
+    }
+}
+
+pub(super) async fn spawn_rest_server(
+    responses: Vec<Value>,
+) -> (String, Arc<Mutex<Vec<SeenRequest>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let seen_requests = Arc::clone(&seen);
+    let responses = Arc::new(Mutex::new(responses.into_iter()));
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let mut buffer = vec![0_u8; 8192];
+            let bytes_read = stream.read(&mut buffer).await.unwrap();
+            let request_text = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+            seen_requests
+                .lock()
+                .unwrap()
+                .push(parse_seen_request(&request_text));
+            let body = responses
+                .lock()
+                .unwrap()
+                .next()
+                .unwrap_or_else(|| json!({}));
+            let body_text = body.to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body_text.len(),
+                body_text
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    (format!("http://{address}"), seen)
+}
+
+fn parse_seen_request(request_text: &str) -> SeenRequest {
+    let request_line = request_text.lines().next().unwrap_or_default();
+    let method = request_line
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let target = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let (path, query_text) = target.split_once('?').unwrap_or((target, ""));
+    let query = query_text
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (key.to_string(), value.to_string())
+        })
+        .collect();
+    let headers = request_text
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            Some((key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    SeenRequest {
+        method,
+        path: path.to_string(),
+        query,
+        headers,
+    }
+}
+
+pub(super) fn exchange_id() -> ExchangeId {
+    ExchangeId::new("binancecoinm").expect("binancecoinm exchange")
+}
+
+pub(super) fn context(request_id: &str) -> RequestContext {
+    RequestContext {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+        account_id: Some(AccountId::new("account").expect("account")),
+        run_id: None,
+        request_id: Some(request_id.to_string()),
+        requested_at: chrono::Utc::now(),
+    }
+}
+
+pub(super) fn symbol_scope(exchange_symbol: &str) -> SymbolScope {
+    SymbolScope {
+        exchange: exchange_id(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USD").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(exchange_id(), MarketType::Perpetual, exchange_symbol)
+            .expect("symbol"),
+    }
+}
+
+pub(super) fn private_config(base_url: String) -> BinanceCoinMGatewayConfig {
+    BinanceCoinMGatewayConfig {
+        rest_base_url: base_url,
+        api_key: Some("test-key".to_string()),
+        api_secret: Some("test-secret".to_string()),
+        recv_window_ms: 5_000,
+        enabled_private_rest: true,
+        ..BinanceCoinMGatewayConfig::default()
+    }
+}
+
+pub(super) fn assert_signed_request(request: &SeenRequest) {
+    assert_signed_request_method(request, "GET");
+}
+
+pub(super) fn assert_signed_request_method(request: &SeenRequest, method: &str) {
+    assert_eq!(request.method, method);
+    assert_eq!(request.header("X-MBX-APIKEY"), Some("test-key"));
+    assert!(request.query.contains_key("timestamp"));
+    assert_eq!(
+        request.query.get("recvWindow").map(String::as_str),
+        Some("5000")
+    );
+    assert!(request.query.contains_key("signature"));
+    assert!(!request
+        .query
+        .values()
+        .any(|value| value.contains("test-secret")));
+}

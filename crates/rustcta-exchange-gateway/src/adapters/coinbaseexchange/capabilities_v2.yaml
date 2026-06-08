@@ -1,0 +1,17 @@
+schema_version: 1
+exchange: coinbaseexchange
+market_types: [spot]
+credential_scopes: [read_only, trade]
+public_rest: native
+private_rest: hmac
+batch:
+  place_orders: composed_sequential
+  cancel_orders: composed_sequential
+streams:
+  public: native
+  private: native_user_channel
+  orderbook_resync: rest_order_book_snapshot
+unsupported:
+  - advanced_trade_brokerage
+  - intx_perpetual
+  - funding_operations

@@ -1,0 +1,15 @@
+{
+  "status": "ok",
+  "transactions": [
+    {
+      "txid": "fill-1",
+      "orderid": "9001",
+      "type": "buy",
+      "amount": "0.01",
+      "rate": "99000",
+      "total": "990",
+      "fee": "9.9",
+      "created": 1710000000000
+    }
+  ]
+}

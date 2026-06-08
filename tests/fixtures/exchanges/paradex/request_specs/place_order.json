@@ -1,0 +1,26 @@
+{
+  "exchange": "paradex",
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/orders",
+  "query": {},
+  "body": {
+    "market": "BTC-USD-PERP",
+    "side": "BUY",
+    "type": "LIMIT",
+    "instruction": "GTC",
+    "price": "65000.0",
+    "size": "0.05",
+    "client_id": "fixture-client-001",
+    "flags": ["REDUCE_ONLY"],
+    "signature": "[\"123\",\"456\"]",
+    "signature_timestamp": 1710793629000
+  },
+  "headers": {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Authorization": "Bearer fixture.jwt.token"
+  },
+  "secret_free": true,
+  "live_runtime_boundary": "Shared PlaceOrderRequest is unsupported until an adapter-specific Stark signer supplies signature and signature_timestamp."
+}

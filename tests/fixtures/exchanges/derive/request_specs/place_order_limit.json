@@ -1,0 +1,29 @@
+{
+  "exchange": "derive",
+  "operation": "derive.place_order",
+  "method": "POST",
+  "path": "/",
+  "auth": "signed",
+  "body": {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "private/order",
+    "params": {
+      "subaccount_id": "fixture-subaccount",
+      "instrument_name": "BTC-PERP",
+      "direction": "buy",
+      "order_type": "limit",
+      "amount": "0.01",
+      "limit_price": "65000",
+      "label": "fixture-client-order-id"
+    }
+  },
+  "headers": {
+    "X-Derive-Session-Key": "fixture-session-key",
+    "X-Derive-Signature": "fixture-session-signature",
+    "X-Derive-Timestamp": "1700000000000"
+  },
+  "forbid_header_values_containing": ["private", "secret", "real-wallet"],
+  "forbid_body_values_containing": ["private", "secret", "real-wallet"],
+  "signing_vector": "derive/session_order_hmac"
+}

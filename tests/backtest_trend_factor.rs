@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{Duration, TimeZone, Utc};
 use rustcta::backtest::factors::{
     expand_mtf_trend_factor_runs, expand_trend_factor_runs, MtfTrendFactorScanSpec,

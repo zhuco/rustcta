@@ -1,3 +1,7 @@
+// Router errors embed the public execution protocol error so callers can retain
+// the full serialized failure payload.
+#![allow(clippy::result_large_err)]
+
 use chrono::{DateTime, Utc};
 use rustcta_event_ledger::{
     AssetBalanceRecord, BalanceSnapshotRecord, EventIdentity, EventKind, FillLedgerRecord,

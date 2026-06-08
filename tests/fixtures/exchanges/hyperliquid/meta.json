@@ -1,0 +1,9 @@
+{
+  "universe": [
+    {
+      "name": "BTC",
+      "szDecimals": 5,
+      "maxLeverage": 50
+    }
+  ]
+}

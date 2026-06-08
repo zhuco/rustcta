@@ -1,0 +1,6 @@
+{
+  "secret": "test-secret",
+  "request": "/v1/order/new",
+  "nonce": "1710000000000000",
+  "algorithm": "base64_payload_hmac_sha384_hex"
+}

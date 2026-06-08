@@ -1,0 +1,16 @@
+[
+  {
+    "id": "trade-1",
+    "orderId": "order-1",
+    "clientOrderId": "CLIENTLIMIT1",
+    "market": "BTC-EUR",
+    "timestamp": 1743054550000,
+    "side": "buy",
+    "amount": "0.01",
+    "price": "65000",
+    "filledAmountQuote": "650",
+    "fee": "1.625",
+    "feeCurrency": "EUR",
+    "taker": true
+  }
+]

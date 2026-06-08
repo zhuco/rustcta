@@ -1,0 +1,14 @@
+{
+  "exchange": "indodax",
+  "operation": "query_order",
+  "method": "POST",
+  "path": "/tapi",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Key": "test-key",
+    "Sign": "<hmac_sha512_form_body>"
+  },
+  "body": "method=getOrder&nonce=1700000000000&order_id=12345&pair=btc_idr",
+  "credential_scope": "read_only",
+  "unsupported": ["client_order_id"]
+}

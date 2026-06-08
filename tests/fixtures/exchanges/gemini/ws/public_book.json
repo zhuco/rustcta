@@ -1,0 +1,6 @@
+{
+  "type": "update",
+  "eventId": 1,
+  "socket_sequence": 1,
+  "events": [{"type": "change", "side": "bid", "price": "30000.00", "remaining": "0.4"}]
+}

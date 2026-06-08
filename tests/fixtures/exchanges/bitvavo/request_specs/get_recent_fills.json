@@ -1,0 +1,11 @@
+{
+  "operation": "bitvavo.get_recent_fills",
+  "method": "GET",
+  "path": "/v2/trades?market=BTC-EUR&limit=100",
+  "headers": [
+    "Bitvavo-Access-Key",
+    "Bitvavo-Access-Timestamp",
+    "Bitvavo-Access-Signature",
+    "Bitvavo-Access-Window"
+  ]
+}

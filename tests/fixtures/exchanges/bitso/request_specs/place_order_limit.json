@@ -1,0 +1,22 @@
+{
+  "method": "POST",
+  "path": "/api/v3/orders",
+  "auth": "bitso_hmac_sha256",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "book": "btc_mxn",
+    "side": "buy",
+    "type": "limit",
+    "major": "0.01",
+    "price": "650000",
+    "time_in_force": "goodtillcancelled",
+    "origin_id": "offline-fixture"
+  },
+  "forbid_header_values_containing": [
+    "real-credential-value",
+    "production-credential-value"
+  ]
+}

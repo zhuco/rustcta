@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "result": {
+    "id": 1001,
+    "product_symbol": "BTCUSDT",
+    "contract_type": "perpetual_futures",
+    "size": 2,
+    "unfilled_size": 0,
+    "side": "buy",
+    "order_type": "limit_order",
+    "limit_price": "65000",
+    "client_order_id": "cid-1",
+    "state": "closed",
+    "average_fill_price": "65000",
+    "reduce_only": false,
+    "created_at": "2026-06-08T01:00:00Z",
+    "updated_at": "2026-06-08T01:00:01Z"
+  }
+}

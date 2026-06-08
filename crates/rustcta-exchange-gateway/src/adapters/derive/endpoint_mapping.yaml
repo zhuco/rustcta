@@ -1,0 +1,144 @@
+schema_version: 1
+exchange: derive
+adapter: rustcta_exchange_gateway::adapters::derive
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: Derive API reference llms.txt snapshot and task 8 local fixtures
+  last_reviewed: "2026-06-08"
+  notes: Options/perp JSON-RPC adapter. Option/perp metadata, session/account boundary, request specs, and WS payloads are fixture-verified. Private trade runtime stays closed until session-key signing is live-validated.
+market_types: [option, perpetual]
+products: [option, perpetual]
+rest:
+  base_url: https://api.derive.xyz
+base_urls:
+  websocket: wss://api.derive.xyz/ws
+auth:
+  private_rest: JSON-RPC private/* calls authenticated by Derive session key bound to wallet/subaccount permissions.
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_account: { scope: subaccount, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_trade: { scope: subaccount, retry_after: http_429_or_venue_message, default_weight: 1 }
+pagination:
+  open_orders: { mode: cursor, cursor_param: page, limit_param: page_size, max_limit: 100 }
+  recent_fills: { mode: cursor, cursor_param: page, limit_param: page_size, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  stream_recovery: Re-login with session key, resubscribe private channels, then reconcile balances, positions, open orders, and trade history over JSON-RPC.
+batch:
+  place_orders: { support: unsupported, reason: derive.batch_place_orders_unverified }
+  cancel_orders: { support: unsupported, reason: derive.batch_cancel_orders_unverified }
+websocket:
+  public: { support: native, channels: [orderbook, ticker, trades], heartbeat: json_rpc_ping }
+  private: { support: spec_only, channels: [private.orders, private.trades, private.balances, private.positions], auth_renewal: relogin }
+endpoints:
+  - operation: symbol_rules
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: none
+    rate_limit_bucket: derive_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: JSON-RPC method public/get_all_instruments; older docs and fixtures may refer to get_instruments generically.
+  - operation: order_book
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: none
+    rate_limit_bucket: derive_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: JSON-RPC method public/get_orderbook or orderbook REST reference.
+  - operation: balances
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: derive_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: JSON-RPC method private/get_collaterals or subaccount balances reference.
+  - operation: positions
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: derive_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: JSON-RPC method private/get_positions.
+  - operation: place_order
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: derive_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+    notes: JSON-RPC method private/order; requires session key with trading permission.
+  - operation: cancel_order
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: derive_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+    notes: JSON-RPC method private/cancel.
+  - operation: open_orders
+    product: option
+    market_types: [option, perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: derive_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    notes: JSON-RPC method private/get_open_orders.

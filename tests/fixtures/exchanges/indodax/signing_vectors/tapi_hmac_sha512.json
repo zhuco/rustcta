@@ -1,0 +1,12 @@
+{
+  "exchange": "indodax",
+  "algorithm": "hmac_sha512_hex",
+  "secret": "secret",
+  "params": {
+    "method": "getInfo",
+    "nonce": "1700000000000",
+    "pair": "btc_idr"
+  },
+  "payload": "method=getInfo&nonce=1700000000000&pair=btc_idr",
+  "signature": "523e6caea8203708f0ccbfaf83e4ddf520aff5f6c4b1e942e5b6807b86cd619d78a32fba6af296a890e8bdc0dbcdac28dd35d6ed9a723d78267acc62aae501e6"
+}

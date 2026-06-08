@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "trades": [
+      {
+        "trade_id": "T-1",
+        "order_id": "ETH-123",
+        "label": "client-1",
+        "instrument_name": "BTC-28JUN24-70000-C",
+        "direction": "buy",
+        "liquidity": "T",
+        "amount": 1,
+        "price": 0.083,
+        "fee": 0.00002,
+        "fee_currency": "BTC",
+        "profit_loss": 0,
+        "timestamp": 1719400000300
+      }
+    ]
+  }
+}

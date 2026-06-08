@@ -1,0 +1,33 @@
+{
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "instrument_name": "BTC-28JUN24-70000-C",
+      "kind": "option",
+      "base_currency": "BTC",
+      "quote_currency": "USD",
+      "settlement_currency": "BTC",
+      "option_type": "call",
+      "strike": 70000,
+      "expiration_timestamp": 1719561600000,
+      "contract_size": 1,
+      "tick_size": 0.0005,
+      "min_trade_amount": 0.1,
+      "is_active": true
+    },
+    {
+      "instrument_name": "BTC-28JUN24-60000-P",
+      "kind": "option",
+      "base_currency": "BTC",
+      "quote_currency": "USD",
+      "settlement_currency": "BTC",
+      "option_type": "put",
+      "strike": 60000,
+      "expiration_timestamp": 1719561600000,
+      "contract_size": 1,
+      "tick_size": 0.0005,
+      "min_trade_amount": 0.1,
+      "is_active": true
+    }
+  ]
+}

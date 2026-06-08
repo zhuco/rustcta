@@ -1,0 +1,11 @@
+{
+  "exchange": "paradex",
+  "operation": "paradex.cancel_order",
+  "method": "DELETE",
+  "path": "/orders/fixture-order-id",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "Bearer fixture.jwt"
+  },
+  "forbid_header_values_containing": ["private", "secret", "real-wallet"]
+}

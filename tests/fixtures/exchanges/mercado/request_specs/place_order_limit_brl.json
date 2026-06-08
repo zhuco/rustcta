@@ -1,0 +1,20 @@
+{
+  "method": "POST",
+  "path": "/api/v4/accounts/<accountId>/BTC-BRL/orders",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "side": "buy",
+    "type": "limit",
+    "qty": "0.01",
+    "limitPrice": "350000",
+    "externalId": "offline-fixture"
+  },
+  "forbid_header_values_containing": [
+    "real-credential-value",
+    "production-credential-value"
+  ]
+}

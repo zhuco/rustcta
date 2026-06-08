@@ -1,0 +1,29 @@
+[
+  {
+    "marketId": "BTC-AUD",
+    "baseAsset": "BTC",
+    "quoteAsset": "AUD",
+    "minOrderAmount": "0.0001",
+    "maxOrderAmount": "1000000",
+    "amountDecimals": "8",
+    "priceDecimals": "2"
+  },
+  {
+    "marketId": "ETH-AUD",
+    "baseAsset": "ETH",
+    "quoteAsset": "AUD",
+    "minOrderAmount": "0.001",
+    "maxOrderAmount": "1000000",
+    "amountDecimals": "8",
+    "priceDecimals": "2"
+  },
+  {
+    "marketId": "ETH-BTC",
+    "baseAsset": "ETH",
+    "quoteAsset": "BTC",
+    "minOrderAmount": "0.001",
+    "maxOrderAmount": "1000000",
+    "amountDecimals": "8",
+    "priceDecimals": "8"
+  }
+]

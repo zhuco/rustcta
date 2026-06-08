@@ -1,0 +1,216 @@
+schema_version: 1
+exchange: krakenfutures
+adapter: rustcta_exchange_gateway::adapters::krakenfutures
+metadata:
+  status: validated
+  notes: "Task 6 futures-only split from Kraken Spot adapter. Spot endpoints remain in the original kraken adapter and are not advertised here."
+market_types:
+  - perpetual
+products:
+  - perpetual
+base_urls:
+  futures_rest: https://futures.kraken.com/derivatives/api/v3
+  futures_ws: wss://futures.kraken.com/ws/v1
+auth:
+  perpetual:
+    algorithm: "HMAC-SHA512 base64"
+    prehash: "form_query_or_body + nonce + /derivatives/api/v3/{endpoint}"
+    headers: [APIKey, Nonce, Authent]
+  futures_websocket:
+    algorithm: "HMAC-SHA512 base64 over SHA256(challenge)"
+rate_limits:
+  buckets:
+    futures_public:
+      scope: rest
+      interval: 1m
+      limit: 60
+    futures_private:
+      scope: account
+      interval: 3s
+      limit: 30
+    futures_order:
+      scope: orders
+      interval: 3s
+      limit: 30
+    ws_public:
+      scope: websocket
+      interval: 1s
+      limit: 10
+    ws_private:
+      scope: user_stream
+      interval: 1s
+      limit: 5
+pagination:
+  recent_fills:
+    perpetual:
+      style: count_with_last_fill_time_cursor
+      endpoint: "GET /derivatives/api/v3/fills"
+      limit_param: count
+      cursor_param: lastFillTime
+      unsupported_cursors: [offset, time_range]
+      max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  triggers:
+    - place_order_timeout
+    - cancel_order_timeout
+    - batch_response_missing_item
+    - private_stream_disconnected
+    - orderbook_sequence_gap
+  unknown_order_policy: query_by_client_or_exchange_id_then_open_orders_then_recent_fills
+batch:
+  place_orders:
+    perpetual:
+      support: native
+      endpoint: /derivatives/api/v3/batchorder
+      atomicity: partial
+      partial_failure: true
+  cancel_orders:
+    perpetual:
+      support: native
+      endpoint: /derivatives/api/v3/batchorder
+      atomicity: partial
+      partial_failure: true
+websocket:
+  public:
+    support: native
+    url: wss://futures.kraken.com/ws/v1
+    heartbeat:
+      request: '{"event":"ping"}'
+      accepts: ['{"event":"pong"}']
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    auth: signed_challenge
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/instruments
+    auth: none
+    rate_limit_bucket: futures_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/orderbook
+    auth: none
+    rate_limit_bucket: futures_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_accounts.json
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/openpositions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_positions.json
+  - operation: place_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/sendorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_place_order_limit.json
+  - operation: cancel_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/cancelorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_cancel_order.json
+  - operation: cancel_all_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/cancelallorders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_cancel_all_orders.json
+  - operation: batch_place_cancel_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /derivatives/api/v3/batchorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: futures_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_batch_order.json
+  - operation: query_order
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_query_order.json
+  - operation: get_open_orders
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/openorders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_open_orders.json
+  - operation: get_recent_fills
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /derivatives/api/v3/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: futures_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/krakenfutures/request_specs/futures_recent_fills.json

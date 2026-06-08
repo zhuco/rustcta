@@ -1,0 +1,176 @@
+schema_version: 1
+exchange: indodax
+adapter: rustcta_exchange_gateway::adapters::indodax
+metadata:
+  status: validated
+  source: https://indodax.com/downloads/INDODAXCOM-API-DOCUMENTATION.pdf
+  notes: "Task 20 IDR spot mapping. Private runtime excludes fiat payment, wallet transfer, and withdrawal APIs."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://indodax.com
+rate_limits:
+  buckets:
+    indodax_public:
+      scope: rest
+      interval: 1m
+      limit: 120
+    indodax_private:
+      scope: rest
+      interval: 1m
+      limit: 120
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
+unsupported:
+  - positions
+  - amend_order
+  - order_list
+  - cancel_all_orders
+  - cancel_order_requires_side_context
+  - batch_cancel_orders_require_side_context
+  - public_streams
+  - private_streams
+  - fiat_payment_runtime
+  - deposit_withdrawal_runtime
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/pairs
+    auth: none
+    rate_limit_bucket: indodax_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/{pair}/depth
+    auth: none
+    rate_limit_bucket: indodax_public
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/get_balances.json
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/cancel_order.json
+    support: unsupported
+    notes: "Indodax cancelOrder requires buy/sell side; generic CancelOrderRequest has no side field."
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/query_order.json
+  - operation: quote_market_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    support: native
+    notes: "Market buy by quote amount only; market sell requires base amount via place_order."
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/quote_market_order.json
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    support: unsupported
+    atomicity: non_atomic
+    native_batch: false
+    max_items: 20
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/place_order_limit.json
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    support: composed
+    atomicity: non_atomic
+    native_batch: false
+    max_items: 20
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/cancel_order.json
+    notes: "Sequential cancel composition is disabled because each cancel requires side context."
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/get_open_orders.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: indodax_private
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/indodax/request_specs/get_recent_fills.json

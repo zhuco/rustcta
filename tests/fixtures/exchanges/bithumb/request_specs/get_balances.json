@@ -1,0 +1,13 @@
+{
+  "exchange": "bithumb",
+  "operation": "bithumb.get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/accounts",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "strict_query": true
+}

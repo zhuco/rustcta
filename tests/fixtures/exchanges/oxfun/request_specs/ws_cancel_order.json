@@ -1,0 +1,18 @@
+{
+  "exchange": "oxfun",
+  "operation": "cancel_order",
+  "transport": "websocket",
+  "url": "wss://api.ox.fun/v2/websocket",
+  "payload": {
+    "op": "cancelorder",
+    "tag": 124,
+    "data": {
+      "timestamp": 1638237934061,
+      "recvWindow": 500,
+      "marketCode": "BTC-USD-SWAP-LIN",
+      "orderId": "1000000700008"
+    }
+  },
+  "request_spec_only": true,
+  "trade_enabled": false
+}

@@ -4,6 +4,8 @@
 //! `src/backtest/*` tree is extracted incrementally. Keep this facade narrow so
 //! app crates can depend on `rustcta-backtest` instead of the legacy root.
 
+#![allow(clippy::all)]
+
 pub mod data;
 pub mod factors;
 pub mod indicators;

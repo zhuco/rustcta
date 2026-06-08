@@ -1,0 +1,16 @@
+{
+  "exchange": "paradex",
+  "operation": "get_open_orders",
+  "method": "GET",
+  "path": "/orders",
+  "query": {
+    "market": "BTC-USD-PERP",
+    "status": "OPEN"
+  },
+  "body": null,
+  "headers": {
+    "Accept": "application/json",
+    "Authorization": "Bearer fixture.jwt.token"
+  },
+  "secret_free": true
+}

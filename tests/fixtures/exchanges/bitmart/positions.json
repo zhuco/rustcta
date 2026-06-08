@@ -1,0 +1,18 @@
+{
+  "code": 1000,
+  "message": "success",
+  "data": {
+    "positions": [
+      {
+        "symbol": "BTCUSDT",
+        "side": "long",
+        "leverage": "3",
+        "open_avg_price": "50000",
+        "mark_price": "50100",
+        "position": "2",
+        "unrealized_pnl": "200",
+        "liquidation_price": "35000"
+      }
+    ]
+  }
+}

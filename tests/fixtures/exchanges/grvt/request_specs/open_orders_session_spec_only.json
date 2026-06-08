@@ -1,0 +1,19 @@
+{
+  "exchange": "grvt",
+  "operation": "open_orders",
+  "status": "unsupported_unverified",
+  "method": "POST",
+  "base_url": "https://trades.testnet.grvt.io/full",
+  "path": "/v1/open_orders",
+  "headers": {
+    "Cookie": "<redacted-session-cookie>",
+    "X-Grvt-Account-Id": "<redacted-account-id>"
+  },
+  "body": {
+    "sub_account_id": "<redacted-sub-account-id>"
+  },
+  "auth": "session_cookie",
+  "request_spec_required": true,
+  "trade_enabled": false,
+  "expected_error": "grvt.open_orders_session_spec_only"
+}

@@ -1,0 +1,4 @@
+[
+  { "currency": "KRW", "balance": "1000000", "locked": "25000", "avg_buy_price": "0" },
+  { "currency": "BTC", "balance": "0.25", "locked": "0.01", "avg_buy_price": "84000000" }
+]

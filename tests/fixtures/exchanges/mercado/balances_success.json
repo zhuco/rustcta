@@ -1,0 +1,16 @@
+{
+  "balances": [
+    {
+      "symbol": "BRL",
+      "available": "1000.00",
+      "onHold": "0.00",
+      "total": "1000.00"
+    },
+    {
+      "symbol": "BTC",
+      "available": "0.01000000",
+      "onHold": "0.00000000",
+      "total": "0.01000000"
+    }
+  ]
+}

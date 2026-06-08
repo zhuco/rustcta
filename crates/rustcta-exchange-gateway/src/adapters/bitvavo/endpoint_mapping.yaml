@@ -1,0 +1,145 @@
+exchange: bitvavo
+schema_version: 1
+websocket:
+  public:
+    support: native
+    url: wss://ws.bitvavo.com/v2/
+    channels: [book, trades, ticker, candles]
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://ws.bitvavo.com/v2/
+    auth: authenticate
+    channels: [account]
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /markets
+    auth: none
+    rate_limit_bucket: rest_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-markets/
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /{market}/book
+    auth: none
+    rate_limit_bucket: rest_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-order-book/
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /balance
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-balance/
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /order
+    auth: hmac
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/create-order/
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /order
+    auth: hmac
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/cancel-order/
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders
+    auth: hmac
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/cancel-orders/
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /order
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-order/
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /ordersOpen
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-open-orders/
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /account/fees
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-account-fees/
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /trades
+    auth: hmac
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://docs.bitvavo.com/docs/rest-api/get-trades/

@@ -1,0 +1,15 @@
+{
+  "feed": "fills",
+  "fills": [
+    {
+      "fill_id": "fill-1",
+      "order_id": "order-1",
+      "symbol": "PF_XBTUSDT",
+      "side": "buy",
+      "price": "37500.5",
+      "size": "0.2",
+      "fee": "0.03",
+      "fillTime": "2024-01-01T00:00:00Z"
+    }
+  ]
+}

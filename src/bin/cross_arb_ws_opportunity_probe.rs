@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;

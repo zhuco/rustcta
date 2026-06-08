@@ -1,0 +1,15 @@
+{
+  "operation": "gemini.cancel_all_orders",
+  "method": "POST",
+  "path": "/v1/order/cancel/session",
+  "auth": "gemini_payload_hmac_sha384",
+  "payload": {
+    "request": "/v1/order/cancel/session",
+    "nonce": "1717200000000000"
+  },
+  "headers": [
+    "Gemini-APIKey",
+    "Gemini-Payload",
+    "Gemini-Signature"
+  ]
+}

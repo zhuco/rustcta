@@ -1,0 +1,17 @@
+[
+  {
+    "id": 101,
+    "child_order_id": "JOR20250327-000000-000001",
+    "product_code": "BTC_JPY",
+    "side": "BUY",
+    "child_order_type": "LIMIT",
+    "price": 6500000,
+    "average_price": 0,
+    "size": 0.01,
+    "executed_size": 0,
+    "child_order_state": "ACTIVE",
+    "child_order_date": "2025-03-27T10:29:08.123Z",
+    "child_order_acceptance_id": "JRF20250327-000000-000001",
+    "time_in_force": "GTC"
+  }
+]

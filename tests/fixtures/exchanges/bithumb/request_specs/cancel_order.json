@@ -1,0 +1,16 @@
+{
+  "exchange": "bithumb",
+  "operation": "bithumb.cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/v2/order",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "query": {
+    "order_id": { "match": "exact", "value": "C0101000000001799653" }
+  },
+  "strict_query": true
+}

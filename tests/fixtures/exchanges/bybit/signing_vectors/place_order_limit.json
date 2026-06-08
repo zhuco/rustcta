@@ -1,0 +1,12 @@
+{
+  "exchange": "bybit",
+  "name": "place_order_limit",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/v5/order/create",
+  "payload": "1700000000000test-key5000{\"category\":\"linear\",\"orderLinkId\":\"cli-place\",\"orderType\":\"Limit\",\"positionIdx\":1,\"price\":\"25000\",\"qty\":\"0.01\",\"side\":\"Buy\",\"symbol\":\"BTCUSDT\"}",
+  "expected_signature": "61ca803aa771613200b534a9e9e2ab4b46c7b7870baa675f3f83991500a9d783",
+  "payload_format": "raw_payload"
+}

@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/api/1/stoporder",
+  "auth": "http_basic_api_key",
+  "headers": {
+    "Authorization": "Basic <redacted>",
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "form": {
+    "order_id": "BXMC2CJ7HNB88U4"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "api_key": "bitflyer-key",
+  "secret": "bitflyer-secret",
+  "timestamp": "1743054548.123",
+  "method": "POST",
+  "request_path": "/v1/me/sendchildorder",
+  "body": "{\"product_code\":\"BTC_JPY\",\"child_order_type\":\"LIMIT\",\"side\":\"BUY\",\"price\":\"6500000\",\"size\":\"0.01\",\"time_in_force\":\"GTC\"}",
+  "expected_signature": "95f343b91ed0473a848b911a3b16455e75bb75d5001660280d49428355fd4656"
+}

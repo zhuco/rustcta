@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "path": "/spot/v2/submit_order",
+  "api_key": "bitmart-key",
+  "api_secret": "bitmart-secret",
+  "api_memo": "bitmart-memo",
+  "timestamp": "1700000000000",
+  "body": "{\"price\":\"50000\",\"side\":\"buy\",\"size\":\"0.01\",\"symbol\":\"BTC_USDT\",\"type\":\"limit\"}",
+  "signature": "3c0f9806d1318792d30ac8e99eaeb5befdad94e45f64f12856a3244669aaebab",
+  "headers": {
+    "X-BM-KEY": "bitmart-key",
+    "X-BM-TIMESTAMP": "1700000000000",
+    "X-BM-SIGN": "3c0f9806d1318792d30ac8e99eaeb5befdad94e45f64f12856a3244669aaebab"
+  }
+}

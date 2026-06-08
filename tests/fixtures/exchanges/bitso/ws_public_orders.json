@@ -1,0 +1,19 @@
+{
+  "type": "orders",
+  "book": "btc_mxn",
+  "payload": {
+    "bids": [
+      {
+        "o": "offline-order-1",
+        "r": "650000",
+        "a": "0.001",
+        "v": "650",
+        "t": 0,
+        "d": 1700000000000,
+        "s": "undefined"
+      }
+    ],
+    "asks": []
+  },
+  "sent": 1700000000001
+}

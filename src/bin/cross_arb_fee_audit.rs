@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

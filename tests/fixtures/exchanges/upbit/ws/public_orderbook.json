@@ -1,0 +1,15 @@
+[
+  {
+    "ticket": "public-ws"
+  },
+  {
+    "type": "orderbook",
+    "codes": [
+      "KRW-BTC"
+    ],
+    "is_only_realtime": true
+  },
+  {
+    "format": "SIMPLE"
+  }
+]

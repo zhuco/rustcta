@@ -1,0 +1,13 @@
+[
+  {
+    "market": "KRW-BTC",
+    "uuid": "bithumb-fill-1",
+    "order_uuid": "bithumb-order-1",
+    "side": "bid",
+    "price": "70000000",
+    "volume": "0.005",
+    "funds": "350000",
+    "paid_fee": "175",
+    "created_at": "2025-06-08T00:00:01+00:00"
+  }
+]

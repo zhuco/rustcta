@@ -1,0 +1,8 @@
+{
+  "request_type": "SUBSCRIBE",
+  "channel": "ORDERBOOK",
+  "topic": {
+    "quote_currency": "KRW",
+    "target_currency": "BTC"
+  }
+}

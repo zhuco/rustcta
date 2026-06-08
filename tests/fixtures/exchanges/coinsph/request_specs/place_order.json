@@ -1,0 +1,25 @@
+{
+  "exchange": "coinsph",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/openapi/v1/order",
+  "auth": "signed",
+  "query": {
+    "symbol": {"match": "exact", "value": "BTCPHP"},
+    "side": {"match": "exact", "value": "BUY"},
+    "type": {"match": "exact", "value": "LIMIT"},
+    "timeInForce": {"match": "exact", "value": "GTC"},
+    "quantity": {"match": "exact", "value": "0.01000000"},
+    "price": {"match": "exact", "value": "3500000.00"},
+    "newClientOrderId": {"match": "exact", "value": "cli-place"},
+    "timestamp": {"match": "present"},
+    "recvWindow": {"match": "exact", "value": "5000"},
+    "signature": {"match": "present"}
+  },
+  "headers": {
+    "x-coins-apikey": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["coins-test-secret"]
+}

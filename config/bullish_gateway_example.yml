@@ -1,0 +1,42 @@
+# Bullish gateway adapter example.
+# Disabled by default. Do not enable live routing until JWT, nonce bounds,
+# request signing, parser, and reconciliation tests are promoted.
+
+exchange: bullish
+adapter: bullish
+enabled: false
+
+market_types:
+  - spot
+  - perpetual
+  - futures
+
+rest_base_url: https://api.exchange.bullish.com
+testnet_rest_base_url: https://api.simnext.bullish-test.com
+public_ws_url: wss://api.exchange.bullish.com/trading-api/v1/market-data/orderbook
+private_ws_url: wss://api.exchange.bullish.com/trading-api/v1/private-data
+
+api_key: ${BULLISH_API_KEY}
+api_secret: ${BULLISH_API_SECRET}
+jwt_token: ${BULLISH_JWT_TOKEN}
+trading_account_id: ${BULLISH_TRADING_ACCOUNT_ID}
+
+enabled_public_rest: false
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+permissions:
+  required: []
+  optional:
+    - read_account
+    - trade
+
+notes:
+  - This is a Task 7 offline audit shell, not a production Bullish trading adapter.
+  - Private writes are request-spec/signing-fixture only.
+  - Options are unsupported until the gateway has option-native models.

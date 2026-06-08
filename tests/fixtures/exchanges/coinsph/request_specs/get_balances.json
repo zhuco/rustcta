@@ -1,0 +1,18 @@
+{
+  "exchange": "coinsph",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/openapi/v1/account",
+  "auth": "signed",
+  "query": {
+    "timestamp": {"match": "present"},
+    "recvWindow": {"match": "exact", "value": "5000"},
+    "signature": {"match": "present"}
+  },
+  "headers": {
+    "x-coins-apikey": {"match": "non_empty"}
+  },
+  "forbid_query_values_containing": ["coins-test-secret"]
+}

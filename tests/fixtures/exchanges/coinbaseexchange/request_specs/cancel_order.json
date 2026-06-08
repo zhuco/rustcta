@@ -1,0 +1,12 @@
+{
+  "exchange": "coinbaseexchange",
+  "operation": "coinbaseexchange.cancel_order",
+  "method": "DELETE",
+  "path": "/orders/2001",
+  "auth": "hmac",
+  "headers": {
+    "CB-ACCESS-KEY": "fixture-key",
+    "CB-ACCESS-TIMESTAMP": "1700000000",
+    "CB-ACCESS-PASSPHRASE": "fixture-passphrase"
+  }
+}

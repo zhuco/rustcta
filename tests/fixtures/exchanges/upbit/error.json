@@ -1,0 +1,6 @@
+{
+  "error": {
+    "name": "too_many_requests",
+    "message": "Too many API requests."
+  }
+}

@@ -436,7 +436,8 @@ mod tests {
     use chrono::TimeZone;
 
     use crate::core::{
-        ExchangeFundingSelection, ExchangeScanError, FundingCandidate, FundingScanReport,
+        ExchangeFundingSelection, ExchangeScanError, ExecutionConfig, FundingCandidate,
+        FundingScanReport, SelectionConfig,
     };
 
     use super::*;
@@ -445,11 +446,19 @@ mod tests {
     fn live_plan_should_build_entries_and_skips_without_adapters() {
         let now = Utc.with_ymd_and_hms(2026, 6, 7, 11, 50, 0).unwrap();
         let settlement = Utc.with_ymd_and_hms(2026, 6, 7, 12, 0, 0).unwrap();
-        let mut config = FundingCoreConfig::default();
-        config.mode = "live".to_string();
-        config.selection.max_seconds_to_settlement_at_scan = Some(900);
-        config.execution.open_seconds_before_settlement = 30;
-        config.execution.close_seconds_after_settlement = 45;
+        let config = FundingCoreConfig {
+            mode: "live".to_string(),
+            selection: SelectionConfig {
+                max_seconds_to_settlement_at_scan: Some(900),
+                ..SelectionConfig::default()
+            },
+            execution: ExecutionConfig {
+                open_seconds_before_settlement: 30,
+                close_seconds_after_settlement: 45,
+                ..ExecutionConfig::default()
+            },
+            ..FundingCoreConfig::default()
+        };
 
         let report = FundingScanReport {
             generated_at: now,

@@ -1,0 +1,19 @@
+{
+  "result": "success",
+  "error_code": "0",
+  "orderbook": {
+    "timestamp": 1710000000000,
+    "bids": [
+      {
+        "price": "99900000",
+        "qty": "0.25"
+      }
+    ],
+    "asks": [
+      {
+        "price": "100100000",
+        "qty": "0.5"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "market": "BTC-EUR",
+    "status": "trading",
+    "base": "BTC",
+    "quote": "EUR",
+    "pricePrecision": "0.01",
+    "amountPrecision": "0.00000001",
+    "minOrderInQuoteAsset": "5"
+  }
+]

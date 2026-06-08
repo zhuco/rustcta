@@ -1,0 +1,23 @@
+{
+  "success": true,
+  "payload": [
+    {
+      "book": "btc_mxn",
+      "minimum_price": "100.00",
+      "maximum_price": "10000000.00",
+      "minimum_amount": "0.00001",
+      "maximum_amount": "100.0",
+      "minimum_value": "10.00",
+      "maximum_value": "10000000.00"
+    },
+    {
+      "book": "btc_brl",
+      "minimum_price": "10.00",
+      "maximum_price": "10000000.00",
+      "minimum_amount": "0.00001",
+      "maximum_amount": "100.0",
+      "minimum_value": "10.00",
+      "maximum_value": "10000000.00"
+    }
+  ]
+}

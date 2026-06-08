@@ -1,0 +1,9 @@
+{
+  "name": "mercado_bearer_place_order_fixture",
+  "algorithm": "bearer_redacted",
+  "credential": "<redacted>",
+  "method": "POST",
+  "request_path": "/api/v4/accounts/<accountId>/BTC-BRL/orders",
+  "body": "{\"side\":\"buy\",\"type\":\"limit\",\"qty\":\"0.01\",\"limitPrice\":\"350000\"}",
+  "fingerprint": "POST /api/v4/accounts/<accountId>/BTC-BRL/orders {\"side\":\"buy\",\"type\":\"limit\",\"qty\":\"0.01\",\"limitPrice\":\"350000\"}"
+}

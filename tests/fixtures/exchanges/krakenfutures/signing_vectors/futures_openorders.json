@@ -1,0 +1,11 @@
+{
+  "secret": "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg==",
+  "api_key": "key",
+  "endpoint_path": "/derivatives/api/v3/openorders",
+  "nonce": "1616492376594",
+  "params": {
+    "symbol": "PF_XBTUSDT"
+  },
+  "expected_query_or_body": "symbol=PF_XBTUSDT",
+  "expected_authent": "k00c0BkD0GOk7BpoAdieCcrbqxpUdoXn9a8pU/v3mzE2ThmkH8nCq9IAO2JQv524MTKUUvyfcEZyQZ16eroUcw=="
+}

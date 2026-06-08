@@ -1,0 +1,15 @@
+{
+  "channel": "account_positions",
+  "data": [
+    {
+      "symbol": "BTC",
+      "amount": "0.25",
+      "entry_price": "65000",
+      "mark_price": "65120",
+      "unrealized_pnl": "30",
+      "liquidation_price": "42000",
+      "leverage": "5",
+      "li": 1557370337
+    }
+  ]
+}

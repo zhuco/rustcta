@@ -1,0 +1,11 @@
+{
+  "exchange": "dydx",
+  "operation": "balances",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/addresses/dydx1testaddress000000000000000000000000000000/subaccountNumber/0",
+  "auth": "none",
+  "strict_query": true,
+  "forbid_query_values_containing": ["secret", "mnemonic", "private"]
+}

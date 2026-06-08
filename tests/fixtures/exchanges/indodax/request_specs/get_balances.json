@@ -1,0 +1,14 @@
+{
+  "exchange": "indodax",
+  "operation": "get_balances",
+  "method": "POST",
+  "path": "/tapi",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Key": "test-key",
+    "Sign": "<hmac_sha512_form_body>"
+  },
+  "body": "method=getInfo&nonce=1700000000000",
+  "credential_scope": "read_only",
+  "unsupported_boundary": "fiat payment and withdrawal APIs are not runtime operations"
+}

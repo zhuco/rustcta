@@ -1,0 +1,18 @@
+{
+  "exchange": "pacifica",
+  "operation": "cancel_order",
+  "method": "POST",
+  "path": "/api/v1/orders/cancel",
+  "auth": "ed25519_body_signature",
+  "operation_type": "cancel_order",
+  "body": {
+    "account": "42trU9A5...",
+    "signature": "redacted-base58-signature",
+    "timestamp": 1748970123456,
+    "expiry_window": 5000,
+    "symbol": "BTC",
+    "order_id": 123456789
+  },
+  "request_spec_only": true,
+  "trade_enabled": false
+}

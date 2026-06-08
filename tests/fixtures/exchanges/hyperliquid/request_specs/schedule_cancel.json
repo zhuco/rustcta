@@ -1,0 +1,13 @@
+{
+  "operation": "schedule_cancel",
+  "method": "POST",
+  "path": "/exchange",
+  "auth": "hyperliquid_eip712_secp256k1",
+  "body": {
+    "action": {
+      "type": "scheduleCancel",
+      "time": 1750000060000
+    },
+    "nonce": 1750000000003
+  }
+}

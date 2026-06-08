@@ -1,0 +1,240 @@
+schema_version: 1
+exchange: bitfinex
+adapter: BitfinexGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bitfinex_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Bitfinex V2 Spot, margin and derivatives boundary mapping with runtime funding/transfer/withdraw excluded.
+market_types: [spot, margin, perpetual]
+products: [spot, margin, perpetual]
+base_urls:
+  public_rest: https://api-pub.bitfinex.com
+  private_rest: https://api.bitfinex.com
+  public_ws: wss://api-pub.bitfinex.com/ws/2
+  private_ws: wss://api.bitfinex.com/ws/2
+auth:
+  private_rest: bfx-nonce, bfx-apikey and bfx-signature; signature HMAC-SHA384 over /api{path}{nonce}{json_body}
+  private_ws: auth payload AUTH{nonce}, HMAC-SHA384 authSig, channel 0 account events
+rate_limits:
+  public_book: { scope: ip, interval_ms: 60000, limit: 240 }
+  private_ws_connections: { scope: ip, interval_ms: 15000, limit: 5 }
+pagination:
+  order_book: { mode: len, max_limit: 250 }
+  recent_fills: { mode: limit_time, max_limit: 2500 }
+reconciliation:
+  private_state: rest_fallback
+  endpoint_operation: open_orders
+  notes: Use REST orders/wallets/positions/trades after private WS reconnect or ambiguous order mutation result.
+batch:
+  place: { support: unsupported, reason: Bitfinex order multi-op is not mapped to shared batch-place response semantics yet. }
+  cancel: { support: native, atomicity: partial, id_only: true, partial_failure: true }
+websocket:
+  public:
+    support: spec_only
+    heartbeat: { mode: server_hb, timeout_ms: 30000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: spec_only
+    auth: auth_channel_zero
+    heartbeat: { mode: server_hb, timeout_ms: 30000 }
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+  public_channels:
+    - { channel: book, auth: none, support: spec_only, official_doc: "https://docs.bitfinex.com/reference/ws-public-books" }
+  private_auth:
+    method: auth
+    url: wss://api.bitfinex.com/ws/2
+    auth: hmac
+    support: spec_only
+    official_doc: https://docs.bitfinex.com/docs/ws-auth
+unsupported:
+  - operation: margin_loan
+    reason: Funding offers/credits/loans are explicitly outside trading runtime.
+  - operation: funding_book
+    reason: Funding symbols use f* books and are not order-book inputs for spot/perp trading.
+  - operation: withdraw
+    reason: High-permission funds movement is outside gateway trading runtime.
+  - operation: transfer
+    reason: Wallet/derivatives funding conversion and transfers are not runtime order lifecycle operations.
+  - operation: amend_order
+    reason: Shared amend request lacks side/cid_date fields needed for safe Bitfinex amount update mapping.
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: GET
+    path: /v2/conf/pub:list:pair:exchange
+    auth: none
+    rate_limit_bucket: bitfinex_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-public-conf
+    notes: Margin uses pub:list:pair:margin; derivatives use pub:list:pair:futures.
+  - operation: order_book
+    product: spot
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: GET
+    path: /v2/book/{symbol}/P0
+    auth: none
+    rate_limit_bucket: bitfinex_public_book
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-public-book
+  - operation: account
+    product: mixed
+    transport: rest
+    method: POST
+    path: /v2/auth/r/wallets
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitfinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-wallets
+    request_spec_fixture: tests/fixtures/exchanges/bitfinex/request_specs/get_balances.json
+  - operation: positions
+    product: perpetual
+    market_types: [margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/r/positions
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitfinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-positions
+  - operation: place_order
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/w/order/submit
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-submit-order
+    request_spec_fixture: tests/fixtures/exchanges/bitfinex/request_specs/place_order.json
+  - operation: cancel_order
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/w/order/cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-cancel-order
+    request_spec_fixture: tests/fixtures/exchanges/bitfinex/request_specs/cancel_order.json
+  - operation: batch_cancel_orders
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/w/order/cancel/multi
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-cancel-orders-multiple
+    notes: Runtime supports exchange order IDs and account-wide all=1 cancel; cid cancellation requires cid_date and remains unsupported in shared request.
+  - operation: cancel_all_orders
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/w/order/cancel/multi
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bitfinex_private_order
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-cancel-orders-multiple
+  - operation: query_order
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/r/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitfinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-retrieve-orders
+  - operation: open_orders
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/r/orders/{symbol}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitfinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/reference/rest-auth-retrieve-orders
+  - operation: recent_fills
+    product: mixed
+    market_types: [spot, margin, perpetual]
+    transport: rest
+    method: POST
+    path: /v2/auth/r/trades/{symbol}/hist
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitfinex_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.bitfinex.com/docs/rest-auth

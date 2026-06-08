@@ -1,0 +1,4 @@
+{
+  "name": "invalid_query_payload",
+  "message": "JWT payload query hash mismatch"
+}

@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -6727,7 +6728,7 @@ fn clear_exchange_values_for_namespace(
         } else {
             for field in schema.fields {
                 for key in namespace_env_keys(credential_namespace, field.field) {
-                    values.remove(&key);
+                    values.insert(key, String::new());
                 }
             }
         }
@@ -6735,21 +6736,28 @@ fn clear_exchange_values_for_namespace(
     }
     for field in schema.fields {
         for key in namespace_env_keys(credential_namespace, field.field) {
-            values.remove(&key);
+            values.insert(key, String::new());
         }
     }
-    values.remove(&account_label_env_key(schema, account_id));
+    values.insert(account_label_env_key(schema, account_id), String::new());
 }
 
 fn clear_all_exchange_values(values: &mut BTreeMap<String, String>, schema: &ExchangeApiKeySchema) {
     for field in schema.fields {
         for alias in field.aliases {
-            values.remove(*alias);
+            values.insert((*alias).to_string(), String::new());
         }
     }
-    values.remove(&account_label_env_key(schema, "default"));
+    values.insert(account_label_env_key(schema, "default"), String::new());
     let prefix = account_env_prefix(schema.exchange);
-    values.retain(|key, _| !key.starts_with(&prefix));
+    let keys = values
+        .keys()
+        .filter(|key| key.starts_with(&prefix))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in keys {
+        values.insert(key, String::new());
+    }
 }
 
 fn request_secret_value<'a>(
@@ -6775,29 +6783,23 @@ fn configured_field_value(
 ) -> Option<(String, String)> {
     if account_id == "default" {
         field.aliases.iter().find_map(|alias| {
-            values
-                .get(*alias)
+            if let Some(value) = values.get(*alias) {
+                return (!value.is_empty()).then(|| ("key_store".to_string(), value.clone()));
+            }
+            std::env::var(alias)
+                .ok()
                 .filter(|value| !value.is_empty())
-                .map(|value| ("key_store".to_string(), value.clone()))
-                .or_else(|| {
-                    std::env::var(alias)
-                        .ok()
-                        .filter(|value| !value.is_empty())
-                        .map(|value| ("process_env".to_string(), value))
-                })
+                .map(|value| ("process_env".to_string(), value))
         })
     } else {
         let key = account_env_key(schema, account_id, field.field);
-        values
-            .get(&key)
+        if let Some(value) = values.get(&key) {
+            return (!value.is_empty()).then(|| ("key_store".to_string(), value.clone()));
+        }
+        std::env::var(&key)
+            .ok()
             .filter(|value| !value.is_empty())
-            .map(|value| ("key_store".to_string(), value.clone()))
-            .or_else(|| {
-                std::env::var(&key)
-                    .ok()
-                    .filter(|value| !value.is_empty())
-                    .map(|value| ("process_env".to_string(), value))
-            })
+            .map(|value| ("process_env".to_string(), value))
     }
 }
 
@@ -6821,16 +6823,13 @@ fn configured_field_value_for_namespace(
     namespace_env_keys(credential_namespace, field.field)
         .into_iter()
         .find_map(|key| {
-            values
-                .get(&key)
+            if let Some(value) = values.get(&key) {
+                return (!value.is_empty()).then(|| ("key_store".to_string(), value.clone()));
+            }
+            std::env::var(&key)
+                .ok()
                 .filter(|value| !value.is_empty())
-                .map(|value| ("key_store".to_string(), value.clone()))
-                .or_else(|| {
-                    std::env::var(&key)
-                        .ok()
-                        .filter(|value| !value.is_empty())
-                        .map(|value| ("process_env".to_string(), value))
-                })
+                .map(|value| ("process_env".to_string(), value))
         })
 }
 
@@ -9246,6 +9245,61 @@ accounts:
     }
 
     #[tokio::test]
+    async fn exchange_api_key_clear_should_tombstone_runtime_env_prefix_namespace() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("strategy.yml");
+        write_cross_arb_key_status_config(&config_path, vec![ExchangeId::Binance]);
+        let state = test_app_state(dir.path(), config_path);
+        write_accounts_config(&state.accounts_config);
+
+        apply_exchange_api_key_update(
+            &state,
+            ExchangeApiKeyUpdateRequest {
+                exchange: "binance".to_string(),
+                account_id: Some("binance_hcr".to_string()),
+                account_label: None,
+                credential_namespace: None,
+                exchange_account_id: None,
+                api_key: Some("key".to_string()),
+                api_secret: Some("secret".to_string()),
+                passphrase: None,
+                clear: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        apply_exchange_api_key_update(
+            &state,
+            ExchangeApiKeyUpdateRequest {
+                exchange: "binance".to_string(),
+                account_id: Some("binance_hcr".to_string()),
+                account_label: None,
+                credential_namespace: Some("BINANCE_3".to_string()),
+                exchange_account_id: None,
+                api_key: None,
+                api_secret: None,
+                passphrase: None,
+                clear: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let values = read_env_store(&state.exchange_api_key_store).await.unwrap();
+        assert_eq!(values.get("BINANCE_3_API_KEY"), Some(&String::new()));
+        assert_eq!(values.get("BINANCE_3_API_SECRET"), Some(&String::new()));
+
+        let status = exchange_api_key_status(&state).await.unwrap();
+        let row = status
+            .exchanges
+            .iter()
+            .find(|row| row.credential_namespace == "BINANCE_3")
+            .expect("runtime namespace should still be listed");
+        assert!(row.fields.iter().all(|field| !field.configured));
+    }
+
+    #[tokio::test]
     async fn exchange_api_key_update_should_reject_invalid_account_identifier() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("strategy.yml");
@@ -9335,7 +9389,15 @@ accounts:
         clear_exchange_api_keys(&path, "binance").await.unwrap();
 
         let values = read_env_store(&path).await.unwrap();
-        assert!(!values.keys().any(|key| key.starts_with("BINANCE")));
+        assert_eq!(values.get("BINANCE_API_KEY"), Some(&String::new()));
+        assert_eq!(values.get("BINANCE_API_SECRET"), Some(&String::new()));
+        assert_eq!(values.get("BINANCE_SPOT_API_KEY"), Some(&String::new()));
+        assert_eq!(values.get("BINANCE_SPOT_API_SECRET"), Some(&String::new()));
+        assert_eq!(values.get("BINANCE__HEDGE__API_KEY"), Some(&String::new()));
+        assert_eq!(
+            values.get("BINANCE__HEDGE__API_SECRET"),
+            Some(&String::new())
+        );
         assert_eq!(
             values.get("BITGET_API_KEY"),
             Some(&"bitget-key".to_string())

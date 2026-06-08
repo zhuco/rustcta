@@ -1,0 +1,19 @@
+{
+  "success": 1,
+  "data": {
+    "assets": [
+      {
+        "asset": "btc",
+        "onhand_amount": "0.6",
+        "locked_amount": "0.1",
+        "free_amount": "0.5"
+      },
+      {
+        "asset": "jpy",
+        "onhand_amount": "100000",
+        "locked_amount": "25000",
+        "free_amount": "75000"
+      }
+    ]
+  }
+}

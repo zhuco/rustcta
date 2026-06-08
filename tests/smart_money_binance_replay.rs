@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 use rustcta::smart_money::*;

@@ -1,0 +1,8 @@
+{
+  "exchange": "paradex",
+  "algorithm": "bearer_header",
+  "input_token": " fixture.jwt.token ",
+  "expected_authorization": "Bearer fixture.jwt.token",
+  "already_prefixed_token": "Bearer existing.fixture.jwt",
+  "expected_already_prefixed_authorization": "Bearer existing.fixture.jwt"
+}

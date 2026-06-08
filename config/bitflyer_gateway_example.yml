@@ -1,0 +1,39 @@
+# bitFlyer gateway adapter example.
+# Keep disabled until credentials and product allowlists are supplied through
+# the runtime environment.
+
+exchange: bitflyer
+adapter: bitflyer
+enabled: false
+
+market_types:
+  - spot
+  - margin
+
+rest_base_url: https://api.bitflyer.com
+public_ws_url: wss://ws.lightstream.bitflyer.com/json-rpc
+private_ws_url: wss://ws.lightstream.bitflyer.com/json-rpc
+
+api_key: ${BITFLYER_API_KEY}
+api_secret: ${BITFLYER_API_SECRET}
+enabled_private_rest: false
+
+request_timeout_ms: 10000
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC_JPY
+    - ETH_JPY
+  margin:
+    - FX_BTC_JPY
+
+permissions:
+  required:
+    - read_account
+  optional:
+    - trade
+
+notes:
+  - Lightning FX product codes are product-code scoped and are not standard futures/perpetual contracts.
+  - Do not configure fiat funding, bank transfer, withdrawal or ledger write operations in gateway runtime.

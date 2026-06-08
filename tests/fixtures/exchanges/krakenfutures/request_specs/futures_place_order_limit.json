@@ -1,0 +1,14 @@
+{
+  "operation": "krakenfutures.place_order.perpetual",
+  "method": "POST",
+  "path": "/derivatives/api/v3/sendorder",
+  "auth": "hmac",
+  "form": {
+    "symbol": "PF_XBTUSDT",
+    "side": "buy",
+    "orderType": "lmt",
+    "size": "0.01",
+    "limitPrice": "37500",
+    "cliOrdId": "client-1"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "exchange": "derive",
+  "operation": "place_order",
+  "transport": "json_rpc",
+  "method": "POST",
+  "path": "/private/order",
+  "auth": "session_key",
+  "headers": {
+    "Authorization": "Bearer derive_session_token_fixture"
+  },
+  "body": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "private/order",
+    "params": {
+      "subaccount_id": 1001,
+      "instrument_name": "BTC-USD-PERP",
+      "side": "buy",
+      "amount": "0.10",
+      "order_type": "limit",
+      "limit_price": "69000",
+      "post_only": true,
+      "reduce_only": false,
+      "label": "derive_client_fixture_001"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "operation": "recent_fills",
+  "method": "POST",
+  "path": "/info",
+  "auth": "address_scoped_read",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "type": "userFillsByTime",
+    "user": "0x1111111111111111111111111111111111111111",
+    "startTime": 1750000000000,
+    "endTime": 1750000100000,
+    "aggregateByTime": true
+  }
+}

@@ -290,30 +290,20 @@ pub struct RiskLimits {
     pub funding_cost_limit: f64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PriceReference {
+    #[default]
     Mid,
     Last,
 }
 
-impl Default for PriceReference {
-    fn default() -> Self {
-        Self::Mid
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RiskReference {
+    #[default]
     Mark,
     Last,
-}
-
-impl Default for RiskReference {
-    fn default() -> Self {
-        Self::Mark
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1629,8 +1619,8 @@ impl GridEngine {
             .slots
             .iter()
             .filter(|slot| slot.intent == open_intent)
-            .cloned()
             .take(levels)
+            .cloned()
             .collect::<Vec<_>>();
 
         let mut target_prices = Vec::with_capacity(levels);

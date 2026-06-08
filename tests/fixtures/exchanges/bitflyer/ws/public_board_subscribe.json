@@ -1,0 +1,7 @@
+{
+  "jsonrpc": "2.0",
+  "method": "subscribe",
+  "params": {
+    "channel": "lightning_board_BTC_JPY"
+  }
+}

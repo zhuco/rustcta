@@ -128,20 +128,15 @@ fn private_stream_key(stream: &PrivateStreamKind) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionAckStatus {
+    #[default]
     Pending,
     Accepted,
     Rejected,
     TimedOut,
     Unsubscribed,
-}
-
-impl Default for SubscriptionAckStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -266,22 +261,17 @@ impl PrivateStreamCapabilities {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamHeartbeatDirection {
     ClientPing,
     ServerPing,
     Bidirectional,
+    #[default]
     None,
 }
 
-impl Default for StreamHeartbeatDirection {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeartbeatCapability {
     #[serde(default)]
     pub supported: bool,
@@ -293,18 +283,6 @@ pub struct HeartbeatCapability {
     pub interval_ms: Option<u64>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
-}
-
-impl Default for HeartbeatCapability {
-    fn default() -> Self {
-        Self {
-            supported: false,
-            required: false,
-            direction: StreamHeartbeatDirection::default(),
-            interval_ms: None,
-            timeout_ms: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -426,19 +404,14 @@ pub struct PrivateStreamSubscription {
     pub kind: PrivateStreamKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HeartbeatDirection {
     ClientPing,
     ServerPing,
     ApplicationMessage,
+    #[default]
     None,
-}
-
-impl Default for HeartbeatDirection {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -479,20 +452,15 @@ impl HeartbeatPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthRenewalKind {
+    #[default]
     None,
     ReLogin,
     ListenKeyKeepAlive,
     TokenRefresh,
     JwtRefresh,
-}
-
-impl Default for AuthRenewalKind {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

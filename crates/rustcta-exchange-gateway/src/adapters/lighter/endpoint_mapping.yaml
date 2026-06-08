@@ -1,0 +1,238 @@
+schema_version: 1
+exchange: lighter
+adapter: LighterGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/lighter_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task 9 conservative Lighter gateway shell. Public REST/WS specs are audited; production low-latency runtime and signed tx writes remain disabled.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://mainnet.zklighter.elliot.ai/api/v1
+  rest_testnet_unverified: https://testnet.zklighter.elliot.ai/api/v1
+  public_ws: wss://mainnet.zklighter.elliot.ai/stream
+  public_ws_testnet: wss://testnet.zklighter.elliot.ai/stream
+auth:
+  public_rest: none
+  private_read: bearer auth token
+  private_write: signed tx via API-key private key and nonce; unsupported in this adapter
+rate_limits:
+  standard_rest: { scope: l1_address, interval_ms: 60000, limit: 60 }
+  ws_inflight: { scope: connection, interval_ms: 1000, limit: 50 }
+pagination:
+  order_book_orders: { mode: limit, max_limit: 250 }
+  private_history: { mode: unsupported }
+reconciliation:
+  order_book:
+    mode: resubscribe_snapshot
+    continuity: begin_nonce must equal previous nonce
+    checksum: unsupported
+    notes: Offset is API-server local and not guaranteed continuous; do not use it for gap detection.
+  private_state: unsupported
+batch:
+  place: { support: unsupported, reason: lighter.send_tx_batch_signing_unverified }
+  cancel: { support: unsupported, reason: lighter.send_tx_batch_signing_unverified }
+websocket:
+  public:
+    support: parser_only
+    heartbeat: { mode: client_keepalive, interval_ms: 60000, timeout_ms: 120000, stale_message_ms: 180000 }
+    order_book: { channel: "order_book/{MARKET_INDEX}", checksum: unsupported, continuity: nonce }
+    channels:
+      order_book: { path: "order_book/{MARKET_INDEX}", support: parser_only, resync: resubscribe_snapshot, checksum: unsupported }
+      ticker: { path: "ticker/{MARKET_INDEX}", support: parser_only }
+      trade: { path: "trade/{MARKET_INDEX}", support: parser_only }
+      market_stats: { path: "market_stats/{MARKET_INDEX}", support: parser_only }
+    parser_fixtures:
+      - tests/fixtures/exchanges/lighter/ws/order_book_snapshot.json
+      - tests/fixtures/exchanges/lighter/ws/order_book_update.json
+      - tests/fixtures/exchanges/lighter/ws/order_book_gap.json
+  private:
+    support: unsupported
+    auth_renewal: { mode: bearer_token, status: unsupported }
+    channels:
+      account_orders: { support: unsupported_unverified, auth: bearer, reason: lighter.private_stream_session_spec_only }
+      account_all_trades: { support: unsupported_unverified, auth: bearer, reason: lighter.private_stream_session_spec_only }
+      account_all_positions: { support: unsupported_unverified, auth: bearer, reason: lighter.private_stream_session_spec_only }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /orderBooks
+    auth: none
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: lighter.symbol_rules_session_spec_only
+  - operation: symbol_rule_details
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /orderBookDetails
+    auth: none
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: lighter.symbol_rule_details_session_spec_only
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /orderBookOrders
+    auth: none
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: lighter.order_book_session_spec_only
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /accountActiveOrders
+    auth: bearer
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.open_orders_auth_token_unverified
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /account
+    auth: bearer
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.positions_auth_token_unverified
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trades
+    auth: bearer
+    rate_limit_bucket: lighter_standard_rest
+    weight: 300
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.trades_auth_token_unverified
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTx
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.send_tx_signing_unverified
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTx
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.send_tx_cancel_signing_unverified
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTx
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.send_tx_modify_signing_unverified
+  - operation: batch_tx
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTxBatch
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.send_tx_batch_signing_unverified
+  - operation: batch_cancel
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTxBatch
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.send_tx_batch_signing_unverified
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /sendTxBatch
+    auth: bearer
+    rate_limit_bucket: lighter_send_tx
+    weight: 6
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: unsupported_unverified
+    reason: lighter.cancel_all_orders_signing_unverified

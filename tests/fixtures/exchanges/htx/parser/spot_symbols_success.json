@@ -1,0 +1,14 @@
+{
+  "status": "ok",
+  "data": [
+    {
+      "symbol": "btcusdt",
+      "base-currency": "btc",
+      "quote-currency": "usdt",
+      "price-precision": 2,
+      "amount-precision": 6,
+      "min-order-amt": "0.0001",
+      "min-order-value": "5"
+    }
+  ]
+}

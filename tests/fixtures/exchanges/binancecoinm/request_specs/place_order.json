@@ -1,0 +1,31 @@
+{
+  "exchange": "binancecoinm",
+  "operation": "place_order",
+  "product": "futures",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/dapi/v1/order",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSD_PERP" },
+    "side": { "match": "exact", "value": "BUY" },
+    "positionSide": { "match": "exact", "value": "LONG" },
+    "type": { "match": "exact", "value": "LIMIT" },
+    "timeInForce": { "match": "exact", "value": "GTC" },
+    "quantity": { "match": "exact", "value": "2" },
+    "price": { "match": "exact", "value": "25000.0" },
+    "newClientOrderId": { "match": "exact", "value": "cli-place" },
+    "timestamp": { "match": "non_empty" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "binancecoinm/place_order_limit"
+}

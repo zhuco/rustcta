@@ -1,0 +1,18 @@
+{
+  "operation": "coinone.place_order",
+  "algorithm": "base64_json_payload_hmac_sha512_hex",
+  "secret": "secret",
+  "payload": {
+    "access_token": "token",
+    "nonce": "nonce-1",
+    "quote_currency": "KRW",
+    "target_currency": "BTC",
+    "type": "LIMIT",
+    "side": "BUY",
+    "qty": "0.01",
+    "price": "100000000",
+    "user_order_id": "C-1"
+  },
+  "expected_payload": "eyJhY2Nlc3NfdG9rZW4iOiJ0b2tlbiIsIm5vbmNlIjoibm9uY2UtMSIsInByaWNlIjoiMTAwMDAwMDAwIiwicXR5IjoiMC4wMSIsInF1b3RlX2N1cnJlbmN5IjoiS1JXIiwic2lkZSI6IkJVWSIsInRhcmdldF9jdXJyZW5jeSI6IkJUQyIsInR5cGUiOiJMSU1JVCIsInVzZXJfb3JkZXJfaWQiOiJDLTEifQ==",
+  "expected_signature": "b7277aebd6cf106bb06c18470f3099ce9b8ab3b56f3f3c0e3e3728fa1bf346b5461b5243496cc17830dd1d1c341ac0b7edc5786c5c4442226e5e092c3b915ee8"
+}

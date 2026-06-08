@@ -1,0 +1,6 @@
+{
+  "operation": "balances",
+  "method": "GET",
+  "path": "/trading-api/v1/accounts/asset?tradingAccountId=offline-account",
+  "auth": "bearer_jwt"
+}

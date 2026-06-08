@@ -1,0 +1,6 @@
+{
+  "method": "POST",
+  "path": "/v1/balances",
+  "payload_fields": ["request", "nonce"],
+  "headers": ["Gemini-APIKey", "Gemini-Payload", "Gemini-Signature"]
+}

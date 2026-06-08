@@ -1,0 +1,13 @@
+{
+  "exchange": "oxfun",
+  "operation": "rest_hmac",
+  "api_secret": "secret",
+  "timestamp": "2026-06-08T00:00:00Z",
+  "nonce": "nonce-1",
+  "method": "GET",
+  "host": "api.ox.fun",
+  "path": "/v3/account",
+  "body_or_query": "asset=OX",
+  "canonical": "2026-06-08T00:00:00Z\nnonce-1\nGET\napi.ox.fun\n/v3/account\nasset=OX",
+  "expected_signature": "8N+Ov1G0potibfVQkbwA5ZaOGPASA7I3xnxqR+F+DTw="
+}

@@ -1,0 +1,5 @@
+{
+  "method": "GET",
+  "path": "/order?market=BTC-EUR&orderId=00000000-0000-4000-8000-000000000001",
+  "headers": ["Bitvavo-Access-Key", "Bitvavo-Access-Timestamp", "Bitvavo-Access-Signature", "Bitvavo-Access-Window"]
+}

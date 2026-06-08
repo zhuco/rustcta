@@ -1,0 +1,7 @@
+{
+  "operation": "kucoinfutures.get_private_bullet_token",
+  "method": "POST",
+  "path": "/api/v1/bullet-private",
+  "auth": "hmac",
+  "body": {}
+}

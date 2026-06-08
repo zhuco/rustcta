@@ -1,0 +1,18 @@
+{
+  "exchange": "pacifica",
+  "operation": "cancel_all_orders",
+  "method": "POST",
+  "path": "/api/v1/orders/cancel_all",
+  "auth": "ed25519_body_signature",
+  "operation_type": "cancel_all_orders",
+  "body": {
+    "account": "42trU9A5...",
+    "signature": "redacted-base58-signature",
+    "timestamp": 1748970123456,
+    "expiry_window": 5000,
+    "all_symbols": true,
+    "exclude_reduce_only": false
+  },
+  "request_spec_only": true,
+  "trade_enabled": false
+}

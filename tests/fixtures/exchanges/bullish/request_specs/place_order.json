@@ -1,0 +1,22 @@
+{
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/trading-api/v2/orders",
+  "auth": "bearer_jwt_plus_bx_signature",
+  "headers": {
+    "Authorization": "Bearer <redacted>",
+    "BX-TIMESTAMP": "1700000000000",
+    "BX-NONCE": "1700000000001",
+    "BX-SIGNATURE": "<hex-or-base64-signature>"
+  },
+  "body": {
+    "commandType": "V3CreateOrder",
+    "symbol": "BTCUSDC",
+    "type": "LMT",
+    "side": "BUY",
+    "quantity": "0.01",
+    "price": "65000",
+    "timeInForce": "GTC",
+    "clientOrderId": "offline-fixture"
+  }
+}

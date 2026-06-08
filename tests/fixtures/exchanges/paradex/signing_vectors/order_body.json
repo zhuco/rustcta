@@ -1,0 +1,18 @@
+{
+  "exchange": "paradex",
+  "algorithm": "starknet_order_signature_external",
+  "note": "The signature is synthetic and only validates request shape; it is not a real Stark signature.",
+  "input": {
+    "market": "BTC-USD-PERP",
+    "side": "BUY",
+    "type": "LIMIT",
+    "instruction": "GTC",
+    "price": "65000.0",
+    "size": "0.05",
+    "client_id": "fixture-client-001",
+    "flags": ["REDUCE_ONLY"],
+    "signature": "[\"123\",\"456\"]",
+    "signature_timestamp": 1710793629000
+  },
+  "expected_prehash_hint": "client_id=fixture-client-001&flags=[\"REDUCE_ONLY\"]&instruction=GTC&market=BTC-USD-PERP&price=65000.0&side=BUY&signature_timestamp=1710793629000&size=0.05&type=LIMIT"
+}

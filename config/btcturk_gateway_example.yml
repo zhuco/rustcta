@@ -1,0 +1,38 @@
+# BTCTurk gateway adapter example. Disabled by default.
+
+exchange: btcturk
+adapter: btcturk
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://api.btcturk.com
+public_ws_url: wss://ws-feed-pro.btcturk.com
+private_ws_url: wss://ws-feed-pro.btcturk.com
+
+api_key: ${BTCTURK_API_KEY}
+api_secret: ${BTCTURK_API_SECRET}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+request_timeout_ms: 10000
+
+fiat_markets:
+  primary_quote: TRY
+  examples:
+    - BTCTRY
+    - ETHTRY
+
+unsupported:
+  - fiat_withdrawals
+  - fiat_deposits
+  - bank_payment_rails
+  - crypto_deposit_addresses
+  - transfers
+
+notes:
+  - Private order and fill endpoints are fixture/request-spec only until live-dry-run gates are added.
+  - Do not put real credentials in this file.

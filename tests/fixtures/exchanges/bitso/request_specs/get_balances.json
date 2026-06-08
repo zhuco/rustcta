@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/v3/balance",
+  "auth": "bitso_hmac_sha256",
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

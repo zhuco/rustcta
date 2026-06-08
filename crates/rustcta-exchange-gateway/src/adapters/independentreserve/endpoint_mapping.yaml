@@ -1,0 +1,146 @@
+schema_version: 1
+exchange: independentreserve
+adapter: rustcta_exchange_gateway::adapters::independentreserve
+metadata:
+  status: validated
+  source: https://www.independentreserve.com/features/api
+  notes: "AUD/SGD/USD spot adapter. Public symbol rules are adapter-local static rules; private REST uses Independent Reserve nonce signatures."
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.independentreserve.com
+  public_websocket: wss://websockets.independentreserve.com
+  private_websocket: wss://websockets.independentreserve.com
+rest:
+  base_url: https://api.independentreserve.com
+auth:
+  rest:
+    scheme: hmac_sha256
+    signing_payload: "method_url,nonce,apiKey,sorted_endpoint_parameters"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 5
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 5
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+websocket:
+  public:
+    support: spec_only
+    channels: [orderbook, trade]
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    channels: [order, trade, account]
+    fallback: rest_reconciliation
+unsupported:
+  - positions
+  - quote_market_order
+  - amend_order
+  - order_list
+  - batch_place_orders
+  - batch_cancel_orders
+  - cancel_all_orders
+  - fiat_deposit_withdrawal_runtime
+  - bank_payment_rails
+  - statement_export
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: STATIC
+    path: static:default_aud_sgd_usd_spot_markets
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 0
+    request_spec_required: false
+    support: composed
+    notes: "Adapter-local static rules for BTC/ETH/XRP against AUD/SGD/USD."
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /Public/GetOrderBook
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /Private/GetAccounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: STATIC
+    path: static:account_tier_fee_placeholder
+    auth: none
+    rate_limit_bucket: private_rest
+    weight: 0
+    request_spec_required: false
+    support: composed
+    notes: "Independent Reserve fees are account-tiered and not exposed as a symbol fee endpoint in this adapter."
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /Private/PlaceLimitOrder|/Private/PlaceMarketOrder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /Private/CancelOrder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /Private/GetOrderDetails
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /Private/GetOpenOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /Private/GetTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true

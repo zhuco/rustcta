@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "path": "/v1/me/sendchildorder",
+  "body": {
+    "product_code": "BTC_JPY",
+    "child_order_type": "LIMIT",
+    "side": "BUY",
+    "price": 30000.0,
+    "size": 0.1,
+    "minute_to_expire": 43200,
+    "time_in_force": "GTC",
+    "client_order_acceptance_id": "JRF20260608-000000-000001"
+  }
+}

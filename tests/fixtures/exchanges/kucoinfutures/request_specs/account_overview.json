@@ -1,0 +1,6 @@
+{
+  "operation": "kucoinfutures.get_balances",
+  "method": "GET",
+  "path": "/api/v1/account-overview",
+  "auth": "hmac"
+}

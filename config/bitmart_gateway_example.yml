@@ -1,0 +1,56 @@
+# BitMart gateway adapter example.
+# Credentials are read from environment variables by default:
+# BITMART_API_KEY, BITMART_API_SECRET and optional BITMART_MEMO.
+
+exchange: bitmart
+market_types:
+  - spot
+  - perpetual
+adapter: bitmart
+enabled: false
+
+api_key: ${BITMART_API_KEY}
+api_secret: ${BITMART_API_SECRET}
+memo: ${BITMART_MEMO}
+
+spot_rest_base_url: https://api-cloud.bitmart.com
+futures_rest_base_url: https://api-cloud-v2.bitmart.com
+spot_ws_url: wss://ws-manager-compress.bitmart.com/api?protocol=1.1
+futures_ws_url: wss://openapi-ws-v2.bitmart.com/api?protocol=1.1
+testnet: false
+sandbox: false
+
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC_USDT
+    - ETH_USDT
+  perpetual:
+    - BTCUSDT
+    - ETHUSDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+    - futures_trading
+  excluded:
+    - withdraw
+    - transfer
+
+notes:
+  - BitMart Spot symbols use BASE_QUOTE; perpetual symbols use compact BASEQUOTE.
+  - Private REST remains disabled until read-only preflight and live-dry-run validation.
+  - WS payload/parser helpers require REST reconciliation after reconnect.

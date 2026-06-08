@@ -1,0 +1,11 @@
+{
+  "result": {
+    "balances": [
+      {
+        "asset": "USDC",
+        "total": "10000.00",
+        "available": "8750.00"
+      }
+    ]
+  }
+}

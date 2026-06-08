@@ -1,0 +1,9 @@
+{
+  "operation": "kucoinfutures.get_fees",
+  "method": "GET",
+  "path": "/api/v1/trade-fees",
+  "auth": "hmac",
+  "query": {
+    "symbols": "XBTUSDTM"
+  }
+}

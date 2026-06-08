@@ -1,0 +1,21 @@
+{
+  "code": "0",
+  "data": {
+    "contractConfig": {
+      "perpetualContract": [
+        {
+          "symbol": "BTCUSDT",
+          "crossSymbolName": "BTC-USDT",
+          "settleCurrencyId": "USDT",
+          "tickSize": "0.1",
+          "stepSize": "0.001",
+          "minOrderSize": "0.001",
+          "maxOrderSize": "100",
+          "initialMarginRate": "0.01",
+          "maintenanceMarginRate": "0.005",
+          "enableTrade": true
+        }
+      ]
+    }
+  }
+}

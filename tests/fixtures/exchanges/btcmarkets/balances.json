@@ -1,0 +1,14 @@
+[
+  {
+    "assetName": "AUD",
+    "balance": "1000",
+    "available": "900",
+    "locked": "100"
+  },
+  {
+    "assetName": "BTC",
+    "balance": "1.25",
+    "available": "1.0",
+    "locked": "0.25"
+  }
+]

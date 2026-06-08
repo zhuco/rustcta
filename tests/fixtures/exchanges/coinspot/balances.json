@@ -1,0 +1,15 @@
+{
+  "status": "ok",
+  "balances": {
+    "btc": {
+      "balance": "1.5",
+      "available": "1.2",
+      "reserved": "0.3"
+    },
+    "aud": {
+      "balance": "120.0",
+      "available": "100.0",
+      "reserved": "20.0"
+    }
+  }
+}

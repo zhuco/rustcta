@@ -1,0 +1,188 @@
+schema_version: 1
+exchange: coinbaseexchange
+adapter: rustcta_exchange_gateway::adapters::coinbaseexchange
+metadata:
+  status: validated
+  notes: "Task 15 Coinbase Exchange spot-only adapter. Separate from coinbase Advanced Trade/INTX. Sandbox REST URL: https://api-public.sandbox.exchange.coinbase.com."
+market_types:
+  - spot
+products:
+  - spot
+rest:
+  base_url: https://api.exchange.coinbase.com
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 10
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 15
+    websocket:
+      scope: websocket
+      interval: 1m
+      limit: 100
+pagination:
+  open_orders:
+    style: before_after_cursor
+    cursor: response_header_cursor
+    limit_param: limit
+    max_limit: 100
+  recent_fills:
+    style: before_after_cursor
+    cursor: response_header_cursor
+    limit_param: limit
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_open_orders
+    - get_recent_fills
+    - query_order
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 20
+    partial_failure: false
+websocket:
+  public:
+    support: native
+    url: wss://ws-feed.exchange.coinbase.com
+    channels: [heartbeat, ticker, level2, matches]
+    heartbeat:
+      direction: application_message
+      channel: heartbeat
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://ws-feed.exchange.coinbase.com
+    channel: user
+    auth: hmac
+    signing_payload: timestamp + "GET" + "/users/self/verify"
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /products
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-all-known-trading-pairs
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /products/{product_id}/book
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-book
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinbaseexchange/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders/{order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinbaseexchange/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    notes: "Requires product_id in this adapter to keep symbol scope explicit."
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders/{order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+unsupported:
+  - operation: advanced_trade_brokerage
+    reason: "Handled by existing coinbase adapter; not Coinbase Exchange."
+  - operation: intx_perpetual
+    reason: "Handled by existing coinbase INTX boundary; coinbaseexchange is spot-only."
+  - operation: deposits_withdrawals_transfers
+    reason: "Funding operations are outside trading runtime."

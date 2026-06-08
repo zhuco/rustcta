@@ -1,0 +1,9 @@
+{
+  "operation": "krakenfutures.cancel_order.perpetual",
+  "method": "POST",
+  "path": "/derivatives/api/v3/cancelorder",
+  "auth": "hmac",
+  "form": {
+    "order_id": "FUT-ORDER-1"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/v4/accounts/<accountId>/BTC-BRL/trades",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

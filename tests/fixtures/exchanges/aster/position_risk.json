@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "BTCUSDT",
+    "positionAmt": "0.125",
+    "entryPrice": "48000",
+    "markPrice": "50000",
+    "unRealizedProfit": "250",
+    "leverage": "5",
+    "marginType": "cross",
+    "positionSide": "BOTH",
+    "updateTime": 1710000002000
+  }
+]

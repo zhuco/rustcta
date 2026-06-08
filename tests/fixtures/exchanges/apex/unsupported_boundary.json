@@ -1,0 +1,16 @@
+{
+  "exchange": "apex",
+  "trade_enabled": false,
+  "scan_only": false,
+  "private_write_blocker": "zklink_l2_signature",
+  "unsupported": [
+    "apex.place_order_requires_zklink_l2_signature",
+    "apex.quote_market_order_requires_price_and_zklink_signature",
+    "apex.amend_order_unsupported",
+    "apex.batch_place_orders_unsupported",
+    "apex.batch_cancel_orders_unsupported",
+    "apex.cancel_all_orders_private_write_not_promoted",
+    "apex.order_list_unsupported",
+    "apex.fees_private_read_not_promoted"
+  ]
+}

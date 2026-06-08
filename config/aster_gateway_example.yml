@@ -1,0 +1,44 @@
+# Aster gateway adapter example. Disabled by default.
+# Credentials are read from environment variables by default:
+# ASTER_USER_ADDRESS, ASTER_SIGNER_ADDRESS and ASTER_SIGNER_PRIVATE_KEY.
+
+exchange: aster
+adapter: aster
+enabled: false
+
+market_types:
+  - perpetual
+
+rest_base_url: https://fapi.asterdex.com
+public_ws_url: wss://fstream.asterdex.com/ws
+private_ws_url: wss://fstream.asterdex.com/ws
+
+user_address: ${ASTER_USER_ADDRESS}
+signer_address: ${ASTER_SIGNER_ADDRESS}
+signer_private_key: ${ASTER_SIGNER_PRIVATE_KEY}
+recv_window_ms: 5000
+
+# Keep private REST and streams disabled until read-only preflight,
+# wallet permissions and live order-risk controls are validated.
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+request_timeout_ms: 10000
+orderbook_depth: 20
+log_raw_messages: false
+
+enabled_symbols:
+  perpetual:
+    - BTCUSDT
+    - ETHUSDT
+
+safety:
+  live_trading_enabled: false
+  unsupported_runtime:
+    - spot
+    - coin_m
+    - quote_market_order
+    - order_list
+    - amend_order
+    - transfer

@@ -1,0 +1,7 @@
+{
+  "operation": "cancel_order",
+  "method": "POST",
+  "path": "/api/v3/delete-order",
+  "auth": "apex_api_key_hmac",
+  "body": "id=offline-order-id&symbol=BTC-USDT"
+}

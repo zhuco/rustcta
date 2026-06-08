@@ -1,0 +1,19 @@
+[
+  {
+    "symbol": "BTCUSDT",
+    "id": 389721654,
+    "orderId": 9081726354,
+    "side": "BUY",
+    "price": "65000.10",
+    "qty": "0.010",
+    "realizedPnl": "0",
+    "marginAsset": "USDT",
+    "quoteQty": "650.001",
+    "commission": "0.13000020",
+    "commissionAsset": "USDT",
+    "time": 1743054550123,
+    "positionSide": "LONG",
+    "buyer": true,
+    "maker": true
+  }
+]

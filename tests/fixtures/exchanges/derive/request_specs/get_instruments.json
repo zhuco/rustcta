@@ -1,0 +1,16 @@
+{
+  "exchange": "derive",
+  "operation": "derive.symbol_rules",
+  "method": "POST",
+  "path": "/",
+  "auth": "none",
+  "body": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "public/get_all_instruments",
+    "params": {
+      "currency": "BTC",
+      "type": "option"
+    }
+  }
+}

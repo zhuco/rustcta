@@ -1,0 +1,15 @@
+[
+  {
+    "coin": "BTC",
+    "side": "B",
+    "limitPx": "65000",
+    "sz": "0.01",
+    "origSz": "0.01",
+    "oid": 123456,
+    "timestamp": 1710000001000,
+    "reduceOnly": false,
+    "orderType": "Limit",
+    "tif": "Gtc",
+    "cloid": "0x00000000000000000000000000000001"
+  }
+]

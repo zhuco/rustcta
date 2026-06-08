@@ -1,0 +1,38 @@
+{
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/exchange",
+  "auth": "hyperliquid_eip712_secp256k1",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "action": {
+      "type": "order",
+      "orders": [
+        {
+          "a": 0,
+          "b": true,
+          "p": "64900.0",
+          "s": "0.10",
+          "r": false,
+          "t": {
+            "limit": {
+              "tif": "Gtc"
+            }
+          },
+          "c": "0x00000000000000000000000000000001"
+        }
+      ],
+      "grouping": "na"
+    },
+    "nonce": 1750000000000,
+    "vaultAddress": "0x1111111111111111111111111111111111111111",
+    "signature": {
+      "r": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "s": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "v": 27
+    }
+  },
+  "canonical": "msgpack(action)||nonce_be||vault_flag_and_address -> keccak -> EIP712 Agent(source=a|b, connectionId) -> secp256k1 recoverable signature"
+}

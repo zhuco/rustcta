@@ -1,0 +1,15 @@
+{
+  "success": 1,
+  "return": {
+    "order": {
+      "order_id": "12345",
+      "pair": "btc_idr",
+      "type": "buy",
+      "price": "100000000",
+      "amount": "0.02000000",
+      "remain": "0.01000000",
+      "status": "open",
+      "submit_time": 1700000000
+    }
+  }
+}

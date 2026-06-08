@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "public/subscribe",
+  "params": {
+    "channels": [
+      {
+        "channel": "orderbook",
+        "instrument_name": "BTC-USD-PERP"
+      }
+    ]
+  }
+}

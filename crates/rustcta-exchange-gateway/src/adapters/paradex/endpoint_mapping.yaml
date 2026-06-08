@@ -1,0 +1,138 @@
+schema_version: 1
+exchange: paradex
+adapter: rustcta_exchange_gateway::adapters::paradex
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: Paradex public API docs and task 8 local fixtures
+  last_reviewed: "2026-06-08"
+  notes: Perp/options DEX adapter. Public markets/orderbook and WS payloads are fixture-verified. Private writes keep Stark signing explicit and offline-only until production signing/session validation is promoted.
+market_types: [perpetual, option]
+products: [perpetual, option]
+rest:
+  base_url: https://api.prod.paradex.trade/v1
+base_urls:
+  public_ws: wss://ws.api.prod.paradex.trade/v1
+  private_ws: wss://ws.api.prod.paradex.trade/v1
+auth:
+  private_rest: POST /auth with PARADEX-STARKNET-ACCOUNT, PARADEX-STARKNET-SIGNATURE, PARADEX-TIMESTAMP, and PARADEX-SIGNATURE-EXPIRATION; private REST then uses bearer JWT.
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_account: { scope: account, retry_after: http_429_or_venue_message, default_weight: 1 }
+  private_trade: { scope: account, retry_after: http_429_or_venue_message, default_weight: 1 }
+pagination:
+  open_orders: { mode: cursor, cursor_param: cursor, limit_param: page_size, max_limit: 100 }
+  recent_fills: { mode: cursor, cursor_param: cursor, limit_param: page_size, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  stream_recovery: Re-authenticate, resubscribe private user channels, then reconcile positions, open orders, and fills through REST.
+batch:
+  place_orders: { support: unsupported, reason: paradex.batch_place_orders_unverified }
+  cancel_orders: { support: unsupported, reason: paradex.batch_cancel_orders_unverified }
+websocket:
+  public: { support: native, channels: [order_book, trades, markets_summary, bbo], heartbeat: client_ping }
+  private: { support: native_with_jwt, channels: [user.orders, user.trades, user.positions, user.balance], auth_renewal: relogin }
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: GET
+    path: /markets
+    auth: none
+    rate_limit_bucket: paradex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: GET
+    path: /orderbook/{market}
+    auth: none
+    rate_limit_bucket: paradex_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: auth
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: POST
+    path: /auth
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: paradex_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: GET
+    path: /positions
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: paradex_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: paradex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: DELETE
+    path: /orders/{order_id}
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: paradex_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual, option]
+    transport: rest
+    method: GET
+    path: /orders
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: paradex_private_account
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native

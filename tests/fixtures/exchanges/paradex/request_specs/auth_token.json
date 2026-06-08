@@ -1,0 +1,16 @@
+{
+  "exchange": "paradex",
+  "operation": "auth_token",
+  "method": "POST",
+  "path": "/auth/fixture_starknet_public_key",
+  "query": {},
+  "body": null,
+  "headers": {
+    "Accept": "application/json",
+    "PARADEX-STARKNET-ACCOUNT": "fixture_starknet_account",
+    "PARADEX-STARKNET-SIGNATURE": "[\"111111111111111111111111111111111111111111111111111111111111111\",\"222222222222222222222222222222222222222222222222222222222222222\"]",
+    "PARADEX-TIMESTAMP": "1710793629",
+    "PARADEX-SIGNATURE-EXPIRATION": "1710795429"
+  },
+  "secret_free": true
+}

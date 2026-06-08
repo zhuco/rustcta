@@ -1,0 +1,8 @@
+{
+  "group": "futures/depth50:BTCUSDT",
+  "data": {
+    "symbol": "BTCUSDT",
+    "bids": [["50000", "1.2"]],
+    "asks": [["50010", "0.8"]]
+  }
+}

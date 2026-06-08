@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "order_id": "ETH-123",
+    "label": "client-1",
+    "instrument_name": "BTC-28JUN24-70000-C",
+    "direction": "buy",
+    "order_type": "limit",
+    "time_in_force": "good_til_cancelled",
+    "order_state": "open",
+    "amount": 1,
+    "price": 0.083,
+    "filled_amount": 0,
+    "average_price": 0,
+    "creation_timestamp": 1719400000100,
+    "last_update_timestamp": 1719400000200
+  }
+}

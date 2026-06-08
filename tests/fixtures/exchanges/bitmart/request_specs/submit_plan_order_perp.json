@@ -1,0 +1,21 @@
+{
+  "operation": "submit_plan_order",
+  "product": "perpetual",
+  "method": "POST",
+  "path": "/contract/private/submit-plan-order",
+  "body": {
+    "symbol": "BTCUSDT",
+    "side": 1,
+    "mode": 1,
+    "type": "limit",
+    "open_type": "isolated",
+    "leverage": "1",
+    "size": "1",
+    "price": "50000",
+    "trigger_price": "49000",
+    "price_way": 1,
+    "price_type": 1,
+    "plan_category": 1
+  },
+  "auth": "x-bm-hmac-sha256"
+}

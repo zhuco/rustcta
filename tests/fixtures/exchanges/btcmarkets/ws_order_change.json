@@ -1,0 +1,23 @@
+{
+  "orderId": "79003",
+  "clientOrderId": "ws-cli-1",
+  "marketId": "BTC-AUD",
+  "side": "Bid",
+  "type": "Limit",
+  "amount": "1",
+  "openAmount": "0.75",
+  "price": "7418.46",
+  "status": "Partially Matched",
+  "trades": [
+    {
+      "id": "3153171493",
+      "timestamp": "2019-04-08T20:54:27.632Z",
+      "price": "7418.46",
+      "amount": "0.25",
+      "fee": "1.854615",
+      "liquidityType": "Taker"
+    }
+  ],
+  "timestamp": "2019-04-08T20:54:27.632Z",
+  "messageType": "orderChange"
+}

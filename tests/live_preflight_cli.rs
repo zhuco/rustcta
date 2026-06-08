@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::fs;
 use std::process::Command;
 

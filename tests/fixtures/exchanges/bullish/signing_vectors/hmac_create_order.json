@@ -1,0 +1,13 @@
+{
+  "name": "hmac_create_order",
+  "algorithm": "sha256_hex_then_hmac_sha256_hex",
+  "timestamp": 1700000000000,
+  "nonce": 1700000000001,
+  "method": "POST",
+  "path": "/trading-api/v2/orders",
+  "body": "{\"commandType\":\"V3CreateOrder\",\"symbol\":\"BTCUSDC\"}",
+  "payload": "17000000000001700000000001POST/trading-api/v2/orders{\"commandType\":\"V3CreateOrder\",\"symbol\":\"BTCUSDC\"}",
+  "secret": "test-secret",
+  "expected_signature": "7051df9791de88c47707d9251a24315ab9c1f95db7f3bfe22778f92c660abe15",
+  "expected_signature_shape": "lower_hex_64"
+}

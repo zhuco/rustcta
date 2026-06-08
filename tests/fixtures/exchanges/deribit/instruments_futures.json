@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "instrument_name": "BTC-PERPETUAL",
+      "kind": "future",
+      "base_currency": "BTC",
+      "quote_currency": "USD",
+      "settlement_currency": "BTC",
+      "contract_size": 10,
+      "tick_size": 0.5,
+      "min_trade_amount": 10,
+      "is_active": true
+    },
+    {
+      "instrument_name": "ETH-27SEP24",
+      "kind": "future",
+      "base_currency": "ETH",
+      "quote_currency": "USD",
+      "settlement_currency": "ETH",
+      "contract_size": 1,
+      "tick_size": 0.05,
+      "min_trade_amount": 1,
+      "is_active": true
+    }
+  ]
+}

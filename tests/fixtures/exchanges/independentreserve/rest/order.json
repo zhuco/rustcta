@@ -1,0 +1,13 @@
+{
+  "OrderGuid": "order-guid-1",
+  "ClientOrderIdentifier": "client-1",
+  "PrimaryCurrencyCode": "Xbt",
+  "SecondaryCurrencyCode": "Aud",
+  "OrderType": "LimitBid",
+  "Status": "PartiallyFilled",
+  "Volume": "0.20",
+  "VolumeFilled": "0.05",
+  "Price": "100000.00",
+  "AvgPrice": "99995.00",
+  "CreatedTimestampUtc": "2026-06-08T00:00:00Z"
+}

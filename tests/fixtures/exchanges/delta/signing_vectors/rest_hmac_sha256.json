@@ -1,0 +1,9 @@
+{
+  "exchange": "delta",
+  "name": "rest_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "secret",
+  "payload": "POST1700000000/v2/orders{\"product_symbol\":\"BTCUSDT\",\"side\":\"buy\"}",
+  "expected_signature": "92a98608ff13d281de176de8d7d16a9c633de386eafcc95fe882f1a99909b205",
+  "payload_format": "raw_payload"
+}

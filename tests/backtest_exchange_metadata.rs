@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use rustcta::backtest::data::exchange_metadata::{ExchangeMetadataReader, ExchangeMetadataWriter};
 use rustcta::core::types::{MarketType, TradingPair};
 use tempfile::tempdir;

@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rustcta::backtest::data::depth_dataset::DepthDatasetWriter;
 use rustcta::backtest::data::kline_dataset::KlineDatasetWriter;

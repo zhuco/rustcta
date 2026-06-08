@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};

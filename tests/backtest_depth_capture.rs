@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rustcta::backtest::data::depth_capture::{
     import_binance_futures_depth_capture, DepthCaptureSession, DepthCaptureWriter,

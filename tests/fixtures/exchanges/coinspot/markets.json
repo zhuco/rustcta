@@ -1,0 +1,14 @@
+{
+  "status": "ok",
+  "markets": [
+    {
+      "coin": "BTC",
+      "market": "AUD",
+      "price_tick": "0.01",
+      "amount_tick": "0.00000001",
+      "minimum_amount": "0.0001",
+      "minimum_total": "1",
+      "status": "online"
+    }
+  ]
+}

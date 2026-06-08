@@ -1,0 +1,12 @@
+{
+  "status": "ok",
+  "data": [
+    {
+      "contract_code": "BTC-USDT",
+      "symbol": "BTC",
+      "contract_size": 0.001,
+      "price_tick": "0.1",
+      "support_margin_mode": "cross"
+    }
+  ]
+}

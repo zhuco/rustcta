@@ -1,0 +1,12 @@
+[
+  {
+    "market": "KRW-BTC",
+    "timestamp": 1529910247984,
+    "total_ask_size": 8.83621228,
+    "total_bid_size": 2.43976741,
+    "orderbook_units": [
+      { "ask_price": 69560000, "bid_price": 69540000, "ask_size": 0.24078656, "bid_size": 0.00718341 },
+      { "ask_price": 69580000, "bid_price": 69530000, "ask_size": 1.12919, "bid_size": 0.11500074 }
+    ]
+  }
+]

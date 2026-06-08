@@ -1,0 +1,25 @@
+[
+  {
+    "id": "818075",
+    "marketId": "BTC-AUD",
+    "timestamp": "2019-07-10T00:56:34.882000Z",
+    "price": "205.1554",
+    "amount": "0.002",
+    "side": "Ask",
+    "fee": "0.00340557",
+    "orderId": "818064",
+    "clientOrderId": "cli-818064",
+    "liquidityType": "Taker"
+  },
+  {
+    "id": "818061",
+    "marketId": "BTC-AUD",
+    "timestamp": "2019-07-10T00:55:10.209000Z",
+    "price": "205.1554",
+    "amount": "0.001",
+    "side": "Ask",
+    "fee": "0.00170278",
+    "orderId": "818050",
+    "liquidityType": "Maker"
+  }
+]

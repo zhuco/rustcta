@@ -1,0 +1,282 @@
+schema_version: 1
+exchange: bullish
+adapter: rustcta_exchange_gateway::adapters::bullish
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs.exchange.bullish.com official REST and WebSocket documentation
+  last_reviewed: "2026-06-08"
+  notes: Task 7 implementation. Public symbol-rules/order-book REST is wired; private REST remains offline request-spec until JWT lifecycle, nonce-window behavior and reconciliation are verified.
+market_types: [spot, perpetual, futures]
+products: [spot, perpetual, futures]
+rest:
+  base_url: https://api.exchange.bullish.com
+  testnet_base_url: https://api.simnext.bullish-test.com
+base_urls:
+  public_ws: wss://api.exchange.bullish.com/trading-api/v1/market-data/orderbook
+  private_ws: wss://api.exchange.bullish.com/trading-api/v1/private-data
+auth:
+  private_rest: Bearer JWT plus BX-TIMESTAMP, BX-NONCE and BX-SIGNATURE for trading commands
+  jwt_login_hmac: GET /trading-api/v1/users/hmac/login
+  jwt_login_ecdsa: POST /trading-api/v2/users/login
+  private_ws: JWT cookie based authentication
+rate_limits:
+  blanket: { scope: api_key_or_ip, retry_after: http_429_or_rate_limit_headers, default_weight: 1 }
+pagination:
+  orders: { mode: time_window, notes: primary orders endpoint is last-24h scoped; history endpoints required for older data }
+reconciliation:
+  private_state: rest_fallback
+  after_place: Query /trading-api/v2/orders, /trading-api/v1/trades and private WS order updates before terminal decision.
+  after_cancel: Query order state and trades; REST ack alone is not execution proof.
+batch:
+  place_orders: { support: unsupported, reason: no native batch order endpoint found in official REST spec }
+  cancel_orders: { support: unsupported, reason: no native batch cancel endpoint found in official REST spec }
+websocket:
+  public:
+    support: native
+    channels: [l1Orderbook, l2Orderbook, trades, tick]
+    heartbeat: { mode: json_rpc_keepalive_ping, interval_ms: 240000, timeout_ms: 30000 }
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+  private:
+    support: jwt_cookie_required
+    channels: [orders, trades, assetAccounts, derivativesPositions]
+    resync: { mode: rest_reconciliation, endpoint_operation: open_orders }
+endpoints:
+  - operation: symbol_rules
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v1/markets
+    auth: none
+    rate_limit_bucket: bullish_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bullish/markets.json }
+    notes: Official schema also includes options; options remain unsupported by this gateway task.
+  - operation: order_book
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v1/markets/{symbol}/orderbook/hybrid
+    auth: none
+    rate_limit_bucket: bullish_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/bullish/orderbook_hybrid.json }
+  - operation: balances
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v1/accounts/asset
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: bullish_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_asset_accounts.json }
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v1/derivatives-positions
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: bullish_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_derivatives_positions.json }
+  - operation: place_order
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /trading-api/v2/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bullish_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/place_order.json }
+  - operation: cancel_order
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /trading-api/v2/command
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bullish_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/cancel_order.json }
+  - operation: open_orders
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v2/orders
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: bullish_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_open_orders.json }
+  - operation: recent_fills
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v1/trades
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: bullish_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_recent_trades.json }
+  - operation: amend_order
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /trading-api/v2/command
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bullish_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/amend_order.json }
+    notes: Official V1AmendOrder exists for open unfilled limit orders, but runtime support is not promoted.
+  - operation: batch_place_orders
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /unsupported/bullish/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: bullish_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official native batch place endpoint found
+  - operation: batch_cancel_orders
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /unsupported/bullish/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: bullish_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official native batch cancel endpoint found
+  - operation: cancel_all_orders
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /trading-api/v2/command
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bullish_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/cancel_all_orders.json }
+    notes: Official V1CancelAllOrders/V1CancelAllOrdersByMarket exists, but runtime private write is not promoted.
+  - operation: quote_market_order
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /unsupported/bullish/quote_market_order
+    auth: unsupported
+    rate_limit_bucket: bullish_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no verified quote-sized market order mapping in Bullish REST command schema
+  - operation: order_list
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: POST
+    path: /unsupported/bullish/order_list
+    auth: unsupported
+    rate_limit_bucket: bullish_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: no official OCO/OTO order-list endpoint found
+  - operation: fees
+    product: mixed
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /trading-api/v1/accounts/trading-accounts
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: bullish_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    request_spec: { status: fixture_only, fixture: tests/fixtures/exchanges/bullish/request_specs/get_trading_accounts_fees.json }
+    notes: Fee data is derived from tradeFeeRate on trading-account payloads and feeGroupId in market metadata; runtime fee endpoint is not promoted.

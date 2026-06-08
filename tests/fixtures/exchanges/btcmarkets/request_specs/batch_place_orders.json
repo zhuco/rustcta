@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "path": "/v3/batchorders",
+  "body": [
+    {
+      "placeOrder": {
+        "marketId": "BTC-AUD",
+        "side": "Bid",
+        "type": "Limit",
+        "amount": "1.034",
+        "price": "100.12",
+        "clientOrderId": "cli-123"
+      }
+    }
+  ]
+}

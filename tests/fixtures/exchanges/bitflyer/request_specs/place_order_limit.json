@@ -1,0 +1,13 @@
+{
+  "operation": "bitflyer.place_order",
+  "method": "POST",
+  "path": "/v1/me/sendchildorder",
+  "body": {
+    "product_code": "BTC_JPY",
+    "child_order_type": "LIMIT",
+    "side": "BUY",
+    "price": "6500000",
+    "size": "0.01",
+    "time_in_force": "GTC"
+  }
+}

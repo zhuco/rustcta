@@ -1,0 +1,13 @@
+{
+  "openPositions": [
+    {
+      "symbol": "PF_XBTUSDT",
+      "side": "long",
+      "size": "2",
+      "price": "37000",
+      "markPrice": "37100",
+      "pnl": "15.5",
+      "leverage": "5"
+    }
+  ]
+}

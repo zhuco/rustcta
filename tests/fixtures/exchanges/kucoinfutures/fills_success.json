@@ -1,0 +1,24 @@
+{
+  "code": "200000",
+  "data": {
+    "currentPage": 1,
+    "pageSize": 100,
+    "totalNum": 1,
+    "totalPage": 1,
+    "items": [
+      {
+        "tradeId": "9001",
+        "orderId": "1001",
+        "clientOid": "CID1001",
+        "symbol": "XBTUSDTM",
+        "side": "buy",
+        "price": "65010",
+        "size": "0.006",
+        "fee": "0.39",
+        "feeCurrency": "USDT",
+        "liquidity": "taker",
+        "createdAt": 1743054550000
+      }
+    ]
+  }
+}

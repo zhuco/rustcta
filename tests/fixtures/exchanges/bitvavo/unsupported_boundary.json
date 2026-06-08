@@ -1,0 +1,23 @@
+{
+  "exchange": "bitvavo",
+  "runtime_scope": "spot_trading_only",
+  "unsupported_operations": [
+    "fiat_payment_methods",
+    "bank_deposits",
+    "withdrawals",
+    "internal_transfers",
+    "staking",
+    "funding_ledger_writes",
+    "non_spot_products",
+    "positions",
+    "reduce_only",
+    "amend_order_without_operator_id"
+  ],
+  "expected_runtime_errors": [
+    "bitvavo.positions_unsupported_spot_only",
+    "bitvavo.reduce_only_unsupported_spot",
+    "bitvavo.amend_order_requires_operator_id_unmapped"
+  ],
+  "trade_enabled": true,
+  "funding_enabled": false
+}

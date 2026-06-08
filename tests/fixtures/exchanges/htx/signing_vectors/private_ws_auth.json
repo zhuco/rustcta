@@ -1,0 +1,17 @@
+{
+  "exchange": "htx",
+  "name": "private-ws-auth",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "test-secret",
+  "method": "GET",
+  "host": "api.hbdm.com",
+  "request_path": "/linear-swap-notification",
+  "query": {
+    "AccessKeyId": "test-key",
+    "SignatureMethod": "HmacSHA256",
+    "SignatureVersion": "2",
+    "Timestamp": "2026-06-08T00:00:00"
+  },
+  "payload": "GET\napi.hbdm.com\n/linear-swap-notification\nAccessKeyId=test-key&SignatureMethod=HmacSHA256&SignatureVersion=2&Timestamp=2026-06-08T00%3A00%3A00",
+  "expected_signature": "SZ182vPaY2aHgGPdec9q7e0d7V6odEARQY0qMymru0w="
+}

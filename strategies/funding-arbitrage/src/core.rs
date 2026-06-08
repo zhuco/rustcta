@@ -531,7 +531,7 @@ pub fn eligible_symbols(
         .filter(|instrument| symbol_allowed(&instrument.canonical_symbol, config))
         .map(|instrument| instrument.canonical_symbol.clone())
         .collect::<Vec<_>>();
-    symbols.sort_by(|left, right| left.as_pair().cmp(&right.as_pair()));
+    symbols.sort_by_key(|symbol| symbol.as_pair());
     symbols.dedup();
     symbols
 }
@@ -630,9 +630,7 @@ fn normalize_symbol(value: &str) -> String {
     value
         .trim()
         .to_ascii_uppercase()
-        .replace('-', "")
-        .replace('_', "")
-        .replace('/', "")
+        .replace(['-', '_', '/'], "")
         .replace("SWAP", "")
 }
 

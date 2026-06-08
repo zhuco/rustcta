@@ -1,0 +1,17 @@
+{
+  "exchange": "derive",
+  "operation": "get_order_book",
+  "transport": "json_rpc",
+  "method": "POST",
+  "path": "/public/get_orderbook",
+  "auth": "none",
+  "body": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "public/get_orderbook",
+    "params": {
+      "instrument_name": "BTC-USD-PERP",
+      "depth": 50
+    }
+  }
+}

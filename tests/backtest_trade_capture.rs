@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rustcta::backtest::data::trade_capture::{
     import_binance_futures_trade_capture, RawTradeRecord, TradeCaptureSession, TradeCaptureWriter,

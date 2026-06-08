@@ -1,0 +1,15 @@
+{
+  "operation": "gemini.get_open_orders",
+  "method": "POST",
+  "path": "/v1/orders",
+  "auth": "gemini_payload_hmac_sha384",
+  "payload": {
+    "request": "/v1/orders",
+    "nonce": "1717200000000000"
+  },
+  "headers": [
+    "Gemini-APIKey",
+    "Gemini-Payload",
+    "Gemini-Signature"
+  ]
+}

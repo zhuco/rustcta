@@ -435,8 +435,10 @@ mod tests {
             "observe mode should not validate live execution sizing"
         );
 
-        let mut live = FundingCoreConfig::default();
-        live.mode = "live".to_string();
+        let mut live = FundingCoreConfig {
+            mode: "live".to_string(),
+            ..FundingCoreConfig::default()
+        };
         assert!(live.validate().is_err());
         live.selection.max_seconds_to_settlement_at_scan = Some(120);
         assert!(live.validate().is_ok());

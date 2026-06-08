@@ -1,0 +1,14 @@
+[
+  {
+    "ticket": "private-ws"
+  },
+  {
+    "authorization": "Bearer <jwt>"
+  },
+  {
+    "type": "myOrder"
+  },
+  {
+    "format": "SIMPLE"
+  }
+]

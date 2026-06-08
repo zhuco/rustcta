@@ -1,0 +1,11 @@
+enabled: false
+adapter: coincheck
+rest_base_url: https://coincheck.com
+websocket_url: wss://ws-api.coincheck.com/
+private_rest_enabled: false
+credentials:
+  api_key_env: COINCHECK_API_KEY
+  api_secret_env: COINCHECK_API_SECRET
+notes:
+  - "Coincheck Japan spot adapter. Lending, deposit, and withdraw are unsupported."
+  - "Do not place live orders from this disabled example."

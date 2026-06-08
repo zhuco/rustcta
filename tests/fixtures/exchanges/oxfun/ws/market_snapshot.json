@@ -1,0 +1,19 @@
+{
+  "table": "market",
+  "data": [
+    {
+      "marketId": "3001000000000",
+      "marketCode": "BTC-USD-SWAP-LIN",
+      "name": "BTC/USD Perpetual",
+      "referencePair": "BTC/USD",
+      "base": "BTC",
+      "counter": "USD",
+      "type": "FUTURE",
+      "tickSize": "0.5",
+      "qtyIncrement": "0.001",
+      "marginCurrency": "OX",
+      "contractValCurrency": "BTC",
+      "marketPrice": "64000"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "exchange": "lighter",
+  "operation": "send_tx",
+  "status": "unsupported_unverified",
+  "method": "POST",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/sendTx",
+  "auth": "bearer",
+  "request_spec_required": true,
+  "requires_signed_tx": true,
+  "expected_error": "lighter.send_tx_signing_unverified",
+  "trade_enabled": false
+}

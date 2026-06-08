@@ -1,0 +1,13 @@
+{
+  "exchange": "coinone",
+  "payment": "unsupported",
+  "wallet": "unsupported",
+  "fiat_transfer": "unsupported",
+  "withdrawal": "unsupported",
+  "deposit_address": "unsupported",
+  "credential_scopes": [
+    "read_only",
+    "trade"
+  ],
+  "notes": "Coinone adapter is limited to KRW spot market data, orders, balances, fees and fills. Payment, wallet withdrawal/deposit, and fiat transfer APIs are intentionally outside the gateway surface."
+}

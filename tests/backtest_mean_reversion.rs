@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::path::PathBuf;
 
 use chrono::{Duration, TimeZone, Timelike, Utc};

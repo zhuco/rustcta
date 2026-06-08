@@ -1,0 +1,11 @@
+{
+  "exchange": "bitfinex",
+  "name": "rest_place_order_hmac_sha384",
+  "algorithm": "hmac_sha384_hex",
+  "secret": "bitfinex-test-secret",
+  "path": "/v2/auth/w/order/submit",
+  "nonce": "1700000000000000",
+  "body": "{\"amount\":\"0.01\",\"price\":\"65000\",\"symbol\":\"tBTCUSD\",\"type\":\"EXCHANGE LIMIT\"}",
+  "payload": "/api/v2/auth/w/order/submit1700000000000000{\"amount\":\"0.01\",\"price\":\"65000\",\"symbol\":\"tBTCUSD\",\"type\":\"EXCHANGE LIMIT\"}",
+  "expected_signature": "a67be9b46285af26271b437c40fc428843042d78b1c0481d1930cc8654c63325f0a752a0335a50ecee7dcd2c39d02482"
+}

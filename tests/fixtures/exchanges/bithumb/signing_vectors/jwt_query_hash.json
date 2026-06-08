@@ -1,0 +1,11 @@
+{
+  "exchange": "bithumb",
+  "name": "jwt-query-hash-limit-order",
+  "access_key": "fixture-access-key",
+  "secret": "fixture-secret",
+  "nonce": "00000000-0000-4000-8000-000000000001",
+  "timestamp": 1720931741000,
+  "query": "client_order_id=my-order-001&market=KRW-BTC&order_type=limit&price=84000000&side=bid&volume=0.001",
+  "expected_query_hash": "c584598357480e782718c74100e1928f4c3990d1a5db4351cbb27d83b896efa1d814a7e4e0fa9aebbd7c5f93b346d6b3d043002679903a78f616eaeee6879026",
+  "algorithm": "jwt_hs256_with_sha512_query_hash"
+}

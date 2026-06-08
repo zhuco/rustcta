@@ -1,0 +1,207 @@
+schema_version: 1
+exchange: bybit
+adapter: rustcta_exchange_gateway::adapters::bybit
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: Bybit V5 REST/WS docs plus legacy private_perp migration notes
+  last_reviewed: "2026-06-08"
+market_types: [spot, perpetual, futures]
+products: [spot, perpetual, futures]
+rest:
+  base_url: https://api.bybit.com
+  testnet_base_url: https://api-testnet.bybit.com
+base_urls:
+  public_ws_linear: wss://stream.bybit.com/v5/public/linear
+  public_ws_spot: wss://stream.bybit.com/v5/public/spot
+  private_ws: wss://stream.bybit.com/v5/private
+auth:
+  private_rest: X-BAPI-SIGN = HMAC_SHA256(timestamp + api_key + recv_window + query_or_json_body)
+  private_ws: auth args [api_key, expires_ms, HMAC_SHA256("GET/realtime" + expires_ms)]
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_retCode_10006, default_weight: 1 }
+  private_account: { scope: api_key, retry_after: http_429_or_retCode_10006, default_weight: 1 }
+  private_trade: { scope: api_key, retry_after: http_429_or_retCode_10006, default_weight: 1 }
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_balances, get_positions, query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_order_then_open_orders
+batch:
+  place_orders:
+    support: unsupported
+    reason: create-batch not yet wired in this adapter
+  cancel_orders:
+    support: unsupported
+    reason: cancel-batch not yet wired in this adapter
+  cancel_all_orders:
+    support: native
+    atomicity: partial
+    partial_failure: true
+websocket:
+  public:
+    support: spec_only
+    channels: [orderbook.50, publicTrade, tickers, kline.1]
+    heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 60000 }
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only_when_credentials_configured
+    channels: [order, execution, position, wallet]
+    auth: bybit_v5_auth
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/market/instruments-info
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/market/orderbook
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+  - operation: funding_history
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/market/funding/history
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bybit/funding_history.json }
+  - operation: open_interest
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/market/open-interest
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bybit/open_interest.json }
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/account/wallet-balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/position/list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/order/create
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/order/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/order/cancel-all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/order/realtime
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/order/realtime
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/execution/list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 1
+    request_spec_required: true
+  - operation: set_leverage
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/position/set-leverage
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: unsupported
+    reason: no shared gateway mutation request type for leverage in task-1 adapter surface
+  - operation: switch_margin_mode
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/position/switch-isolated
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: unsupported
+    reason: no shared gateway mutation request type for margin mode in task-1 adapter surface
+  - operation: switch_position_mode
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /v5/position/switch-mode
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 1
+    request_spec_required: true
+    support: unsupported
+    reason: no shared gateway mutation request type for position mode in task-1 adapter surface

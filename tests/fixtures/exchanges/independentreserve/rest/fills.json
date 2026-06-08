@@ -1,0 +1,19 @@
+{
+  "Data": [
+    {
+      "TradeGuid": "trade-guid-1",
+      "OrderGuid": "order-guid-1",
+      "ClientOrderIdentifier": "client-1",
+      "PrimaryCurrencyCode": "Xbt",
+      "SecondaryCurrencyCode": "Aud",
+      "OrderType": "LimitBid",
+      "Price": "99995.00",
+      "Volume": "0.05",
+      "Value": "4999.75",
+      "Fee": "2.50",
+      "FeeCurrencyCode": "Aud",
+      "LiquidityType": "Maker",
+      "TradeTimestampUtc": "2026-06-08T00:01:00Z"
+    }
+  ]
+}

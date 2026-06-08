@@ -1,0 +1,15 @@
+{
+  "status": "ok",
+  "buyorders": [
+    {
+      "rate": "99000.5",
+      "amount": "0.25"
+    }
+  ],
+  "sellorders": [
+    {
+      "rate": "100000.5",
+      "amount": "0.3"
+    }
+  ]
+}

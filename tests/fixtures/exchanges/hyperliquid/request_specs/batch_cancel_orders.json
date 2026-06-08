@@ -1,0 +1,22 @@
+{
+  "operation": "batch_cancel_orders",
+  "method": "POST",
+  "path": "/exchange",
+  "auth": "hyperliquid_eip712_secp256k1",
+  "body": {
+    "action": {
+      "type": "cancel",
+      "cancels": [
+        {
+          "a": 0,
+          "o": 123456789
+        },
+        {
+          "a": 1,
+          "o": 223456789
+        }
+      ]
+    },
+    "nonce": 1750000000002
+  }
+}

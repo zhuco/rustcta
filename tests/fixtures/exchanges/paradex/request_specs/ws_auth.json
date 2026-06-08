@@ -1,0 +1,14 @@
+{
+  "exchange": "paradex",
+  "operation": "ws_auth",
+  "transport": "websocket",
+  "payload": {
+    "jsonrpc": "2.0",
+    "method": "auth",
+    "params": {
+      "bearer": "fixture.jwt.token"
+    },
+    "id": 0
+  },
+  "secret_free": true
+}

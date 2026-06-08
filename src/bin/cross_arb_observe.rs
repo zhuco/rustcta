@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;

@@ -1,0 +1,8 @@
+{
+  "operation": "get_balances",
+  "product": "spot",
+  "method": "GET",
+  "path": "/spot/v1/wallet",
+  "query": {},
+  "auth": "x-bm-hmac-sha256"
+}

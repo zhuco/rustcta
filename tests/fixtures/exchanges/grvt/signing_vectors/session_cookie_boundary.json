@@ -1,0 +1,9 @@
+{
+  "exchange": "grvt",
+  "operation": "private_rest_auth",
+  "supported": false,
+  "reason": "GRVT private REST requires a session cookie from API-key login plus X-Grvt-Account-Id; order writes also require EIP-712/external signer coverage.",
+  "expected_error": "grvt.private_session_unavailable",
+  "contains_real_cookie": false,
+  "contains_wallet_private_key": false
+}

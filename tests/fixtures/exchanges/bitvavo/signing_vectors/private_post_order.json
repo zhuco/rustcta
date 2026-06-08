@@ -1,0 +1,8 @@
+{
+  "secret": "test-secret",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "request_path": "/v2/order",
+  "body": "{\"market\":\"BTC-EUR\",\"side\":\"buy\",\"orderType\":\"limit\",\"amount\":\"0.02\",\"price\":\"65000\"}",
+  "expected_signature": "17324a586cf1fd465ec91d282be876d22d8f5bb9244b0b6d95cb7ece3ceadcfe"
+}

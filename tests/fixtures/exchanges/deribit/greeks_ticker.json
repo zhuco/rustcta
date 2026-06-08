@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "instrument_name": "BTC-28JUN24-70000-C",
+    "timestamp": 1719400000400,
+    "underlying_price": 66800.25,
+    "mark_iv": 58.4,
+    "bid_iv": 57.9,
+    "ask_iv": 59.1,
+    "greeks": {
+      "delta": 0.42,
+      "gamma": 0.000031,
+      "theta": -39.7,
+      "vega": 45.2,
+      "rho": 8.1
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "secret": "kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5nE9qa99HAZtuZuj6F1huXg==",
+  "api_key": "key",
+  "endpoint_path": "/derivatives/api/v3/cancelorder",
+  "nonce": "1616492376594",
+  "params": {
+    "order_id": "FUT-ORDER-1"
+  },
+  "expected_query_or_body": "order_id=FUT-ORDER-1",
+  "expected_authent": "7k2cFTs5oVafmouu9pSw7tsL6AXIAa83fZ69YlLz9QRi54izJeGqz8VX9RDnL/p5sm7nogfr8AHOz4UXf3HaCQ=="
+}

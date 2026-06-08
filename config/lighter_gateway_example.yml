@@ -1,0 +1,47 @@
+# Lighter conservative gateway adapter example.
+# Low-latency order book WS/parser specs are available offline, but production
+# runtime and signed transaction writes remain disabled.
+
+exchange: lighter
+adapter: lighter
+enabled: false
+
+market_types:
+  - perpetual
+
+auth_token: ${LIGHTER_AUTH_TOKEN}
+account_index: ${LIGHTER_ACCOUNT_INDEX}
+api_key_index: ${LIGHTER_API_KEY_INDEX}
+
+rest_base_url: https://mainnet.zklighter.elliot.ai/api/v1
+ws_url: wss://mainnet.zklighter.elliot.ai/stream
+testnet_rest_base_url: https://testnet.zklighter.elliot.ai/api/v1
+testnet_ws_url: wss://testnet.zklighter.elliot.ai/stream
+testnet: true
+sandbox: false
+
+enabled_public_rest: false
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_limit: 250
+log_raw_messages: false
+
+enabled_markets:
+  perpetual:
+    - market:0
+    - market:1
+
+permissions:
+  required: []
+  optional:
+    - read_only_auth_token
+    - trade_signed_tx
+
+notes:
+  - Do not put API private keys in this config file.
+  - sendTx/sendTxBatch writes require offline signed transaction vectors and are currently Unsupported.
+  - Order book checksum is unsupported by official WS payloads; continuity uses begin_nonce == previous nonce.
+  - Offset is not continuous across servers or reconnects and must not be used for gap detection.

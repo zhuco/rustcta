@@ -1,0 +1,22 @@
+{
+  "symbols": [
+    {
+      "symbol": "BTCUSD_PERP",
+      "pair": "BTCUSD",
+      "contractType": "PERPETUAL",
+      "contractStatus": "TRADING",
+      "contractSize": 100,
+      "baseAsset": "BTC",
+      "quoteAsset": "USD",
+      "marginAsset": "BTC",
+      "pricePrecision": 1,
+      "quantityPrecision": 0,
+      "orderTypes": ["LIMIT", "MARKET"],
+      "timeInForce": ["GTC", "IOC", "FOK", "GTX"],
+      "filters": [
+        {"filterType": "PRICE_FILTER", "minPrice": "0.1", "maxPrice": "1000000", "tickSize": "0.1"},
+        {"filterType": "LOT_SIZE", "minQty": "1", "maxQty": "100000", "stepSize": "1"}
+      ]
+    }
+  ]
+}

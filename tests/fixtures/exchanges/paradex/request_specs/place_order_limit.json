@@ -1,0 +1,22 @@
+{
+  "exchange": "paradex",
+  "operation": "paradex.place_order",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "bearer",
+  "headers": {
+    "Authorization": "Bearer fixture.jwt"
+  },
+  "body": {
+    "market": "BTC-USD-PERP",
+    "side": "BUY",
+    "type": "LIMIT",
+    "size": "0.01",
+    "price": "65000",
+    "client_id": "fixture-client-order-id",
+    "signature": "<fixture-stark-signature>"
+  },
+  "forbid_header_values_containing": ["private", "secret", "real-wallet"],
+  "forbid_body_values_containing": ["private", "secret", "real-wallet"],
+  "signing_vector": "paradex/order_stark_fixture"
+}

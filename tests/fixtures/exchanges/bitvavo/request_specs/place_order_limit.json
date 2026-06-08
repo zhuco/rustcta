@@ -1,0 +1,14 @@
+{
+  "operation": "bitvavo.place_order",
+  "method": "POST",
+  "path": "/v2/order",
+  "body": {
+    "market": "BTC-EUR",
+    "side": "buy",
+    "orderType": "limit",
+    "amount": "0.02",
+    "price": "65000",
+    "timeInForce": "GTC",
+    "clientOrderId": "CLIENTLIMIT1"
+  }
+}

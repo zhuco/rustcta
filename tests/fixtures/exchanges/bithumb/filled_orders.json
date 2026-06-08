@@ -1,0 +1,26 @@
+[
+  {
+    "uuid": "C0101000000001799626",
+    "client_order_id": "fill-client-001",
+    "side": "bid",
+    "ord_type": "limit",
+    "price": "84000000",
+    "state": "done",
+    "market": "KRW-BTC",
+    "created_at": "2024-07-12T16:30:01+09:00",
+    "volume": "0.001",
+    "executed_volume": "0.001",
+    "executed_funds": "84000",
+    "paid_fee": "210",
+    "trades": [
+      {
+        "uuid": "trade-001",
+        "price": "84000000",
+        "volume": "0.001",
+        "funds": "84000",
+        "fee": "210",
+        "created_at": "2024-07-12T16:30:03+09:00"
+      }
+    ]
+  }
+]

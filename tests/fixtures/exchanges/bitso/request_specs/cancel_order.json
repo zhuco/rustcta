@@ -1,0 +1,8 @@
+{
+  "method": "DELETE",
+  "path": "/api/v3/orders/offline-order-1",
+  "auth": "bitso_hmac_sha256",
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

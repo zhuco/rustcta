@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/api/v3/open_orders",
+  "auth": "bitso_hmac_sha256",
+  "query": {
+    "book": "btc_mxn"
+  },
+  "headers": {
+    "Authorization": "<redacted:authorization>"
+  }
+}

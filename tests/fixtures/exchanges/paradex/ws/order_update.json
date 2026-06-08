@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "method": "subscription",
+  "params": {
+    "channel": "orders.BTC-USD-PERP",
+    "data": {
+      "account": "fixture_starknet_account",
+      "client_id": "fixture-client-001",
+      "created_at": 1710793629000,
+      "flags": ["REDUCE_ONLY"],
+      "id": "fixture-order-001",
+      "instruction": "GTC",
+      "last_updated_at": 1710793629000,
+      "market": "BTC-USD-PERP",
+      "price": "65000.0",
+      "remaining_size": "0.04",
+      "seq_no": 1710793629000000001,
+      "side": "BUY",
+      "size": "0.05",
+      "status": "OPEN",
+      "timestamp": 1710793629000,
+      "type": "LIMIT"
+    }
+  }
+}

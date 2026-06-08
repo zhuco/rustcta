@@ -1,0 +1,138 @@
+schema_version: 1
+exchange: mercado
+adapter: MercadoGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/mercado_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Mercado Bitcoin spot adapter. BRL fiat markets are normalized to BASE-QUOTE. Live private write REST remains offline request-spec only.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.mercadobitcoin.net/api/v4
+auth:
+  private_rest: bearer token for account endpoints; no real tokens in fixtures
+rate_limits:
+  public: { scope: ip, interval_ms: 1000, limit: 1 }
+  private_orders: { scope: account, interval_ms: 1000, limit: 3 }
+pagination:
+  private_history: { mode: page_or_time, notes: audit before live promotion }
+reconciliation:
+  private_state: rest_fallback
+  notes: Private streams are not promoted until official WS auth is verified.
+batch:
+  place: { support: unsupported, reason: mercado.native_batch_place_unsupported }
+  cancel: { support: cancel_all_only, reason: mercado.cancel_all_open_orders_offline_only }
+websocket:
+  public:
+    support: payload_helper
+    channels: [orderbook, trades, ticker]
+    heartbeat: { mode: connection, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /symbols
+    auth: none
+    rate_limit_bucket: mercado_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orderbook/{symbol}
+    auth: none
+    rate_limit_bucket: mercado_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /accounts/{accountId}/{symbol}/orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: mercado_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /accounts/{accountId}/{symbol}/orders/{orderId}
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: mercado_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /accounts/{accountId}/balances
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: mercado_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /accounts/{accountId}/orders
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: mercado_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /accounts/{accountId}/{symbol}/trades
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: mercado_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only

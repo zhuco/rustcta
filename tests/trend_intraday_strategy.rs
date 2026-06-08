@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock as StdRwLock};
 

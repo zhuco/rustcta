@@ -1,0 +1,11 @@
+{
+  "positions": [
+    {
+      "market": "BTC-USD",
+      "status": "OPEN",
+      "size": "0.02",
+      "entryPrice": "64000",
+      "unrealizedPnl": "20.0"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "fill-1",
+    "orderId": "00000000-0000-4000-8000-000000000001",
+    "market": "BTC-EUR",
+    "side": "buy",
+    "amount": "0.01",
+    "price": "30000.00",
+    "fee": "0.25",
+    "feeCurrency": "EUR",
+    "timestamp": 1710000000000
+  }
+]

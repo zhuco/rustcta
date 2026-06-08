@@ -1,0 +1,20 @@
+{
+  "success": 1,
+  "data": {
+    "trades": [
+      {
+        "trade_id": 987654,
+        "pair": "btc_jpy",
+        "order_id": 123457,
+        "side": "sell",
+        "type": "limit",
+        "amount": "0.01",
+        "price": "6600000",
+        "maker_taker": "maker",
+        "fee_amount_base": "0",
+        "fee_amount_quote": "-132",
+        "executed_at": 1743054550000
+      }
+    ]
+  }
+}

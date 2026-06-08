@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "fill_id": "fixture-fill-001",
+      "order_id": "fixture-order-001",
+      "client_id": "fixture-client-001",
+      "market": "BTC-USD-PERP",
+      "side": "BUY",
+      "price": "65000.0",
+      "size": "0.01",
+      "liquidity": "TAKER",
+      "fee": "0.325",
+      "fee_currency": "USDC",
+      "created_at": 1710793630000
+    }
+  ]
+}

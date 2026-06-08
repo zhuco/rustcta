@@ -1,0 +1,11 @@
+{
+  "operation": "batch_cancel_orders",
+  "product": "perpetual",
+  "method": "POST",
+  "path": "/contract/private/cancel-orders",
+  "body": {
+    "symbol": "BTCUSDT",
+    "order_ids": ["2001", "2002"]
+  },
+  "auth": "x-bm-hmac-sha256"
+}

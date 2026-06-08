@@ -1,0 +1,11 @@
+gateway:
+  adapter: mercado
+  enabled: false
+  rest_base_url: https://api.mercadobitcoin.net/api/v4
+  public_ws_url: wss://ws.mercadobitcoin.net/ws
+  private_rest_enabled: false
+  private_streams_enabled: false
+  notes:
+    - Spot-only Brazil and Latin America markets.
+    - Keep bearer tokens and account IDs in environment variables; do not place secrets in this file.
+    - Fiat ledger is read-audit-only; withdrawals, bank payments, and transfers are unsupported.

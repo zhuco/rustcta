@@ -1,0 +1,15 @@
+{
+  "orders": [
+    {
+      "order_id": "FUT-QUERY-1",
+      "cliOrdId": "client-query-1",
+      "symbol": "PF_XBTUSDT",
+      "side": "buy",
+      "orderType": "lmt",
+      "status": "open",
+      "size": "0.01",
+      "filled": "0",
+      "limitPrice": "37500"
+    }
+  ]
+}

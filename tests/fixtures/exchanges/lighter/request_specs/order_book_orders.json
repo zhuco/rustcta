@@ -1,0 +1,15 @@
+{
+  "exchange": "lighter",
+  "operation": "order_book",
+  "status": "spec_only",
+  "method": "GET",
+  "base_url": "https://mainnet.zklighter.elliot.ai/api/v1",
+  "path": "/orderBookOrders",
+  "query": {
+    "market_id": "0",
+    "limit": "250"
+  },
+  "auth": "none",
+  "request_spec_required": false,
+  "trade_enabled": false
+}

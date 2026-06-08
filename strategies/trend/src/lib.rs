@@ -939,7 +939,7 @@ mod tests {
         let mut tilt_candles: Vec<_> = (0..12).map(|idx| sample_candle(idx, 10.0)).collect();
         for (idx, candle) in tilt_candles.iter_mut().enumerate() {
             candle.open = 10.0;
-            candle.close = if idx < 2 || idx >= 7 { 11.0 } else { 9.0 };
+            candle.close = if !(2..7).contains(&idx) { 11.0 } else { 9.0 };
         }
         assert_eq!(compute_orderbook_tilt(&tilt_candles[..2]), 0.0);
         assert_eq!(compute_orderbook_tilt(&tilt_candles), 0.0);

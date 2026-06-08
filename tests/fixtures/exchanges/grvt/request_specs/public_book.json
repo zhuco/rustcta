@@ -1,0 +1,15 @@
+{
+  "exchange": "grvt",
+  "operation": "order_book",
+  "status": "spec_only",
+  "method": "POST",
+  "base_url": "https://market-data.testnet.grvt.io/full",
+  "path": "/v1/book",
+  "body": {
+    "instrument": "BTC_USDT_Perp",
+    "depth": 10
+  },
+  "auth": "none",
+  "request_spec_required": false,
+  "trade_enabled": false
+}

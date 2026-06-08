@@ -1,0 +1,12 @@
+{
+  "name": "bitso_rest_place_order_fixture",
+  "algorithm": "hmac_sha256_hex",
+  "credential_label": "fixture-key",
+  "credential_material": "fixture-credential",
+  "nonce": "1700000000000",
+  "method": "POST",
+  "request_path": "/api/v3/orders",
+  "body": "{\"book\":\"btc_mxn\",\"side\":\"buy\"}",
+  "payload": "1700000000000POST/api/v3/orders{\"book\":\"btc_mxn\",\"side\":\"buy\"}",
+  "expected_digest_shape": "hex64"
+}

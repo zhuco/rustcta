@@ -1,0 +1,21 @@
+{
+  "success": 1,
+  "data": {
+    "orders": [
+      {
+        "order_id": 123457,
+        "pair": "btc_jpy",
+        "side": "sell",
+        "type": "limit",
+        "start_amount": "0.02",
+        "remaining_amount": "0.01",
+        "executed_amount": "0.01",
+        "price": "6600000",
+        "post_only": true,
+        "average_price": "6600000",
+        "ordered_at": 1743054549000,
+        "status": "PARTIALLY_FILLED"
+      }
+    ]
+  }
+}

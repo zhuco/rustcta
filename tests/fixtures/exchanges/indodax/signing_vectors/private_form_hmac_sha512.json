@@ -1,0 +1,10 @@
+{
+  "exchange": "indodax",
+  "algorithm": "hmac_sha512",
+  "secret": "secret",
+  "payload": "method=getInfo&nonce=1700000000000",
+  "headers": {
+    "Key": "key",
+    "Sign_length": 128
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "channel": "orderUpdates",
+  "data": [
+    {
+      "status": "open",
+      "statusTimestamp": 1750000003000,
+      "order": {
+        "coin": "BTC",
+        "oid": 123456789,
+        "cloid": "0x00000000000000000000000000000001",
+        "side": "B",
+        "limitPx": "64900.0",
+        "sz": "0.10",
+        "timestamp": 1750000001000
+      }
+    }
+  ]
+}

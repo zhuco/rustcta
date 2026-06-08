@@ -1,0 +1,4 @@
+{
+  "type": "myOrder",
+  "auth": "jwt_bearer_header"
+}

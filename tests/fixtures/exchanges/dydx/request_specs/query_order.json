@@ -1,0 +1,10 @@
+{
+  "exchange": "dydx",
+  "operation": "query_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders/order-fixture-1",
+  "auth": "none",
+  "strict_query": true
+}

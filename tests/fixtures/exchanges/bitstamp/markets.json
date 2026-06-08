@@ -1,0 +1,14 @@
+[
+  {
+    "name": "BTC/USD",
+    "market_symbol": "btcusd",
+    "base_currency": "BTC",
+    "counter_currency": "USD",
+    "base_decimals": 8,
+    "counter_decimals": 2,
+    "minimum_order": "20.0 USD",
+    "minimum_order_value": "20.0",
+    "trading": "Enabled",
+    "market_type": "SPOT"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "exchange": "oxfun",
+  "operation": "ws_login",
+  "api_secret": "secret",
+  "timestamp_ms": "1700000000000",
+  "canonical": "1700000000000GET/auth/self/verify",
+  "expected_signature": "qNyCEuPA4GPpD3gYnapr/2/0OOe1C+GUn5QWMIV8GoY="
+}

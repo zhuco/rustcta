@@ -1,0 +1,308 @@
+schema_version: 1
+exchange: htx
+adapter: rustcta-exchange-gateway::adapters::htx
+metadata:
+  status: validated
+  source: HTX/Huobi official Spot and USDT-margined swap API docs
+  last_reviewed: "2026-06-08"
+  notes: HTX canonical profile. Huobi is implemented as a legacy profile that reuses this adapter logic with exchange id huobi.
+market_types: [spot, linear_perp]
+products: [spot, linear_perp]
+rest:
+  base_url: https://api.huobi.pro
+base_urls:
+  spot_rest_base_url: https://api.huobi.pro
+  linear_rest_base_url: https://api.hbdm.com
+  spot_public_ws_url: wss://api.huobi.pro/ws
+  spot_private_ws_url: wss://api.huobi.pro/ws/v2
+  linear_public_ws_url: wss://api.hbdm.com/linear-swap-ws
+  private_ws_url: wss://api.hbdm.com/linear-swap-notification
+auth:
+  rest:
+    mode: hmac_sha256_base64_query_v2
+    query: [AccessKeyId, SignatureMethod, SignatureVersion, Timestamp, Signature]
+    payload: uppercase_method + newline + lowercase_host + newline + path + newline + ascii_sorted_urlencoded_query
+  private_ws:
+    mode: signed_auth
+    payload: GET + newline + api.hbdm.com + newline + /linear-swap-notification + newline + signed_auth_query
+rate_limits:
+  plan: fixed_window_conservative
+  buckets:
+    htx.rest.public: { scope: ip, limit: 60, window_ms: 60000, burst: 10 }
+    htx.rest.private: { scope: account, limit: 30, window_ms: 60000, burst: 5 }
+    htx.orders: { scope: orders, limit: 20, window_ms: 60000, burst: 5 }
+    htx.ws: { scope: websocket, limit: 60, window_ms: 60000, burst: 10 }
+pagination:
+  open_orders: { mode: page_index, page_size_param: page_size, max_limit: 50 }
+  fills_history: { mode: page_index, page_size_param: page_size, max_limit: 50 }
+reconciliation:
+  after_place_or_cancel_unknown:
+    requires_query_order: true
+    requires_open_orders: true
+    requires_recent_fills: true
+    unknown_order_policy: query_by_exchange_order_id
+    allow_order_replay: false
+  after_ws_reconnect:
+    requires_order_book_snapshot: true
+    requires_balances: true
+    requires_positions: true
+    requires_open_orders: true
+batch:
+  place:
+    mode: native
+    atomicity: partial
+    max_items: 25
+    same_market_type_required: true
+    supports_client_order_id: true
+    supports_partial_failure: true
+  cancel:
+    mode: native
+    atomicity: partial
+    max_items: 50
+    same_symbol_required: true
+    supports_client_order_id: true
+    supports_partial_failure: true
+websocket:
+  transport: websocket
+  compression: gzip
+  public:
+    supports_subscribe: true
+    supports_unsubscribe: true
+    channels: [depth, trade, ticker, kline]
+    heartbeat: { direction: server_ping, ping_interval_ms: 20000, pong_timeout_ms: 30000, stale_message_ms: 30000 }
+  private:
+    supports_subscribe: true
+    supports_unsubscribe: true
+    channels: [spot_orders, spot_fills, spot_accounts, orders_cross, match_orders_cross, accounts_cross, positions_cross]
+    auth_renewal: { kind: relogin, renewal_interval_ms: null, reconnect_requires_login: true, resubscribe_after_renewal: true }
+streams:
+  public:
+    operation: subscribe_public_stream
+    transport: websocket
+    product: linear_perp
+    support: parser_only
+    request_spec_required: true
+    rate_limit_bucket: htx.ws
+    weight: 1
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs, fixture: tests/fixtures/exchanges/htx/ws/public_book.json }
+    resync: { endpoint_operation: get_order_book }
+  private:
+    operation: subscribe_private_stream
+    transport: websocket
+    product: spot | linear_perp
+    support: parser_only
+    auth: signed
+    credential_scopes: [read_only, trade]
+    request_spec_required: true
+    rate_limit_bucket: htx.ws
+    weight: 1
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs }
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/stream_tests.rs, fixture: tests/fixtures/exchanges/htx/ws/private_order.json }
+    resync: { endpoint_operation: get_open_orders }
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /v1/common/symbols | /linear-swap-api/v1/swap_contract_info
+    auth: none
+    rate_limit_bucket: htx.rest.public
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/public_tests.rs, fixture: tests/fixtures/exchanges/htx/parser/spot_symbols_success.json }
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: GET
+    path: /market/depth | /linear-swap-ex/market/depth
+    auth: none
+    rate_limit_bucket: htx.rest.public
+    weight: 1
+    request_spec_required: false
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/public_tests.rs, fixture: tests/fixtures/exchanges/htx/parser/orderbook_success.json }
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/account/accounts/{account-id}/balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_balances
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_account_info
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_positions
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_position_info
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: linear_perp
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_fee
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: linear_perp
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /v1/order/orders/place | /linear-swap-api/v1/swap_cross_order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: htx.orders
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs, fixture: tests/fixtures/exchanges/htx/request_specs/place_order_perp_limit.json }
+  - operation: cancel_order
+    product: linear_perp
+    market_types: [spot, linear_perp]
+    transport: rest
+    method: POST
+    path: /v1/order/orders/{order-id}/submitcancel | /linear-swap-api/v1/swap_cross_cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: htx.orders
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs, fixture: tests/fixtures/exchanges/htx/request_specs/cancel_order_perp.json }
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/order/orders/{order-id}
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_order_info
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/order/openOrders
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+    request_spec: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/htx/private_tests.rs, fixture: tests/fixtures/exchanges/htx/request_specs/open_orders_spot.json }
+  - operation: get_open_orders
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_openorders
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/order/matchresults
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v3/swap_cross_matchresults
+    auth: signed
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: htx.rest.private
+    weight: 1
+    request_spec_required: true
+  - operation: batch_place_orders
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_batchorder
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: htx.orders
+    weight: 5
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: batch_cancel_orders
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_cancel
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: htx.orders
+    weight: 5
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+  - operation: cancel_all_orders
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: POST
+    path: /linear-swap-api/v1/swap_cross_cancelall
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: htx.orders
+    weight: 5
+    request_spec_required: true
+  - operation: get_funding_rate
+    product: linear_perp
+    market_types: [linear_perp]
+    transport: rest
+    method: GET
+    path: /linear-swap-api/v1/swap_funding_rate
+    auth: none
+    support: spec_only
+    rate_limit_bucket: htx.rest.public
+    weight: 1
+    request_spec_required: false

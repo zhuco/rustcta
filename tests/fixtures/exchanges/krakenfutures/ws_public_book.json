@@ -1,0 +1,7 @@
+{
+  "feed": "book",
+  "product_id": "PF_XBTUSDT",
+  "bids": [{"price": 37500.0, "qty": 2.0}],
+  "asks": [{"price": 37501.0, "qty": 1.5}],
+  "sequence": 42
+}

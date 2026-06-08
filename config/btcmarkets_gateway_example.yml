@@ -1,0 +1,38 @@
+# BTC Markets Australian AUD spot gateway adapter example.
+# Credentials are read from BTCMARKETS_API_KEY and BTCMARKETS_API_SECRET by
+# default when private REST is enabled.
+
+exchange: btcmarkets
+market_type: spot
+adapter: btcmarkets
+enabled: false
+
+rest_base_url: https://api.btcmarkets.net
+websocket_url: wss://socket.btcmarkets.net/v2
+private_rest_enabled: false
+
+api_key: ${BTCMARKETS_API_KEY}
+api_secret: ${BTCMARKETS_API_SECRET}
+
+dry_run: true
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - BTC-AUD
+  - ETH-AUD
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+
+unsupported_runtime:
+  - fiat_deposit
+  - fiat_withdrawal
+  - bank_payment_rails
+  - tax_reporting
+  - positions
+  - amend_order
+  - order_list

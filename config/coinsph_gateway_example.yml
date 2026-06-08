@@ -1,0 +1,37 @@
+# Coins.ph Philippines PHP spot gateway adapter example.
+# Credentials are read from COINSPH_API_KEY and COINSPH_API_SECRET by default.
+
+exchange: coinsph
+market_type: spot
+adapter: coinsph
+enabled: false
+
+rest_base_url: https://api.pro.coins.ph
+private_rest_enabled: false
+recv_window_ms: 5000
+
+api_key: ${COINSPH_API_KEY}
+api_secret: ${COINSPH_API_SECRET}
+
+dry_run: true
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - BTCPHP
+  - ETHPHP
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+
+unsupported_runtime:
+  - non_php_markets
+  - public_streams
+  - private_streams
+  - payment_wallet_fiat_transfer
+  - withdraw
+  - cancel_all_orders
+  - batch_orders

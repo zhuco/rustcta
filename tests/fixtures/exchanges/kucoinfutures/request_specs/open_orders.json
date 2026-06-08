@@ -1,0 +1,12 @@
+{
+  "operation": "kucoinfutures.get_open_orders",
+  "method": "GET",
+  "path": "/api/v1/orders",
+  "auth": "hmac",
+  "query": {
+    "symbol": "XBTUSDTM",
+    "status": "active",
+    "pageSize": "50",
+    "currentPage": "3"
+  }
+}

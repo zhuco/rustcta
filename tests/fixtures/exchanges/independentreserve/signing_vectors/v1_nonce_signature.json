@@ -1,0 +1,11 @@
+{
+  "endpoint": "GetClosedFilledOrders",
+  "nonce": 1701945494169,
+  "api_key": "key",
+  "api_secret": "secret",
+  "params": {
+    "secondaryCurrencyCode": "Aud",
+    "primaryCurrencyCode": "Xbt"
+  },
+  "expected_signature": "27F701D4E7603519CE43A865CA25842DB9319CC3D65B49EC76F49A74357EEE17"
+}

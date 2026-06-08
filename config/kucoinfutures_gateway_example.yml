@@ -1,0 +1,24 @@
+gateway:
+  bind_addr: "127.0.0.1:18081"
+  adapters:
+    - kucoinfutures
+
+kucoinfutures:
+  enabled: false
+  rest_base_url: "https://api-futures.kucoin.com"
+  public_ws_url: "wss://ws-api-futures.kucoin.com/endpoint"
+  private_ws_url: "wss://ws-api-futures.kucoin.com/endpoint"
+  market_types:
+    spot: unsupported
+    perpetual: enabled
+  env:
+    rest_base_url: "RUSTCTA_KUCOIN_FUTURES_REST_BASE_URL"
+    api_key: "RUSTCTA_KUCOIN_FUTURES_API_KEY"
+    api_secret: "RUSTCTA_KUCOIN_FUTURES_API_SECRET"
+    passphrase: "RUSTCTA_KUCOIN_FUTURES_API_PASSPHRASE"
+    private_rest_enabled: "RUSTCTA_KUCOIN_FUTURES_PRIVATE_REST_ENABLED"
+  defaults:
+    public_streams: true
+    private_streams: true
+    rest_reconciliation_fallback: true
+    size_unit: "contracts"

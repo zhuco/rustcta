@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rustcta::backtest::data::trade_dataset::TradeDatasetWriter;
 use rustcta::core::types::{OrderSide, Trade};

@@ -1,0 +1,8 @@
+{
+  "subaccount": {
+    "address": "dydx1testaddress000000000000000000000000000",
+    "subaccountNumber": 0,
+    "equity": "1250.5",
+    "freeCollateral": "1000.25"
+  }
+}

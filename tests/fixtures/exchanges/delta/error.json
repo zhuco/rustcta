@@ -1,0 +1,7 @@
+{
+  "success": false,
+  "error": {
+    "code": "invalid_signature",
+    "message": "Invalid Signature"
+  }
+}

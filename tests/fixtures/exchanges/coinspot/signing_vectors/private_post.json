@@ -1,0 +1,5 @@
+{
+  "secret": "secret",
+  "payload": "{\"nonce\":\"1710000000000\",\"cointype\":\"btc\",\"markettype\":\"aud\",\"amount\":\"0.01\",\"rate\":\"99000\"}",
+  "expected_signature": "cab259ebb4503f70792f69741e864a69cbb69b326acca88663e2507bf8458d32c113f2306479991e6144cbc00fb1c8396944b2ea6bc418d5f4415877db155d4e"
+}

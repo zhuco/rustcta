@@ -1,0 +1,15 @@
+{
+  "type": "accepted",
+  "order_id": "18834",
+  "client_order_id": "cli-18834",
+  "symbol": "btcusd",
+  "side": "buy",
+  "order_type": "exchange limit",
+  "price": "30500.00",
+  "original_amount": "0.25",
+  "executed_amount": "0",
+  "avg_execution_price": "0",
+  "is_live": true,
+  "is_cancelled": false,
+  "timestampms": 1717200000000
+}

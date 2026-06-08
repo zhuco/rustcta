@@ -1,4 +1,5 @@
-﻿use chrono::{Duration, TimeZone, Utc};
+#![allow(clippy::all)]
+use chrono::{Duration, TimeZone, Utc};
 use rustcta::backtest::matching::engine::BacktestEngineState;
 use rustcta::backtest::schema::{
     BacktestEvent, DepthDeltaEvent, FundingRateEvent, MarkPriceEvent, TradeEvent,

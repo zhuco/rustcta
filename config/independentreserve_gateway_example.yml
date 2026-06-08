@@ -1,0 +1,42 @@
+# Independent Reserve AUD/SGD/USD spot gateway adapter example.
+# Credentials are read from INDEPENDENTRESERVE_API_KEY and
+# INDEPENDENTRESERVE_API_SECRET by default.
+
+exchange: independentreserve
+market_type: spot
+adapter: independentreserve
+enabled: false
+
+rest_base_url: https://api.independentreserve.com
+public_websocket_url: wss://websockets.independentreserve.com
+private_websocket_url: wss://websockets.independentreserve.com
+private_rest_enabled: false
+
+api_key: ${INDEPENDENTRESERVE_API_KEY}
+api_secret: ${INDEPENDENTRESERVE_API_SECRET}
+
+dry_run: true
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - BTC/AUD
+  - ETH/AUD
+  - BTC/SGD
+  - BTC/USD
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+
+unsupported_runtime:
+  - fiat_deposit
+  - fiat_withdrawal
+  - bank_payment_rails
+  - statement_export
+  - positions
+  - amend_order
+  - order_list
+  - batch_orders

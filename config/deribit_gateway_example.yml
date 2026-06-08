@@ -1,0 +1,15 @@
+enabled: false
+adapter: deribit
+rest_base_url: https://www.deribit.com
+public_ws_url: wss://www.deribit.com/ws/api/v2
+private_ws_url: wss://www.deribit.com/ws/api/v2
+enabled_private_rest: false
+enabled_public_stream: true
+enabled_private_stream: false
+request_timeout_ms: 10000
+credentials:
+  client_id_env: DERIBIT_CLIENT_ID
+  client_secret_env: DERIBIT_CLIENT_SECRET
+notes:
+  - "Disabled example only; do not put Deribit client secrets in this file."
+  - "Options greeks/chain/settlement are adapter-specific helper data, not unified trading fields."

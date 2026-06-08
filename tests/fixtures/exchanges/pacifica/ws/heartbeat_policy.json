@@ -1,0 +1,10 @@
+{
+  "exchange": "pacifica",
+  "operation": "ws_heartbeat",
+  "transport": "websocket",
+  "payload": { "method": "ping" },
+  "interval_ms": 30000,
+  "timeout_ms": 60000,
+  "stale_message_ms": 60000,
+  "force_reconnect_ms": 86400000
+}

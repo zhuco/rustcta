@@ -1,0 +1,254 @@
+schema_version: 1
+exchange: bitflyer
+adapter: rustcta_exchange_gateway::adapters::bitflyer
+metadata:
+  status: validated
+  notes: "Task 13 bitFlyer scope for Japanese Spot and Lightning FX product-code boundaries. FX_BTC_JPY is documented as Lightning FX/CFD-style exposure, not a standard futures/perpetual contract."
+market_types:
+  - spot
+  - margin
+products:
+  - spot
+  - margin
+rest:
+  base_url: https://api.bitflyer.com
+base_urls:
+  public_ws: wss://ws.lightstream.bitflyer.com/json-rpc
+  private_ws: wss://ws.lightstream.bitflyer.com/json-rpc
+auth:
+  rest:
+    algorithm: "HMAC-SHA256 hex"
+    prehash: "timestamp + method + request_path_with_query + body"
+    headers: [X-API-KEY, X-API-TIMESTAMP, X-API-SIGN]
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 5m
+      limit: 500
+    private_rest:
+      scope: account
+      interval: 5m
+      limit: 500
+    private_order:
+      scope: orders
+      interval: 5m
+      limit: 300
+    websocket:
+      scope: websocket
+      interval: 1m
+      limit: 100
+pagination:
+  open_orders:
+    style: count_before_after_or_skip
+    cursor: id_or_offset
+    limit_param: count
+    before_param: before
+    offset_param: skip
+    max_limit: 500
+  recent_fills:
+    style: count_before_after
+    cursor: execution_id
+    limit_param: count
+    before_param: before
+    max_limit: 500
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 10
+    partial_failure: false
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    max_items: 10
+    partial_failure: false
+websocket:
+  public:
+    support: native
+    url: wss://ws.lightstream.bitflyer.com/json-rpc
+    protocol: json_rpc_2
+    channels:
+      - lightning_board_snapshot_{product_code}
+      - lightning_board_{product_code}
+      - lightning_ticker_{product_code}
+      - lightning_executions_{product_code}
+    heartbeat:
+      direction: server_ping
+      response: pong
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://ws.lightstream.bitflyer.com/json-rpc
+    channel: child_order_events
+    auth: api_key_permission_required
+    fallback: rest_reconciliation
+unsupported:
+  - operation: fiat_funding
+    reason: "JPY deposits, withdrawals, bank transfers and ledger writes are outside gateway runtime scope."
+  - operation: standard_futures_perpetual
+    reason: "Lightning FX/CFD product codes are not modeled as standard futures/perpetual contracts."
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/getmarkets
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/markets_success.json
+  - operation: get_symbol_rules_fx
+    product: margin
+    transport: rest
+    method: GET
+    path: /v1/getmarkets
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/markets_success.json
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/getboard
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/orderbook_success.json
+  - operation: get_order_book_fx
+    product: margin
+    transport: rest
+    method: GET
+    path: /v1/getboard
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/me/getbalance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/balances_success.json
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/me/gettradingcommission
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/me/sendchildorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/place_order_limit.json
+  - operation: place_order_fx
+    product: margin
+    transport: rest
+    method: POST
+    path: /v1/me/sendchildorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /v1/me/cancelchildorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitflyer/request_specs/cancel_order.json
+  - operation: cancel_order_fx
+    product: margin
+    transport: rest
+    method: DELETE
+    path: /v1/me/cancelchildorder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/me/cancelallchildorders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_order
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/me/getchildorders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/order_state_success.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/me/getchildorders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/me/getexecutions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    response_parser:
+      fixture: tests/fixtures/exchanges/bitflyer/fills_success.json

@@ -1,0 +1,6 @@
+{
+  "operation": "krakenfutures.get_balances",
+  "method": "GET",
+  "path": "/derivatives/api/v3/accounts",
+  "auth": "hmac"
+}

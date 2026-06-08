@@ -1,0 +1,15 @@
+{
+  "exchange": "indodax",
+  "operation": "cancel_order",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/tapi",
+  "auth": "hmac_sha512_form",
+  "form": {
+    "method": "cancelOrder",
+    "pair": "btc_idr",
+    "order_id": "12345",
+    "type": "buy"
+  },
+  "unsupported": ["client_order_id", "cancel_all_orders", "amend_order"]
+}

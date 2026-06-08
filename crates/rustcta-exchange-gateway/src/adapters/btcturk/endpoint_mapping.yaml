@@ -1,0 +1,149 @@
+schema_version: 1
+exchange: btcturk
+adapter: rustcta_exchange_gateway::adapters::btcturk
+metadata:
+  status: validated
+  source: docs/btcturk_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "Task 18 Turkey spot adapter; TRY fiat markets documented, fiat funding rails excluded."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.btcturk.com
+base_urls:
+  public_ws: wss://ws-feed-pro.btcturk.com
+auth:
+  private_rest: X-PCK api key plus X-Stamp and base64 HMAC-SHA256 signature over api_key + timestamp.
+rate_limits:
+  buckets:
+    btcturk_rest:
+      scope: rest
+      interval: 1m
+      limit: 1200
+      burst: 100
+    btcturk_orders:
+      scope: orders
+      interval: 1m
+      limit: 120
+      burst: 20
+pagination:
+  get_recent_fills:
+    style: time_window
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
+batch:
+  place_orders: { support: unsupported, reason: btcturk.batch_place_orders_unverified }
+  cancel_orders: { support: unsupported, reason: btcturk.batch_cancel_orders_unverified }
+websocket:
+  public:
+    support: native
+    url: wss://ws-feed-pro.btcturk.com
+    heartbeat: { direction: server_ping, interval_ms: 30000, timeout_ms: 10000 }
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    url: wss://ws-feed-pro.btcturk.com
+    auth: hmac_api_key
+    fallback: rest_reconciliation
+unsupported:
+  - fiat_withdrawals
+  - fiat_deposits
+  - bank_payment_rails
+  - crypto_deposit_addresses
+  - transfers
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v2/server/exchangeinfo
+    auth: none
+    rate_limit_bucket: btcturk_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/btcturk/exchange_info.json
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v2/orderbook
+    auth: none
+    rate_limit_bucket: btcturk_rest
+    weight: 1
+    request_spec_required: false
+    params:
+      - name: pairSymbol
+      - name: limit
+    response_parser:
+      fixture: tests/fixtures/exchanges/btcturk/orderbook.json
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/users/balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: btcturk_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: btcturk_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcturk/request_specs/place_order.json
+    notes: Signing vector tests/fixtures/exchanges/btcturk/signing_vectors/rest_hmac_sha256.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /api/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: btcturk_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/btcturk/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/order/{orderId}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: btcturk_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: btcturk_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v1/users/transactions/trade
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: btcturk_rest
+    weight: 1
+    request_spec_required: true

@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use dotenv::dotenv;
 use rustcta::core::{
     config::{ApiKeys, Config},

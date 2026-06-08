@@ -1,0 +1,21 @@
+gateway:
+  bind_addr: "127.0.0.1:18081"
+  adapters:
+    - krakenfutures
+
+krakenfutures:
+  enabled: false
+  futures_rest_base_url: "https://futures.kraken.com/derivatives/api/v3"
+  futures_ws_url: "wss://futures.kraken.com/ws/v1"
+  market_types:
+    spot: unsupported
+    perpetual: enabled
+  env:
+    rest_base_url: "RUSTCTA_KRAKEN_FUTURES_REST_BASE_URL"
+    api_key: "RUSTCTA_KRAKEN_FUTURES_API_KEY"
+    api_secret: "RUSTCTA_KRAKEN_FUTURES_API_SECRET"
+    private_rest_enabled: "RUSTCTA_KRAKEN_FUTURES_PRIVATE_REST_ENABLED"
+  defaults:
+    public_streams: true
+    private_streams: true
+    rest_reconciliation_fallback: true

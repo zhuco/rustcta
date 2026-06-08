@@ -1,0 +1,20 @@
+schema_version: 1
+exchange: coincheck
+market_types: [spot]
+credential_scopes: [read_only, trade]
+public_rest: native_order_book
+private_rest: hmac
+batch:
+  place_orders: composed_sequential
+  cancel_orders: composed_sequential
+streams:
+  public: native
+  private: rest_reconciliation
+  orderbook_resync: rest_order_book_snapshot
+unsupported:
+  - private_websocket
+  - single_order_query
+  - cancel_all_orders
+  - amend_order
+  - lending
+  - deposit_withdraw

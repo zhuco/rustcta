@@ -1,0 +1,12 @@
+{
+  "exchange": "oxfun",
+  "operation": "ws_public_unsubscribe_depth",
+  "transport": "websocket",
+  "url": "wss://api.ox.fun/v2/websocket",
+  "payload": {
+    "op": "unsubscribe",
+    "tag": "public-ws",
+    "args": ["depthUpdate:BTC-USD-SWAP-LIN"]
+  },
+  "runtime_enabled": false
+}

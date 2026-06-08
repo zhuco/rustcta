@@ -1,0 +1,16 @@
+enabled: false
+adapter: binancecoinm
+rest_base_url: https://dapi.binance.com
+testnet_rest_base_url: https://testnet.binancefuture.com
+private_rest:
+  enabled: false
+  api_key_env: RUSTCTA_BINANCECOINM_API_KEY
+  api_secret_env: RUSTCTA_BINANCECOINM_API_SECRET
+  recv_window_ms: 5000
+products:
+  - futures
+  - perpetual
+notes:
+  - COIN-M quantities are contract counts.
+  - Settle and margin asset is the contract coin, for example BTC on BTCUSD_PERP.
+  - WebSocket runtime is disabled; use REST reconciliation after reconnect.

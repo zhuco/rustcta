@@ -1,0 +1,20 @@
+{
+  "code": 1000,
+  "message": "success",
+  "data": {
+    "trades": [
+      {
+        "trade_id": "122177405911172002",
+        "order_id": "118100034543076010",
+        "client_order_id": "bm-client-1",
+        "symbol": "BTC_USDT",
+        "side": "buy",
+        "size": "0.01",
+        "price": "50000",
+        "fee": "0.05",
+        "fee_coin_name": "USDT",
+        "exec_time": 1700000000000
+      }
+    ]
+  }
+}

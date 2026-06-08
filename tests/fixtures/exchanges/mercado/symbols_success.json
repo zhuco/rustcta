@@ -1,0 +1,11 @@
+{
+  "symbols": [
+    {
+      "symbol": "BTC-BRL",
+      "base": "BTC",
+      "quote": "BRL",
+      "minOrderQty": "0.00001",
+      "minOrderCost": "10.00"
+    }
+  ]
+}

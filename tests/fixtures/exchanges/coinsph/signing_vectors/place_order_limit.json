@@ -1,0 +1,8 @@
+{
+  "exchange": "coinsph",
+  "name": "place_order_limit",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "lH3ELTNiFxCQTmi9pPcWWikhsjO04Yoqw3euoHUuOLC3GYBW64ZqzQsiOEHXQS76",
+  "payload": "symbol=BTCPHP&side=BUY&type=LIMIT&timeInForce=GTC&quantity=1&price=0.1&recvWindow=5000&timestamp=1538323200000",
+  "expected_signature": "d7b09aa959094bafd1de10be3985651691fff6cc04b5cd94aea8cc1ca02e0ed8"
+}

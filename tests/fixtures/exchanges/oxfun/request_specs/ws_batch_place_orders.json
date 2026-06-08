@@ -1,0 +1,27 @@
+{
+  "exchange": "oxfun",
+  "operation": "batch_place_orders",
+  "transport": "websocket",
+  "url": "wss://api.ox.fun/v2/websocket",
+  "payload": {
+    "op": "placeorders",
+    "tag": 123,
+    "dataArray": [
+      {
+        "timestamp": 1638237934061,
+        "recvWindow": 500,
+        "clientOrderId": 1,
+        "marketCode": "BTC-USD-SWAP-LIN",
+        "side": "BUY",
+        "orderType": "LIMIT",
+        "quantity": 1,
+        "timeInForce": "MAKER_ONLY",
+        "price": 100
+      }
+    ]
+  },
+  "native_batch": true,
+  "atomicity": "partial",
+  "request_spec_only": true,
+  "trade_enabled": false
+}

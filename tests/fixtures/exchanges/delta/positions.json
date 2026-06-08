@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "result": [
+    {
+      "product_symbol": "BTCUSDT",
+      "contract_type": "perpetual_futures",
+      "size": "2",
+      "entry_price": "64000",
+      "mark_price": "65000",
+      "liquidation_price": "52000",
+      "unrealized_pnl": "2000",
+      "leverage": "10",
+      "updated_at": "2026-06-08T01:00:01Z"
+    }
+  ]
+}

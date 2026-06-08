@@ -1,0 +1,40 @@
+{
+  "tickers": [
+    {
+      "pair": "XBTZAR",
+      "timestamp": 1700000000000,
+      "bid": "1200000.00",
+      "ask": "1201000.00",
+      "last_trade": "1200500.00",
+      "rolling_24_hour_volume": "12.50",
+      "status": "ACTIVE"
+    },
+    {
+      "pair": "XBTMYR",
+      "timestamp": 1700000000000,
+      "bid": "300000.00",
+      "ask": "300500.00",
+      "last_trade": "300250.00",
+      "rolling_24_hour_volume": "8.20",
+      "status": "ACTIVE"
+    },
+    {
+      "pair": "XBTNGN",
+      "timestamp": 1700000000000,
+      "bid": "110000000.00",
+      "ask": "110100000.00",
+      "last_trade": "110050000.00",
+      "rolling_24_hour_volume": "2.10",
+      "status": "ACTIVE"
+    },
+    {
+      "pair": "XBTIDR",
+      "timestamp": 1700000000000,
+      "bid": "950000000.00",
+      "ask": "950500000.00",
+      "last_trade": "950250000.00",
+      "rolling_24_hour_volume": "1.75",
+      "status": "ACTIVE"
+    }
+  ]
+}

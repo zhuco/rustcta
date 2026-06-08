@@ -1,0 +1,22 @@
+{
+  "exchange": "htx",
+  "operation": "htx.cancel_order",
+  "product": "linear_perp",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/linear-swap-api/v1/swap_cross_cancel",
+  "auth": "signed",
+  "query": {
+    "AccessKeyId": { "match": "exact", "value": "test-key" },
+    "SignatureMethod": { "match": "exact", "value": "HmacSHA256" },
+    "SignatureVersion": { "match": "exact", "value": "2" },
+    "Timestamp": { "match": "non_empty" },
+    "Signature": { "match": "non_empty" }
+  },
+  "body_contains": {
+    "contract_code": "BTC-USDT",
+    "order_id": "1001",
+    "client_order_id": "CID1"
+  },
+  "forbid_query_values_containing": ["real_", "sk_live", "token_"]
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "indodax",
+  "operation": "place_order",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/tapi",
+  "auth": "hmac_sha512_form",
+  "form": {
+    "method": "trade",
+    "pair": "btc_idr",
+    "type": "buy",
+    "price": "100000000",
+    "btc": "0.01000000"
+  },
+  "headers": ["Key", "Sign"],
+  "unsupported": ["client_order_id", "reduce_only", "post_only", "non_spot_market"]
+}

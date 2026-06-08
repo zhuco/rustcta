@@ -1,0 +1,10 @@
+{
+  "exchange": "coinspot",
+  "algorithm": "hmac_sha512",
+  "secret": "secret",
+  "payload": "{\"nonce\":1700000000000}",
+  "headers": {
+    "key": "key",
+    "sign_length": 128
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "operation": "kucoinfutures.get_positions",
+  "method": "GET",
+  "path": "/api/v1/positions",
+  "auth": "hmac"
+}

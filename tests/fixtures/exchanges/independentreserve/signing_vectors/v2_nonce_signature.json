@@ -1,0 +1,11 @@
+{
+  "path": "/Private/GetOrderDetails",
+  "nonce": 1701945494169,
+  "api_key": "key",
+  "api_secret": "secret",
+  "params": {
+    "secondaryCurrencyCode": "Sgd",
+    "orderGuid": "abc-123"
+  },
+  "expected_signature": "27D7EF494A457D28EE564D0BCFF6A33A32399D6981B2C8CEFE0A31DC69FFA216"
+}

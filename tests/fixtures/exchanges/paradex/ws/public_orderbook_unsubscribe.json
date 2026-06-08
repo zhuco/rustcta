@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "method": "unsubscribe",
+  "params": {
+    "channel": "order_book.BTC-USD-PERP"
+  },
+  "id": 1
+}

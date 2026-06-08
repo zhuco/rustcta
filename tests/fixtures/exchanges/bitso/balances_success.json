@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "payload": {
+    "balances": [
+      {
+        "currency": "mxn",
+        "total": "1000.00",
+        "locked": "0.00",
+        "available": "1000.00"
+      },
+      {
+        "currency": "btc",
+        "total": "0.01000000",
+        "locked": "0.00000000",
+        "available": "0.01000000"
+      }
+    ]
+  }
+}

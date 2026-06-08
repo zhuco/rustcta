@@ -1,0 +1,11 @@
+{
+  "operation": "krakenfutures.get_recent_fills.perpetual",
+  "method": "GET",
+  "path": "/derivatives/api/v3/fills",
+  "auth": "hmac",
+  "query": {
+    "symbol": "PF_XBTUSDT",
+    "count": "25",
+    "lastFillTime": "2026-06-08T00:00:00Z"
+  }
+}

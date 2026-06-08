@@ -1,0 +1,19 @@
+gateway:
+  adapters:
+    - indodax
+
+indodax:
+  enabled: false
+  rest_base_url: "https://indodax.com"
+  private_rest_enabled: false
+  stale_book_ms: 5000
+  credentials:
+    api_key_env: INDODAX_API_KEY
+    api_secret_env: INDODAX_API_SECRET
+  unsupported_runtime:
+    - non_idr_markets
+    - fiat_payment
+    - deposit
+    - withdrawal
+    - streams
+    - generic_cancel_order_without_side

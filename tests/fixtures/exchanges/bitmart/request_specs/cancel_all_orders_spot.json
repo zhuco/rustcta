@@ -1,0 +1,10 @@
+{
+  "operation": "cancel_all_orders",
+  "product": "spot",
+  "method": "POST",
+  "path": "/spot/v3/cancel_orders",
+  "body": {
+    "symbol": "BTC_USDT"
+  },
+  "auth": "x-bm-hmac-sha256"
+}

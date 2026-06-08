@@ -13,20 +13,58 @@ Use these documents as the current source of truth:
 
 - `docs/README.md` for the active documentation index
 - `docs/industrial_workspace_migration_status.md` for migration progress
-- `docs/industrial_workspace_update_2026-06-07_v0.3.9.md` for the latest
-  cleanup/update note
+- `docs/exchange_gateway_next_40_parallel_tasks_zh.md` for the 2026-06-08
+  exchange gateway expansion close-out
+- `docs/industrial_workspace_update_2026-06-07_v0.3.9.md` for the previous
+  workspace cleanup/update note
 - `docs/industrial_cta_platform_architecture_assessment.md` for the target
   architecture
 
 The legacy root package `rustcta` is still present and still owns most concrete
 runtime behavior. New work should move toward the workspace boundaries below.
 
-Current workspace version: `0.3.12`. This update expands the exchange gateway
+Current workspace version: `0.3.13`. This update expands the exchange gateway
 surface with additional adapter modules, endpoint mapping fixtures, signing and
 request-spec validation assets, and refreshed gateway example configs. See
 `docs/README.md`, `docs/exchange_adapter_toolchain_completion_zh.md`, and
 `docs/exchange_api_completion_matrix.md` for the active adapter documentation
 and validation commands.
+
+## Exchange Gateway Support
+
+The local gateway now registers 77 real exchange adapters plus the local `paper`
+adapter. Supported adapter ids:
+
+`apex`, `ascendex`, `aster`, `backpack`, `biconomy`, `bigone`, `binance`,
+`binancecoinm`, `bingx`, `bitbank`, `bitfinex`, `bitflyer`, `bitget`,
+`bithumb`, `bitkan`, `bitmart`, `bitmex`, `bitrue`, `bitso`, `bitstamp`,
+`bitunix`, `bitvavo`, `blofin`, `btcmarkets`, `btcturk`, `bullish`, `bybit`,
+`coinbase`, `coinbaseexchange`, `coincheck`, `coindcx`, `coinex`, `coinone`,
+`coinsph`, `coinspot`, `coinstore`, `cointr`, `coinw`, `cryptocom`,
+`deepcoin`, `delta`, `deribit`, `derive`, `digifinex`, `dydx`, `gateio`,
+`gemini`, `grvt`, `hashkey_global`, `htx`, `huobi`, `hyperliquid`,
+`independentreserve`, `indodax`, `kraken`, `krakenfutures`, `kucoin`,
+`kucoinfutures`, `lbank`, `lighter`, `luno`, `mercado`, `mexc`, `okx`,
+`orangex`, `oxfun`, `pacifica`, `paradex`, `phemex`, `poloniex`, `tapbit`,
+`toobit`, `upbit`, `weex`, `whitebit`, `woo`, and `xt`.
+
+The visual support matrix lives in `docs/exchange_support_matrix.md`. It splits
+venues into centralized/custodial exchanges and decentralized or on-chain
+perpetual venues, with remote icons sourced first from CoinGecko exchange
+images and then from CoinGlass or official-domain fallbacks when CoinGecko does
+not list a venue.
+
+| Function surface | Current support |
+| --- | --- |
+| Public REST | Symbol rules and order book snapshots where each venue exposes stable public endpoints. |
+| Private REST read | Balances, fees, open orders, query order, and recent fills where credential scopes and official APIs allow it. |
+| Private REST write | Place order, quote market order, cancel order, cancel-all, batch place/cancel, and order-list only where the venue exposes compatible native semantics; otherwise explicitly `Unsupported`. |
+| WebSocket | Public/private subscribe payloads, auth payloads, heartbeat policy, parser fixtures, or REST reconciliation fallback per venue. |
+| Derivatives | Futures, perpetuals, options, funding, mark/open-interest, leverage/margin/position mode where the adapter and official API support lossless mapping. |
+| Safety boundary | Wallet, payment rails, fiat deposit/withdrawal, transfers, tax reports, and non-trading account operations remain outside gateway runtime unless a venue document explicitly narrows that boundary. |
+
+Per-exchange details live in `docs/<adapter>_adapter.md` and
+`crates/rustcta-exchange-gateway/src/adapters/<adapter>/endpoint_mapping.yaml`.
 
 ## Repository Layout
 

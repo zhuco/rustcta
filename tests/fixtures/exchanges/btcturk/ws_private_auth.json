@@ -1,0 +1,10 @@
+[
+  114,
+  {
+    "type": 114,
+    "publicKey": "public-key",
+    "timestamp": 1700000000000,
+    "nonce": 3000,
+    "signature": "<redacted-signature>"
+  }
+]

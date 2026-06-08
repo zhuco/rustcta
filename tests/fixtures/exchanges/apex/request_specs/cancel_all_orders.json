@@ -1,0 +1,9 @@
+{
+  "operation": "cancel_all_orders",
+  "method": "POST",
+  "path": "/api/v3/delete-open-orders",
+  "auth": "apex_api_key_hmac",
+  "supported": false,
+  "expected_error": "apex.cancel_all_orders_private_write_not_promoted",
+  "body": "symbol=BTC-USDT"
+}

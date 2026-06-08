@@ -1,0 +1,24 @@
+{
+  "exchange": "bybit",
+  "operation": "query_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v5/order/realtime",
+  "auth": "signed",
+  "query": {
+    "category": { "match": "exact", "value": "linear" },
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "orderId": { "match": "exact", "value": "1001" },
+    "orderLinkId": { "match": "exact", "value": "cli-place" }
+  },
+  "headers": {
+    "X-BAPI-API-KEY": { "match": "exact", "value": "test-key" },
+    "X-BAPI-SIGN": { "match": "non_empty" },
+    "X-BAPI-SIGN-TYPE": { "match": "exact", "value": "2" },
+    "X-BAPI-TIMESTAMP": { "match": "non_empty" },
+    "X-BAPI-RECV-WINDOW": { "match": "exact", "value": "5000" }
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["test-secret"]
+}

@@ -1,0 +1,169 @@
+schema_version: 1
+exchange: coinone
+adapter: rustcta_exchange_gateway::adapters::coinone
+metadata:
+  status: validated
+  source: https://docs.coinone.co.kr/
+  notes: "Korean KRW spot adapter. Private REST uses Coinone payload HMAC-SHA512 signing; wallet, payment and fiat-transfer APIs are unsupported."
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.coinone.co.kr
+  public_websocket: wss://stream.coinone.co.kr
+  private_websocket: wss://stream.coinone.co.kr/v1/private
+rest:
+  base_url: https://api.coinone.co.kr
+auth:
+  rest:
+    scheme: hmac_sha512_payload
+    headers: [X-COINONE-PAYLOAD, X-COINONE-SIGNATURE]
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 10
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 5
+    orders:
+      scope: orders
+      interval: 1s
+      limit: 5
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+websocket:
+  public:
+    support: spec_only
+    channels: [orderbook]
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    channels: [orders]
+    fallback: rest_reconciliation
+unsupported:
+  - non_krw_markets
+  - positions
+  - amend_order
+  - order_list
+  - batch_place_orders
+  - batch_cancel_orders
+  - payment_wallet_fiat_transfer
+  - withdraw
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /public/v2/markets/KRW
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /public/v2/orderbook/KRW
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinone/request_specs/place_order_limit.json
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/coinone/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order/cancel/all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order/detail
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order/open_orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/order/complete_orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/account/balance/all
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2.1/account/trade_fee
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true

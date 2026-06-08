@@ -1,0 +1,15 @@
+{
+  "exchange": "coinspot",
+  "operation": "coinspot.get_fees",
+  "method": "POST",
+  "path": "/api/v2/ro/my/fees",
+  "headers": {
+    "Content-Type": "application/json",
+    "key": "test-key",
+    "sign": "<hmac_sha512_json_body>"
+  },
+  "body": {
+    "nonce": 1700000000000
+  },
+  "credential_scope": "read_only"
+}

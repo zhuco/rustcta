@@ -1,0 +1,14 @@
+{
+  "operation": "quote_market_order",
+  "product": "spot",
+  "method": "POST",
+  "path": "/spot/v2/submit_order",
+  "body": {
+    "symbol": "BTC_USDT",
+    "side": "buy",
+    "type": "market",
+    "notional": "25",
+    "client_order_id": "bm-quote-1"
+  },
+  "auth": "x-bm-hmac-sha256"
+}

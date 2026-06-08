@@ -1,0 +1,44 @@
+# Huobi legacy gateway profile example.
+# This profile reuses the HTX adapter implementation while returning exchange id huobi.
+
+exchange: huobi
+adapter: huobi
+enabled: false
+market_types:
+  - spot
+  - perpetual
+
+api_key: ${HUOBI_API_KEY}
+api_secret: ${HUOBI_API_SECRET}
+spot_account_id: ${HUOBI_SPOT_ACCOUNT_ID}
+
+spot_rest_base_url: https://api.huobi.pro
+linear_rest_base_url: https://api.hbdm.com
+spot_public_ws_url: wss://api.huobi.pro/ws
+spot_private_ws_url: wss://api.huobi.pro/ws/v2
+linear_public_ws_url: wss://api.hbdm.com/linear-swap-ws
+private_ws_url: wss://api.hbdm.com/linear-swap-notification
+testnet: false
+sandbox: false
+
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 150
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+  perpetual:
+    - BTC-USDT
+
+rate_limit:
+  max_requests_per_second: 1
+  burst: 2
+
+notes:
+  - Huobi is a legacy profile, not a copied implementation.
+  - Use HTX API semantics and domains unless an official Huobi endpoint difference is explicitly documented.

@@ -1,0 +1,15 @@
+{
+  "operation": "kucoinfutures.place_order",
+  "method": "POST",
+  "path": "/api/v1/orders",
+  "auth": "hmac",
+  "body": {
+    "clientOid": "LIMIT1",
+    "symbol": "XBTUSDTM",
+    "side": "buy",
+    "type": "limit",
+    "size": "0.01",
+    "price": "65000",
+    "tradeType": "TRADE"
+  }
+}

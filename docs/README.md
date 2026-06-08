@@ -1,6 +1,6 @@
 # RustCTA Documentation Index
 
-Status date: 2026-06-07
+Status date: 2026-06-08
 
 This directory is now organized around current-state architecture, active
 operations, and the industrial workspace migration. The migration status file is
@@ -10,8 +10,11 @@ the best starting point when multiple AI agents are working in parallel.
 
 - `industrial_workspace_migration_status.md` - current migration progress,
   verified checks, remaining work, and next batch scope.
-- `industrial_workspace_update_2026-06-07_v0.3.9.md` - latest cleanup note,
-  version bump, validation result, and current directory structure.
+- `exchange_gateway_next_40_parallel_tasks_zh.md` - 2026-06-08 close-out for
+  the next 40 exchange gateway adapters and validation status.
+- `industrial_workspace_update_2026-06-07_v0.3.9.md` - previous workspace
+  cleanup note, version bump, validation result, and current directory
+  structure.
 - `industrial_cta_platform_architecture_assessment.md` - target industrial
   architecture and long-term migration direction.
 - `industrial_directory_migration_plan.md` - app/tool/strategy/runtime ownership
@@ -63,12 +66,15 @@ cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
 - `exchange_adapter_interface_status.md` - current adapter layout after
   compatibility cleanup.
 - `exchange_api_completion_matrix.md` - code-first adapter capability matrix.
+- `exchange_support_matrix.md` - visual exchange support list, separated into
+  centralized/custodial venues and decentralized/on-chain perpetual venues with
+  CoinGecko/CoinGlass/official icon sources.
 - `exchange_adapter_toolchain_completion_zh.md` - endpoint mapping, request
   spec, stream runtime, reconciliation, and adapter migration task split.
 - `exchange_gateway_expansion_30_venues_zh.md` - three-batch plan for 30 new
   exchange gateway adapters and Binance-parity interface checklist.
-- `exchange_gateway_next_40_parallel_tasks_zh.md` - next 40-exchange gateway
-  expansion split into 20 two-exchange AI task packets.
+- `exchange_gateway_next_40_parallel_tasks_zh.md` - completed 40-exchange
+  gateway expansion split into 20 two-exchange AI task packets.
 - `bitkan_adapter.md` - BitKan conservative gateway registration, capability
   boundaries, and OpenAPI upgrade gate.
 - `blofin_adapter.md` - BloFin USDT perpetual gateway adapter endpoint mapping,
@@ -96,6 +102,8 @@ cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
 ## Exchange References
 
 - `spot_exchange_adapters.md` - Spot adapter architecture notes.
+- `exchange_support_matrix.md` - gateway exchange support matrix with icons and
+  centralized/decentralized grouping.
 - `ascendex_adapter.md` - AscendEX Spot/Cash and futures gateway adapter reference.
 - `bitget_adapter.md` - Bitget Spot adapter reference.
 - `bitkan_adapter.md` - BitKan conservative gateway adapter reference.

@@ -1,0 +1,6 @@
+{
+  "operation": "balances",
+  "method": "GET",
+  "path": "/api/v3/account-balance",
+  "auth": "apex_api_key_hmac"
+}

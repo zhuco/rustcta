@@ -1,0 +1,48 @@
+{
+  "success": true,
+  "message": null,
+  "code": 0,
+  "data": {
+    "symbols": [
+      {
+        "id": 1,
+        "name": "BTCTRY",
+        "nameNormalized": "BTC_TRY",
+        "status": "TRADING",
+        "numerator": "BTC",
+        "denominator": "TRY",
+        "numeratorScale": 8,
+        "denominatorScale": 2,
+        "minLimitOrderPrice": "1.00",
+        "maxLimitOrderPrice": "100000000.00",
+        "minExchangeValue": "100.00"
+      },
+      {
+        "id": 2,
+        "name": "ETHTRY",
+        "nameNormalized": "ETH_TRY",
+        "status": "TRADING",
+        "numerator": "ETH",
+        "denominator": "TRY",
+        "numeratorScale": 8,
+        "denominatorScale": 2,
+        "minLimitOrderPrice": "1.00",
+        "maxLimitOrderPrice": "100000000.00",
+        "minExchangeValue": "100.00"
+      },
+      {
+        "id": 3,
+        "name": "BTCUSDT",
+        "nameNormalized": "BTC_USDT",
+        "status": "TRADING",
+        "numerator": "BTC",
+        "denominator": "USDT",
+        "numeratorScale": 8,
+        "denominatorScale": 2,
+        "minLimitOrderPrice": "1.00",
+        "maxLimitOrderPrice": "100000000.00",
+        "minExchangeValue": "10.00"
+      }
+    ]
+  }
+}

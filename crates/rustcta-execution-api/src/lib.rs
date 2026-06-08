@@ -4,6 +4,10 @@
 //! and supervisor implementation details. Types here are designed for strategy
 //! submission, gateway routing, audit persistence, and deterministic replay.
 
+// Public protocol errors intentionally preserve the shared ExchangeError payload
+// so callers and serialized events keep the same schema.
+#![allow(clippy::large_enum_variant, clippy::result_large_err)]
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_types::{

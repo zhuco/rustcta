@@ -1,0 +1,9 @@
+{
+  "operation": "positions",
+  "method": "GET",
+  "path": "/trading-api/v1/derivatives-positions?tradingAccountId=offline-account",
+  "auth": "bearer_jwt",
+  "headers": {
+    "Authorization": "Bearer <redacted>"
+  }
+}

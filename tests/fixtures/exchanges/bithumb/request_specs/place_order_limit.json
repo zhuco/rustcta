@@ -1,0 +1,22 @@
+{
+  "exchange": "bithumb",
+  "operation": "bithumb.place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v2/orders",
+  "auth": "signed",
+  "headers": {
+    "authorization": { "match": "non_empty" }
+  },
+  "body": {
+    "client_order_id": "my-order-001",
+    "market": "KRW-BTC",
+    "order_type": "limit",
+    "price": "84000000",
+    "side": "bid",
+    "volume": "0.001"
+  },
+  "strict_body": true,
+  "signing_vector": "tests/fixtures/exchanges/bithumb/signing_vectors/jwt_query_hash.json"
+}

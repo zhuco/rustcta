@@ -1,0 +1,14 @@
+{
+  "fills": [
+    {
+      "id": "fill-1",
+      "orderRef": "offline-order-1",
+      "instrument": "BTC-BRL",
+      "side": "buy",
+      "qty": "0.005",
+      "price": "350000",
+      "fee": "1.75",
+      "feeAsset": "BRL"
+    }
+  ]
+}

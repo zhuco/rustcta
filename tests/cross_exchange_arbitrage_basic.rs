@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 const CROSS_ARB_SQL: &str = include_str!("../sql/cross_exchange_arbitrage.sql");
 
 #[derive(Debug, Clone)]

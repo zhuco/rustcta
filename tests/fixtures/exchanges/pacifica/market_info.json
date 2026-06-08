@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "data": [
+    {
+      "symbol": "BTC",
+      "tick_size": "1",
+      "min_tick": "0",
+      "max_tick": "1000000",
+      "lot_size": "0.00001",
+      "max_leverage": 50,
+      "isolated_only": false,
+      "min_order_size": "10",
+      "max_order_size": "5000000",
+      "funding_rate": "0.0000125",
+      "next_funding_rate": "0.0000125",
+      "created_at": 1748881333944
+    }
+  ],
+  "error": null,
+  "code": null
+}

@@ -1,0 +1,9 @@
+{
+  "operation": "open_orders",
+  "method": "GET",
+  "path": "/trading-api/v2/orders?tradingAccountId=offline-account&symbol=BTCUSDC",
+  "auth": "bearer_jwt",
+  "headers": {
+    "Authorization": "Bearer <redacted>"
+  }
+}

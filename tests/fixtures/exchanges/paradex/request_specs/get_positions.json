@@ -1,0 +1,13 @@
+{
+  "exchange": "paradex",
+  "operation": "get_positions",
+  "method": "GET",
+  "path": "/positions",
+  "query": {},
+  "body": null,
+  "headers": {
+    "Accept": "application/json",
+    "Authorization": "Bearer fixture.jwt.token"
+  },
+  "secret_free": true
+}

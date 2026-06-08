@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use chrono::{Duration, TimeZone, Utc};
 use rustcta::backtest::data::depth_dataset::DepthDatasetWriter;
 use rustcta::backtest::schema::DepthDeltaEvent;

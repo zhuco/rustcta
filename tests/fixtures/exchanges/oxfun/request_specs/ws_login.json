@@ -1,0 +1,17 @@
+{
+  "exchange": "oxfun",
+  "operation": "ws_login",
+  "transport": "websocket",
+  "url": "wss://api.ox.fun/v2/websocket",
+  "auth": "hmac",
+  "payload": {
+    "op": "login",
+    "tag": "login",
+    "data": {
+      "apiKey": "test-key",
+      "timestamp": "1700000000000",
+      "signature": "qNyCEuPA4GPpD3gYnapr/2/0OOe1C+GUn5QWMIV8GoY="
+    }
+  },
+  "trade_enabled": false
+}

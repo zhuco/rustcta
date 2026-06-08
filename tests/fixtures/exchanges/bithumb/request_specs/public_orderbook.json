@@ -1,0 +1,13 @@
+{
+  "exchange": "bithumb",
+  "operation": "bithumb.get_order_book",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/orderbook",
+  "auth": "none",
+  "query": {
+    "markets": { "match": "exact", "value": "KRW-BTC" }
+  },
+  "strict_query": true
+}

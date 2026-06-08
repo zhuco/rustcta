@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "result": {
+    "symbol": "BTCUSDT",
+    "buy": [
+      { "price": "65000", "size": "2" },
+      { "price": "64999.5", "size": "1" }
+    ],
+    "sell": [
+      { "price": "65001", "size": "3" },
+      { "price": "65002", "size": "4" }
+    ],
+    "last_sequence_no": 123456,
+    "timestamp": 1780837531243
+  }
+}

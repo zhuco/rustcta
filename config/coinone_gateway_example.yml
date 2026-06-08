@@ -1,0 +1,38 @@
+# Coinone Korean KRW spot gateway adapter example.
+# Credentials are read from COINONE_SPOT_ACCESS_TOKEN/COINONE_SPOT_SECRET_KEY
+# or COINONE_ACCESS_TOKEN/COINONE_SECRET_KEY by default.
+
+exchange: coinone
+market_type: spot
+adapter: coinone
+enabled: false
+
+rest_base_url: https://api.coinone.co.kr
+public_websocket_url: wss://stream.coinone.co.kr
+private_websocket_url: wss://stream.coinone.co.kr/v1/private
+private_rest_enabled: false
+
+access_token: ${COINONE_SPOT_ACCESS_TOKEN}
+secret_key: ${COINONE_SPOT_SECRET_KEY}
+
+dry_run: true
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - BTC/KRW
+  - ETH/KRW
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+
+unsupported_runtime:
+  - non_krw_markets
+  - payment_wallet_fiat_transfer
+  - withdraw
+  - positions
+  - amend_order
+  - order_list

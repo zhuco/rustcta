@@ -1,0 +1,12 @@
+{
+  "operation": "positions",
+  "method": "GET",
+  "path": "/api/v3/account",
+  "auth": "apex_api_key_hmac",
+  "headers": {
+    "APEX-SIGNATURE": "<base64-hmac>",
+    "APEX-TIMESTAMP": "2026-06-08T00:00:00.000Z",
+    "APEX-API-KEY": "<redacted>",
+    "APEX-PASSPHRASE": "<redacted>"
+  }
+}

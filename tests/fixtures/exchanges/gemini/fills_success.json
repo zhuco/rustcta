@@ -1,0 +1,14 @@
+[
+  {
+    "tid": 39013,
+    "order_id": "18834",
+    "client_order_id": "cli-18834",
+    "symbol": "btcusd",
+    "type": "Buy",
+    "price": "30500.00",
+    "amount": "0.10",
+    "fee_currency": "USD",
+    "fee_amount": "6.10",
+    "timestampms": 1717200000500
+  }
+]

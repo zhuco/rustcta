@@ -1,0 +1,16 @@
+enabled: false
+adapter: bithumb
+rest_base_url: https://api.bithumb.com
+public_ws_url: wss://ws-api.bithumb.com/websocket/v1
+private_ws_url: wss://ws-api.bithumb.com/websocket/v1/private
+market_types:
+  - spot
+private_rest:
+  enabled: false
+  api_key_env: BITHUMB_API_KEY
+  api_secret_env: BITHUMB_API_SECRET
+private_streams:
+  enabled: false
+notes:
+  - "Disabled by default; do not store credentials in this file."
+  - "KRW spot markets use QUOTE-BASE symbols such as KRW-BTC."

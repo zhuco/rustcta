@@ -1,0 +1,55 @@
+# bitbank Japanese Spot/Jpy gateway adapter example.
+# Credentials are read from environment variables by default:
+# BITBANK_API_KEY and BITBANK_API_SECRET.
+
+exchange: bitbank
+market_type: spot
+adapter: bitbank
+enabled: false
+
+api_key: ${BITBANK_API_KEY}
+api_secret: ${BITBANK_API_SECRET}
+
+public_base_url: https://public.bitbank.cc
+private_base_url: https://api.bitbank.cc/v1
+websocket_url: wss://stream.bitbank.cc/socket.io/?EIO=4&transport=websocket
+private_stream_token_endpoint: /user/subscribe
+
+testnet: false
+sandbox: false
+dry_run: true
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+stale_book_ms: 10000
+reconnect_interval_ms: 1000
+max_reconnect_attempts: 10
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - btc_jpy
+  - eth_jpy
+  - xrp_jpy
+
+symbol_mappings:
+  BTCJPY: btc_jpy
+  ETHJPY: eth_jpy
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 5
+
+permissions:
+  required:
+    - read_account
+    - spot_trading
+  optional:
+    - private_stream_token
+
+notes:
+  - bitbank venue symbols use lowercase base_quote pairs, for example btc_jpy.
+  - JPY quote markets are spot markets, not fiat funding flows.
+  - Fiat deposit, fiat withdrawal, bank transfer, and ledger write APIs are not configured.
+  - Client order IDs, IOC/FOK, reduce-only, quote-quantity market orders, amend, and cancel-all are unsupported.

@@ -1,0 +1,6 @@
+{
+  "action": "authenticate",
+  "key": "key",
+  "timestamp": 1700000000000,
+  "window": 10000
+}

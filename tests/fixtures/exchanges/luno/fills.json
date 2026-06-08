@@ -1,0 +1,16 @@
+{
+  "trades": [
+    {
+      "sequence": 1,
+      "base": "0.01000000",
+      "counter": "12000.00",
+      "fee_base": "0.00000000",
+      "fee_counter": "12.00",
+      "price": "1200000.00",
+      "is_buy": true,
+      "order_id": "BXMC2CJ7HNB88U4",
+      "timestamp": 1700000000000,
+      "type": "BID"
+    }
+  ]
+}

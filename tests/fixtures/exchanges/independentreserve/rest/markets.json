@@ -1,0 +1,38 @@
+{
+  "Data": [
+    {
+      "primaryCurrencyCode": "Xbt",
+      "secondaryCurrencyCode": "Aud",
+      "minimumPriceIncrement": "0.01",
+      "minimumVolumeIncrement": "0.00000001",
+      "minimumOrderVolume": "0.0001",
+      "minimumOrderValue": "10",
+      "isActive": true
+    },
+    {
+      "primaryCurrencyCode": "Eth",
+      "secondaryCurrencyCode": "Sgd",
+      "minimumPriceIncrement": "0.01",
+      "minimumVolumeIncrement": "0.000001",
+      "minimumOrderVolume": "0.001",
+      "minimumOrderValue": "10",
+      "isActive": true
+    },
+    {
+      "primaryCurrencyCode": "Xrp",
+      "secondaryCurrencyCode": "Usd",
+      "minimumPriceIncrement": "0.0001",
+      "minimumVolumeIncrement": "0.01",
+      "minimumOrderVolume": "1",
+      "minimumOrderValue": "10",
+      "isActive": true
+    },
+    {
+      "primaryCurrencyCode": "Eth",
+      "secondaryCurrencyCode": "Nzd",
+      "minimumPriceIncrement": "0.01",
+      "minimumVolumeIncrement": "0.000001",
+      "isActive": true
+    }
+  ]
+}

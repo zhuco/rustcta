@@ -1,0 +1,16 @@
+{
+  "operation": "coinone.cancel_order",
+  "method": "POST",
+  "path": "/v2.1/order/cancel",
+  "headers": {
+    "X-COINONE-PAYLOAD": "<base64-json>",
+    "X-COINONE-SIGNATURE": "<hmac-sha512-hex>"
+  },
+  "body": {
+    "access_token": "<redacted>",
+    "nonce": "<uuid>",
+    "quote_currency": "KRW",
+    "target_currency": "BTC",
+    "order_id": "O-1"
+  }
+}

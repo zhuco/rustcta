@@ -1,0 +1,14 @@
+{
+  "operation": "coinspot.place_order",
+  "method": "POST",
+  "path": "/api/v2/my/buy",
+  "auth": "signed",
+  "body": {
+    "cointype": "btc",
+    "markettype": "aud",
+    "amount": "0.01",
+    "rate": "99000"
+  },
+  "headers": ["key", "sign"],
+  "notes": "CoinSpot private requests add a nonce to the JSON body and sign the final JSON with HMAC-SHA512 hex."
+}

@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 use std::fs;
 
 use rustcta::strategies::spot_spot_taker_arbitrage::SpotSpotTakerArbitrageConfig;

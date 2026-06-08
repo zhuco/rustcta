@@ -1,0 +1,13 @@
+{
+  "order_id": "18834",
+  "client_order_id": "client-1",
+  "symbol": "btcusd",
+  "side": "buy",
+  "type": "exchange limit",
+  "is_live": true,
+  "is_cancelled": false,
+  "original_amount": "0.01",
+  "executed_amount": "0",
+  "price": "30000.00",
+  "timestampms": 1710000000000
+}

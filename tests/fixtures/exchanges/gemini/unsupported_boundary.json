@@ -1,0 +1,27 @@
+{
+  "exchange": "gemini",
+  "runtime_scope": "spot_trading_only",
+  "unsupported_operations": [
+    "auction",
+    "block_trading",
+    "travel_rule",
+    "withdrawals",
+    "deposits",
+    "fiat_transfers",
+    "custody",
+    "clearing",
+    "staking",
+    "positions",
+    "market_order",
+    "quote_market_order",
+    "reduce_only"
+  ],
+  "expected_runtime_errors": [
+    "gemini.positions_unsupported_spot_only",
+    "gemini.market_order_unsupported",
+    "gemini.quote_market_order_unsupported",
+    "gemini.reduce_only_unsupported_spot"
+  ],
+  "trade_enabled": true,
+  "funding_enabled": false
+}

@@ -1,0 +1,18 @@
+{
+  "code": 1000,
+  "message": "success",
+  "data": {
+    "symbols": [
+      {
+        "symbol": "BTCUSDT",
+        "base_currency": "BTC",
+        "quote_currency": "USDT",
+        "is_trading": 1,
+        "min_volume": "1",
+        "max_volume": "1000000",
+        "tick_size": "0.1",
+        "volume_precision": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "currency": "BTC",
+    "amount": "1.50000000",
+    "available": "1.25000000",
+    "availableForWithdrawal": "1.25000000"
+  },
+  {
+    "currency": "USD",
+    "amount": "1500.00",
+    "available": "1500.00",
+    "availableForWithdrawal": "1500.00"
+  }
+]

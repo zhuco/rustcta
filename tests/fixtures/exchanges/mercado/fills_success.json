@@ -1,0 +1,15 @@
+{
+  "trades": [
+    {
+      "id": "offline-trade-1",
+      "orderId": "<redacted:order_id>",
+      "instrument": "BTC-BRL",
+      "side": "buy",
+      "qty": "0.001",
+      "price": "350000",
+      "fee": "0.35",
+      "feeCurrency": "BRL",
+      "createdAt": "2026-06-08T00:00:00Z"
+    }
+  ]
+}

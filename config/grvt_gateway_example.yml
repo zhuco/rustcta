@@ -1,0 +1,53 @@
+# GRVT conservative gateway adapter example.
+# Public API and WS specs are audited, but runtime REST/WS trading remains
+# disabled until request-spec, parser, session-cookie and EIP-712 signer
+# fixtures are promoted.
+
+exchange: grvt
+adapter: grvt
+enabled: false
+
+market_types:
+  - perpetual
+  - option
+
+api_key: ${GRVT_API_KEY}
+session_cookie: ${GRVT_COOKIE}
+account_id: ${GRVT_ACCOUNT_ID}
+sub_account_id: ${GRVT_SUB_ACCOUNT_ID}
+
+market_data_rest_base_url: https://market-data.grvt.io/full
+trading_rest_base_url: https://trades.grvt.io/full
+auth_base_url: https://edge.grvt.io/auth
+market_data_ws_url: wss://market-data.grvt.io/ws/full
+trading_ws_url: wss://trades.grvt.io/ws/full
+testnet_market_data_rest_base_url: https://market-data.testnet.grvt.io/full
+testnet_trading_rest_base_url: https://trades.testnet.grvt.io/full
+testnet_auth_base_url: https://edge.testnet.grvt.io/auth
+testnet: true
+sandbox: false
+
+enabled_public_rest: false
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 10
+log_raw_messages: false
+
+enabled_symbols:
+  perpetual:
+    - BTC_USDT_Perp
+    - ETH_USDT_Perp
+
+permissions:
+  required: []
+  optional:
+    - read_account
+    - trade
+
+notes:
+  - Do not place EVM private keys or real GRVT session cookies in config files.
+  - Order writes require EIP-712/external signer coverage and are currently Unsupported.
+  - Private streams require Cookie and X-Grvt-Account-Id session handling and are currently Unsupported.
