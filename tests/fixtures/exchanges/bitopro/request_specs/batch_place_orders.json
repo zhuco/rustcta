@@ -1,0 +1,18 @@
+{
+  "operation": "bitopro.batch_place_orders",
+  "method": "POST",
+  "path": "/orders/batch",
+  "query": [],
+  "body": [
+    {
+      "pair": "btc_twd",
+      "action": "BUY",
+      "type": "LIMIT",
+      "price": "3000000",
+      "amount": "0.01",
+      "timestamp": 1554380909131,
+      "timeInForce": "GTC",
+      "clientId": 12345
+    }
+  ]
+}

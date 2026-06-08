@@ -1,0 +1,171 @@
+schema_version: 1
+exchange: foxbit
+adapter: FoxbitGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/foxbit_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Foxbit Exchange REST/WS v3 spot adapter. BRL spot markets use lowercase compact symbols such as btcbrl. Live private writes remain offline request-spec only.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.foxbit.com.br/rest/v3
+auth:
+  private_rest: X-FB-ACCESS-KEY plus timestamp and HMAC-SHA256 signature over timestamp + method + path + query + raw body
+rate_limits:
+  default_rest: { scope: ip_or_member, interval_ms: 10000, limit: 300 }
+  public_markets: { scope: ip, interval_ms: 1000, limit: 6 }
+  public_orderbook: { scope: ip, interval_ms: 2000, limit: 10 }
+pagination:
+  private_history: { mode: cursor_or_time, notes: audit before live promotion }
+reconciliation:
+  private_state: rest_fallback
+  notes: Private WS is documented for account events only; not promoted until live read-only validation.
+batch:
+  place: { support: unsupported, reason: foxbit.native_batch_place_unsupported }
+  cancel: { support: unsupported, reason: foxbit.native_batch_cancel_unsupported }
+websocket:
+  public:
+    support: payload_helper
+    channels: [orderbook-100, orderbook-250, orderbook-500, orderbook-1000, trades, ticker]
+    heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: auth_payload_only
+    auth_renewal: { mode: reconnect_and_login }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /markets
+    auth: none
+    rate_limit_bucket: foxbit_public_markets
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /markets/{market_symbol}/orderbook
+    auth: none
+    rate_limit_bucket: foxbit_public_orderbook
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: foxbit_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: foxbit_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders/{order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: foxbit_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: foxbit_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: foxbit_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /orders/{order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: foxbit_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+streams:
+  - operation: public_orderbook_subscribe
+    product: spot
+    market_types: [spot]
+    transport: websocket
+    channel: orderbook-1000
+    auth: none
+    support: spec_only
+    resync: { endpoint_operation: order_book }
+  - operation: private_account_events
+    product: spot
+    market_types: [spot]
+    transport: websocket
+    channel: private
+    auth: hmac
+    support: auth_payload_only
+    resync: { endpoint_operation: open_orders }

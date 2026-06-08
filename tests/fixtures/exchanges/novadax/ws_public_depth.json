@@ -1,0 +1,10 @@
+{
+  "transport": "socket_io",
+  "channel": "MARKET.BTC_BRL.DEPTH",
+  "symbol": "BTC_BRL",
+  "data": {
+    "bids": [["350000.00", "0.50"]],
+    "asks": [["350100.00", "0.40"]],
+    "timestamp": 1710000000000
+  }
+}

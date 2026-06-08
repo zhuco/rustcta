@@ -2,6 +2,7 @@ use std::fmt;
 
 #[derive(Clone)]
 pub struct OkxGatewayConfig {
+    pub exchange_id: String,
     pub rest_base_url: String,
     pub request_timeout_ms: u64,
     pub enabled: bool,
@@ -9,6 +10,8 @@ pub struct OkxGatewayConfig {
     pub api_secret: Option<String>,
     pub passphrase: Option<String>,
     pub enabled_private_rest: bool,
+    pub status_message: String,
+    pub unsupported_market_type_operation: &'static str,
 }
 
 impl Default for OkxGatewayConfig {
@@ -19,6 +22,7 @@ impl Default for OkxGatewayConfig {
         let enabled_private_rest =
             api_key.is_some() && api_secret.is_some() && passphrase.is_some();
         Self {
+            exchange_id: "okx".to_string(),
             rest_base_url: "https://www.okx.com".to_string(),
             request_timeout_ms: 10_000,
             enabled: true,
@@ -26,6 +30,8 @@ impl Default for OkxGatewayConfig {
             api_secret,
             passphrase,
             enabled_private_rest,
+            status_message: "okx public REST gateway adapter".to_string(),
+            unsupported_market_type_operation: "okx.non_spot_market_type",
         }
     }
 }
@@ -54,6 +60,7 @@ impl fmt::Debug for OkxGatewayConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("OkxGatewayConfig")
+            .field("exchange_id", &self.exchange_id)
             .field("rest_base_url", &self.rest_base_url)
             .field("request_timeout_ms", &self.request_timeout_ms)
             .field("enabled", &self.enabled)
@@ -67,6 +74,11 @@ impl fmt::Debug for OkxGatewayConfig {
                 &self.passphrase.as_ref().map(|_| "<redacted>"),
             )
             .field("enabled_private_rest", &self.enabled_private_rest)
+            .field("status_message", &self.status_message)
+            .field(
+                "unsupported_market_type_operation",
+                &self.unsupported_market_type_operation,
+            )
             .finish()
     }
 }

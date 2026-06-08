@@ -1,0 +1,11 @@
+{
+  "type": "snapshot",
+  "channel": "orderbook-1000",
+  "market_symbol": "btcbrl",
+  "params": {
+    "sequence_id": 123456789,
+    "timestamp": 1700000000000,
+    "bids": [["350000.00", "0.10000000"]],
+    "asks": [["350010.00", "0.08000000"]]
+  }
+}

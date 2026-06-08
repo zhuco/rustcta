@@ -1,0 +1,16 @@
+{
+  "exchange": "woofipro",
+  "signing": "orderly-ed25519",
+  "timestamp_ms": 1700000000000,
+  "method": "GET",
+  "path_with_query": "/v1/orderbook/PERP_BTC_USDC",
+  "body": "",
+  "canonical_payload": "1700000000000GET/v1/orderbook/PERP_BTC_USDC",
+  "headers": [
+    "orderly-account-id",
+    "orderly-key",
+    "orderly-timestamp",
+    "orderly-signature"
+  ],
+  "boundary": "runtime_signing"
+}

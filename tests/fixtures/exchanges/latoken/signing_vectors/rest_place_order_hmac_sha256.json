@@ -1,0 +1,21 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "api_key": "latoken_public_test_key",
+  "api_secret": "latoken_private_test_secret",
+  "method": "POST",
+  "path": "/v2/auth/order/place",
+  "query": [],
+  "body_params": [
+    ["baseCurrency", "BTC"],
+    ["quoteCurrency", "USDT"],
+    ["side", "BUY"],
+    ["condition", "GTC"],
+    ["type", "LIMIT"],
+    ["clientOrderId", "latoken_test_client_order_001"],
+    ["price", "64000"],
+    ["quantity", "0.01"]
+  ],
+  "canonical_payload": "POST/v2/auth/order/placebaseCurrency=BTC&quoteCurrency=USDT&side=BUY&condition=GTC&type=LIMIT&clientOrderId=latoken_test_client_order_001&price=64000&quantity=0.01",
+  "expected_signature": "34984cfe32415a4adbc71abe4372e2b4627428e89e2c3ac6b28771ff8dc1fc30",
+  "sanitized": true
+}

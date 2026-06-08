@@ -1,0 +1,11 @@
+{
+  "exchange": "d8x",
+  "scheme": "evm_wallet_contract_call",
+  "supported_by_gateway_runtime": false,
+  "chain_id": 1101,
+  "contract": "0xaB7794EcD2c8e9Decc6B577864b40eBf9204720f",
+  "method": "trade",
+  "canonical_payload": "chain_id=1101;contract=0xab7794ecd2c8e9decc6b577864b40ebf9204720f;method=trade;signer=eip155-wallet",
+  "expected_error": "d8x.place_order_requires_evm_signer_and_contract_audit",
+  "notes": "No private key, wallet address, order id or transaction hash is included. This vector documents the unsupported signing boundary only."
+}

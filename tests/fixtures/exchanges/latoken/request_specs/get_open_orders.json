@@ -1,0 +1,18 @@
+{
+  "operation": "latoken.get_open_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/v2/auth/order/active",
+  "query": {
+    "limit": "1000"
+  },
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256"
+  },
+  "canonical_payload": "GET/v2/auth/order/activelimit=1000",
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "latoken.open_orders_request_spec_only"
+}

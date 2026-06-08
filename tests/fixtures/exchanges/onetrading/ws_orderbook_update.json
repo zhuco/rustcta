@@ -1,0 +1,18 @@
+{
+  "type": "ORDER_BOOK_UPDATE",
+  "channel_name": "ORDER_BOOK",
+  "time": 1715268699262970610,
+  "instrument_code": "BTC_EUR",
+  "changes": [
+    [
+      "BUY",
+      "6500.09",
+      "0.84702376"
+    ],
+    [
+      "SELL",
+      "100000",
+      "0"
+    ]
+  ]
+}

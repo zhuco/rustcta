@@ -1,0 +1,15 @@
+{
+  "event": "update",
+  "topic": "PERP_BTC_USDC@orderbookupdate",
+  "ts": 1700000000000,
+  "data": {
+    "symbol": "PERP_BTC_USDC",
+    "seq": 424243,
+    "bids": [
+      ["65000.0", "1.50"]
+    ],
+    "asks": [
+      ["65001.0", "0.90"]
+    ]
+  }
+}

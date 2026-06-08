@@ -1,0 +1,47 @@
+{
+  "success": true,
+  "errorCode": "",
+  "message": "",
+  "result": [
+    {
+      "name": "BTC_USDT",
+      "stock": "BTC",
+      "money": "USDT",
+      "precision": {
+        "money": "2",
+        "stock": "6",
+        "fee": "4"
+      },
+      "limits": {
+        "min_amount": "0.00001",
+        "max_amount": "9000",
+        "step_size": "0.000001",
+        "min_price": "0.01",
+        "max_price": "1000000",
+        "tick_size": "0.01",
+        "min_total": "5"
+      }
+    },
+    {
+      "name": "ETH_USDT",
+      "stock": "ETH",
+      "money": "USDT",
+      "precision": {
+        "money": "2",
+        "stock": "5",
+        "fee": "4"
+      },
+      "limits": {
+        "min_amount": "0.0001",
+        "max_amount": "100000",
+        "step_size": "0.00001",
+        "min_price": "0.01",
+        "max_price": "1000000",
+        "tick_size": "0.01",
+        "min_total": "5"
+      }
+    }
+  ],
+  "cache_time": 1698731482.965841,
+  "current_time": 1698731498.885766
+}

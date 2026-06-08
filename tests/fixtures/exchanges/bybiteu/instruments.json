@@ -1,0 +1,26 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "linear",
+    "list": [
+      {
+        "symbol": "BTCUSDT",
+        "status": "Trading",
+        "baseCoin": "BTC",
+        "quoteCoin": "USDT",
+        "settleCoin": "USDT",
+        "priceFilter": {
+          "minPrice": "0.10",
+          "maxPrice": "1000000",
+          "tickSize": "0.10"
+        },
+        "lotSizeFilter": {
+          "minOrderQty": "0.001",
+          "maxOrderQty": "100",
+          "qtyStep": "0.001"
+        }
+      }
+    ]
+  }
+}

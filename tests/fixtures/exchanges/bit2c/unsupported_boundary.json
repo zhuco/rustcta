@@ -1,0 +1,20 @@
+{
+  "exchange": "bit2c",
+  "status": "scan_only_g1",
+  "private_rest": "request_spec_only",
+  "unsupported": [
+    "perpetuals",
+    "futures",
+    "margin",
+    "positions",
+    "websocket",
+    "testnet",
+    "batch_place_orders",
+    "batch_cancel_orders",
+    "cancel_all_orders",
+    "amend_order",
+    "withdrawals",
+    "merchant",
+    "broker"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "exchange": "derive_chain_perps",
+  "task": "C-47",
+  "chain_id": 957,
+  "surface": "markets",
+  "audit_subjects": ["markets", "symbols", "oracle_pricing"],
+  "official_docs": [
+    "https://docs.derive.xyz/",
+    "https://docs.derive.xyz/whitepaper-v3/pricing-mechanism",
+    "https://github.com/deriveprotocol/sdk"
+  ],
+  "weak_example_rest": {
+    "host": "https://api.derive.xyz",
+    "path": "/v1/markets/{market}",
+    "promoted": false,
+    "reason": "Official examples reference helper endpoints, but no versioned API schema/SLA was verified."
+  },
+  "gateway_mapping": {
+    "get_symbol_rules": "unsupported_unverified",
+    "get_order_book": "unsupported_unverified",
+    "notes": "Derive Exchange market/order-book runtime belongs to the existing derive adapter; this profile only audits Derive Chain settlement differences."
+  }
+}

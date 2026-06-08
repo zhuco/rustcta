@@ -1,0 +1,19 @@
+{
+  "operation": "zebpay.cancel_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "DELETE",
+  "path": "/orders/{order_id}",
+  "query": {},
+  "headers": {
+    "client_id": "<redacted:client-id>",
+    "timestamp": "<redacted:unix-ms>",
+    "RequestId": "<redacted:uuid>",
+    "Authorization": "<redacted:bearer-token>"
+  },
+  "path_params": {
+    "order_id": "zebpay_test_order_id_001"
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "zebpay.cancel_order_request_spec_only"
+}

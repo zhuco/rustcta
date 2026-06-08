@@ -1,0 +1,12 @@
+{
+  "exchange": "zeta_markets",
+  "operation": "get_order_book",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v2/orderbook?ticker_id=SOL-PERP",
+  "auth": "none",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true
+}

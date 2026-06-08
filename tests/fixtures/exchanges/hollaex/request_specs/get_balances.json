@@ -1,0 +1,31 @@
+{
+  "exchange": "hollaex",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v2/user/balance",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "api-signature": {
+      "match": "exact",
+      "value": "8702128e0e88dfb231af7f4fa9a4fbc59bea3bbdac92bde24cc2206cace795be"
+    },
+    "api-expires": {
+      "match": "exact",
+      "value": "1710000000"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "hollaex/get_balances_hmac_sha256"
+}

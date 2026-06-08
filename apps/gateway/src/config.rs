@@ -2,22 +2,33 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use rustcta_exchange_gateway::{
-    AdapterBackedGateway, AscendexGatewayConfig, AsterGatewayConfig, BackpackGatewayConfig,
-    BiconomyGatewayConfig, BigOneGatewayConfig, BinanceCoinMGatewayConfig, BinanceGatewayConfig,
-    BingxGatewayConfig, BitbankGatewayConfig, BitfinexGatewayConfig, BitflyerGatewayConfig,
+    AarkGatewayConfig, AdapterBackedGateway, AftermathGatewayConfig, AlpacaGatewayConfig,
+    ApolloxDexGatewayConfig, ArkhamGatewayConfig, AscendexGatewayConfig, AsterGatewayConfig,
+    BackpackGatewayConfig, BiconomyGatewayConfig, BigOneGatewayConfig, BinanceCoinMGatewayConfig,
+    BinanceGatewayConfig, BinanceUsGatewayConfig, BingxGatewayConfig, Bit2cGatewayConfig,
+    BitbankGatewayConfig, BitbnsGatewayConfig, BitfinexGatewayConfig, BitflyerGatewayConfig,
     BitgetGatewayConfig, BithumbGatewayConfig, BitkanGatewayConfig, BitmartGatewayConfig,
-    BitsoGatewayConfig, BitstampGatewayConfig, BitunixGatewayConfig, BitvavoGatewayConfig,
-    BlofinGatewayConfig, BtcMarketsGatewayConfig, BtcTurkGatewayConfig, BybitGatewayConfig,
-    CoinDcxGatewayConfig, CoinExGatewayConfig, CoinbaseExchangeGatewayConfig,
-    CoincheckGatewayConfig, CoinoneGatewayConfig, CoinsPhGatewayConfig, CoinspotGatewayConfig,
-    CoinstoreGatewayConfig, CointrGatewayConfig, CryptoComGatewayConfig, DeepcoinGatewayConfig,
-    DeriveGatewayConfig, DydxGatewayConfig, GateIoGatewayConfig, GeminiGatewayConfig,
-    HashKeyGlobalGatewayConfig, HtxGatewayConfig, HuobiGatewayConfig, HyperliquidGatewayConfig,
+    BitoproGatewayConfig, BitsoGatewayConfig, BitstampGatewayConfig, BittradeGatewayConfig,
+    BitunixGatewayConfig, BitvavoGatewayConfig, BlockchainComGatewayConfig, BlofinGatewayConfig,
+    BsxGatewayConfig, BtcMarketsGatewayConfig, BtcTurkGatewayConfig, BtcboxGatewayConfig,
+    BybitGatewayConfig, BybiteuGatewayConfig, BydfiGatewayConfig, CexGatewayConfig,
+    Cod3xGatewayConfig, CoinDcxGatewayConfig, CoinExGatewayConfig, CoinbaseExchangeGatewayConfig,
+    CoincheckGatewayConfig, CoinmateGatewayConfig, CoinoneGatewayConfig, CoinsPhGatewayConfig,
+    CoinspotGatewayConfig, CoinstoreGatewayConfig, CointrGatewayConfig, CryptoComGatewayConfig,
+    CryptomusGatewayConfig, D8xGatewayConfig, DeepcoinGatewayConfig, DeriveChainPerpsGatewayConfig,
+    DeriveGatewayConfig, DydxGatewayConfig, EquationGatewayConfig, ExmoGatewayConfig,
+    FmfwioGatewayConfig, FoxbitGatewayConfig, GateIoGatewayConfig, GeminiGatewayConfig,
+    HashKeyGlobalGatewayConfig, HibachiGatewayConfig, HitbtcGatewayConfig, HollaexGatewayConfig,
+    HtxGatewayConfig, HuobiGatewayConfig, HyperliquidGatewayConfig,
     IndependentReserveGatewayConfig, IndodaxGatewayConfig, KrakenFuturesGatewayConfig,
     KrakenGatewayConfig, KuCoinFuturesGatewayConfig, KuCoinGatewayConfig, LBankGatewayConfig,
-    LunoGatewayConfig, MercadoGatewayConfig, MexcGatewayConfig, OkxGatewayConfig,
-    OrangeXGatewayConfig, ParadexGatewayConfig, PhemexGatewayConfig, UpbitGatewayConfig,
-    WeexGatewayConfig,
+    LatokenGatewayConfig, LunoGatewayConfig, MangoMarketsGatewayConfig, MercadoGatewayConfig,
+    MexcGatewayConfig, ModetradeGatewayConfig, MyOkxGatewayConfig, NdaxGatewayConfig,
+    NovadaxGatewayConfig, OkxGatewayConfig, OkxusGatewayConfig, OneTradingGatewayConfig,
+    OrangeXGatewayConfig, P2bGatewayConfig, ParadexGatewayConfig, PaymiumGatewayConfig,
+    PhemexGatewayConfig, TokocryptoGatewayConfig, UpbitGatewayConfig, WavesExchangeGatewayConfig,
+    WeexGatewayConfig, WoofiproGatewayConfig, YobitGatewayConfig, ZaifGatewayConfig,
+    ZebpayGatewayConfig, ZetaMarketsGatewayConfig,
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -84,19 +95,34 @@ impl GatewayRestBaseUrls {
     pub fn from_env_reader(mut env: impl FnMut(&str) -> Option<String>) -> Self {
         let mut urls = HashMap::new();
         for (adapter, key) in [
+            ("aark", "RUSTCTA_AARK_REST_BASE_URL"),
+            ("aftermath", "RUSTCTA_AFTERMATH_REST_BASE_URL"),
+            ("alpaca", "RUSTCTA_ALPACA_REST_BASE_URL"),
+            ("alpaca_broker", "RUSTCTA_ALPACA_BROKER_REST_BASE_URL"),
+            (
+                "alpaca_market_data",
+                "RUSTCTA_ALPACA_MARKET_DATA_REST_BASE_URL",
+            ),
+            ("apollox_dex", "RUSTCTA_APOLLOX_DEX_REST_BASE_URL"),
+            ("apollox_dex", "APOLLOX_DEX_REST_BASE_URL"),
+            ("arkham", "RUSTCTA_ARKHAM_REST_BASE_URL"),
             ("ascendex", "RUSTCTA_ASCENDEX_REST_BASE_URL"),
             ("aster", "RUSTCTA_ASTER_REST_BASE_URL"),
             ("backpack", "RUSTCTA_BACKPACK_REST_BASE_URL"),
             ("biconomy", "RUSTCTA_BICONOMY_REST_BASE_URL"),
             ("binance", "RUSTCTA_BINANCE_REST_BASE_URL"),
             ("binancecoinm", "RUSTCTA_BINANCECOINM_REST_BASE_URL"),
+            ("binanceus", "RUSTCTA_BINANCEUS_REST_BASE_URL"),
+            ("binanceus", "RUSTCTA_BINANCE_US_REST_BASE_URL"),
             ("bigone", "RUSTCTA_BIGONE_REST_BASE_URL"),
             ("bigone_spot", "RUSTCTA_BIGONE_SPOT_REST_BASE_URL"),
             ("bigone_contract", "RUSTCTA_BIGONE_CONTRACT_REST_BASE_URL"),
             ("bingx", "RUSTCTA_BINGX_REST_BASE_URL"),
+            ("bit2c", "RUSTCTA_BIT2C_REST_BASE_URL"),
             ("bitbank", "RUSTCTA_BITBANK_REST_BASE_URL"),
             ("bitbank_public", "RUSTCTA_BITBANK_PUBLIC_REST_BASE_URL"),
             ("bitbank_private", "RUSTCTA_BITBANK_PRIVATE_REST_BASE_URL"),
+            ("bitbns", "RUSTCTA_BITBNS_REST_BASE_URL"),
             ("bitfinex", "RUSTCTA_BITFINEX_REST_BASE_URL"),
             ("bitfinex_public", "RUSTCTA_BITFINEX_PUBLIC_REST_BASE_URL"),
             ("bitfinex_private", "RUSTCTA_BITFINEX_PRIVATE_REST_BASE_URL"),
@@ -107,15 +133,26 @@ impl GatewayRestBaseUrls {
             ("bitmart", "RUSTCTA_BITMART_REST_BASE_URL"),
             ("bitmart_spot", "RUSTCTA_BITMART_SPOT_REST_BASE_URL"),
             ("bitmart_futures", "RUSTCTA_BITMART_FUTURES_REST_BASE_URL"),
+            ("bitopro", "RUSTCTA_BITOPRO_REST_BASE_URL"),
             ("bitso", "RUSTCTA_BITSO_REST_BASE_URL"),
             ("bitstamp", "RUSTCTA_BITSTAMP_REST_BASE_URL"),
+            ("bittrade", "RUSTCTA_BITTRADE_REST_BASE_URL"),
             ("bitvavo", "RUSTCTA_BITVAVO_REST_BASE_URL"),
+            ("blockchaincom", "RUSTCTA_BLOCKCHAINCOM_REST_BASE_URL"),
+            ("blockchaincom", "RUSTCTA_BLOCKCHAIN_COM_REST_BASE_URL"),
             ("btcturk", "RUSTCTA_BTCTURK_REST_BASE_URL"),
+            ("btcbox", "RUSTCTA_BTCBOX_REST_BASE_URL"),
             ("bitunix", "RUSTCTA_BITUNIX_REST_BASE_URL"),
             ("bybit", "RUSTCTA_BYBIT_REST_BASE_URL"),
+            ("bybiteu", "RUSTCTA_BYBITEU_REST_BASE_URL"),
+            ("bybiteu", "RUSTCTA_BYBIT_EU_REST_BASE_URL"),
+            ("bydfi", "RUSTCTA_BYDFI_REST_BASE_URL"),
+            ("cex", "RUSTCTA_CEX_REST_BASE_URL"),
+            ("cex", "RUSTCTA_CEXIO_REST_BASE_URL"),
             ("bitunix_spot", "RUSTCTA_BITUNIX_SPOT_REST_BASE_URL"),
             ("bitunix_futures", "RUSTCTA_BITUNIX_FUTURES_REST_BASE_URL"),
             ("blofin", "RUSTCTA_BLOFIN_REST_BASE_URL"),
+            ("bsx", "RUSTCTA_BSX_REST_BASE_URL"),
             ("btcmarkets", "RUSTCTA_BTCMARKETS_REST_BASE_URL"),
             ("coindcx", "RUSTCTA_COINDCX_REST_BASE_URL"),
             ("coindcx_spot", "RUSTCTA_COINDCX_SPOT_REST_BASE_URL"),
@@ -127,6 +164,7 @@ impl GatewayRestBaseUrls {
             ),
             ("coinbaseexchange", "RUSTCTA_COINBASEEXCHANGE_REST_BASE_URL"),
             ("coincheck", "RUSTCTA_COINCHECK_REST_BASE_URL"),
+            ("coinmate", "RUSTCTA_COINMATE_REST_BASE_URL"),
             ("coinex", "RUSTCTA_COINEX_REST_BASE_URL"),
             ("coinone", "RUSTCTA_COINONE_REST_BASE_URL"),
             ("coinspot", "RUSTCTA_COINSPOT_REST_BASE_URL"),
@@ -141,11 +179,31 @@ impl GatewayRestBaseUrls {
                 "RUSTCTA_COINSTORE_FUTURES_REST_BASE_URL",
             ),
             ("cointr", "RUSTCTA_COINTR_REST_BASE_URL"),
+            ("cod3x", "RUSTCTA_COD3X_DOCS_BASE_URL"),
+            ("cod3x", "RUSTCTA_COD3X_REST_BASE_URL"),
+            ("cod3x_app", "RUSTCTA_COD3X_APP_BASE_URL"),
+            ("cod3x_website", "RUSTCTA_COD3X_WEBSITE_BASE_URL"),
             ("cryptocom", "RUSTCTA_CRYPTOCOM_REST_BASE_URL"),
+            ("cryptomus", "RUSTCTA_CRYPTOMUS_REST_BASE_URL"),
+            ("d8x", "RUSTCTA_D8X_REST_BASE_URL"),
             ("deepcoin", "RUSTCTA_DEEPCOIN_REST_BASE_URL"),
             ("derive", "RUSTCTA_DERIVE_REST_BASE_URL"),
+            (
+                "derive_chain_perps",
+                "RUSTCTA_DERIVE_CHAIN_PERPS_REST_BASE_URL",
+            ),
+            (
+                "derive_chain_perps_rpc",
+                "RUSTCTA_DERIVE_CHAIN_PERPS_RPC_URL",
+            ),
             ("dydx", "RUSTCTA_DYDX_INDEXER_REST_BASE_URL"),
             ("dydx_node", "RUSTCTA_DYDX_NODE_REST_BASE_URL"),
+            ("equation", "RUSTCTA_EQUATION_DOCS_BASE_URL"),
+            ("equation", "RUSTCTA_EQUATION_REST_BASE_URL"),
+            ("equation_app", "RUSTCTA_EQUATION_APP_BASE_URL"),
+            ("exmo", "RUSTCTA_EXMO_REST_BASE_URL"),
+            ("fmfwio", "RUSTCTA_FMFWIO_REST_BASE_URL"),
+            ("foxbit", "RUSTCTA_FOXBIT_REST_BASE_URL"),
             ("gateio", "RUSTCTA_GATEIO_REST_BASE_URL"),
             ("gemini", "RUSTCTA_GEMINI_REST_BASE_URL"),
             ("hashkey_global", "RUSTCTA_HASHKEY_GLOBAL_REST_BASE_URL"),
@@ -157,6 +215,11 @@ impl GatewayRestBaseUrls {
                 "hashkey_global_futures",
                 "RUSTCTA_HASHKEY_GLOBAL_FUTURES_REST_BASE_URL",
             ),
+            ("hollaex", "RUSTCTA_HOLLAEX_REST_BASE_URL"),
+            ("hibachi", "RUSTCTA_HIBACHI_REST_BASE_URL"),
+            ("hibachi", "RUSTCTA_HIBACHI_DATA_REST_BASE_URL"),
+            ("hibachi_account", "RUSTCTA_HIBACHI_ACCOUNT_REST_BASE_URL"),
+            ("hitbtc", "RUSTCTA_HITBTC_REST_BASE_URL"),
             ("htx", "RUSTCTA_HTX_REST_BASE_URL"),
             ("htx_spot", "RUSTCTA_HTX_SPOT_REST_BASE_URL"),
             ("htx_linear", "RUSTCTA_HTX_LINEAR_REST_BASE_URL"),
@@ -177,20 +240,52 @@ impl GatewayRestBaseUrls {
             ("kraken_spot", "RUSTCTA_KRAKEN_SPOT_REST_BASE_URL"),
             ("kraken_futures", "RUSTCTA_KRAKEN_FUTURES_REST_BASE_URL"),
             ("krakenfutures", "RUSTCTA_KRAKEN_FUTURES_REST_BASE_URL"),
+            ("latoken", "RUSTCTA_LATOKEN_REST_BASE_URL"),
             ("lbank", "RUSTCTA_LBANK_REST_BASE_URL"),
             ("lbank_spot", "RUSTCTA_LBANK_SPOT_REST_BASE_URL"),
             ("lbank_contract", "RUSTCTA_LBANK_CONTRACT_REST_BASE_URL"),
             ("luno", "RUSTCTA_LUNO_REST_BASE_URL"),
+            ("mango_markets", "RUSTCTA_MANGO_MARKETS_SOLANA_RPC_URL"),
             ("mercado", "RUSTCTA_MERCADO_REST_BASE_URL"),
             ("mexc", "RUSTCTA_MEXC_REST_BASE_URL"),
+            ("modetrade", "RUSTCTA_MODETRADE_REST_BASE_URL"),
+            ("woofipro", "RUSTCTA_WOOFIPRO_REST_BASE_URL"),
+            ("myokx", "RUSTCTA_MYOKX_REST_BASE_URL"),
+            ("myokx", "MYOKX_REST_BASE_URL"),
+            ("ndax", "RUSTCTA_NDAX_REST_BASE_URL"),
+            ("novadax", "RUSTCTA_NOVADAX_REST_BASE_URL"),
             ("okx", "RUSTCTA_OKX_REST_BASE_URL"),
+            ("okxus", "RUSTCTA_OKXUS_REST_BASE_URL"),
+            ("okxus", "RUSTCTA_OKX_US_REST_BASE_URL"),
+            ("onetrading", "RUSTCTA_ONETRADING_REST_BASE_URL"),
+            ("onetrading", "RUSTCTA_ONE_TRADING_REST_BASE_URL"),
             ("orangex", "RUSTCTA_ORANGEX_REST_BASE_URL"),
+            ("p2b", "RUSTCTA_P2B_REST_BASE_URL"),
+            ("p2b", "RUSTCTA_P2PB2B_REST_BASE_URL"),
             ("paradex", "RUSTCTA_PARADEX_REST_BASE_URL"),
+            ("paymium", "RUSTCTA_PAYMIUM_REST_BASE_URL"),
             ("phemex", "RUSTCTA_PHEMEX_REST_BASE_URL"),
+            ("tokocrypto", "RUSTCTA_TOKOCRYPTO_REST_BASE_URL"),
+            (
+                "tokocrypto_market",
+                "RUSTCTA_TOKOCRYPTO_MARKET_REST_BASE_URL",
+            ),
+            (
+                "tokocrypto_nextme",
+                "RUSTCTA_TOKOCRYPTO_NEXTME_REST_BASE_URL",
+            ),
             ("upbit", "RUSTCTA_UPBIT_REST_BASE_URL"),
+            ("wavesexchange", "RUSTCTA_WAVESEXCHANGE_REST_BASE_URL"),
             ("weex", "RUSTCTA_WEEX_REST_BASE_URL"),
             ("weex_spot", "RUSTCTA_WEEX_SPOT_REST_BASE_URL"),
             ("weex_contract", "RUSTCTA_WEEX_CONTRACT_REST_BASE_URL"),
+            ("yobit", "RUSTCTA_YOBIT_REST_BASE_URL"),
+            ("zaif", "RUSTCTA_ZAIF_REST_BASE_URL"),
+            ("zaif_public", "RUSTCTA_ZAIF_PUBLIC_REST_BASE_URL"),
+            ("zaif_private", "RUSTCTA_ZAIF_PRIVATE_REST_BASE_URL"),
+            ("zeta_markets", "RUSTCTA_ZETA_MARKETS_REST_BASE_URL"),
+            ("zeta_markets", "RUSTCTA_ZETAMARKETS_REST_BASE_URL"),
+            ("zebpay", "RUSTCTA_ZEBPAY_REST_BASE_URL"),
         ] {
             if let Some(value) = env(key).filter(|value| !value.trim().is_empty()) {
                 urls.insert(adapter.to_string(), value);
@@ -212,8 +307,10 @@ impl GatewayPrivateCredentials {
                 Some(keys) => first_env(&mut env, keys),
                 None => None,
             };
-            let token_only_credentials = matches!(spec.adapter, "orangex" | "mercado" | "dydx")
-                && passphrase.as_ref().is_some_and(|value| !value.is_empty());
+            let token_only_credentials =
+                matches!(spec.adapter, "dydx" | "mercado" | "onetrading" | "orangex")
+                    && (spec.adapter == "onetrading"
+                        || passphrase.as_ref().is_some_and(|value| !value.is_empty()));
             let api_key = match first_env(&mut env, spec.api_key_keys) {
                 Some(api_key) => api_key,
                 None if token_only_credentials => String::new(),
@@ -314,9 +411,32 @@ fn register_adapter(
     private_credentials: &GatewayPrivateCredentials,
 ) -> Result<()> {
     match adapter.trim().to_ascii_lowercase().as_str() {
+        "aark" | "aark_digital" | "aark-digital" => gateway.register_aark_adapter(aark_config(
+            rest_base_urls.get("aark"),
+            private_credentials.get("aark"),
+        ))?,
+        "aftermath" => {
+            gateway.register_aftermath_adapter(aftermath_config(rest_base_urls.get("aftermath")))?
+        }
+        "alpaca" => gateway.register_alpaca_adapter(alpaca_config(
+            rest_base_urls.get("alpaca"),
+            rest_base_urls.get("alpaca_broker"),
+            rest_base_urls.get("alpaca_market_data"),
+            private_credentials.get("alpaca"),
+        ))?,
+        "apollox_dex" | "apollox-dex" | "apollox" | "apx" => {
+            gateway.register_apollox_dex_adapter(apollox_dex_config(
+                rest_base_urls.get("apollox_dex"),
+                private_credentials.get("apollox_dex"),
+            ))?
+        }
         "ascendex" | "ascend_ex" => gateway.register_ascendex_adapter(ascendex_config(
             rest_base_urls.get("ascendex"),
             private_credentials.get("ascendex"),
+        ))?,
+        "arkham" => gateway.register_arkham_adapter(arkham_config(
+            rest_base_urls.get("arkham"),
+            private_credentials.get("arkham"),
         ))?,
         "aster" | "asterdex" | "aster_dex" => gateway.register_aster_adapter(aster_config(
             rest_base_urls.get("aster"),
@@ -339,6 +459,12 @@ fn register_adapter(
                 rest_base_urls.get("binancecoinm"),
                 private_credentials.get("binancecoinm"),
             ))?,
+        "binanceus" | "binance_us" | "binance-us" => {
+            gateway.register_binanceus_adapter(binanceus_config(
+                rest_base_urls.get("binanceus"),
+                private_credentials.get("binanceus"),
+            ))?
+        }
         "bigone" | "big_one" => gateway.register_bigone_adapter(bigone_config(
             rest_base_urls.get("bigone"),
             rest_base_urls.get("bigone_spot"),
@@ -349,11 +475,19 @@ fn register_adapter(
             rest_base_urls.get("bingx"),
             private_credentials.get("bingx"),
         ))?,
+        "bit2c" | "bit_2c" | "bit2c.co.il" => gateway.register_bit2c_adapter(bit2c_config(
+            rest_base_urls.get("bit2c"),
+            private_credentials.get("bit2c"),
+        ))?,
         "bitbank" => gateway.register_bitbank_adapter(bitbank_config(
             rest_base_urls.get("bitbank"),
             rest_base_urls.get("bitbank_public"),
             rest_base_urls.get("bitbank_private"),
             private_credentials.get("bitbank"),
+        ))?,
+        "bitbns" => gateway.register_bitbns_adapter(bitbns_config(
+            rest_base_urls.get("bitbns"),
+            private_credentials.get("bitbns"),
         ))?,
         "bitfinex" => gateway.register_bitfinex_adapter(bitfinex_config(
             rest_base_urls.get("bitfinex"),
@@ -383,9 +517,20 @@ fn register_adapter(
             rest_base_urls.get("bitmart_futures"),
             private_credentials.get("bitmart"),
         ))?,
+        "bitopro" | "bito_pro" | "bito-pro" => gateway.register_bitopro_adapter(bitopro_config(
+            rest_base_urls.get("bitopro"),
+            private_credentials.get("bitopro"),
+        ))?,
         "bybit" => gateway.register_bybit_adapter(bybit_config(
             rest_base_urls.get("bybit"),
             private_credentials.get("bybit"),
+        ))?,
+        "bybiteu" | "bybit_eu" | "bybit-eu" => {
+            gateway.register_bybiteu_adapter(bybiteu_config(rest_base_urls.get("bybiteu")))?
+        }
+        "bydfi" | "bydfi.com" => gateway.register_bydfi_adapter(bydfi_config(
+            rest_base_urls.get("bydfi"),
+            private_credentials.get("bydfi"),
         ))?,
         "bitso" => gateway.register_bitso_adapter(bitso_config(
             rest_base_urls.get("bitso"),
@@ -395,10 +540,20 @@ fn register_adapter(
             rest_base_urls.get("bitstamp"),
             private_credentials.get("bitstamp"),
         ))?,
+        "bittrade" | "bittradejp" | "bittrade_jp" | "huobi_japan" => gateway
+            .register_bittrade_adapter(bittrade_config(
+                rest_base_urls.get("bittrade"),
+                private_credentials.get("bittrade"),
+            ))?,
         "bitvavo" => gateway.register_bitvavo_adapter(bitvavo_config(
             rest_base_urls.get("bitvavo"),
             private_credentials.get("bitvavo"),
         ))?,
+        "blockchain.com" | "blockchaincom" | "blockchain_com" | "blockchain-com" => gateway
+            .register_blockchaincom_adapter(blockchaincom_config(
+                rest_base_urls.get("blockchaincom"),
+                private_credentials.get("blockchaincom"),
+            ))?,
         "btcturk" | "btc_turk" | "btc-turk" => gateway.register_btcturk_adapter(btcturk_config(
             rest_base_urls.get("btcturk"),
             private_credentials.get("btcturk"),
@@ -413,9 +568,21 @@ fn register_adapter(
             rest_base_urls.get("blofin"),
             private_credentials.get("blofin"),
         ))?,
+        "bsx" => gateway.register_bsx_adapter(bsx_config(
+            rest_base_urls.get("bsx"),
+            private_credentials.get("bsx"),
+        ))?,
         "btcmarkets" | "btc_markets" => gateway.register_btcmarkets_adapter(btcmarkets_config(
             rest_base_urls.get("btcmarkets"),
             private_credentials.get("btcmarkets"),
+        ))?,
+        "btcbox" | "btc_box" => gateway.register_btcbox_adapter(btcbox_config(
+            rest_base_urls.get("btcbox"),
+            private_credentials.get("btcbox"),
+        ))?,
+        "cex" | "cexio" | "cex.io" => gateway.register_cex_adapter(cex_config(
+            rest_base_urls.get("cex"),
+            private_credentials.get("cex"),
         ))?,
         "coindcx" | "coin_dcx" => gateway.register_coindcx_adapter(coindcx_config(
             rest_base_urls.get("coindcx"),
@@ -432,6 +599,10 @@ fn register_adapter(
         "coincheck" => gateway.register_coincheck_adapter(coincheck_config(
             rest_base_urls.get("coincheck"),
             private_credentials.get("coincheck"),
+        ))?,
+        "coinmate" | "coin_mate" => gateway.register_coinmate_adapter(coinmate_config(
+            rest_base_urls.get("coinmate"),
+            private_credentials.get("coinmate"),
         ))?,
         "coinex" => gateway.register_coinex_adapter(coinex_config(
             rest_base_urls.get("coinex"),
@@ -462,12 +633,25 @@ fn register_adapter(
             rest_base_urls.get("cointr"),
             private_credentials.get("cointr"),
         ))?,
+        "cod3x" | "cod3x_ai" | "cod3x-ai" => gateway.register_cod3x_adapter(cod3x_config(
+            rest_base_urls.get("cod3x"),
+            rest_base_urls.get("cod3x_website"),
+            rest_base_urls.get("cod3x_app"),
+        ))?,
         "crypto.com" | "crypto_com" | "cryptocom" => {
             gateway.register_cryptocom_adapter(cryptocom_config(
                 rest_base_urls.get("cryptocom"),
                 private_credentials.get("cryptocom"),
             ))?
         }
+        "cryptomus" | "crypto_mus" => gateway.register_cryptomus_adapter(cryptomus_config(
+            rest_base_urls.get("cryptomus"),
+            private_credentials.get("cryptomus"),
+        ))?,
+        "d8x" | "d8x_exchange" | "d8x-exchange" => gateway.register_d8x_adapter(d8x_config(
+            rest_base_urls.get("d8x"),
+            private_credentials.get("d8x"),
+        ))?,
         "deepcoin" | "deep_coin" => gateway.register_deepcoin_adapter(deepcoin_config(
             rest_base_urls.get("deepcoin"),
             private_credentials.get("deepcoin"),
@@ -476,10 +660,33 @@ fn register_adapter(
             rest_base_urls.get("derive"),
             private_credentials.get("derive"),
         ))?,
+        "derive_chain_perps" | "derive-chain-perps" | "derive_chain" => gateway
+            .register_derive_chain_perps_adapter(derive_chain_perps_config(
+                rest_base_urls.get("derive_chain_perps"),
+                rest_base_urls.get("derive_chain_perps_rpc"),
+            ))?,
         "dydx" | "dydx_v4" | "dydxv4" => gateway.register_dydx_adapter(dydx_config(
             rest_base_urls.get("dydx"),
             rest_base_urls.get("dydx_node"),
             private_credentials.get("dydx"),
+        ))?,
+        "equation" | "equation_dao" | "equationdao" => {
+            gateway.register_equation_adapter(equation_config(
+                rest_base_urls.get("equation"),
+                rest_base_urls.get("equation_app"),
+            ))?
+        }
+        "exmo" => gateway.register_exmo_adapter(exmo_config(
+            rest_base_urls.get("exmo"),
+            private_credentials.get("exmo"),
+        ))?,
+        "fmfwio" | "fmfw.io" | "fmfw" => gateway.register_fmfwio_adapter(fmfwio_config(
+            rest_base_urls.get("fmfwio"),
+            private_credentials.get("fmfwio"),
+        ))?,
+        "foxbit" | "fox_bit" => gateway.register_foxbit_adapter(foxbit_config(
+            rest_base_urls.get("foxbit"),
+            private_credentials.get("foxbit"),
         ))?,
         "gate" | "gate.io" | "gateio" => gateway.register_gateio_adapter(gateio_config(
             rest_base_urls.get("gateio"),
@@ -496,6 +703,21 @@ fn register_adapter(
                 rest_base_urls.get("hashkey_global_futures"),
                 private_credentials.get("hashkey_global"),
             ))?,
+        "hollaex" | "hollaex_demo" | "hollaex-demo" => {
+            gateway.register_hollaex_adapter(hollaex_config(
+                rest_base_urls.get("hollaex"),
+                private_credentials.get("hollaex"),
+            ))?
+        }
+        "hibachi" => gateway.register_hibachi_adapter(hibachi_config(
+            rest_base_urls.get("hibachi"),
+            rest_base_urls.get("hibachi_account"),
+            private_credentials.get("hibachi"),
+        ))?,
+        "hitbtc" | "hitbtc.com" | "hit_btc" => gateway.register_hitbtc_adapter(hitbtc_config(
+            rest_base_urls.get("hitbtc"),
+            private_credentials.get("hitbtc"),
+        ))?,
         "htx" => gateway.register_htx_adapter(htx_config(
             rest_base_urls.get("htx"),
             rest_base_urls.get("htx_spot"),
@@ -546,6 +768,10 @@ fn register_adapter(
                 rest_base_urls.get("krakenfutures"),
                 private_credentials.get("krakenfutures"),
             ))?,
+        "latoken" => gateway.register_latoken_adapter(latoken_config(
+            rest_base_urls.get("latoken"),
+            private_credentials.get("latoken"),
+        ))?,
         "lbank" => gateway.register_lbank_adapter(lbank_config(
             rest_base_urls.get("lbank"),
             rest_base_urls.get("lbank_spot"),
@@ -556,6 +782,10 @@ fn register_adapter(
             rest_base_urls.get("luno"),
             private_credentials.get("luno"),
         ))?,
+        "mango_markets" | "mango-markets" | "mango" | "mango_markets_v4" => gateway
+            .register_mango_markets_adapter(mango_markets_config(
+                rest_base_urls.get("mango_markets"),
+            ))?,
         "mercado" | "mercadobitcoin" | "mercado_bitcoin" | "mercado-bitcoin" => gateway
             .register_mercado_adapter(mercado_config(
                 rest_base_urls.get("mercado"),
@@ -565,35 +795,122 @@ fn register_adapter(
             rest_base_urls.get("mexc"),
             private_credentials.get("mexc"),
         ))?,
+        "modetrade" | "mode_trade" | "mode-trade" => {
+            gateway.register_modetrade_adapter(modetrade_config(
+                rest_base_urls.get("modetrade"),
+                private_credentials.get("modetrade"),
+            ))?
+        }
+        "woofipro" | "woofi_pro" | "woofi-pro" => {
+            gateway.register_woofipro_adapter(woofipro_config(
+                rest_base_urls.get("woofipro"),
+                private_credentials.get("woofipro"),
+            ))?
+        }
+        "myokx" | "my_okx" | "my-okx" | "okx_eea" | "okx-eea" => {
+            gateway.register_myokx_adapter(myokx_config(rest_base_urls.get("myokx")))?
+        }
+        "ndax" | "ndaxio" | "ndax_io" => gateway.register_ndax_adapter(ndax_config(
+            rest_base_urls.get("ndax"),
+            private_credentials.get("ndax"),
+        ))?,
+        "novadax" | "nova_dax" | "nova-dax" => gateway.register_novadax_adapter(novadax_config(
+            rest_base_urls.get("novadax"),
+            private_credentials.get("novadax"),
+        ))?,
         "okx" => gateway.register_okx_adapter(okx_config(
             rest_base_urls.get("okx"),
             private_credentials.get("okx"),
         ))?,
+        "okxus" | "okx_us" | "okx-us" => {
+            gateway.register_okxus_adapter(okxus_config(rest_base_urls.get("okxus")))?
+        }
+        "onetrading" | "one_trading" | "one-trading" => {
+            gateway.register_onetrading_adapter(onetrading_config(
+                rest_base_urls.get("onetrading"),
+                private_credentials.get("onetrading"),
+            ))?
+        }
         "orange_x" | "orangex" => gateway.register_orangex_adapter(orangex_config(
             rest_base_urls.get("orangex"),
             private_credentials.get("orangex"),
+        ))?,
+        "p2b" | "p2pb2b" | "p2pb2b.com" => gateway.register_p2b_adapter(p2b_config(
+            rest_base_urls.get("p2b"),
+            private_credentials.get("p2b"),
         ))?,
         "paradex" => gateway.register_paradex_adapter(paradex_config(
             rest_base_urls.get("paradex"),
             private_credentials.get("paradex"),
         ))?,
+        "paymium" => gateway.register_paymium_adapter(paymium_config(
+            rest_base_urls.get("paymium"),
+            private_credentials.get("paymium"),
+        ))?,
         "phemex" => gateway.register_phemex_adapter(phemex_config(
             rest_base_urls.get("phemex"),
             private_credentials.get("phemex"),
         ))?,
+        "tokocrypto" | "toko_crypto" | "toko-crypto" => {
+            gateway.register_tokocrypto_adapter(tokocrypto_config(
+                rest_base_urls.get("tokocrypto"),
+                rest_base_urls.get("tokocrypto_market"),
+                rest_base_urls.get("tokocrypto_nextme"),
+                private_credentials.get("tokocrypto"),
+            ))?
+        }
         "upbit" => gateway.register_upbit_adapter(upbit_config(
             rest_base_urls.get("upbit"),
             private_credentials.get("upbit"),
         ))?,
+        "wavesexchange" | "waves_exchange" | "waves.exchange" => gateway
+            .register_wavesexchange_adapter(wavesexchange_config(
+                rest_base_urls.get("wavesexchange"),
+            ))?,
         "weex" => gateway.register_weex_adapter(weex_config(
             rest_base_urls.get("weex"),
             rest_base_urls.get("weex_spot"),
             rest_base_urls.get("weex_contract"),
             private_credentials.get("weex"),
         ))?,
+        "yobit" | "yo_bit" | "yobit.net" => gateway.register_yobit_adapter(yobit_config(
+            rest_base_urls.get("yobit"),
+            private_credentials.get("yobit"),
+        ))?,
+        "zaif" => gateway.register_zaif_adapter(zaif_config(
+            rest_base_urls.get("zaif"),
+            rest_base_urls.get("zaif_public"),
+            rest_base_urls.get("zaif_private"),
+            private_credentials.get("zaif"),
+        ))?,
+        "zebpay" | "zeb_pay" => gateway.register_zebpay_adapter(zebpay_config(
+            rest_base_urls.get("zebpay"),
+            private_credentials.get("zebpay"),
+        ))?,
+        "zeta_markets" | "zetamarkets" | "zeta-markets" => gateway.register_zeta_markets_adapter(
+            zeta_markets_config(rest_base_urls.get("zeta_markets")),
+        )?,
         other => gateway.register_named_adapter(other)?,
     }
     Ok(())
+}
+
+fn aark_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> AarkGatewayConfig {
+    let mut config = AarkGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.orderly_key = Some(credentials.api_key.clone());
+        config.orderly_secret = Some(credentials.api_secret.clone());
+        config.orderly_account_id = credentials.account_group.clone();
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
+    config
 }
 
 fn ascendex_config(
@@ -608,6 +925,87 @@ fn ascendex_config(
         config.api_secret = Some(credentials.api_secret.clone());
         config.enabled_private_rest = config.account_group.is_some();
     }
+    config
+}
+
+fn arkham_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> ArkhamGatewayConfig {
+    let mut config = ArkhamGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config
+}
+
+fn aftermath_config(rest_base_url: Option<String>) -> AftermathGatewayConfig {
+    let mut config = AftermathGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
+    config
+}
+
+fn alpaca_config(
+    rest_base_url: Option<String>,
+    broker_rest_base_url: Option<String>,
+    market_data_rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> AlpacaGatewayConfig {
+    let mut config = AlpacaGatewayConfig::default();
+    if let Some(rest_base_url) = rest_base_url {
+        config.broker_rest_base_url = rest_base_url.clone();
+        config.market_data_rest_base_url = rest_base_url;
+    }
+    apply_rest_base_url(&mut config.broker_rest_base_url, broker_rest_base_url);
+    apply_rest_base_url(
+        &mut config.market_data_rest_base_url,
+        market_data_rest_base_url,
+    );
+    if let Some(credentials) = credentials {
+        config.api_key = credentials.api_key.clone();
+        config.api_secret = credentials.api_secret.clone();
+        config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn apollox_dex_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> ApolloxDexGatewayConfig {
+    let mut config = ApolloxDexGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
+    config
+}
+
+fn d8x_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> D8xGatewayConfig {
+    let mut config = D8xGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.wallet_address = Some(credentials.api_key.clone());
+        config.signer_private_key = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
     config
 }
 
@@ -682,6 +1080,20 @@ fn binancecoinm_config(
     config
 }
 
+fn binanceus_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BinanceUsGatewayConfig {
+    let mut config = BinanceUsGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = true;
+    }
+    config
+}
+
 fn blofin_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -698,6 +1110,23 @@ fn blofin_config(
     config
 }
 
+fn bsx_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BsxGatewayConfig {
+    let mut config = BsxGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.wallet_address = credentials.account_group.clone();
+        config.signer_address = credentials.passphrase.clone();
+    }
+    config.enabled_private_rest = false;
+    config.enabled_private_streams = false;
+    config
+}
+
 fn btcmarkets_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -708,6 +1137,20 @@ fn btcmarkets_config(
         config.api_key = Some(credentials.api_key.clone());
         config.api_secret = Some(credentials.api_secret.clone());
         config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn btcbox_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BtcboxGatewayConfig {
+    let mut config = BtcboxGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
     }
     config
 }
@@ -747,6 +1190,20 @@ fn bingx_config(
     config
 }
 
+fn bit2c_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> Bit2cGatewayConfig {
+    let mut config = Bit2cGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
 fn bitbank_config(
     rest_base_url: Option<String>,
     public_rest_base_url: Option<String>,
@@ -764,6 +1221,35 @@ fn bitbank_config(
         config.api_key = Some(credentials.api_key.clone());
         config.api_secret = Some(credentials.api_secret.clone());
         config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn bitbns_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BitbnsGatewayConfig {
+    let mut config = BitbnsGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = credentials.api_key.clone();
+        config.api_secret = credentials.api_secret.clone();
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
+fn bittrade_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BittradeGatewayConfig {
+    let mut config = BittradeGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
     }
     config
 }
@@ -869,6 +1355,21 @@ fn bitmart_config(
     config
 }
 
+fn bitopro_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BitoproGatewayConfig {
+    let mut config = BitoproGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.api_identity = credentials.account_group.clone();
+        config.enabled_private_rest = config.api_identity.is_some();
+    }
+    config
+}
+
 fn bitso_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -909,6 +1410,21 @@ fn bitvavo_config(
         config.api_key = credentials.api_key.clone();
         config.api_secret = credentials.api_secret.clone();
         config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn blockchaincom_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BlockchainComGatewayConfig {
+    let mut config = BlockchainComGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
     }
     config
 }
@@ -962,6 +1478,42 @@ fn bybit_config(
     config
 }
 
+fn bybiteu_config(rest_base_url: Option<String>) -> BybiteuGatewayConfig {
+    let mut config = BybiteuGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    config
+}
+
+fn bydfi_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> BydfiGatewayConfig {
+    let mut config = BydfiGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn cex_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> CexGatewayConfig {
+    let mut config = CexGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.user_id = credentials.account_group.clone();
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config
+}
+
 fn coindcx_config(
     rest_base_url: Option<String>,
     spot_rest_base_url: Option<String>,
@@ -1010,6 +1562,25 @@ fn coincheck_config(
         config.api_key = Some(credentials.api_key.clone());
         config.api_secret = Some(credentials.api_secret.clone());
         config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn coinmate_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> CoinmateGatewayConfig {
+    let mut config = CoinmateGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.public_key = Some(credentials.api_key.clone());
+        config.private_key = Some(credentials.api_secret.clone());
+        config.client_id = credentials
+            .account_group
+            .clone()
+            .or_else(|| credentials.passphrase.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
     }
     config
 }
@@ -1121,6 +1692,22 @@ fn cointr_config(
     config
 }
 
+fn cod3x_config(
+    docs_base_url: Option<String>,
+    website_base_url: Option<String>,
+    app_base_url: Option<String>,
+) -> Cod3xGatewayConfig {
+    let mut config = Cod3xGatewayConfig::default();
+    apply_rest_base_url(&mut config.docs_base_url, docs_base_url);
+    apply_rest_base_url(&mut config.website_base_url, website_base_url);
+    apply_rest_base_url(&mut config.app_base_url, app_base_url);
+    config.enabled_public_rest = false;
+    config.enabled_private_rest = false;
+    config.enabled_public_streams = false;
+    config.enabled_private_streams = false;
+    config
+}
+
 fn dydx_config(
     indexer_rest_base_url: Option<String>,
     node_rest_base_url: Option<String>,
@@ -1145,6 +1732,110 @@ fn dydx_config(
     config
 }
 
+fn equation_config(
+    docs_base_url: Option<String>,
+    app_base_url: Option<String>,
+) -> EquationGatewayConfig {
+    let mut config = EquationGatewayConfig::default();
+    apply_rest_base_url(&mut config.docs_base_url, docs_base_url);
+    apply_rest_base_url(&mut config.app_base_url, app_base_url);
+    config.enabled_public_rest = false;
+    config.enabled_private_rest = false;
+    config.enabled_public_streams = false;
+    config.enabled_private_streams = false;
+    config
+}
+
+fn exmo_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> ExmoGatewayConfig {
+    let mut config = ExmoGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn fmfwio_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> FmfwioGatewayConfig {
+    let mut config = FmfwioGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
+fn hollaex_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> HollaexGatewayConfig {
+    let mut config = HollaexGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
+fn foxbit_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> FoxbitGatewayConfig {
+    let mut config = FoxbitGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config
+}
+
+fn hibachi_config(
+    data_rest_base_url: Option<String>,
+    account_rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> HibachiGatewayConfig {
+    let mut config = HibachiGatewayConfig::default();
+    apply_rest_base_url(&mut config.data_rest_base_url, data_rest_base_url);
+    apply_rest_base_url(&mut config.account_rest_base_url, account_rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.private_key = Some(credentials.api_secret.clone());
+        config.public_key = credentials.passphrase.clone();
+        config.account_id = credentials.account_group.clone();
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config
+}
+
+fn hitbtc_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> HitbtcGatewayConfig {
+    let mut config = HitbtcGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
 fn cryptocom_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -1155,6 +1846,21 @@ fn cryptocom_config(
         config.api_key = credentials.api_key.clone();
         config.api_secret = credentials.api_secret.clone();
         config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn cryptomus_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> CryptomusGatewayConfig {
+    let mut config = CryptomusGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.user_id = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
     }
     config
 }
@@ -1187,6 +1893,21 @@ fn derive_config(
         config.subaccount_id = credentials.account_group.clone();
         config.enabled_private_rest = config.subaccount_id.is_some();
     }
+    config
+}
+
+fn derive_chain_perps_config(
+    rest_base_url: Option<String>,
+    rpc_url: Option<String>,
+) -> DeriveChainPerpsGatewayConfig {
+    let mut config = DeriveChainPerpsGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    apply_rest_base_url(&mut config.rpc_url, rpc_url);
+    config.enabled = false;
+    config.enabled_public_rest = false;
+    config.enabled_private_rest = false;
+    config.enabled_public_streams = false;
+    config.enabled_private_streams = false;
     config
 }
 
@@ -1434,6 +2155,20 @@ fn lbank_config(
     config
 }
 
+fn latoken_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> LatokenGatewayConfig {
+    let mut config = LatokenGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
 fn luno_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -1445,6 +2180,18 @@ fn luno_config(
         config.api_key_secret = Some(credentials.api_secret.clone());
         config.enabled_private_rest = false;
     }
+    config
+}
+
+fn mango_markets_config(solana_rpc_url: Option<String>) -> MangoMarketsGatewayConfig {
+    let mut config = MangoMarketsGatewayConfig::default();
+    if let Some(solana_rpc_url) = solana_rpc_url {
+        config.solana_rpc_url = solana_rpc_url;
+    }
+    config.enabled_public_scan = false;
+    config.enabled_private_rest = false;
+    config.enabled_public_streams = false;
+    config.enabled_private_streams = false;
     config
 }
 
@@ -1478,6 +2225,82 @@ fn mexc_config(
     config
 }
 
+fn modetrade_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> ModetradeGatewayConfig {
+    let mut config = ModetradeGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.orderly_key = Some(credentials.api_key.clone());
+        config.orderly_secret = Some(credentials.api_secret.clone());
+        config.orderly_account_id = credentials.account_group.clone();
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
+    config
+}
+
+fn woofipro_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> WoofiproGatewayConfig {
+    let mut config = WoofiproGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.orderly_key = Some(credentials.api_key.clone());
+        config.orderly_secret = Some(credentials.api_secret.clone());
+        config.orderly_account_id = credentials.account_group.clone();
+        config.enabled_private_rest = config.private_rest_available();
+    }
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
+    config.enabled_private_streams = false;
+    config
+}
+
+fn novadax_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> NovadaxGatewayConfig {
+    let mut config = NovadaxGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.account_id = credentials.passphrase.clone();
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config
+}
+
+fn ndax_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> NdaxGatewayConfig {
+    let mut config = NdaxGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.passphrase = credentials.passphrase.clone();
+        config.user_id = credentials.account_group.clone();
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_rest = true;
+    config
+}
+
+fn myokx_config(rest_base_url: Option<String>) -> MyOkxGatewayConfig {
+    let mut config = MyOkxGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    config
+}
+
 fn okx_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -1489,6 +2312,26 @@ fn okx_config(
         config.api_secret = Some(credentials.api_secret.clone());
         config.passphrase = credentials.passphrase.clone();
         config.enabled_private_rest = true;
+    }
+    config
+}
+
+fn okxus_config(rest_base_url: Option<String>) -> OkxusGatewayConfig {
+    let mut config = OkxusGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    config
+}
+
+fn onetrading_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> OneTradingGatewayConfig {
+    let mut config = OneTradingGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_token = Some(credentials.api_key.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
     }
     config
 }
@@ -1514,6 +2357,20 @@ fn orangex_config(
     config
 }
 
+fn p2b_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> P2bGatewayConfig {
+    let mut config = P2bGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = credentials.api_key.clone();
+        config.api_secret = credentials.api_secret.clone();
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
 fn paradex_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -1526,6 +2383,22 @@ fn paradex_config(
         config.jwt_token = credentials.passphrase.clone();
         config.enabled_private_rest = true;
     }
+    config
+}
+
+fn paymium_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> PaymiumGatewayConfig {
+    let mut config = PaymiumGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_streams = false;
     config
 }
 
@@ -1543,6 +2416,26 @@ fn phemex_config(
     config
 }
 
+fn tokocrypto_config(
+    rest_base_url: Option<String>,
+    market_rest_base_url: Option<String>,
+    nextme_rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> TokocryptoGatewayConfig {
+    let mut config = TokocryptoGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    apply_rest_base_url(&mut config.market_rest_base_url, market_rest_base_url);
+    apply_rest_base_url(&mut config.nextme_rest_base_url, nextme_rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+        config.enabled_private_streams = false;
+    }
+    config.enabled_public_streams = false;
+    config
+}
+
 fn upbit_config(
     rest_base_url: Option<String>,
     credentials: Option<&ExchangePrivateCredentials>,
@@ -1555,6 +2448,12 @@ fn upbit_config(
         config.enabled_private_rest = true;
         config.enabled_private_streams = true;
     }
+    config
+}
+
+fn wavesexchange_config(rest_base_url: Option<String>) -> WavesExchangeGatewayConfig {
+    let mut config = WavesExchangeGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
     config
 }
 
@@ -1577,6 +2476,66 @@ fn weex_config(
         config.passphrase = credentials.passphrase.clone();
         config.enabled_private_rest = true;
     }
+    config
+}
+
+fn yobit_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> YobitGatewayConfig {
+    let mut config = YobitGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = credentials.api_key.clone();
+        config.api_secret = credentials.api_secret.clone();
+    }
+    config.enabled_private_rest = false;
+    config
+}
+
+fn zaif_config(
+    rest_base_url: Option<String>,
+    public_rest_base_url: Option<String>,
+    private_rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> ZaifGatewayConfig {
+    let mut config = ZaifGatewayConfig::default();
+    if let Some(rest_base_url) = rest_base_url {
+        config.public_rest_base_url = rest_base_url.clone();
+        config.private_rest_base_url = rest_base_url;
+    }
+    apply_rest_base_url(&mut config.public_rest_base_url, public_rest_base_url);
+    apply_rest_base_url(&mut config.private_rest_base_url, private_rest_base_url);
+    if let Some(credentials) = credentials {
+        config.api_key = Some(credentials.api_key.clone());
+        config.api_secret = Some(credentials.api_secret.clone());
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
+fn zebpay_config(
+    rest_base_url: Option<String>,
+    credentials: Option<&ExchangePrivateCredentials>,
+) -> ZebpayGatewayConfig {
+    let mut config = ZebpayGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    if let Some(credentials) = credentials {
+        config.client_id = credentials.api_key.clone();
+        config.client_secret = credentials.api_secret.clone();
+        config.access_token = credentials.passphrase.clone().unwrap_or_default();
+        config.enabled_private_rest = false;
+    }
+    config
+}
+
+fn zeta_markets_config(rest_base_url: Option<String>) -> ZetaMarketsGatewayConfig {
+    let mut config = ZetaMarketsGatewayConfig::default();
+    apply_rest_base_url(&mut config.rest_base_url, rest_base_url);
+    config.enabled_public_rest = true;
+    config.enabled_public_streams = false;
+    config.enabled_private_rest = false;
+    config.enabled_private_streams = false;
     config
 }
 
@@ -1617,6 +2576,48 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         ],
         passphrase_keys: None,
         account_group_keys: Some(&["RUSTCTA_ASCENDEX_ACCOUNT_GROUP", "ASCENDEX_ACCOUNT_GROUP"]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "alpaca",
+        api_key_keys: &[
+            "RUSTCTA_ALPACA_API_KEY",
+            "RUSTCTA_ALPACA_API_KEY_ID",
+            "ALPACA_API_KEY",
+            "APCA_API_KEY_ID",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_ALPACA_API_SECRET",
+            "RUSTCTA_ALPACA_SECRET_KEY",
+            "ALPACA_API_SECRET",
+            "APCA_API_SECRET_KEY",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "apollox_dex",
+        api_key_keys: &[
+            "RUSTCTA_APOLLOX_DEX_API_KEY",
+            "APOLLOX_DEX_API_KEY",
+            "APOLLOX_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_APOLLOX_DEX_API_SECRET",
+            "APOLLOX_DEX_API_SECRET",
+            "APOLLOX_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "arkham",
+        api_key_keys: &["RUSTCTA_ARKHAM_API_KEY", "ARKHAM_API_KEY"],
+        api_secret_keys: &["RUSTCTA_ARKHAM_API_SECRET", "ARKHAM_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
@@ -1671,6 +2672,44 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "binanceus",
+        api_key_keys: &[
+            "RUSTCTA_BINANCEUS_API_KEY",
+            "RUSTCTA_BINANCE_US_API_KEY",
+            "BINANCEUS_SPOT_API_KEY",
+            "BINANCEUS_API_KEY",
+            "BINANCE_US_SPOT_API_KEY",
+            "BINANCE_US_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_BINANCEUS_API_SECRET",
+            "RUSTCTA_BINANCE_US_API_SECRET",
+            "BINANCEUS_SPOT_API_SECRET",
+            "BINANCEUS_API_SECRET",
+            "BINANCE_US_SPOT_API_SECRET",
+            "BINANCE_US_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "tokocrypto",
+        api_key_keys: &[
+            "RUSTCTA_TOKOCRYPTO_API_KEY",
+            "TOKOCRYPTO_SPOT_API_KEY",
+            "TOKOCRYPTO_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_TOKOCRYPTO_API_SECRET",
+            "TOKOCRYPTO_SPOT_API_SECRET",
+            "TOKOCRYPTO_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "bigone",
         api_key_keys: &["RUSTCTA_BIGONE_API_KEY", "BIGONE_API_KEY"],
         api_secret_keys: &["RUSTCTA_BIGONE_API_SECRET", "BIGONE_API_SECRET"],
@@ -1711,9 +2750,41 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "bit2c",
+        api_key_keys: &["RUSTCTA_BIT2C_API_KEY", "BIT2C_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BIT2C_API_SECRET", "BIT2C_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "bitbank",
         api_key_keys: &["RUSTCTA_BITBANK_API_KEY", "BITBANK_API_KEY"],
         api_secret_keys: &["RUSTCTA_BITBANK_API_SECRET", "BITBANK_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "zaif",
+        api_key_keys: &["RUSTCTA_ZAIF_API_KEY", "ZAIF_API_KEY"],
+        api_secret_keys: &["RUSTCTA_ZAIF_API_SECRET", "ZAIF_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "bitbns",
+        api_key_keys: &["RUSTCTA_BITBNS_API_KEY", "BITBNS_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BITBNS_API_SECRET", "BITBNS_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "bittrade",
+        api_key_keys: &["RUSTCTA_BITTRADE_API_KEY", "BITTRADE_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BITTRADE_API_SECRET", "BITTRADE_API_SECRET"],
         passphrase_keys: None,
         account_group_keys: None,
         requires_passphrase: false,
@@ -1781,6 +2852,19 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "bitopro",
+        api_key_keys: &["RUSTCTA_BITOPRO_API_KEY", "BITOPRO_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BITOPRO_API_SECRET", "BITOPRO_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: Some(&[
+            "RUSTCTA_BITOPRO_API_IDENTITY",
+            "BITOPRO_API_IDENTITY",
+            "RUSTCTA_BITOPRO_IDENTITY",
+            "BITOPRO_IDENTITY",
+        ]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "bitmart",
         api_key_keys: &["RUSTCTA_BITMART_API_KEY", "BITMART_API_KEY"],
         api_secret_keys: &["RUSTCTA_BITMART_API_SECRET", "BITMART_API_SECRET"],
@@ -1822,9 +2906,35 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "blockchaincom",
+        api_key_keys: &[
+            "RUSTCTA_BLOCKCHAINCOM_API_KEY",
+            "RUSTCTA_BLOCKCHAIN_COM_API_KEY",
+            "BLOCKCHAINCOM_API_KEY",
+            "BLOCKCHAIN_COM_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_BLOCKCHAINCOM_API_SECRET",
+            "RUSTCTA_BLOCKCHAIN_COM_API_SECRET",
+            "BLOCKCHAINCOM_API_SECRET",
+            "BLOCKCHAIN_COM_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "btcturk",
         api_key_keys: &["RUSTCTA_BTCTURK_API_KEY", "BTCTURK_API_KEY"],
         api_secret_keys: &["RUSTCTA_BTCTURK_API_SECRET", "BTCTURK_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "btcbox",
+        api_key_keys: &["RUSTCTA_BTCBOX_API_KEY", "BTCBOX_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BTCBOX_API_SECRET", "BTCBOX_API_SECRET"],
         passphrase_keys: None,
         account_group_keys: None,
         requires_passphrase: false,
@@ -1846,6 +2956,26 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "bydfi",
+        api_key_keys: &["RUSTCTA_BYDFI_API_KEY", "BYDFI_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BYDFI_API_SECRET", "BYDFI_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "cex",
+        api_key_keys: &["RUSTCTA_CEX_API_KEY", "CEX_API_KEY", "CEXIO_API_KEY"],
+        api_secret_keys: &[
+            "RUSTCTA_CEX_API_SECRET",
+            "CEX_API_SECRET",
+            "CEXIO_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: Some(&["RUSTCTA_CEX_USER_ID", "CEX_USER_ID", "CEXIO_USER_ID"]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "blofin",
         api_key_keys: &["RUSTCTA_BLOFIN_API_KEY", "BLOFIN_API_KEY"],
         api_secret_keys: &["RUSTCTA_BLOFIN_API_SECRET", "BLOFIN_API_SECRET"],
@@ -1857,6 +2987,14 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         ]),
         account_group_keys: None,
         requires_passphrase: true,
+    },
+    PrivateCredentialSpec {
+        adapter: "bsx",
+        api_key_keys: &["RUSTCTA_BSX_API_KEY", "BSX_API_KEY"],
+        api_secret_keys: &["RUSTCTA_BSX_API_SECRET", "BSX_API_SECRET"],
+        passphrase_keys: Some(&["RUSTCTA_BSX_SIGNER_ADDRESS", "BSX_SIGNER_ADDRESS"]),
+        account_group_keys: Some(&["RUSTCTA_BSX_WALLET_ADDRESS", "BSX_WALLET_ADDRESS"]),
+        requires_passphrase: false,
     },
     PrivateCredentialSpec {
         adapter: "btcmarkets",
@@ -1908,6 +3046,24 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         api_secret_keys: &["RUSTCTA_COINCHECK_API_SECRET", "COINCHECK_API_SECRET"],
         passphrase_keys: None,
         account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "coinmate",
+        api_key_keys: &[
+            "RUSTCTA_COINMATE_PUBLIC_KEY",
+            "RUSTCTA_COINMATE_API_KEY",
+            "COINMATE_PUBLIC_KEY",
+            "COINMATE_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_COINMATE_PRIVATE_KEY",
+            "RUSTCTA_COINMATE_API_SECRET",
+            "COINMATE_PRIVATE_KEY",
+            "COINMATE_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: Some(&["RUSTCTA_COINMATE_CLIENT_ID", "COINMATE_CLIENT_ID"]),
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
@@ -1998,6 +3154,27 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "cryptomus",
+        api_key_keys: &["RUSTCTA_CRYPTOMUS_API_KEY", "CRYPTOMUS_API_KEY"],
+        api_secret_keys: &[
+            "RUSTCTA_CRYPTOMUS_USER_ID",
+            "CRYPTOMUS_USER_ID",
+            "RUSTCTA_CRYPTOMUS_API_SECRET",
+            "CRYPTOMUS_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "d8x",
+        api_key_keys: &["RUSTCTA_D8X_WALLET_ADDRESS", "D8X_WALLET_ADDRESS"],
+        api_secret_keys: &["RUSTCTA_D8X_SIGNER_PRIVATE_KEY", "D8X_SIGNER_PRIVATE_KEY"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "deepcoin",
         api_key_keys: &["RUSTCTA_DEEPCOIN_API_KEY", "DEEPCOIN_API_KEY"],
         api_secret_keys: &["RUSTCTA_DEEPCOIN_API_SECRET", "DEEPCOIN_API_SECRET"],
@@ -2025,6 +3202,58 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         passphrase_keys: Some(&["RUSTCTA_DYDX_SUBACCOUNT_NUMBER", "DYDX_SUBACCOUNT_NUMBER"]),
         account_group_keys: Some(&["RUSTCTA_DYDX_SUBACCOUNT_NUMBER", "DYDX_SUBACCOUNT_NUMBER"]),
         requires_passphrase: true,
+    },
+    PrivateCredentialSpec {
+        adapter: "exmo",
+        api_key_keys: &["RUSTCTA_EXMO_API_KEY", "EXMO_SPOT_API_KEY", "EXMO_API_KEY"],
+        api_secret_keys: &[
+            "RUSTCTA_EXMO_API_SECRET",
+            "EXMO_SPOT_API_SECRET",
+            "EXMO_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "fmfwio",
+        api_key_keys: &["RUSTCTA_FMFWIO_API_KEY", "FMFWIO_API_KEY"],
+        api_secret_keys: &["RUSTCTA_FMFWIO_API_SECRET", "FMFWIO_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "hollaex",
+        api_key_keys: &["RUSTCTA_HOLLAEX_API_KEY", "HOLLAEX_API_KEY"],
+        api_secret_keys: &["RUSTCTA_HOLLAEX_API_SECRET", "HOLLAEX_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "foxbit",
+        api_key_keys: &["RUSTCTA_FOXBIT_API_KEY", "FOXBIT_API_KEY"],
+        api_secret_keys: &["RUSTCTA_FOXBIT_API_SECRET", "FOXBIT_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "hibachi",
+        api_key_keys: &["RUSTCTA_HIBACHI_API_KEY", "HIBACHI_API_KEY"],
+        api_secret_keys: &["RUSTCTA_HIBACHI_PRIVATE_KEY", "HIBACHI_PRIVATE_KEY"],
+        passphrase_keys: Some(&["RUSTCTA_HIBACHI_PUBLIC_KEY", "HIBACHI_PUBLIC_KEY"]),
+        account_group_keys: Some(&["RUSTCTA_HIBACHI_ACCOUNT_ID", "HIBACHI_ACCOUNT_ID"]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "hitbtc",
+        api_key_keys: &["RUSTCTA_HITBTC_API_KEY", "HITBTC_API_KEY"],
+        api_secret_keys: &["RUSTCTA_HITBTC_API_SECRET", "HITBTC_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
     },
     PrivateCredentialSpec {
         adapter: "gateio",
@@ -2227,6 +3456,80 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "aark",
+        api_key_keys: &[
+            "RUSTCTA_AARK_ORDERLY_KEY",
+            "RUSTCTA_AARK_API_KEY",
+            "AARK_ORDERLY_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_AARK_ORDERLY_SECRET",
+            "RUSTCTA_AARK_API_SECRET",
+            "AARK_ORDERLY_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: Some(&["RUSTCTA_AARK_ORDERLY_ACCOUNT_ID", "AARK_ORDERLY_ACCOUNT_ID"]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "modetrade",
+        api_key_keys: &[
+            "RUSTCTA_MODETRADE_ORDERLY_KEY",
+            "RUSTCTA_MODETRADE_API_KEY",
+            "MODETRADE_ORDERLY_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_MODETRADE_ORDERLY_SECRET",
+            "RUSTCTA_MODETRADE_API_SECRET",
+            "MODETRADE_ORDERLY_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: Some(&[
+            "RUSTCTA_MODETRADE_ORDERLY_ACCOUNT_ID",
+            "MODETRADE_ORDERLY_ACCOUNT_ID",
+        ]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "woofipro",
+        api_key_keys: &[
+            "RUSTCTA_WOOFIPRO_ORDERLY_KEY",
+            "RUSTCTA_WOOFIPRO_API_KEY",
+            "WOOFIPRO_ORDERLY_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_WOOFIPRO_ORDERLY_SECRET",
+            "RUSTCTA_WOOFIPRO_API_SECRET",
+            "WOOFIPRO_ORDERLY_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: Some(&[
+            "RUSTCTA_WOOFIPRO_ORDERLY_ACCOUNT_ID",
+            "WOOFIPRO_ORDERLY_ACCOUNT_ID",
+        ]),
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "p2b",
+        api_key_keys: &[
+            "RUSTCTA_P2B_API_KEY",
+            "RUSTCTA_P2B_SPOT_API_KEY",
+            "RUSTCTA_P2PB2B_API_KEY",
+            "P2B_API_KEY",
+            "P2PB2B_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_P2B_API_SECRET",
+            "RUSTCTA_P2B_SPOT_API_SECRET",
+            "RUSTCTA_P2PB2B_API_SECRET",
+            "P2B_API_SECRET",
+            "P2PB2B_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "paradex",
         api_key_keys: &[
             "RUSTCTA_PARADEX_STARKNET_ACCOUNT",
@@ -2241,12 +3544,40 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         requires_passphrase: false,
     },
     PrivateCredentialSpec {
+        adapter: "paymium",
+        api_key_keys: &["RUSTCTA_PAYMIUM_API_KEY", "PAYMIUM_API_KEY"],
+        api_secret_keys: &["RUSTCTA_PAYMIUM_API_SECRET", "PAYMIUM_API_SECRET"],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
         adapter: "mercado",
         api_key_keys: &["RUSTCTA_MERCADO_BEARER_TOKEN", "MERCADO_BEARER_TOKEN"],
         api_secret_keys: &[],
         passphrase_keys: Some(&["RUSTCTA_MERCADO_ACCOUNT_ID", "MERCADO_ACCOUNT_ID"]),
         account_group_keys: None,
         requires_passphrase: true,
+    },
+    PrivateCredentialSpec {
+        adapter: "novadax",
+        api_key_keys: &["RUSTCTA_NOVADAX_API_KEY", "NOVADAX_API_KEY"],
+        api_secret_keys: &["RUSTCTA_NOVADAX_API_SECRET", "NOVADAX_API_SECRET"],
+        passphrase_keys: Some(&["RUSTCTA_NOVADAX_ACCOUNT_ID", "NOVADAX_ACCOUNT_ID"]),
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "ndax",
+        api_key_keys: &["RUSTCTA_NDAX_API_KEY", "NDAX_API_KEY"],
+        api_secret_keys: &["RUSTCTA_NDAX_API_SECRET", "NDAX_API_SECRET"],
+        passphrase_keys: Some(&[
+            "RUSTCTA_NDAX_API_PASSPHRASE",
+            "NDAX_API_PASSPHRASE",
+            "NDAX_PASSPHRASE",
+        ]),
+        account_group_keys: Some(&["RUSTCTA_NDAX_USER_ID", "NDAX_USER_ID"]),
+        requires_passphrase: false,
     },
     PrivateCredentialSpec {
         adapter: "lbank",
@@ -2260,6 +3591,14 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
             "LBANK_SPOT_API_SECRET",
             "LBANK_API_SECRET",
         ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "latoken",
+        api_key_keys: &["RUSTCTA_LATOKEN_API_KEY", "LATOKEN_API_KEY"],
+        api_secret_keys: &["RUSTCTA_LATOKEN_API_SECRET", "LATOKEN_API_SECRET"],
         passphrase_keys: None,
         account_group_keys: None,
         requires_passphrase: false,
@@ -2297,6 +3636,19 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         ]),
         account_group_keys: None,
         requires_passphrase: true,
+    },
+    PrivateCredentialSpec {
+        adapter: "onetrading",
+        api_key_keys: &[
+            "RUSTCTA_ONETRADING_API_TOKEN",
+            "RUSTCTA_ONE_TRADING_API_TOKEN",
+            "ONETRADING_API_TOKEN",
+            "ONE_TRADING_API_TOKEN",
+        ],
+        api_secret_keys: &[],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
     },
     PrivateCredentialSpec {
         adapter: "orangex",
@@ -2357,6 +3709,30 @@ const PRIVATE_CREDENTIAL_SPECS: &[PrivateCredentialSpec] = &[
         account_group_keys: None,
         requires_passphrase: true,
     },
+    PrivateCredentialSpec {
+        adapter: "yobit",
+        api_key_keys: &[
+            "RUSTCTA_YOBIT_API_KEY",
+            "RUSTCTA_YOBIT_SPOT_API_KEY",
+            "YOBIT_API_KEY",
+        ],
+        api_secret_keys: &[
+            "RUSTCTA_YOBIT_API_SECRET",
+            "RUSTCTA_YOBIT_SPOT_API_SECRET",
+            "YOBIT_API_SECRET",
+        ],
+        passphrase_keys: None,
+        account_group_keys: None,
+        requires_passphrase: false,
+    },
+    PrivateCredentialSpec {
+        adapter: "zebpay",
+        api_key_keys: &["RUSTCTA_ZEBPAY_CLIENT_ID", "ZEBPAY_CLIENT_ID"],
+        api_secret_keys: &["RUSTCTA_ZEBPAY_CLIENT_SECRET", "ZEBPAY_CLIENT_SECRET"],
+        passphrase_keys: Some(&["RUSTCTA_ZEBPAY_ACCESS_TOKEN", "ZEBPAY_ACCESS_TOKEN"]),
+        account_group_keys: None,
+        requires_passphrase: true,
+    },
 ];
 
 #[cfg(test)]
@@ -2366,7 +3742,7 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use rustcta_exchange_api::{
-        AccountId, ExchangeId, RequestContext, TenantId, EXCHANGE_API_SCHEMA_VERSION,
+        AccountId, ExchangeId, MarketType, RequestContext, TenantId, EXCHANGE_API_SCHEMA_VERSION,
     };
     use rustcta_exchange_gateway::{
         gateway_router, GatewayClient, GetCapabilitiesRequest, InProcessGatewayClient,
@@ -2392,6 +3768,145 @@ mod tests {
         assert_eq!(config.adapters, vec!["paper"]);
         assert!(config.rest_base_urls.get("binance").is_none());
         assert!(!config.private_credentials.contains("binance"));
+    }
+
+    #[test]
+    fn config_should_wire_exmo_private_gateway_adapter_with_redacted_env_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "exmo"),
+            ("RUSTCTA_EXMO_REST_BASE_URL", "http://127.0.0.1:9330"),
+            ("RUSTCTA_EXMO_API_KEY", "exmo-key"),
+            ("RUSTCTA_EXMO_API_SECRET", "exmo-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["exmo"]);
+        assert_eq!(
+            config.rest_base_urls.get("exmo").as_deref(),
+            Some("http://127.0.0.1:9330")
+        );
+        assert!(config.private_credentials.contains("exmo"));
+        config.build_gateway().expect("exmo gateway");
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("exmo-key"));
+        assert!(!debug.contains("exmo-secret"));
+    }
+
+    #[test]
+    fn config_should_wire_equation_gateway_adapter_as_scan_only() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "equation"),
+            (
+                "RUSTCTA_EQUATION_DOCS_BASE_URL",
+                "https://docs.equation.org",
+            ),
+            ("RUSTCTA_EQUATION_APP_BASE_URL", "https://app.equation.org"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["equation"]);
+        assert_eq!(
+            config.rest_base_urls.get("equation").as_deref(),
+            Some("https://docs.equation.org")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("equation_app").as_deref(),
+            Some("https://app.equation.org")
+        );
+        assert!(!config.private_credentials.contains("equation"));
+        let gateway = config.build_gateway().expect("equation gateway");
+        assert_eq!(gateway.adapter_count().expect("count"), 1);
+    }
+
+    #[test]
+    fn config_should_wire_cod3x_gateway_adapter_as_audit_only() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "cod3x"),
+            ("RUSTCTA_COD3X_DOCS_BASE_URL", "https://docs.cod3x.org"),
+            ("RUSTCTA_COD3X_WEBSITE_BASE_URL", "https://www.cod3x.org"),
+            ("RUSTCTA_COD3X_APP_BASE_URL", "https://app.cod3x.org"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["cod3x"]);
+        assert_eq!(
+            config.rest_base_urls.get("cod3x").as_deref(),
+            Some("https://docs.cod3x.org")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("cod3x_website").as_deref(),
+            Some("https://www.cod3x.org")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("cod3x_app").as_deref(),
+            Some("https://app.cod3x.org")
+        );
+        assert!(!config.private_credentials.contains("cod3x"));
+        let gateway = config.build_gateway().expect("cod3x gateway");
+        assert_eq!(gateway.adapter_count().expect("count"), 1);
+    }
+
+    #[tokio::test]
+    async fn alpaca_config_should_parse_split_rest_urls_and_register_private_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "alpaca"),
+            (
+                "RUSTCTA_ALPACA_BROKER_REST_BASE_URL",
+                "http://127.0.0.1:9310",
+            ),
+            (
+                "RUSTCTA_ALPACA_MARKET_DATA_REST_BASE_URL",
+                "http://127.0.0.1:9311",
+            ),
+            ("RUSTCTA_ALPACA_API_KEY", "alpaca-key"),
+            ("RUSTCTA_ALPACA_API_SECRET", "alpaca-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["alpaca"]);
+        assert_eq!(
+            config.rest_base_urls.get("alpaca_broker").as_deref(),
+            Some("http://127.0.0.1:9310")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("alpaca_market_data").as_deref(),
+            Some("http://127.0.0.1:9311")
+        );
+        assert!(config.private_credentials.contains("alpaca"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("alpaca-key"));
+        assert!(!debug.contains("alpaca-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "alpaca-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("acct-123").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("acct-123").expect("account")),
+                        run_id: None,
+                        request_id: Some("alpaca-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("alpaca").expect("alpaca")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let alpaca = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "alpaca")
+            .expect("alpaca capabilities");
+        assert!(alpaca.supports_public_rest);
+        assert!(alpaca.supports_private_rest);
+        assert!(alpaca.supports_place_order);
+        assert!(alpaca.market_types.contains(&MarketType::Spot));
     }
 
     #[test]
@@ -2428,6 +3943,275 @@ mod tests {
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("bitflyer-secret"));
         assert!(!debug.contains("bitbank-secret"));
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_bitopro_private_gateway_adapter_without_exposing_identity() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bitopro"),
+            ("RUSTCTA_BITOPRO_REST_BASE_URL", "http://127.0.0.1:9208/v3"),
+            ("RUSTCTA_BITOPRO_API_KEY", "bitopro-key"),
+            ("RUSTCTA_BITOPRO_API_SECRET", "bitopro-secret"),
+            ("RUSTCTA_BITOPRO_API_IDENTITY", "bitopro-identity"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["bitopro"]);
+        assert_eq!(
+            config.rest_base_urls.get("bitopro").as_deref(),
+            Some("http://127.0.0.1:9208/v3")
+        );
+        assert!(config.private_credentials.contains("bitopro"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("bitopro-secret"));
+        assert!(!debug.contains("bitopro-identity"));
+
+        let gateway = config.build_gateway().expect("gateway");
+        let status = gateway.status().await.expect("status");
+        assert!(status
+            .exchanges
+            .iter()
+            .any(|exchange| exchange.exchange == "bitopro"));
+    }
+
+    #[test]
+    fn config_should_parse_bittrade_without_exposing_secrets() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bittrade"),
+            ("RUSTCTA_BITTRADE_REST_BASE_URL", "http://127.0.0.1:9204"),
+            ("RUSTCTA_BITTRADE_API_KEY", "bittrade-key"),
+            ("RUSTCTA_BITTRADE_API_SECRET", "bittrade-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["bittrade"]);
+        assert_eq!(
+            config.rest_base_urls.get("bittrade").as_deref(),
+            Some("http://127.0.0.1:9204")
+        );
+        assert!(config.private_credentials.contains("bittrade"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("bittrade-secret"));
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_coinmate_scan_only_gateway_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "coinmate"),
+            (
+                "RUSTCTA_COINMATE_REST_BASE_URL",
+                "http://127.0.0.1:9216/api",
+            ),
+            ("RUSTCTA_COINMATE_CLIENT_ID", "fixture-client"),
+            ("RUSTCTA_COINMATE_PUBLIC_KEY", "fixture-public"),
+            ("RUSTCTA_COINMATE_PRIVATE_KEY", "fixture-private"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["coinmate"]);
+        assert_eq!(
+            config.rest_base_urls.get("coinmate").as_deref(),
+            Some("http://127.0.0.1:9216/api")
+        );
+        assert!(config.private_credentials.contains("coinmate"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("fixture-private"));
+        assert!(!debug.contains("fixture-client"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "coinmate-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("coinmate-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("coinmate").expect("coinmate")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        let capabilities = &response.capabilities[0];
+        assert_eq!(capabilities.exchange.as_str(), "coinmate");
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+        assert!(!capabilities.supports_positions);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_cex_public_gateway_adapter_with_redacted_env_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "cex"),
+            ("RUSTCTA_CEX_REST_BASE_URL", "http://127.0.0.1:9415/api"),
+            ("RUSTCTA_CEX_API_KEY", "fixture-cex-key"),
+            ("RUSTCTA_CEX_API_SECRET", "fixture-cex-secret"),
+            ("RUSTCTA_CEX_USER_ID", "fixture-cex-user"),
+        ]));
+        assert_eq!(config.adapters, vec!["cex"]);
+        assert_eq!(
+            config.rest_base_urls.get("cex").as_deref(),
+            Some("http://127.0.0.1:9415/api")
+        );
+        assert!(config.private_credentials.contains("cex"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("fixture-cex-secret"));
+        assert!(!debug.contains("fixture-cex-user"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "cex-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("cex-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("cex").expect("cex")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("cex capabilities");
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_paymium_public_gateway_adapter_with_redacted_env_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "paymium"),
+            (
+                "RUSTCTA_PAYMIUM_REST_BASE_URL",
+                "http://127.0.0.1:9433/api/v1",
+            ),
+            ("RUSTCTA_PAYMIUM_API_KEY", "fixture-paymium-key"),
+            ("RUSTCTA_PAYMIUM_API_SECRET", "fixture-paymium-secret"),
+        ]));
+        assert_eq!(config.adapters, vec!["paymium"]);
+        assert_eq!(
+            config.rest_base_urls.get("paymium").as_deref(),
+            Some("http://127.0.0.1:9433/api/v1")
+        );
+        assert!(config.private_credentials.contains("paymium"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("fixture-paymium-key"));
+        assert!(!debug.contains("fixture-paymium-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "paymium-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("paymium-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("paymium").expect("paymium")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("paymium capabilities");
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_public_streams);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_wavesexchange_public_gateway_adapter_without_private_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "wavesexchange"),
+            (
+                "RUSTCTA_WAVESEXCHANGE_REST_BASE_URL",
+                "http://127.0.0.1:9435",
+            ),
+            ("RUSTCTA_WAVESEXCHANGE_API_KEY", "ignored-waves-key"),
+            ("RUSTCTA_WAVESEXCHANGE_API_SECRET", "ignored-waves-secret"),
+        ]));
+        assert_eq!(config.adapters, vec!["wavesexchange"]);
+        assert_eq!(
+            config.rest_base_urls.get("wavesexchange").as_deref(),
+            Some("http://127.0.0.1:9435")
+        );
+        assert!(!config.private_credentials.contains("wavesexchange"));
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("ignored-waves-key"));
+        assert!(!debug.contains("ignored-waves-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "wavesexchange-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("wavesexchange-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("wavesexchange").expect("wavesexchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response
+            .capabilities
+            .first()
+            .expect("wavesexchange capabilities");
+        assert_eq!(capabilities.exchange.as_str(), "wavesexchange");
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_public_streams);
+        assert!(!capabilities.supports_place_order);
     }
 
     #[test]
@@ -2539,6 +4323,9 @@ mod tests {
             ("RUSTCTA_BITUNIX_API_SECRET", "bitunix-secret"),
             ("RUSTCTA_CRYPTOCOM_API_KEY", "cryptocom-key"),
             ("RUSTCTA_CRYPTOCOM_API_SECRET", "cryptocom-secret"),
+            ("RUSTCTA_CRYPTOMUS_REST_BASE_URL", "http://127.0.0.1:9016"),
+            ("RUSTCTA_CRYPTOMUS_API_KEY", "cryptomus-key"),
+            ("RUSTCTA_CRYPTOMUS_USER_ID", "cryptomus-user-id"),
             ("RUSTCTA_COINTR_API_KEY", "cointr-key"),
             ("RUSTCTA_COINTR_API_SECRET", "cointr-secret"),
             ("RUSTCTA_COINTR_API_PASSPHRASE", "cointr-passphrase"),
@@ -2630,6 +4417,10 @@ mod tests {
             config.rest_base_urls.get("cointr").as_deref(),
             Some("http://127.0.0.1:9015")
         );
+        assert_eq!(
+            config.rest_base_urls.get("cryptomus").as_deref(),
+            Some("http://127.0.0.1:9016")
+        );
         assert!(config.private_credentials.contains("ascendex"));
         assert!(config.private_credentials.contains("binance"));
         assert!(config.private_credentials.contains("biconomy"));
@@ -2637,6 +4428,7 @@ mod tests {
         assert!(config.private_credentials.contains("bitunix"));
         assert!(config.private_credentials.contains("cointr"));
         assert!(config.private_credentials.contains("cryptocom"));
+        assert!(config.private_credentials.contains("cryptomus"));
         assert!(config.private_credentials.contains("deepcoin"));
         assert!(config.private_credentials.contains("kraken"));
         assert!(config.private_credentials.contains("kraken_futures"));
@@ -2654,6 +4446,7 @@ mod tests {
         assert!(!debug.contains("cointr-passphrase"));
         assert!(!debug.contains("cointr-secret"));
         assert!(!debug.contains("cryptocom-secret"));
+        assert!(!debug.contains("cryptomus-user-id"));
         assert!(!debug.contains("deepcoin-secret"));
         assert!(!debug.contains("deepcoin-passphrase"));
         assert!(!debug.contains("kraken-secret"));
@@ -2670,6 +4463,471 @@ mod tests {
             GatewayAppConfig::from_env_reader(env_from(&[("RUSTCTA_GATEWAY_ADAPTERS", "paper")]));
         let gateway = config.build_gateway().expect("gateway");
         assert_eq!(gateway.status().await.expect("status").exchanges.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn myokx_config_should_register_eea_profile_without_private_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "myokx"),
+            ("RUSTCTA_MYOKX_REST_BASE_URL", "http://127.0.0.1:9055"),
+            ("RUSTCTA_MYOKX_API_KEY", "ignored-myokx-key"),
+            ("RUSTCTA_MYOKX_API_SECRET", "ignored-myokx-secret"),
+            ("RUSTCTA_MYOKX_API_PASSPHRASE", "ignored-myokx-passphrase"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["myokx"]);
+        assert_eq!(
+            config.rest_base_urls.get("myokx").as_deref(),
+            Some("http://127.0.0.1:9055")
+        );
+        assert!(!config.private_credentials.contains("myokx"));
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("ignored-myokx-secret"));
+        assert!(!debug.contains("ignored-myokx-passphrase"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "myokx-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("myokx-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("myokx").expect("myokx")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("myokx capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("myokx").expect("myokx")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn zaif_config_should_parse_redacted_credentials_and_register_spot_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "zaif"),
+            (
+                "RUSTCTA_ZAIF_PUBLIC_REST_BASE_URL",
+                "http://127.0.0.1:9064/api/1",
+            ),
+            (
+                "RUSTCTA_ZAIF_PRIVATE_REST_BASE_URL",
+                "http://127.0.0.1:9065/tapi",
+            ),
+            ("RUSTCTA_ZAIF_API_KEY", "zaif-key"),
+            ("RUSTCTA_ZAIF_API_SECRET", "zaif-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["zaif"]);
+        assert_eq!(
+            config.rest_base_urls.get("zaif_public").as_deref(),
+            Some("http://127.0.0.1:9064/api/1")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("zaif_private").as_deref(),
+            Some("http://127.0.0.1:9065/tapi")
+        );
+        assert!(config.private_credentials.contains("zaif"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("zaif-key"));
+        assert!(!debug.contains("zaif-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "zaif-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("zaif-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("zaif").expect("zaif")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("zaif capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("zaif").expect("zaif")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn ndax_config_should_parse_redacted_credentials_and_register_scan_only_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "ndax"),
+            ("RUSTCTA_NDAX_REST_BASE_URL", "http://127.0.0.1:9056"),
+            ("RUSTCTA_NDAX_API_KEY", "ndax-key"),
+            ("RUSTCTA_NDAX_API_SECRET", "ndax-secret"),
+            ("RUSTCTA_NDAX_API_PASSPHRASE", "ndax-passphrase"),
+            ("RUSTCTA_NDAX_USER_ID", "ndax-user"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["ndax"]);
+        assert_eq!(
+            config.rest_base_urls.get("ndax").as_deref(),
+            Some("http://127.0.0.1:9056")
+        );
+        assert!(config.private_credentials.contains("ndax"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("ndax-secret"));
+        assert!(!debug.contains("ndax-passphrase"));
+        assert!(!debug.contains("ndax-user"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "ndax-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("ndax-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("ndax").expect("ndax")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("ndax capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("ndax").expect("ndax")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn btcbox_config_should_register_scan_only_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "btcbox"),
+            (
+                "RUSTCTA_BTCBOX_REST_BASE_URL",
+                "http://127.0.0.1:9059/api/v1",
+            ),
+            ("RUSTCTA_BTCBOX_API_KEY", "btcbox-key"),
+            ("RUSTCTA_BTCBOX_API_SECRET", "btcbox-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["btcbox"]);
+        assert_eq!(
+            config.rest_base_urls.get("btcbox").as_deref(),
+            Some("http://127.0.0.1:9059/api/v1")
+        );
+        assert!(config.private_credentials.contains("btcbox"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("btcbox-key"));
+        assert!(!debug.contains("btcbox-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "btcbox-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("btcbox-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("btcbox").expect("btcbox")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("btcbox capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("btcbox").expect("btcbox")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn novadax_config_should_register_spot_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "novadax"),
+            ("RUSTCTA_NOVADAX_REST_BASE_URL", "http://127.0.0.1:9057"),
+            ("RUSTCTA_NOVADAX_API_KEY", "novadax-key"),
+            ("RUSTCTA_NOVADAX_API_SECRET", "novadax-secret"),
+            ("RUSTCTA_NOVADAX_ACCOUNT_ID", "novadax-account"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["novadax"]);
+        assert_eq!(
+            config.rest_base_urls.get("novadax").as_deref(),
+            Some("http://127.0.0.1:9057")
+        );
+        assert!(config.private_credentials.contains("novadax"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("novadax-secret"));
+        assert!(!debug.contains("novadax-account"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "novadax-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("novadax-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("novadax").expect("novadax")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("novadax capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("novadax").expect("novadax")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn onetrading_config_should_register_spot_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "onetrading"),
+            ("RUSTCTA_ONETRADING_REST_BASE_URL", "http://127.0.0.1:9058"),
+            ("RUSTCTA_ONETRADING_API_TOKEN", "onetrading-token"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["onetrading"]);
+        assert_eq!(
+            config.rest_base_urls.get("onetrading").as_deref(),
+            Some("http://127.0.0.1:9058")
+        );
+        assert!(config.private_credentials.contains("onetrading"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("onetrading-token"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "onetrading-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("onetrading-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("onetrading").expect("onetrading")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response
+            .capabilities
+            .first()
+            .expect("onetrading capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("onetrading").expect("onetrading")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn okxus_config_should_register_us_profile_without_private_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "okxus"),
+            ("RUSTCTA_OKXUS_REST_BASE_URL", "http://127.0.0.1:9056"),
+            ("RUSTCTA_OKXUS_API_KEY", "ignored-okxus-key"),
+            ("RUSTCTA_OKXUS_API_SECRET", "ignored-okxus-secret"),
+            ("RUSTCTA_OKXUS_API_PASSPHRASE", "ignored-okxus-passphrase"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["okxus"]);
+        assert_eq!(
+            config.rest_base_urls.get("okxus").as_deref(),
+            Some("http://127.0.0.1:9056")
+        );
+        assert!(!config.private_credentials.contains("okxus"));
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("ignored-okxus-secret"));
+        assert!(!debug.contains("ignored-okxus-passphrase"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "okxus-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("okxus-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("okxus").expect("okxus")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response.capabilities.first().expect("okxus capabilities");
+        assert_eq!(
+            capabilities.exchange,
+            ExchangeId::new("okxus").expect("okxus")
+        );
+        assert_eq!(capabilities.market_types, vec![MarketType::Spot]);
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_cryptomus_gateway_adapter_without_payment_api_or_live_writes() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "cryptomus"),
+            ("RUSTCTA_CRYPTOMUS_REST_BASE_URL", "http://127.0.0.1:9045"),
+            ("RUSTCTA_CRYPTOMUS_API_KEY", "cryptomus-key"),
+            ("RUSTCTA_CRYPTOMUS_USER_ID", "cryptomus-user-id"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["cryptomus"]);
+        assert_eq!(
+            config.rest_base_urls.get("cryptomus").as_deref(),
+            Some("http://127.0.0.1:9045")
+        );
+        assert!(config.private_credentials.contains("cryptomus"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("cryptomus-user-id"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "cryptomus-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("cryptomus-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("cryptomus").expect("cryptomus")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let capabilities = response
+            .capabilities
+            .first()
+            .expect("cryptomus capabilities");
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_symbol_rules);
+        assert!(capabilities.supports_order_book_snapshot);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_private_streams);
+        assert!(!capabilities.supports_place_order);
     }
 
     #[test]
@@ -2706,6 +4964,213 @@ mod tests {
         assert!(!debug.contains("bitso-secret"));
         assert!(!debug.contains("mercado-token"));
         assert!(!debug.contains("mercado-account"));
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_bitbns_scan_only_gateway_adapter_without_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bitbns"),
+            ("RUSTCTA_BITBNS_REST_BASE_URL", "http://127.0.0.1:9044"),
+            ("RUSTCTA_BITBNS_API_KEY", "bitbns-key"),
+            ("RUSTCTA_BITBNS_API_SECRET", "bitbns-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["bitbns"]);
+        assert_eq!(
+            config.rest_base_urls.get("bitbns").as_deref(),
+            Some("http://127.0.0.1:9044")
+        );
+        assert!(config.private_credentials.contains("bitbns"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("bitbns-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "bitbns-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("bitbns-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("bitbns").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_blockchaincom_adapter_without_promoting_private_runtime() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "blockchain.com"),
+            (
+                "RUSTCTA_BLOCKCHAINCOM_REST_BASE_URL",
+                "http://127.0.0.1:9045/v3/exchange",
+            ),
+            ("RUSTCTA_BLOCKCHAINCOM_API_KEY", "blockchain-key"),
+            ("RUSTCTA_BLOCKCHAINCOM_API_SECRET", "blockchain-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["blockchain.com"]);
+        assert_eq!(
+            config.rest_base_urls.get("blockchaincom").as_deref(),
+            Some("http://127.0.0.1:9045/v3/exchange")
+        );
+        assert!(config.private_credentials.contains("blockchaincom"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("blockchain-key"));
+        assert!(!debug.contains("blockchain-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "blockchaincom-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("blockchaincom-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("blockchaincom").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_cancel_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_d8x_without_promoting_contract_writes() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "d8x"),
+            ("RUSTCTA_D8X_REST_BASE_URL", "http://127.0.0.1:9059"),
+            (
+                "RUSTCTA_D8X_WALLET_ADDRESS",
+                "0x000000000000000000000000000000000000d8x0",
+            ),
+            ("RUSTCTA_D8X_SIGNER_PRIVATE_KEY", "fixture-d8x-private-key"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["d8x"]);
+        assert_eq!(
+            config.rest_base_urls.get("d8x").as_deref(),
+            Some("http://127.0.0.1:9059")
+        );
+        assert!(config.private_credentials.contains("d8x"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("fixture-d8x-private-key"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "d8x-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("d8x-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("d8x").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_cancel_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_mango_markets_as_g0_scan_only_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "mango_markets"),
+            (
+                "RUSTCTA_MANGO_MARKETS_SOLANA_RPC_URL",
+                "http://127.0.0.1:8899",
+            ),
+        ]));
+
+        assert_eq!(config.adapters, vec!["mango_markets"]);
+        assert_eq!(
+            config.rest_base_urls.get("mango_markets").as_deref(),
+            Some("http://127.0.0.1:8899")
+        );
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "mango-markets-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("mango-markets-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("mango_markets").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(!response.capabilities[0].supports_public_rest);
+        assert!(!response.capabilities[0].supports_symbol_rules);
+        assert!(!response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_cancel_order);
     }
 
     #[tokio::test]
@@ -2783,6 +5248,118 @@ mod tests {
         assert_eq!(response.capabilities.len(), 1);
         assert!(response.capabilities[0].supports_private_rest);
         assert!(response.capabilities[0].supports_balances);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_binanceus_private_gateway_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "binanceus"),
+            ("RUSTCTA_BINANCEUS_REST_BASE_URL", "http://127.0.0.1:9060"),
+            ("RUSTCTA_BINANCEUS_API_KEY", "binanceus-key"),
+            ("RUSTCTA_BINANCEUS_API_SECRET", "binanceus-secret"),
+        ]));
+        assert_eq!(config.adapters, vec!["binanceus"]);
+        assert_eq!(
+            config.rest_base_urls.get("binanceus").as_deref(),
+            Some("http://127.0.0.1:9060")
+        );
+        assert!(config.private_credentials.contains("binanceus"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("binanceus-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "binanceus-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("binanceus-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("binanceus").expect("binanceus")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_private_rest);
+        assert!(response.capabilities[0].supports_balances);
+        assert!(response.capabilities[0].supports_fees);
+        assert!(response.capabilities[0].supports_place_order);
+        assert!(response.capabilities[0].supports_cancel_order);
+        assert!(response.capabilities[0].supports_cancel_all_orders);
+        assert!(!response.capabilities[0].supports_positions);
+        assert!(!response.capabilities[0].supports_amend_order);
+        assert!(!response.capabilities[0].supports_order_list);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_tokocrypto_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "tokocrypto"),
+            ("RUSTCTA_TOKOCRYPTO_REST_BASE_URL", "http://127.0.0.1:9071"),
+            (
+                "RUSTCTA_TOKOCRYPTO_MARKET_REST_BASE_URL",
+                "http://127.0.0.1:9072",
+            ),
+            ("RUSTCTA_TOKOCRYPTO_API_KEY", "tokocrypto-key"),
+            ("RUSTCTA_TOKOCRYPTO_API_SECRET", "tokocrypto-secret"),
+        ]));
+        assert_eq!(config.adapters, vec!["tokocrypto"]);
+        assert_eq!(
+            config.rest_base_urls.get("tokocrypto").as_deref(),
+            Some("http://127.0.0.1:9071")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("tokocrypto_market").as_deref(),
+            Some("http://127.0.0.1:9072")
+        );
+        assert!(config.private_credentials.contains("tokocrypto"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("tokocrypto-key"));
+        assert!(!debug.contains("tokocrypto-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "tokocrypto-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("tokocrypto-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("tokocrypto").expect("tokocrypto")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
     }
 
     #[tokio::test]
@@ -2950,6 +5527,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn config_should_wire_arkham_gateway_adapter_with_redacted_env_credentials() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "arkham"),
+            ("RUSTCTA_ARKHAM_REST_BASE_URL", "http://127.0.0.1:9042"),
+            ("RUSTCTA_ARKHAM_API_KEY", "arkham-key"),
+            ("RUSTCTA_ARKHAM_API_SECRET", "arkham-secret"),
+        ]));
+        assert_eq!(
+            config.rest_base_urls.get("arkham").as_deref(),
+            Some("http://127.0.0.1:9042")
+        );
+        assert!(config.private_credentials.contains("arkham"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("arkham-key"));
+        assert!(!debug.contains("arkham-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+
+        let response = client
+            .get_capabilities(
+                "arkham-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("arkham-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("arkham").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_private_streams);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_p2b_gateway_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "p2b"),
+            ("RUSTCTA_P2B_REST_BASE_URL", "http://127.0.0.1:9044"),
+            ("RUSTCTA_P2B_API_KEY", "p2b-key"),
+            ("RUSTCTA_P2B_API_SECRET", "p2b-secret"),
+        ]));
+        assert_eq!(config.adapters, vec!["p2b"]);
+        assert_eq!(
+            config.rest_base_urls.get("p2b").as_deref(),
+            Some("http://127.0.0.1:9044")
+        );
+        assert!(config.private_credentials.contains("p2b"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("p2b-key"));
+        assert!(!debug.contains("p2b-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "p2b-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("p2b-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("p2b").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_private_streams);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_aftermath_gateway_adapter_as_scan_only() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "aftermath"),
+            ("RUSTCTA_AFTERMATH_REST_BASE_URL", "http://127.0.0.1:9043"),
+        ]));
+        assert_eq!(
+            config.rest_base_urls.get("aftermath").as_deref(),
+            Some("http://127.0.0.1:9043")
+        );
+        assert!(!config.private_credentials.contains("aftermath"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "aftermath-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("aftermath-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("aftermath").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(response.capabilities[0]
+            .market_types
+            .contains(&MarketType::Perpetual));
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_private_streams);
+    }
+
+    #[tokio::test]
     async fn config_should_wire_btcturk_gateway_adapter_without_promoting_private_rest() {
         let config = GatewayAppConfig::from_env_reader(env_from(&[
             ("RUSTCTA_GATEWAY_ADAPTERS", "btcturk"),
@@ -2988,6 +5714,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn config_should_wire_bit2c_gateway_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bit2c"),
+            ("RUSTCTA_BIT2C_REST_BASE_URL", "http://127.0.0.1:9042"),
+            ("RUSTCTA_BIT2C_API_KEY", "bit2c-key"),
+            ("RUSTCTA_BIT2C_API_SECRET", "bit2c-secret"),
+        ]));
+        assert_eq!(
+            config.rest_base_urls.get("bit2c").as_deref(),
+            Some("http://127.0.0.1:9042")
+        );
+        assert!(config.private_credentials.contains("bit2c"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("bit2c-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "bit2c-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("bit2c-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("bit2c").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_public_streams);
+    }
+
+    #[tokio::test]
     async fn config_should_wire_luno_gateway_adapter_without_promoting_payment_rails() {
         let config = GatewayAppConfig::from_env_reader(env_from(&[
             ("RUSTCTA_GATEWAY_ADAPTERS", "luno"),
@@ -3023,6 +5798,225 @@ mod tests {
         assert!(response.capabilities[0].supports_public_rest);
         assert!(!response.capabilities[0].supports_private_rest);
         assert!(!response.capabilities[0].supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_latoken_gateway_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "latoken"),
+            ("RUSTCTA_LATOKEN_REST_BASE_URL", "http://127.0.0.1:9046"),
+            ("RUSTCTA_LATOKEN_API_KEY", "latoken-key"),
+            ("RUSTCTA_LATOKEN_API_SECRET", "latoken-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["latoken"]);
+        assert_eq!(
+            config.rest_base_urls.get("latoken").as_deref(),
+            Some("http://127.0.0.1:9046")
+        );
+        assert!(config.private_credentials.contains("latoken"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("latoken-key"));
+        assert!(!debug.contains("latoken-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "latoken-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("latoken-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("latoken").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_public_streams);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_aark_without_promoting_orderly_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "aark"),
+            ("RUSTCTA_AARK_REST_BASE_URL", "http://127.0.0.1:9048"),
+            ("RUSTCTA_AARK_ORDERLY_ACCOUNT_ID", "acct-aark-fixture"),
+            ("RUSTCTA_AARK_ORDERLY_KEY", "aark-orderly-key"),
+            ("RUSTCTA_AARK_ORDERLY_SECRET", "aark-orderly-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["aark"]);
+        assert_eq!(
+            config.rest_base_urls.get("aark").as_deref(),
+            Some("http://127.0.0.1:9048")
+        );
+        assert!(config.private_credentials.contains("aark"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("aark-orderly-key"));
+        assert!(!debug.contains("aark-orderly-secret"));
+        assert!(!debug.contains("acct-aark-fixture"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "aark-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("aark-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("aark").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(!response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_public_streams);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_apollox_dex_without_promoting_private_runtime() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "apollox_dex"),
+            (
+                "RUSTCTA_APOLLOX_DEX_REST_BASE_URL",
+                "http://127.0.0.1:9062/fapi",
+            ),
+            ("RUSTCTA_APOLLOX_DEX_API_KEY", "apollox-key"),
+            ("RUSTCTA_APOLLOX_DEX_API_SECRET", "apollox-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["apollox_dex"]);
+        assert_eq!(
+            config.rest_base_urls.get("apollox_dex").as_deref(),
+            Some("http://127.0.0.1:9062/fapi")
+        );
+        assert!(config.private_credentials.contains("apollox_dex"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("apollox-key"));
+        assert!(!debug.contains("apollox-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "apollox-dex-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("apollox-dex-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("apollox_dex").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert_eq!(
+            response.capabilities[0].market_types,
+            vec![MarketType::Perpetual]
+        );
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_private_streams);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_modetrade_without_promoting_orderly_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "modetrade"),
+            ("RUSTCTA_MODETRADE_REST_BASE_URL", "http://127.0.0.1:9047"),
+            ("RUSTCTA_MODETRADE_ORDERLY_ACCOUNT_ID", "acct-mode-fixture"),
+            ("RUSTCTA_MODETRADE_ORDERLY_KEY", "mode-orderly-key"),
+            ("RUSTCTA_MODETRADE_ORDERLY_SECRET", "mode-orderly-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["modetrade"]);
+        assert_eq!(
+            config.rest_base_urls.get("modetrade").as_deref(),
+            Some("http://127.0.0.1:9047")
+        );
+        assert!(config.private_credentials.contains("modetrade"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("mode-orderly-key"));
+        assert!(!debug.contains("mode-orderly-secret"));
+        assert!(!debug.contains("acct-mode-fixture"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "modetrade-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("modetrade-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("modetrade").expect("exchange")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        assert!(response.capabilities[0].supports_public_rest);
+        assert!(response.capabilities[0].supports_symbol_rules);
+        assert!(!response.capabilities[0].supports_order_book_snapshot);
+        assert!(!response.capabilities[0].supports_private_rest);
+        assert!(!response.capabilities[0].supports_place_order);
+        assert!(!response.capabilities[0].supports_public_streams);
     }
 
     #[tokio::test]
@@ -3083,6 +6077,48 @@ mod tests {
             .any(|capability| capability.exchange.as_str() == "binancecoinm"
                 && capability.supports_private_rest
                 && capability.supports_positions));
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_bybiteu_profile_with_private_trading_disabled() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bybiteu"),
+            ("RUSTCTA_BYBITEU_REST_BASE_URL", "http://127.0.0.1:9060"),
+        ]));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("bybiteu"));
+        assert!(!debug.contains("secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "bybiteu-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("bybiteu-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("bybiteu").expect("bybiteu")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        assert_eq!(response.capabilities.len(), 1);
+        let capabilities = &response.capabilities[0];
+        assert_eq!(capabilities.exchange.as_str(), "bybiteu");
+        assert!(capabilities.supports_public_rest);
+        assert!(capabilities.supports_public_streams);
+        assert!(!capabilities.supports_private_rest);
+        assert!(!capabilities.supports_place_order);
     }
 
     #[tokio::test]
@@ -3913,5 +6949,571 @@ mod tests {
         assert!(dydx
             .market_types
             .contains(&rustcta_exchange_api::MarketType::Perpetual));
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_fmfwio_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "fmfwio"),
+            (
+                "RUSTCTA_FMFWIO_REST_BASE_URL",
+                "http://127.0.0.1:9060/api/3",
+            ),
+            ("RUSTCTA_FMFWIO_API_KEY", "fmfwio-key"),
+            ("RUSTCTA_FMFWIO_API_SECRET", "fmfwio-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["fmfwio"]);
+        assert_eq!(
+            config.rest_base_urls.get("fmfwio").as_deref(),
+            Some("http://127.0.0.1:9060/api/3")
+        );
+        assert!(config.private_credentials.contains("fmfwio"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("fmfwio-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "fmfwio-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("fmfwio-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("fmfwio").expect("fmfwio")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let fmfwio = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "fmfwio")
+            .expect("fmfwio capabilities");
+        assert!(fmfwio.supports_public_rest);
+        assert!(fmfwio.supports_symbol_rules);
+        assert!(fmfwio.supports_order_book_snapshot);
+        assert!(!fmfwio.supports_private_rest);
+        assert!(!fmfwio.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_hollaex_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "hollaex"),
+            ("RUSTCTA_HOLLAEX_REST_BASE_URL", "http://127.0.0.1:9061/v2"),
+            ("RUSTCTA_HOLLAEX_API_KEY", "hollaex-key"),
+            ("RUSTCTA_HOLLAEX_API_SECRET", "hollaex-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["hollaex"]);
+        assert_eq!(
+            config.rest_base_urls.get("hollaex").as_deref(),
+            Some("http://127.0.0.1:9061/v2")
+        );
+        assert!(config.private_credentials.contains("hollaex"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("hollaex-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "hollaex-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("hollaex-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("hollaex").expect("hollaex")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let hollaex = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "hollaex")
+            .expect("hollaex capabilities");
+        assert!(hollaex.supports_public_rest);
+        assert!(hollaex.supports_symbol_rules);
+        assert!(hollaex.supports_order_book_snapshot);
+        assert!(!hollaex.supports_private_rest);
+        assert!(!hollaex.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_foxbit_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "foxbit"),
+            (
+                "RUSTCTA_FOXBIT_REST_BASE_URL",
+                "http://127.0.0.1:9061/rest/v3",
+            ),
+            ("RUSTCTA_FOXBIT_API_KEY", "foxbit-key"),
+            ("RUSTCTA_FOXBIT_API_SECRET", "foxbit-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["foxbit"]);
+        assert_eq!(
+            config.rest_base_urls.get("foxbit").as_deref(),
+            Some("http://127.0.0.1:9061/rest/v3")
+        );
+        assert!(config.private_credentials.contains("foxbit"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("foxbit-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "foxbit-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("foxbit-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("foxbit").expect("foxbit")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let foxbit = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "foxbit")
+            .expect("foxbit capabilities");
+        assert!(foxbit.supports_public_rest);
+        assert!(foxbit.supports_symbol_rules);
+        assert!(foxbit.supports_order_book_snapshot);
+        assert!(!foxbit.supports_private_rest);
+        assert!(!foxbit.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn bsx_config_should_register_public_perp_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bsx"),
+            ("RUSTCTA_BSX_REST_BASE_URL", "http://127.0.0.1:9064"),
+            ("RUSTCTA_BSX_API_KEY", "bsx-api-key"),
+            ("RUSTCTA_BSX_API_SECRET", "bsx-api-secret"),
+            (
+                "RUSTCTA_BSX_WALLET_ADDRESS",
+                "0x1111111111111111111111111111111111111111",
+            ),
+            (
+                "RUSTCTA_BSX_SIGNER_ADDRESS",
+                "0x2222222222222222222222222222222222222222",
+            ),
+        ]));
+
+        assert_eq!(config.adapters, vec!["bsx"]);
+        assert_eq!(
+            config.rest_base_urls.get("bsx").as_deref(),
+            Some("http://127.0.0.1:9064")
+        );
+        assert!(config.private_credentials.contains("bsx"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("bsx-api-secret"));
+        assert!(!debug.contains("0x1111111111111111111111111111111111111111"));
+        assert!(!debug.contains("0x2222222222222222222222222222222222222222"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "bsx-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("bsx-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("bsx").expect("bsx")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let bsx = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "bsx")
+            .expect("bsx capabilities");
+        assert_eq!(bsx.market_types, vec![MarketType::Perpetual]);
+        assert!(bsx.supports_public_rest);
+        assert!(bsx.supports_symbol_rules);
+        assert!(bsx.supports_order_book_snapshot);
+        assert!(!bsx.supports_private_rest);
+        assert!(!bsx.supports_place_order);
+        assert!(!bsx.supports_private_streams);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_hibachi_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "hibachi"),
+            (
+                "RUSTCTA_HIBACHI_DATA_REST_BASE_URL",
+                "http://127.0.0.1:9062/data",
+            ),
+            (
+                "RUSTCTA_HIBACHI_ACCOUNT_REST_BASE_URL",
+                "http://127.0.0.1:9063/account",
+            ),
+            ("RUSTCTA_HIBACHI_API_KEY", "hibachi-key"),
+            ("RUSTCTA_HIBACHI_PRIVATE_KEY", "hibachi-private-key"),
+            ("RUSTCTA_HIBACHI_PUBLIC_KEY", "hibachi-public-key"),
+            ("RUSTCTA_HIBACHI_ACCOUNT_ID", "42"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["hibachi"]);
+        assert_eq!(
+            config.rest_base_urls.get("hibachi").as_deref(),
+            Some("http://127.0.0.1:9062/data")
+        );
+        assert_eq!(
+            config.rest_base_urls.get("hibachi_account").as_deref(),
+            Some("http://127.0.0.1:9063/account")
+        );
+        assert!(config.private_credentials.contains("hibachi"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("hibachi-key"));
+        assert!(!debug.contains("hibachi-private-key"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "hibachi-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("hibachi-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("hibachi").expect("hibachi")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let hibachi = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "hibachi")
+            .expect("hibachi capabilities");
+        assert!(hibachi.supports_public_rest);
+        assert!(hibachi.supports_symbol_rules);
+        assert!(hibachi.supports_order_book_snapshot);
+        assert!(hibachi.supports_fees);
+        assert!(!hibachi.supports_private_rest);
+        assert!(!hibachi.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn config_should_wire_hitbtc_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "hitbtc"),
+            (
+                "RUSTCTA_HITBTC_REST_BASE_URL",
+                "http://127.0.0.1:9061/api/3",
+            ),
+            ("RUSTCTA_HITBTC_API_KEY", "hitbtc-key"),
+            ("RUSTCTA_HITBTC_API_SECRET", "hitbtc-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["hitbtc"]);
+        assert_eq!(
+            config.rest_base_urls.get("hitbtc").as_deref(),
+            Some("http://127.0.0.1:9061/api/3")
+        );
+        assert!(config.private_credentials.contains("hitbtc"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("hitbtc-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "hitbtc-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("hitbtc-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("hitbtc").expect("hitbtc")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let hitbtc = response
+            .capabilities
+            .iter()
+            .find(|capabilities| capabilities.exchange.as_str() == "hitbtc")
+            .expect("hitbtc capabilities");
+        assert!(hitbtc.supports_public_rest);
+        assert!(hitbtc.supports_symbol_rules);
+        assert!(hitbtc.supports_order_book_snapshot);
+        assert!(!hitbtc.supports_private_rest);
+        assert!(!hitbtc.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn yobit_config_should_register_scan_only_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "yobit"),
+            ("RUSTCTA_YOBIT_REST_BASE_URL", "http://127.0.0.1:9071"),
+            ("RUSTCTA_YOBIT_API_KEY", "yobit-key"),
+            ("RUSTCTA_YOBIT_API_SECRET", "yobit-secret"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["yobit"]);
+        assert_eq!(
+            config.rest_base_urls.get("yobit").as_deref(),
+            Some("http://127.0.0.1:9071")
+        );
+        assert!(config.private_credentials.contains("yobit"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("yobit-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "yobit-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("yobit-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("yobit").expect("yobit")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let yobit = &response.capabilities[0];
+        assert_eq!(yobit.exchange.as_str(), "yobit");
+        assert_eq!(yobit.market_types, vec![MarketType::Spot]);
+        assert!(yobit.supports_public_rest);
+        assert!(yobit.supports_symbol_rules);
+        assert!(yobit.supports_order_book_snapshot);
+        assert!(!yobit.supports_private_rest);
+        assert!(!yobit.supports_place_order);
+    }
+
+    #[tokio::test]
+    async fn bydfi_config_should_parse_redacted_credentials_and_register_adapter() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "bydfi"),
+            ("RUSTCTA_BYDFI_REST_BASE_URL", "http://127.0.0.1:9070/api"),
+            ("RUSTCTA_BYDFI_API_KEY", "bydfi-key"),
+            ("RUSTCTA_BYDFI_API_SECRET", "bydfi-secret"),
+        ]));
+
+        assert_eq!(
+            config.rest_base_urls.get("bydfi").as_deref(),
+            Some("http://127.0.0.1:9070/api")
+        );
+        assert!(config.private_credentials.contains("bydfi"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("bydfi-secret"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "bydfi-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("bydfi-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("bydfi").expect("bydfi")],
+                },
+            )
+            .await
+            .expect("capabilities");
+        let bydfi = &response.capabilities[0];
+        assert_eq!(bydfi.exchange.as_str(), "bydfi");
+        assert!(bydfi.supports_private_rest);
+        assert!(bydfi
+            .market_types
+            .contains(&rustcta_exchange_api::MarketType::Perpetual));
+    }
+
+    #[tokio::test]
+    async fn zebpay_config_should_register_scan_only_adapter_without_promoting_private_rest() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "zebpay"),
+            ("RUSTCTA_ZEBPAY_REST_BASE_URL", "http://127.0.0.1:9072"),
+            ("RUSTCTA_ZEBPAY_CLIENT_ID", "zebpay-client-id"),
+            ("RUSTCTA_ZEBPAY_CLIENT_SECRET", "zebpay-client-secret"),
+            ("RUSTCTA_ZEBPAY_ACCESS_TOKEN", "zebpay-access-token"),
+        ]));
+
+        assert_eq!(config.adapters, vec!["zebpay"]);
+        assert_eq!(
+            config.rest_base_urls.get("zebpay").as_deref(),
+            Some("http://127.0.0.1:9072")
+        );
+        assert!(config.private_credentials.contains("zebpay"));
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("zebpay-client-secret"));
+        assert!(!debug.contains("zebpay-access-token"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "zebpay-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("zebpay-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("zebpay").expect("zebpay")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let zebpay = &response.capabilities[0];
+        assert_eq!(zebpay.exchange.as_str(), "zebpay");
+        assert_eq!(zebpay.market_types, vec![MarketType::Spot]);
+        assert!(zebpay.supports_public_rest);
+        assert!(zebpay.supports_symbol_rules);
+        assert!(zebpay.supports_order_book_snapshot);
+        assert!(!zebpay.supports_private_rest);
+        assert!(!zebpay.supports_place_order);
+        assert!(!zebpay.supports_public_streams);
+    }
+
+    #[tokio::test]
+    async fn zeta_markets_config_should_register_scan_only_adapter_without_private_runtime() {
+        let config = GatewayAppConfig::from_env_reader(env_from(&[
+            ("RUSTCTA_GATEWAY_ADAPTERS", "zeta_markets"),
+            (
+                "RUSTCTA_ZETA_MARKETS_REST_BASE_URL",
+                "http://127.0.0.1:9073",
+            ),
+        ]));
+
+        assert_eq!(config.adapters, vec!["zeta_markets"]);
+        assert_eq!(
+            config.rest_base_urls.get("zeta_markets").as_deref(),
+            Some("http://127.0.0.1:9073")
+        );
+        assert!(!config.private_credentials.contains("zeta_markets"));
+
+        let gateway = Arc::new(config.build_gateway().expect("gateway"));
+        let client = InProcessGatewayClient::new(gateway);
+        let response = client
+            .get_capabilities(
+                "zeta-markets-capabilities".to_string(),
+                TenantId::new("tenant").expect("tenant"),
+                Some(AccountId::new("account").expect("account")),
+                GetCapabilitiesRequest {
+                    schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                    context: RequestContext {
+                        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+                        account_id: Some(AccountId::new("account").expect("account")),
+                        run_id: None,
+                        request_id: Some("zeta-markets-capabilities".to_string()),
+                        requested_at: chrono::Utc::now(),
+                    },
+                    exchanges: vec![ExchangeId::new("zeta_markets").expect("zeta_markets")],
+                },
+            )
+            .await
+            .expect("capabilities");
+
+        let zeta_markets = &response.capabilities[0];
+        assert_eq!(zeta_markets.exchange.as_str(), "zeta_markets");
+        assert_eq!(zeta_markets.market_types, vec![MarketType::Perpetual]);
+        assert!(zeta_markets.supports_public_rest);
+        assert!(zeta_markets.supports_symbol_rules);
+        assert!(zeta_markets.supports_order_book_snapshot);
+        assert!(!zeta_markets.supports_private_rest);
+        assert!(!zeta_markets.supports_place_order);
+        assert!(!zeta_markets.supports_public_streams);
     }
 }

@@ -1,0 +1,10 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "place_order",
+  "algorithm": "HMAC-SHA256",
+  "api_key": "test-key",
+  "api_secret": "test-secret",
+  "canonical_query": "newClientOrderId=cli-apollox-place&price=65000.5&quantity=0.01&recvWindow=5000&reduceOnly=false&side=BUY&symbol=BTCUSDT&timeInForce=GTC&timestamp=1700000000000&type=LIMIT",
+  "signature": "9a5c6ac755472e9880b03af5087371fd2d7aa1159537113eca8371ee81167dc4",
+  "notes": "Sanitized local vector; no production API key or account data."
+}

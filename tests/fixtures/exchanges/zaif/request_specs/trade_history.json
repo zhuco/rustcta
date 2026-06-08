@@ -1,0 +1,6 @@
+{
+  "operation": "zaif.get_recent_fills",
+  "method": "POST",
+  "path": "/tapi",
+  "body": "nonce=1710000004&method=trade_history&currency_pair=btc_jpy&count=10"
+}

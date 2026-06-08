@@ -1,0 +1,14 @@
+{
+  "exchange": "arkham",
+  "intel_api_is_trading_adapter": false,
+  "public_rest_live_enabled": true,
+  "private_rest_live_enabled": false,
+  "private_write_live_enabled": false,
+  "private_ws_live_enabled": false,
+  "transfer_withdrawal_enabled": false,
+  "notes": [
+    "Arkham Intel API is on-chain intelligence and is not mapped into trading adapter operations.",
+    "Arkham Exchange private trading endpoints are covered by offline request specs only in this task.",
+    "Private WebSocket auth/channel behavior stays disabled until a live-dry-run validation task verifies it."
+  ]
+}

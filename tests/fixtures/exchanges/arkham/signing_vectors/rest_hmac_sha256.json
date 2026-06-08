@@ -1,0 +1,10 @@
+{
+  "algorithm": "hmac-sha256-base64",
+  "principal": "test-api-key",
+  "credential_material_base64": "dGVzdC1zZWNyZXQ=",
+  "expires_us": 1700000300000000,
+  "method": "POST",
+  "path": "/orders/new",
+  "body": "{\"symbol\":\"BTC_USDT\",\"side\":\"buy\",\"type\":\"limitGtc\",\"size\":\"0.01\",\"price\":\"64000\",\"clientOrderId\":\"<redacted:order_id>\"}",
+  "expected_hmac_sha256_base64": "4AkQc8UWRJEutp/k4LnmMGRPx5WRxKurMKRtGxD6V8M="
+}

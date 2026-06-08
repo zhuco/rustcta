@@ -1,0 +1,13 @@
+{
+  "exchange": "coinmetro",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/exchange/orders/active",
+  "auth": "bearer",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer fixture.jwt.token" }
+  },
+  "forbid_header_values_containing": ["secret", "production"]
+}

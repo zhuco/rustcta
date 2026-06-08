@@ -1,0 +1,6 @@
+{
+  "m": 3,
+  "i": 0,
+  "n": "Level2UpdateEvent",
+  "o": "[{\"MDUpdateID\":100001,\"Price\":\"65000.00\",\"Quantity\":\"0.25000000\",\"Side\":0},{\"MDUpdateID\":100002,\"Price\":\"65010.00\",\"Quantity\":\"0.40000000\",\"Side\":1}]"
+}

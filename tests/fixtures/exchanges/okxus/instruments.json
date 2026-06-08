@@ -1,0 +1,15 @@
+[
+  {
+    "instType": "SPOT",
+    "instId": "BTC-USD",
+    "baseCcy": "BTC",
+    "quoteCcy": "USD",
+    "tickSz": "0.01",
+    "lotSz": "0.00000001",
+    "minSz": "0.00001",
+    "minLmtAmt": "10",
+    "maxLmtSz": "100",
+    "maxMktSz": "50",
+    "state": "live"
+  }
+]

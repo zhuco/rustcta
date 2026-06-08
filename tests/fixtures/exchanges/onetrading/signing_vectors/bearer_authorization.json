@@ -1,0 +1,5 @@
+{
+  "scheme": "bearer",
+  "credential_material": "<redacted:token>",
+  "authorization": "<redacted:authorization>"
+}

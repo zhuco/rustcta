@@ -1,0 +1,25 @@
+{
+  "operation": "zebpay.place_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/orders",
+  "query": {},
+  "headers": {
+    "client_id": "<redacted:client-id>",
+    "timestamp": "<redacted:unix-ms>",
+    "RequestId": "<redacted:uuid>",
+    "Authorization": "<redacted:bearer-token>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "trade_pair": "BTC-INR",
+    "side": "bid",
+    "size": "0.01",
+    "price": "7000000",
+    "tradeType": 1,
+    "platform": "API_Trading"
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "zebpay.place_order_request_spec_only"
+}

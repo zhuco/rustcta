@@ -1,0 +1,5 @@
+{
+  "id": "modetrade-PERP_BTC_USDC@orderbookupdate",
+  "event": "unsubscribe",
+  "topic": "PERP_BTC_USDC@orderbookupdate"
+}

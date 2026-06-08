@@ -1,0 +1,32 @@
+[
+  {
+    "name": "BTC/JPY",
+    "title": "BTC/JPY",
+    "currency_pair": "btc_jpy",
+    "description": "Bitcoin / Japanese Yen",
+    "is_token": false,
+    "event_number": 0,
+    "seq": 1,
+    "item_unit_min": 0.0001,
+    "item_unit_step": 0.0001,
+    "item_japanese": "Bitcoin",
+    "aux_unit_min": 5,
+    "aux_unit_step": 5,
+    "aux_unit_point": 0
+  },
+  {
+    "name": "ETH/JPY",
+    "title": "ETH/JPY",
+    "currency_pair": "eth_jpy",
+    "description": "Ethereum / Japanese Yen",
+    "is_token": false,
+    "event_number": 0,
+    "seq": 2,
+    "item_unit_min": 0.0001,
+    "item_unit_step": 0.0001,
+    "item_japanese": "Ethereum",
+    "aux_unit_min": 5,
+    "aux_unit_step": 5,
+    "aux_unit_point": 0
+  }
+]

@@ -1,0 +1,13 @@
+gateway:
+  adapter: coinmate
+  enabled: false
+  rest_base_url: https://coinmate.io/api
+  ws_url: wss://coinmate.io/api/websocket
+  private_rest_enabled: false
+  public_streams_enabled: false
+  private_streams_enabled: false
+  notes:
+    - Spot-only European markets.
+    - Keep client ID, public key, and private key in environment variables.
+    - Private REST and private WebSocket are offline request-spec/payload fixtures only.
+    - Withdrawals, transfers, bank-wire withdrawal, and fiat movement are unsupported.

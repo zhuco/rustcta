@@ -1,0 +1,24 @@
+gateway:
+  adapters:
+    - zebpay
+
+zebpay:
+  enabled: false
+  mode: scan_only
+  market_types:
+    - spot
+  rest_base_url: https://www.zebapi.com
+  group: singapore
+  request_timeout_ms: 10000
+  private_rest:
+    enabled: false
+    request_spec_only: true
+    client_id_env: RUSTCTA_ZEBPAY_CLIENT_ID
+    client_secret_env: RUSTCTA_ZEBPAY_CLIENT_SECRET
+    access_token_env: RUSTCTA_ZEBPAY_ACCESS_TOKEN
+  websocket:
+    public_enabled: false
+    private_enabled: false
+  notes:
+    - "A-39 scan-only adapter: public market list and order book snapshots only."
+    - "Private REST and trading stay disabled until ZebPay API onboarding, KYC, token lifecycle, and permission scopes are verified."

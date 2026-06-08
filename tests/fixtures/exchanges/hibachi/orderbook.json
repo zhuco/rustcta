@@ -1,0 +1,20 @@
+{
+  "sequence": 123456,
+  "timestamp": 1717200000123,
+  "bid": {
+    "startPrice": "64999.50",
+    "endPrice": "64999.00",
+    "levels": [
+      { "price": "64999.50", "quantity": "1.25" },
+      { "price": "64999.00", "quantity": "0.75" }
+    ]
+  },
+  "ask": {
+    "startPrice": "65000.00",
+    "endPrice": "65000.50",
+    "levels": [
+      { "price": "65000.00", "quantity": "0.80" },
+      { "price": "65000.50", "quantity": "1.10" }
+    ]
+  }
+}

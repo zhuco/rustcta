@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "symbol": "btcbrl",
+      "base": { "symbol": "BTC", "type": "CRYPTO" },
+      "quote": { "symbol": "BRL", "type": "FIAT" },
+      "quantity_precision": 8,
+      "price_precision": 2,
+      "quantity_min": "0.00002",
+      "quantity_increment": "0.00000001",
+      "price_increment": "0.01",
+      "amount_min": "10",
+      "order_types": ["LIMIT", "MARKET", "STOP_LIMIT", "STOP_MARKET"],
+      "is_active": true
+    },
+    {
+      "symbol": "ethbrl",
+      "base": { "symbol": "ETH", "type": "CRYPTO" },
+      "quote": { "symbol": "BRL", "type": "FIAT" },
+      "quantity_precision": 8,
+      "price_precision": 2,
+      "quantity_min": "0.001",
+      "quantity_increment": "0.00000001",
+      "price_increment": "0.01",
+      "amount_min": "10",
+      "order_types": ["LIMIT", "MARKET"],
+      "is_active": true
+    }
+  ]
+}

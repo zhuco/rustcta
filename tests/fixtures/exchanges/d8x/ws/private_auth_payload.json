@@ -1,0 +1,6 @@
+{
+  "type": "auth",
+  "wallet": "0x000000000000000000000000000000000000d8x0",
+  "signature": "fixture-signature",
+  "scheme": "eip191_or_eip712_unverified"
+}

@@ -1,0 +1,46 @@
+# MyOKX EEA gateway profile example. Disabled by default.
+
+exchange: myokx
+adapter: myokx
+profile_of: okx
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://eea.okx.com
+public_ws_url: wss://wseea.okx.com:8443/ws/v5/public
+private_ws_url: wss://wseea.okx.com:8443/ws/v5/private
+business_ws_url: wss://wseea.okx.com:8443/ws/v5/business
+testnet: false
+sandbox: false
+
+credentials:
+  status: unsupported_until_eea_credential_scope_audit
+  api_key_env: MYOKX_API_KEY
+  api_secret_env: MYOKX_API_SECRET
+  passphrase_env: MYOKX_API_PASSPHRASE
+
+private_rest_enabled: false
+private_streams_enabled: false
+request_timeout_ms: 10000
+
+enabled_symbols:
+  spot:
+    - BTC-USDT
+    - ETH-USDT
+
+permissions:
+  enabled:
+    - public_market_data
+  excluded:
+    - trade
+    - account_read
+    - withdraw
+    - transfer
+    - derivatives
+
+notes:
+  - MyOKX is treated as an OKX EEA Spot profile, not a copied adapter.
+  - Runtime private REST and private WebSocket are disabled until EEA credential scope is audited.
+  - Public REST reuses OKX Spot instrument and order book response shapes with exchange id myokx.

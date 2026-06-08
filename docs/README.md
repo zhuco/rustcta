@@ -10,8 +10,10 @@ the best starting point when multiple AI agents are working in parallel.
 
 - `industrial_workspace_migration_status.md` - current migration progress,
   verified checks, remaining work, and next batch scope.
-- `exchange_gateway_next_40_parallel_tasks_zh.md` - 2026-06-08 close-out for
-  the next 40 exchange gateway adapters and validation status.
+- `交易所网关/README.md` - exchange gateway docs, adapter index, interface
+  checklist, WebSocket market-data dimensions, and per-exchange references.
+- `交易所网关/总览/exchange_gateway_next_40_parallel_tasks_zh.md` - 2026-06-08
+  close-out for the next 40 exchange gateway adapters and validation status.
 - `industrial_workspace_update_2026-06-07_v0.3.9.md` - previous workspace
   cleanup note, version bump, validation result, and current directory
   structure.
@@ -62,33 +64,14 @@ cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
 
 - `architecture_module_layout.md` - legacy root module map and current
   functional paths.
-- `exchange_abstraction.md` - exchange-facing contract summary.
-- `exchange_adapter_interface_status.md` - current adapter layout after
-  compatibility cleanup.
-- `exchange_api_completion_matrix.md` - code-first adapter capability matrix.
-- `exchange_support_matrix.md` - visual exchange support list, separated into
-  centralized/custodial venues and decentralized/on-chain perpetual venues with
-  CoinGecko/CoinGlass/official icon sources.
-- `exchange_adapter_toolchain_completion_zh.md` - endpoint mapping, request
-  spec, stream runtime, reconciliation, and adapter migration task split.
-- `exchange_gateway_expansion_30_venues_zh.md` - three-batch plan for 30 new
-  exchange gateway adapters and Binance-parity interface checklist.
-- `exchange_gateway_next_40_parallel_tasks_zh.md` - completed 40-exchange
-  gateway expansion split into 20 two-exchange AI task packets.
-- `bitkan_adapter.md` - BitKan conservative gateway registration, capability
-  boundaries, and OpenAPI upgrade gate.
-- `blofin_adapter.md` - BloFin USDT perpetual gateway adapter endpoint mapping,
-  signing, WS heartbeat, and unsupported Spot trading boundary.
-- `api_key_security.md` - read-only key requirements and validation safety.
 - `control_plane_security.md` - control-plane write and audit rules.
 - `kill_switch.md` - kill-switch state and safety semantics.
 - `live_preflight.md` - read-only readiness gate.
 - `live_dry_run.md` - non-submitting live order plan path.
-- `client_order_id_policy.md` - client order id generation and validation.
-- `order_reconciliation.md` - REST reconciliation behavior.
-- `fee_model.md` - fee source priority and fallback behavior.
-- `symbol_management.md` - internal/exchange symbol mapping rules.
-- `websocket_market_data.md` - shared websocket book-cache path.
+
+Exchange gateway architecture, adapter capability matrices, API key policy,
+client order id policy, fee model, order reconciliation, symbol mapping, and
+WebSocket market-data rules now live under `交易所网关/`.
 
 ## Strategies And Operations
 
@@ -101,17 +84,12 @@ cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
 
 ## Exchange References
 
-- `spot_exchange_adapters.md` - Spot adapter architecture notes.
-- `exchange_support_matrix.md` - gateway exchange support matrix with icons and
-  centralized/decentralized grouping.
-- `ascendex_adapter.md` - AscendEX Spot/Cash and futures gateway adapter reference.
-- `bitget_adapter.md` - Bitget Spot adapter reference.
-- `bitkan_adapter.md` - BitKan conservative gateway adapter reference.
-- `gateio_adapter.md` - Gate.io Spot adapter reference.
-- `hashkey_global_adapter.md` - HashKey Global Spot and futures gateway adapter reference.
-- `hyperliquid_api.md` - Hyperliquid API and strategy integration notes.
-- `mexc_adapter.md` - MEXC Spot adapter reference.
-- `xt_adapter.md` - XT.com Spot and USDT-M gateway adapter reference.
+- `交易所网关/README.md` - Chinese gateway documentation entrypoint.
+- `交易所网关/接口盘点维度.md` - capability dimensions for filling exchange
+  docs, including product-line support and WebSocket depth/speed requirements.
+- `交易所网关/交易所接口补全文档模板.md` - per-exchange interface template.
+- `交易所网关/适配器索引.md` - Chinese index for adapter file names.
+- `交易所网关/适配器/` - one adapter document per exchange.
 
 ## Cleanup Policy
 

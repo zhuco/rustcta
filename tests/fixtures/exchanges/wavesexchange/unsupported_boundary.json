@@ -1,0 +1,21 @@
+{
+  "exchange": "wavesexchange",
+  "market_type": "spot",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_read_enabled": false,
+  "private_write_enabled": false,
+  "reason": "WX Network matcher orders require Waves order/public-key signatures and wallet account scope.",
+  "allowed_operations": [
+    "symbol_rules",
+    "order_book"
+  ],
+  "unsupported_operations": [
+    "balances",
+    "positions",
+    "place_order",
+    "cancel_order",
+    "batch_place_orders",
+    "batch_cancel_orders"
+  ]
+}

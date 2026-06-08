@@ -1,0 +1,16 @@
+{
+  "timestamp": 1710000000123,
+  "lastOffset": 321,
+  "pair": {
+    "amountAsset": "WAVES",
+    "priceAsset": "DG2xFkPdDwKUoBkzGAhQtLpSGzfXLiCYPEzeKH2Ad24p"
+  },
+  "bids": [
+    { "price": 2.515, "amount": 125.75 },
+    { "price": "2.510", "amount": "80.0" }
+  ],
+  "asks": [
+    { "price": 2.525, "amount": 99.5 },
+    { "price": "2.530", "amount": "120.0" }
+  ]
+}

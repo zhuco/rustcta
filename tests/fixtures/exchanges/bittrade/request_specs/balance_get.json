@@ -1,0 +1,11 @@
+{
+  "exchange": "bittrade",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/account/accounts/100009/balance",
+  "auth": "hmac",
+  "body": null,
+  "strict_body": true
+}

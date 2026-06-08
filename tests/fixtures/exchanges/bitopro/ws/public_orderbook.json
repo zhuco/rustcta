@@ -1,0 +1,23 @@
+{
+  "event": "ORDER_BOOK",
+  "eventID": "dadf4ac1-665a-4f39-a139-ab95da102374",
+  "pair": "BTC_TWD",
+  "bids": [
+    {
+      "price": "3000000",
+      "amount": "0.10",
+      "count": 1,
+      "total": "0.10"
+    }
+  ],
+  "asks": [
+    {
+      "price": "3010000",
+      "amount": "0.12",
+      "count": 1,
+      "total": "0.12"
+    }
+  ],
+  "timestamp": 1136185445000,
+  "datetime": "2006-01-02T15:04:05.700Z"
+}

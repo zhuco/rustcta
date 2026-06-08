@@ -1,0 +1,14 @@
+{
+  "exchange": "btcbox",
+  "operation": "cancel_order",
+  "method": "POST",
+  "path": "/api/v1/trade_cancel",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "canonical": "coin=btc&id=12345&key=btcbox-public-key&nonce=1700000000012",
+  "body": "coin=btc&id=12345&key=btcbox-public-key&nonce=1700000000012&signature=67e51c2f9d67ddff19241474db405d5da626fbe847d4156b0c5f90ad92e910a0",
+  "auth": "hmac_sha256_md5_private_key",
+  "expected_signature": "67e51c2f9d67ddff19241474db405d5da626fbe847d4156b0c5f90ad92e910a0",
+  "network": "offline_request_spec_only"
+}

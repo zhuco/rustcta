@@ -1,0 +1,18 @@
+{
+  "exchange": "p2b",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "heartbeat": {
+    "mode": "server_ping_available_unimplemented",
+    "request": {
+      "method": "server.ping",
+      "params": [],
+      "id": 1
+    }
+  },
+  "public_ws_doc": "https://github.com/P2B-team/P2B-WSS-Public/blob/main/wss_documentation.md",
+  "rest_reconciliation_fallback": [
+    "/api/v2/orders",
+    "/api/v2/account/market_deals"
+  ]
+}

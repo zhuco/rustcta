@@ -1,0 +1,13 @@
+{
+  "operation": "exmo.get_recent_fills",
+  "method": "POST",
+  "path": "/v1.1/user_trades",
+  "content_type": "application/x-www-form-urlencoded",
+  "auth": "hmac_sha512_form",
+  "body": {
+    "pair": "BTC_USD",
+    "limit": "100",
+    "offset": "20",
+    "nonce": "1710000000005"
+  }
+}

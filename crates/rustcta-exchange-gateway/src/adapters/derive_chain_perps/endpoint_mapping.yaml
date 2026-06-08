@@ -1,0 +1,237 @@
+schema_version: 1
+exchange: derive_chain_perps
+adapter: DeriveChainPerpsGatewayAdapter
+status: audit_only
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/derive_chain_perps_adapter.md
+  last_reviewed: "2026-06-08"
+  profile_of: derive
+  chain: derive_chain
+  chain_id: 957
+  notes: "C-47: Derive Chain settlement/profile audit for perpetuals. Runtime Derive Exchange API coverage remains in the existing derive adapter; this profile keeps REST/WS/signing unsupported_unverified until Derive Chain indexer/RPC semantics are fixture-verified."
+market_types:
+  - perpetual
+products:
+  - perpetual
+base_urls:
+  docs: https://docs.derive.xyz
+  app: https://www.derive.xyz
+  rest: https://api.derive.xyz
+  rpc: https://rpc.lyra.finance
+  indexer: unsupported_unverified
+auth:
+  private_rest: unsupported
+  wallet_signing: unsupported_unverified
+  notes: "No promoted API-key/HMAC/Derive Chain transaction signing path is implemented."
+rate_limits:
+  derive_chain_perps_unverified:
+    scope: none
+    notes: "No live HTTP runtime is opened by this adapter."
+reconciliation:
+  positions: unsupported_unverified
+  balances: unsupported_unverified
+  open_orders: unsupported_unverified
+batch:
+  place_orders: unsupported_unverified
+  cancel_orders: unsupported_unverified
+websocket:
+  public: unsupported_unverified
+  private: unsupported_unverified
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/markets
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Official public market API contract not verified; audited only through protocol documentation."
+    market_types: [perpetual]
+  - operation: get_order_book
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/orderbook
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "No stable order-book or quote snapshot REST contract was verified."
+    market_types: [perpetual]
+  - operation: get_fees
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/risk
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Risk/funding/liquidation fields are protocol-audit subjects, not a promoted runtime parser."
+    market_types: [perpetual]
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/positions
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Account/position reads require verified wallet/indexer semantics before runtime support."
+    market_types: [perpetual]
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/balances
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Collateral/account state source is unverified."
+    market_types: [perpetual]
+  - operation: get_open_orders
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/open-orders
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Open-order read API is not verified."
+    market_types: [perpetual]
+  - operation: query_order
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/order
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Order status source is not verified."
+    market_types: [perpetual]
+  - operation: get_recent_fills
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/derive_chain_perps/fills
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Fill history source is not verified."
+    market_types: [perpetual]
+  - operation: place_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/derive_chain_perps/place-order
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "Derive Chain transaction/off-chain order signing path is not verified."
+    market_types: [perpetual]
+  - operation: cancel_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/derive_chain_perps/cancel-order
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "Cancel signing and execution semantics are not verified."
+    market_types: [perpetual]
+  - operation: batch_place_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/derive_chain_perps/batch-place
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "No verified native batch order contract/API."
+    market_types: [perpetual]
+  - operation: batch_cancel_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/derive_chain_perps/batch-cancel
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "No verified native batch cancel contract/API."
+    market_types: [perpetual]
+  - operation: cancel_all_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/derive_chain_perps/cancel-all
+    auth: unsupported
+    rate_limit_bucket: derive_chain_perps_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "No verified cancel-all contract/API."
+    market_types: [perpetual]

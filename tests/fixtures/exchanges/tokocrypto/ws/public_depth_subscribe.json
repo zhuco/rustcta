@@ -1,0 +1,13 @@
+{
+  "stream": "btcusdt@depth",
+  "subscribe_payload": {
+    "method": "SUBSCRIBE",
+    "params": ["btcusdt@depth"],
+    "id": 1
+  },
+  "unsubscribe_payload": {
+    "method": "UNSUBSCRIBE",
+    "params": ["btcusdt@depth"],
+    "id": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "operation": "bitteam.get_open_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/trade/api/ccxt/ordersOfUser",
+  "query": {
+    "type": "active",
+    "limit": "1000",
+    "offset": "0",
+    "pair": "BTC_USDT"
+  },
+  "headers": {
+    "authorization": "<redacted:basic-auth>"
+  },
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "bitteam.open_orders_request_spec_only"
+}

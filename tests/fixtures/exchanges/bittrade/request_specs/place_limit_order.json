@@ -1,0 +1,23 @@
+{
+  "exchange": "bittrade",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v1/order/orders/place",
+  "auth": "hmac",
+  "body": {
+    "account-id": 100009,
+    "amount": "0.01",
+    "price": "3000000",
+    "source": "api",
+    "symbol": "btcjpy",
+    "type": "buy-limit"
+  },
+  "strict_body": true,
+  "forbidden_secret_fragments": [
+    "secret",
+    "real-key",
+    "api-secret"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "m": 1,
+  "i": 1,
+  "n": "GetInstruments",
+  "o": "[{\"omsId\":1,\"instrumentId\":1,\"symbol\":\"BTCCAD\",\"product1\":1,\"product1Symbol\":\"BTC\",\"product2\":8,\"product2Symbol\":\"CAD\",\"instrumentType\":1,\"sessionStatus\":1,\"quantityIncrement\":\"0.00000001\",\"priceIncrement\":\"0.01\"},{\"omsId\":1,\"instrumentId\":2,\"symbol\":\"ETHCAD\",\"product1\":2,\"product1Symbol\":\"ETH\",\"product2\":8,\"product2Symbol\":\"CAD\",\"instrumentType\":1,\"sessionStatus\":1,\"quantityIncrement\":\"0.000001\",\"priceIncrement\":\"0.01\"}]"
+}

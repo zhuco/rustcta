@@ -1,0 +1,23 @@
+gateway:
+  adapters:
+    - cod3x
+
+cod3x:
+  enabled: false
+  docs_base_url: https://docs.cod3x.org
+  website_base_url: https://www.cod3x.org
+  app_base_url: https://app.cod3x.org
+  venue_profiles:
+    - hyperliquid
+    - gmx_v2
+    - lighter
+  public_rest_enabled: false
+  private_rest_enabled: false
+  public_streams_enabled: false
+  private_streams_enabled: false
+  trade_enabled: false
+  scan_only: true
+  notes:
+    - "C-48 keeps Cod3x as a G0 audit-only AI perps terminal/routing-layer adapter."
+    - "Do not configure terminal secrets, downstream venue keys, wallet private keys, or delegated trading tokens for this adapter."
+    - "Use dedicated downstream adapters for Hyperliquid, GMX V2, Lighter, or any other venue once their own API contracts are verified."

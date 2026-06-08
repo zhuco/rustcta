@@ -1,0 +1,12 @@
+{
+  "algorithm": "hmac_sha256_hex",
+  "timestamp": "1700000000000",
+  "method": "POST",
+  "path": "/orders",
+  "query_string": "",
+  "body": "{\"market_symbol\":\"btcbrl\",\"price\":\"350000\",\"quantity\":\"0.01\",\"side\":\"BUY\",\"type\":\"LIMIT\"}",
+  "payload": "1700000000000POST/orders{\"market_symbol\":\"btcbrl\",\"price\":\"350000\",\"quantity\":\"0.01\",\"side\":\"BUY\",\"type\":\"LIMIT\"}",
+  "api_key": "fixture-key",
+  "secret": "<redacted-fixture-secret>",
+  "expected_signature": "9c23ecbd2bc78a3fa52270ded0e39f7f5586d3e423652b559be00687dbed8e15"
+}

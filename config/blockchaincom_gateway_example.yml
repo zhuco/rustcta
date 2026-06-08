@@ -1,0 +1,47 @@
+# Blockchain.com Exchange gateway adapter example. Disabled by default.
+
+exchange: blockchaincom
+adapter: blockchaincom
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://api.blockchain.com/v3/exchange
+public_ws_url: wss://ws.blockchain.info/mercury-gateway/v1/ws
+private_ws_url: wss://ws.blockchain.info/mercury-gateway/v1/ws
+ws_origin: https://exchange.blockchain.com
+
+api_key: ${BLOCKCHAINCOM_API_KEY}
+api_secret: ${BLOCKCHAINCOM_API_SECRET}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+request_timeout_ms: 10000
+
+offline_request_spec_only:
+  - get_balances
+  - get_fees
+  - place_order
+  - cancel_order
+  - cancel_all_orders
+  - query_order
+  - get_open_orders
+  - get_recent_fills
+
+unsupported:
+  - derivatives
+  - futures
+  - perpetuals
+  - margin_positions
+  - brokerage_swaps
+  - crypto_deposit_address_creation
+  - withdrawals
+  - whitelist_management
+
+notes:
+  - REST auth uses X-API-Token; no REST HMAC canonical signing string is documented.
+  - Private write/read endpoints are fixture/request-spec only in this task.
+  - Do not put real credentials in this file.

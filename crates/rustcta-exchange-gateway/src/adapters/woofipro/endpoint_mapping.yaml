@@ -1,0 +1,304 @@
+schema_version: 1
+exchange: woofipro
+adapter: WoofiproGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/woofipro_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task A-36 WOOFi Pro profile over Orderly API. Public info and signed REST trading/read endpoints are mapped; WS runtime remains helper/spec-only.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://api.orderly.org
+  legacy_evm_rest: https://api-evm.orderly.org
+  testnet_rest: https://testnet-api.orderly.org
+  public_ws: wss://ws-evm.orderly.org/ws/stream
+  private_ws: wss://ws-private-evm.orderly.org/v2/ws/private/stream
+auth:
+  public_rest: none
+  private_rest: Orderly account headers orderly-account-id/orderly-key/orderly-signature/orderly-timestamp
+  signing: Ed25519 over timestamp + method + path_with_query + body, signature encoded base64url without padding
+rate_limits:
+  woofipro_public: { scope: ip, interval_ms: 1000, limit: 10 }
+  woofipro_orderly_signed_read: { scope: account, interval_ms: 1000, limit: 5 }
+  woofipro_orderly_private: { scope: account, interval_ms: 1000, limit: 10 }
+  woofipro_orderly_orders: { scope: account, interval_ms: 1000, limit: 10 }
+  woofipro_orderly_batch: { scope: account, interval_ms: 1000, limit: 2 }
+  woofipro_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  public_info: { mode: none }
+  private_history: { mode: page_or_size }
+reconciliation:
+  private_state: signed_rest
+  notes: Cancel acknowledgements may require query/open-orders reconciliation for final terminal state.
+batch:
+  place: { support: native, max_items: 10, atomicity: partial }
+  cancel: { support: native, max_items: 10, atomicity: partial }
+websocket:
+  public:
+    support: spec_only
+    helper_only: true
+    heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/public/info
+    auth: none
+    rate_limit_bucket: woofipro_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/public/get-available-symbols
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/public_info.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/orderbook/{symbol}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: woofipro_orderly_signed_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/restful-api/private/orderbook-snapshot
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/orderbook_signed_read.json
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/client/holding
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: woofipro_orderly_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/get_balances.json
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/position/{symbol}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: woofipro_orderly_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/get_position.json
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: woofipro_orderly_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/place_order.json
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: woofipro_orderly_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/cancel_order.json
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PUT
+    path: /v1/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: woofipro_orderly_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/amend_order.json
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v1/batch-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: woofipro_orderly_batch
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/batch_place_orders.json
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /v1/batch-order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: woofipro_orderly_batch
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/batch_cancel_orders.json
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /v1/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: woofipro_orderly_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: partial
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/cancel_all_orders.json
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/order/{order_id}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: woofipro_orderly_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/query_order.json
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: woofipro_orderly_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/get_open_orders.json
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/trades
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: woofipro_orderly_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private
+    request_spec_fixture: tests/fixtures/exchanges/woofipro/request_specs/get_recent_fills.json
+  - operation: get_fees
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/woofipro/fees
+    auth: unsupported
+    rate_limit_bucket: woofipro_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: woofipro.fees_require_orderly_account_audit
+streams:
+  - operation: public_orderbook_delta
+    product: perpetual
+    transport: websocket
+    channel: "{symbol}@orderbookupdate"
+    auth: none
+    support: spec_only
+    resync:
+      endpoint_operation: get_order_book
+      mode: signed_rest_required
+  - operation: public_builder_ticker
+    product: perpetual
+    transport: websocket
+    channel: "woofi_pro${symbol}@ticker"
+    auth: none
+    support: spec_only
+  - operation: private_user_events
+    product: perpetual
+    transport: websocket
+    channel: executionreport/account
+    auth: signed
+    support: unsupported
+    reason: woofipro.private_streams_require_orderly_account_auth

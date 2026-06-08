@@ -1,0 +1,239 @@
+schema_version: 1
+exchange: alpaca
+adapter: rustcta_exchange_gateway::adapters::alpaca
+metadata:
+  status: validated
+  source: docs/alpaca_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Alpaca Broker crypto spot adapter. Public market data still requires APCA key/secret credentials.
+market_types:
+  - spot
+products:
+  - spot
+rest:
+  base_url: https://broker-api.alpaca.markets
+  testnet_base_url: https://broker-api.sandbox.alpaca.markets
+base_urls:
+  broker_live: https://broker-api.alpaca.markets
+  broker_sandbox: https://broker-api.sandbox.alpaca.markets
+  market_data_live: https://data.alpaca.markets
+  market_data_sandbox: https://data.sandbox.alpaca.markets
+auth:
+  mode: api_key
+  headers:
+    - APCA-API-KEY-ID
+    - APCA-API-SECRET-KEY
+rate_limits:
+  buckets:
+    broker_rest:
+      scope: account
+      interval: 1m
+      limit: header_driven
+    market_data_rest:
+      scope: account
+      interval: 1m
+      limit: header_driven
+    websocket:
+      scope: websocket
+      interval: connection
+      limit: venue_documented
+pagination:
+  get_open_orders:
+    style: status_filtered_list
+    status_param: status
+    until_param: until
+    max_limit: 500
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_balances
+    - get_positions
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: unsupported
+    reason: Alpaca Broker order API is single-order only in this adapter.
+  cancel_orders:
+    support: composed
+    mode: composed_sequential
+    atomicity: non_atomic
+    partial_failure: true
+  cancel_all_orders:
+    support: native
+    atomicity: partial
+    partial_failure: true
+websocket:
+  public:
+    support: native
+    url: wss://stream.data.alpaca.markets/v1beta3/crypto/us
+    channels: [orderbooks]
+    auth: api_key
+    heartbeat:
+      direction: none_documented
+      disconnect_policy: reconnect_and_resync
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    reason: Alpaca Broker trade events are exposed as SSE at /v2/events/trades, not WebSocket.
+unsupported:
+  - operation: margin_short_leverage
+    reason: Alpaca crypto positions are spot-only and non-marginable.
+  - operation: private_websocket_orders
+    reason: Broker order updates use SSE; this adapter does not expose a private WebSocket.
+  - operation: historical_order_book
+    reason: Alpaca crypto data REST exposes latest orderbooks, not historical depth snapshots.
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: spot
+    method: GET
+    path: /v1/assets
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/get_symbol_rules.json
+    official_doc: https://docs.alpaca.markets/reference/get-v1-assets
+    notes: Adapter filters asset_class=crypto and tradable assets.
+  - operation: get_order_book
+    transport: rest
+    product: spot
+    method: GET
+    path: /v1beta3/crypto/{loc}/latest/orderbooks
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: market_data_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/get_order_book.json
+    official_doc: https://docs.alpaca.markets/reference/cryptolatestorderbooks-1
+  - operation: get_balances
+    transport: rest
+    product: spot
+    method: GET
+    path: /v1/trading/accounts/{account_id}/account
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/get_positions.json
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/get_balances.json
+  - operation: get_positions
+    transport: rest
+    product: spot
+    method: GET
+    path: /v1/trading/accounts/{account_id}/positions
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /v1/trading/accounts/{account_id}/orders
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/place_order.json
+  - operation: place_quote_market_order
+    transport: rest
+    product: spot
+    method: POST
+    path: /v1/trading/accounts/{account_id}/orders
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/place_quote_market_order.json
+    notes: Implemented with Alpaca market order notional.
+  - operation: cancel_order
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /v1/trading/accounts/{account_id}/orders/{order_id}
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    transport: rest
+    product: spot
+    method: DELETE
+    path: /v1/trading/accounts/{account_id}/orders
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/cancel_all_orders.json
+    notes: Account-wide cancel-all only; symbol-scoped cancel-all is unsupported.
+  - operation: query_order
+    transport: rest
+    product: spot
+    method: GET
+    path: /v1/trading/accounts/{account_id}/orders:by_client_order_id
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/query_order_by_client_id.json
+    notes: Adapter supports client_order_id and exchange order id readbacks.
+  - operation: get_open_orders
+    transport: rest
+    product: spot
+    method: GET
+    path: /v1/trading/accounts/{account_id}/orders
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: broker_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/alpaca/request_specs/get_open_orders.json
+  - operation: get_recent_fills
+    transport: rest
+    product: spot
+    method: UNSUPPORTED
+    path: /unsupported/alpaca/recent_fills
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Account activity fills exist, but this adapter keeps recent fills unsupported until pagination and symbol filters are mapped losslessly.
+  - operation: get_fees
+    transport: rest
+    product: spot
+    method: UNSUPPORTED
+    path: /unsupported/alpaca/fees
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Broker crypto fee schedule is not exposed as a per-symbol trading-fee endpoint matching the shared gateway model.

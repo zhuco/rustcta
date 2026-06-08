@@ -1,0 +1,24 @@
+{
+  "operation": "p2b.place_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/api/v2/order/new",
+  "query": {},
+  "headers": {
+    "X-TXC-APIKEY": "<redacted:api-key>",
+    "X-TXC-PAYLOAD": "<redacted:base64-json-payload>",
+    "X-TXC-SIGNATURE": "<redacted:hmac-sha512-hex>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "market": "BTC_USDT",
+    "side": "buy",
+    "amount": "0.01",
+    "price": "64000",
+    "request": "/api/v2/order/new",
+    "nonce": "1698484860"
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "p2b.place_order_request_spec_only"
+}

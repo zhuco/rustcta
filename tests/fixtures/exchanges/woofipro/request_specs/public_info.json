@@ -1,0 +1,9 @@
+{
+  "exchange": "woofipro",
+  "operation": "get_symbol_rules",
+  "method": "GET",
+  "path": "/v1/public/info",
+  "query": {},
+  "headers": {},
+  "auth": "none"
+}

@@ -1,0 +1,27 @@
+{
+  "exchange": "hitbtc",
+  "runtime_enabled": [
+    "spot_public_rest_symbol_rules",
+    "spot_public_rest_order_book"
+  ],
+  "offline_only": [
+    "spot_place_order_request_spec",
+    "spot_cancel_order_request_spec",
+    "spot_open_orders_request_spec",
+    "spot_recent_fills_request_spec",
+    "public_ws_orderbook_payload_and_parser",
+    "private_ws_login_payload"
+  ],
+  "unsupported_runtime": [
+    "private_rest_trading",
+    "private_rest_readbacks",
+    "public_ws_supervisor",
+    "private_ws_supervisor",
+    "margin_trading",
+    "futures_trading",
+    "wallet_withdraw_transfer",
+    "batch_place_cancel",
+    "amend_order",
+    "quote_market_order"
+  ]
+}

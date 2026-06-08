@@ -1,0 +1,20 @@
+{
+  "exchange": "bequant",
+  "operation": "bequant.place_order",
+  "method": "POST",
+  "path": "/spot/order",
+  "auth": "basic",
+  "headers": {
+    "Authorization": "Basic Zml4dHVyZS1rZXk6Zml4dHVyZS1zZWNyZXQ="
+  },
+  "body": {
+    "symbol": "BTCUSDT",
+    "side": "buy",
+    "type": "limit",
+    "time_in_force": "GTC",
+    "client_order_id": "CLIENTLIMIT1",
+    "quantity": "0.02",
+    "price": "65000",
+    "post_only": "true"
+  }
+}

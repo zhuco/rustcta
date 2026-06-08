@@ -1,0 +1,8 @@
+{
+  "algorithm": "hmac_sha512_hex",
+  "api_key": "yobit_public_fixture_key",
+  "api_secret": "yobit_secret_fixture",
+  "form_body": "method=getInfo&nonce=1700000000",
+  "expected_sign": "8e46aeb2a394c5e0fe7161fd81a059631d2978932e152292ac4e263e6d6e6f576b17b94f95fc5c00f0064d55b3bba52fe0f941df707a5772222988296385c9f7",
+  "sanitized": true
+}

@@ -1,0 +1,23 @@
+{
+  "operation": "p2b.get_recent_fills",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/api/v2/account/market_deals",
+  "query": {},
+  "headers": {
+    "X-TXC-APIKEY": "<redacted:api-key>",
+    "X-TXC-PAYLOAD": "<redacted:base64-json-payload>",
+    "X-TXC-SIGNATURE": "<redacted:hmac-sha512-hex>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "market": "BTC_USDT",
+    "limit": "100",
+    "offset": "0",
+    "request": "/api/v2/account/market_deals",
+    "nonce": "1698489001"
+  },
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "p2b.recent_fills_request_spec_only"
+}

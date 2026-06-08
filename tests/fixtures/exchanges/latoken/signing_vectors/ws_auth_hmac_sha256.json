@@ -1,0 +1,8 @@
+{
+  "algorithm": "HMAC-SHA256",
+  "api_key": "latoken_public_test_key",
+  "api_secret": "latoken_private_test_secret",
+  "timestamp_ms": "1710000000000",
+  "expected_signature": "a3cdfca9f0e237a7b1943e1d093d476fd2d32cd6b8e78acddcad94ccf4d68942",
+  "sanitized": true
+}

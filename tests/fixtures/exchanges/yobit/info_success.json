@@ -1,0 +1,13 @@
+{
+  "server_time": 1710000000,
+  "pairs": {
+    "btc_usdt": {
+      "decimal_places": 2,
+      "min_price": "0.00000001",
+      "max_price": "1000000",
+      "min_amount": "0.0001",
+      "hidden": 0,
+      "fee": 0.2
+    }
+  }
+}

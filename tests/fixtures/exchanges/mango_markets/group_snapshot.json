@@ -1,0 +1,36 @@
+{
+  "source": "sanitized Mango v4 group snapshot shape",
+  "program_id": "4MangoMjqJ2firMokCjjGgoK8d4MXcrgL7XJaL3w6fVg",
+  "group": "78b8f4cGCwmZ9ysPFMWLaLTkkaYnUjwMJYStWe5RTSSX",
+  "quote_symbol": "USDC",
+  "perp_markets": [
+    {
+      "name": "SOL-PERP",
+      "base": "SOL",
+      "quote": "USDC",
+      "price_tick": "0.01",
+      "base_lot_size": "0.001",
+      "min_order_size": "0.001",
+      "min_notional": "5",
+      "active": true
+    },
+    {
+      "name": "BTC-PERP",
+      "base": "BTC",
+      "quote": "USDC",
+      "price_tick": "1",
+      "base_lot_size": "0.0001",
+      "min_order_size": "0.0001",
+      "min_notional": "10",
+      "active": true
+    },
+    {
+      "name": "DELISTED-PERP",
+      "base": "DELISTED",
+      "quote": "USDC",
+      "price_tick": "0.001",
+      "base_lot_size": "1",
+      "active": false
+    }
+  ]
+}

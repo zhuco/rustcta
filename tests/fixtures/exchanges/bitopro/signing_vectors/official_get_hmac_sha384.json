@@ -1,0 +1,9 @@
+{
+  "name": "bitopro-official-get-delete-hmac-sha384",
+  "api_key": "bitopro-key",
+  "api_secret": "bitopro",
+  "identity": "support@example.test",
+  "nonce": 1554380909131,
+  "payload_base64": "eyJpZGVudGl0eSI6InN1cHBvcnRAZXhhbXBsZS50ZXN0Iiwibm9uY2UiOjE1NTQzODA5MDkxMzF9",
+  "expected_signature": "4956968712276b3ea246ea8e6e44d26f82e65bbfd310a793ad873183acbb14cef015d826d20608298f96efe9c2e85118"
+}

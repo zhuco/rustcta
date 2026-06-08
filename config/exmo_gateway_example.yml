@@ -1,0 +1,41 @@
+enabled: false
+adapter: exmo
+market_types:
+  - spot
+rest:
+  base_url: https://api.exmo.com
+websocket:
+  public_url: wss://ws-api.exmo.com/v1/public
+  private_url: wss://ws-api.exmo.com/v1/private
+private_rest:
+  enabled: false
+  api_key_env: RUSTCTA_EXMO_API_KEY
+  api_secret_env: RUSTCTA_EXMO_API_SECRET
+rate_limits:
+  rest_requests_per_second: 10
+capability_boundary:
+  implemented:
+    - get_symbol_rules
+    - get_order_book
+    - get_fees
+    - get_balances
+    - place_order
+    - place_quote_market_order
+    - cancel_order
+    - query_order_limited_order_trades
+    - get_open_orders
+    - get_recent_fills
+    - websocket_subscription_specs
+  unsupported:
+    - margin
+    - perpetual
+    - futures
+    - positions
+    - native_batch_place
+    - native_batch_cancel
+    - cancel_all_orders
+    - amend_order
+    - order_list
+    - excode
+    - wallet_withdraw
+    - transfers

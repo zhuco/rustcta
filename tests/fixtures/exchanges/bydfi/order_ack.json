@@ -1,0 +1,15 @@
+{
+  "wallet": "W001",
+  "symbol": "BTC-USDT",
+  "orderId": "9001",
+  "clientOrderId": "CID-001",
+  "price": "65000",
+  "quantity": "0.02",
+  "avgPrice": "0",
+  "dealQuantity": "0",
+  "orderType": "LIMIT",
+  "side": "BUY",
+  "status": "NEW",
+  "updateTime": 1775541541009,
+  "createTime": 1775541540000
+}

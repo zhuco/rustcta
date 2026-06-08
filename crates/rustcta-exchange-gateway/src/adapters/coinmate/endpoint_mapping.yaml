@@ -1,0 +1,338 @@
+schema_version: 1
+exchange: coinmate
+adapter: CoinmateGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/coinmate_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: European spot scan-only adapter. Private REST is offline request-spec only.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://coinmate.io/api
+  public_ws_v2: wss://coinmate.io/api/websocket
+  public_ws_v1_prefix: wss://coinmate.io/api/websocket/channel
+auth:
+  private_rest: form params clientId/publicKey/nonce/signature, HMAC-SHA256 uppercase hex over nonce + clientId + publicKey
+  private_ws: same auth fields in v2 subscribe payload data
+rate_limits:
+  rest: { scope: ip, interval_ms: 60000, limit: 100 }
+pagination:
+  private_history: { mode: limit, max_limit: 1000, notes: tradeHistory and history endpoints document 1000-row max/default limits }
+reconciliation:
+  private_state: rest_fallback
+  notes: WebSocket order book sequence/checksum is not documented; use REST orderBook snapshot for resync.
+batch:
+  place: { support: unsupported, reason: coinmate.native_batch_place_unsupported }
+  cancel: { support: cancel_all_only, reason: coinmate.cancelAllOpenOrders is native cancel-all, not list batch cancel }
+websocket:
+  public:
+    support: payload_helper
+    url: wss://coinmate.io/api/websocket
+    channels:
+      - "trades-{PAIR}"
+      - "order_book-{PAIR}"
+      - "statistics-{PAIR}"
+    heartbeat: { mode: ping_pong_event, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: payload_helper_only
+    channels:
+      - "private-open_orders-{ACCOUNT_ID}[-{PAIR}]"
+      - "private-user_balances-{ACCOUNT_ID}"
+      - "private-user-trades-{ACCOUNT_ID}[-{PAIR}]"
+    reconciliation: rest_fallback
+unsupported:
+  - perpetuals
+  - futures
+  - margin
+  - leverage
+  - positions
+  - funding
+  - mark_price
+  - open_interest
+  - risk_tiers
+  - withdrawals
+  - transfers
+  - bank_wire_withdrawal
+  - stop_loss_orders
+  - hidden_orders
+  - native_batch_place
+  - native_batch_cancel_list
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /tradingPairs
+    auth: none
+    rate_limit_bucket: coinmate_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/trading_pairs.json }
+  - operation: products
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /products
+    auth: none
+    rate_limit_bucket: coinmate_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orderBook
+    auth: none
+    rate_limit_bucket: coinmate_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/orderbook_btc_eur.json }
+  - operation: ticker
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /ticker
+    auth: none
+    rate_limit_bucket: coinmate_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+  - operation: public_trades
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /transactions
+    auth: none
+    rate_limit_bucket: coinmate_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_balances.json }
+  - operation: fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /traderFees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_fees.json }
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_open_orders.json }
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /orderById
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/query_order.json }
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /tradeHistory
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/get_recent_fills.json }
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /buyLimit
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/place_order_limit_buy.json }
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /sellLimit
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/place_order_limit_sell.json }
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /cancelOrder
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/cancel_order.json }
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /cancelAllOpenOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/cancel_all_orders.json }
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /replaceByBuyLimit
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: coinmate_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://coinmate.docs.apiary.io/
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/coinmate/request_specs/amend_order_replace_buy.json }
+streams:
+  - operation: public_ws_order_book
+    product: spot
+    channel: order_book-{PAIR}
+    support: parser_only
+    resync: { endpoint_operation: order_book }
+  - operation: public_ws_trades
+    product: spot
+    channel: trades-{PAIR}
+    support: payload_helper
+  - operation: public_ws_statistics
+    product: spot
+    channel: statistics-{PAIR}
+    support: payload_helper
+  - operation: private_ws_open_orders
+    product: spot
+    channel: private-open_orders-{ACCOUNT_ID}[-{PAIR}]
+    support: parser_only
+    resync: { endpoint_operation: open_orders }
+  - operation: private_ws_balances
+    product: spot
+    channel: private-user_balances-{ACCOUNT_ID}
+    support: parser_only
+    resync: { endpoint_operation: balances }
+  - operation: private_ws_user_trades
+    product: spot
+    channel: private-user-trades-{ACCOUNT_ID}[-{PAIR}]
+    support: parser_only
+    resync: { endpoint_operation: recent_fills }

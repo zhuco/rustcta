@@ -1,0 +1,10 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "private_write_signing",
+  "supported": false,
+  "reason": "Waves matcher private writes require signed Waves order payloads and public-key scoped cancellation signatures; this adapter only exposes public REST scan-only fixtures.",
+  "signing_model": "waves_order_curve25519_signature",
+  "expected_error": "wavesexchange.place_order_requires_waves_order_curve25519_signing",
+  "contains_api_private_key": false,
+  "contains_auth_token": false
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "MDUpdateID": 100001,
+    "Accounts": 0,
+    "ActionDateTime": 1700000000000,
+    "ActionType": 0,
+    "Price": "65000.00",
+    "ProductPairCode": 1,
+    "Quantity": "0.25000000",
+    "Side": 0
+  },
+  {
+    "MDUpdateID": 100002,
+    "Accounts": 0,
+    "ActionDateTime": 1700000000001,
+    "ActionType": 0,
+    "Price": "65010.00",
+    "ProductPairCode": 1,
+    "Quantity": "0.40000000",
+    "Side": 1
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "ok": "error",
+  "e": "order_book",
+  "data": {
+    "error": "There was an error while placing your order: Wrong currency pair."
+  }
+}

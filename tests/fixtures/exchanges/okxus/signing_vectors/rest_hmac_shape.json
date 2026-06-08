@@ -1,0 +1,16 @@
+{
+  "exchange": "okxus",
+  "profile_of": "okx",
+  "name": "rest_hmac_shape_disabled",
+  "algorithm": "hmac_sha256_base64",
+  "payload_rule": "timestamp + uppercase_method + request_path + body",
+  "required_headers": [
+    "OK-ACCESS-KEY",
+    "OK-ACCESS-SIGN",
+    "OK-ACCESS-TIMESTAMP",
+    "OK-ACCESS-PASSPHRASE",
+    "Content-Type"
+  ],
+  "credential_values": {},
+  "status": "shape_only_private_disabled"
+}

@@ -1,0 +1,5 @@
+{
+  "ws_url": "wss://api.coinmetro.com/ws?pairs=BTCEUR&token=fixture-device:fixture.jwt.token",
+  "auth": "jwt_query_token",
+  "fallback": "rest_reconciliation"
+}

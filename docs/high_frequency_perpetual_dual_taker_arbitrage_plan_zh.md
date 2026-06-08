@@ -477,7 +477,7 @@ sizing:
 每个 AI 开始前必须：
 
 1. 运行 `git status --short`，识别无关脏文件。
-2. 阅读本文档，以及 `docs/exchange_abstraction.md`、`docs/exchange_api_completion_matrix.md`、`docs/order_reconciliation.md`、`docs/live_preflight.md`。
+2. 阅读本文档，以及 `docs/交易所网关/总览/exchange_abstraction.md`、`docs/交易所网关/总览/exchange_api_completion_matrix.md`、`docs/交易所网关/通用机制/order_reconciliation.md`、`docs/live_preflight.md`。
 3. 只修改自己任务允许范围。
 4. 不回滚、不覆盖其他 AI 或用户已有改动。
 5. 不绕过 dry-run、live-small admission、preflight、kill switch、private WS ready、reconciliation。

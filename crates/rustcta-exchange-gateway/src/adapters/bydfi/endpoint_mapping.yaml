@@ -1,0 +1,319 @@
+schema_version: 1
+exchange: bydfi
+adapter: BydfiGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: docs/bydfi_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: USDT perpetual first adapter. Spot trading, testnet and private WS remain explicit Unsupported boundaries.
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+base_urls:
+  rest: https://api.bydfi.com/api
+  public_ws: wss://stream.bydfi.com/v1/public/fapi
+  testnet: unsupported_no_official_url
+auth:
+  private_rest: hmac_sha256_headers
+  private_ws: unsupported_private_connection_url_not_documented
+rate_limits:
+  public_rest: { scope: ip, interval_ms: 1000, limit: 20 }
+  private_rest: { scope: api_key, interval_ms: 1000, limit: 5, notes: per-interface private quotas not fully published }
+  public_ws_subscriptions: { scope: ip, interval_ms: 1000, limit: 5, burst_5m: 300 }
+pagination:
+  history: { mode: time_window_limit, max_window_days: 7, max_age_months: 6, max_limit: 1000 }
+reconciliation:
+  private_state: rest_fallback
+  order_book: REST GET /v1/fapi/market/depth
+  orders: REST GET /v2/fapi/trade/open_order and /v2/fapi/trade/history_trade
+batch:
+  place: { support: native, max_items: 5, atomicity: partial }
+  cancel: { support: native, max_items: 10, atomicity: partial, same_symbol_required: true }
+websocket:
+  public:
+    support: native
+    url: wss://stream.bydfi.com/v1/public/fapi
+    subscribe: { method: SUBSCRIBE, params: ["<symbol>@depth", "<symbol>@ticker", "<symbol>@kline_1m"] }
+    heartbeat: { method: ping, interval_ms: 30000, expected_result: pong, retention_ms: 1200000 }
+  private:
+    support: unsupported
+    reason: BYDFi documents LOGIN and events but not a stable private WebSocket connection URL.
+unsupported:
+  - operation: spot_trading
+    reason: Current official SPOT section does not document spot market/order lifecycle endpoints.
+  - operation: testnet
+    reason: No official testnet or sandbox base URL found.
+  - operation: private_websocket_runtime
+    reason: Private WS URL/subscription lifecycle is undocumented; use REST reconciliation.
+endpoints:
+  - operation: symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/market/exchange_info
+    auth: none
+    rate_limit_bucket: bydfi_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/market
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/public_tests.rs, fixture: tests/fixtures/exchanges/bydfi/instruments.json }
+  - operation: order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/market/depth
+    auth: none
+    rate_limit_bucket: bydfi_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/market
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/public_tests.rs, fixture: tests/fixtures/exchanges/bydfi/orderbook.json }
+  - operation: funding_rate
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/market/funding_rate
+    auth: none
+    rate_limit_bucket: bydfi_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/market
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bydfi/funding.json }
+  - operation: funding_rate_history
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/market/funding_rate_history
+    auth: none
+    rate_limit_bucket: bydfi_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/market
+  - operation: mark_price
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/market/mark_price
+    auth: none
+    rate_limit_bucket: bydfi_public_market
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/market
+  - operation: balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/fapi/account/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bydfi_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/user
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/balances.json
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/private_tests.rs, fixture: tests/fixtures/exchanges/bydfi/balance.json }
+  - operation: positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v2/fapi/trade/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bydfi_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/positions.json
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/private_tests.rs, fixture: tests/fixtures/exchanges/bydfi/position.json }
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/fapi/trade/place_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/place_order.json
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/private_tests.rs, fixture: tests/fixtures/exchanges/bydfi/order_ack.json }
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/fapi/trade/cancel_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/cancel_order.json
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/fapi/trade/edit_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/amend_order.json
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/fapi/trade/batch_place_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    max_items: 5
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/batch_place_orders.json
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/fapi/trade/batch_cancel_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    max_items: 10
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/batch_cancel_orders.json
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /v2/fapi/trade/cancel_all_order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: bydfi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/cancel_all_orders.json
+  - operation: open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v2/fapi/trade/open_order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bydfi_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/open_orders.json
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v2/fapi/trade/open_order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bydfi_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/query_order.json
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v2/fapi/trade/history_trade
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: bydfi_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://developers.bydfi.com/en/futures/trade
+    request_spec_fixture: tests/fixtures/exchanges/bydfi/request_specs/recent_fills.json
+    response_parser: { status: implemented, test: crates/rustcta-exchange-gateway/src/adapters/bydfi/private_tests.rs, fixture: tests/fixtures/exchanges/bydfi/fill.json }

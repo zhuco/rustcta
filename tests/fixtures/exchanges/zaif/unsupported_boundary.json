@@ -1,0 +1,12 @@
+{
+  "exchange": "zaif",
+  "unsupported": [
+    "private_rest_runtime",
+    "private_websocket",
+    "fiat_funding",
+    "futures",
+    "client_order_id",
+    "amend_order"
+  ],
+  "reason": "A-38 implements public Spot REST parsing plus offline private signing/request specs only."
+}

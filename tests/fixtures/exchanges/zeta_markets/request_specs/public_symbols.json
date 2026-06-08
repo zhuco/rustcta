@@ -1,0 +1,12 @@
+{
+  "exchange": "zeta_markets",
+  "operation": "get_symbol_rules",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/prices/symbols",
+  "auth": "none",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true
+}

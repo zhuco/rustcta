@@ -1,0 +1,9 @@
+{
+  "algorithm": "hmac_sha256_hex",
+  "nonce": "1700000000000",
+  "full_url": "https://paymium.com/api/v1/user/orders",
+  "body": "{\"type\":\"LimitOrder\",\"currency\":\"EUR\",\"direction\":\"buy\",\"price\":50000,\"amount\":0.01}",
+  "api_secret": "fixture-secret",
+  "payload": "1700000000000https://paymium.com/api/v1/user/orders{\"type\":\"LimitOrder\",\"currency\":\"EUR\",\"direction\":\"buy\",\"price\":50000,\"amount\":0.01}",
+  "signature": "ff5ed709bbc679919dc37bf549478110e737c0d9be643e7ad43283e057cbbdbe"
+}

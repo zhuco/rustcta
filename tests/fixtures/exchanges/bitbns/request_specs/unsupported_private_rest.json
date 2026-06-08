@@ -1,0 +1,14 @@
+{
+  "exchange": "bitbns",
+  "operation": "private_rest",
+  "status": "unsupported",
+  "unsupported_reason": "Private REST signatures are documented in the official SDK, but trading/readback endpoints remain disabled until regional KYC/account constraints and read-only calls are verified.",
+  "request_spec_required": false,
+  "scan_only": true,
+  "trade_enabled": false,
+  "headers_shape": [
+    "X-BITBNS-APIKEY",
+    "X-BITBNS-PAYLOAD",
+    "X-BITBNS-SIGNATURE"
+  ]
+}

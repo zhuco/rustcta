@@ -1,0 +1,6 @@
+{
+  "BTC-USD": {
+    "base_currency": "BTC",
+    "counter_currency": "USD"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "exchange": "hibachi",
+  "operation": "cancel_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/trade/order",
+  "auth": "signed",
+  "body": {
+    "accountId": 42,
+    "orderId": 579183763093760000,
+    "signature": "sig"
+  },
+  "strict_body": true
+}

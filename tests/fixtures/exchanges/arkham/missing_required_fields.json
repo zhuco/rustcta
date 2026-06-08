@@ -1,0 +1,8 @@
+[
+  {
+    "baseSymbol": "BTC",
+    "quoteSymbol": "USDT",
+    "pairType": "spot",
+    "status": "listed"
+  }
+]

@@ -1,0 +1,23 @@
+enabled: false
+adapter: bydfi
+exchange: bydfi
+market_types:
+  - spot
+  - perpetual
+rest_base_url: https://api.bydfi.com/api
+public_websocket_url: wss://stream.bydfi.com/v1/public/fapi
+testnet_rest_base_url: null
+private_rest:
+  enabled: false
+  api_key_env: RUSTCTA_BYDFI_API_KEY
+  api_secret_env: RUSTCTA_BYDFI_API_SECRET
+  wallet: W001
+public_streams:
+  enabled: true
+private_streams:
+  enabled: false
+  reason: BYDFi documents login/events but not a stable private WebSocket connection URL.
+unsupported:
+  - spot_trading
+  - testnet
+  - private_websocket_runtime

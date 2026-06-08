@@ -13,7 +13,7 @@ Use these documents as the current source of truth:
 
 - `docs/README.md` for the active documentation index
 - `docs/industrial_workspace_migration_status.md` for migration progress
-- `docs/exchange_gateway_next_40_parallel_tasks_zh.md` for the 2026-06-08
+- `docs/交易所网关/总览/exchange_gateway_next_40_parallel_tasks_zh.md` for the 2026-06-08
   exchange gateway expansion close-out
 - `docs/industrial_workspace_update_2026-06-07_v0.3.9.md` for the previous
   workspace cleanup/update note
@@ -26,8 +26,8 @@ runtime behavior. New work should move toward the workspace boundaries below.
 Current workspace version: `0.3.13`. This update expands the exchange gateway
 surface with additional adapter modules, endpoint mapping fixtures, signing and
 request-spec validation assets, and refreshed gateway example configs. See
-`docs/README.md`, `docs/exchange_adapter_toolchain_completion_zh.md`, and
-`docs/exchange_api_completion_matrix.md` for the active adapter documentation
+`docs/README.md`, `docs/交易所网关/总览/exchange_adapter_toolchain_completion_zh.md`, and
+`docs/交易所网关/总览/exchange_api_completion_matrix.md` for the active adapter documentation
 and validation commands.
 
 ## Exchange Gateway Support
@@ -48,7 +48,7 @@ adapter. Supported adapter ids:
 `orangex`, `oxfun`, `pacifica`, `paradex`, `phemex`, `poloniex`, `tapbit`,
 `toobit`, `upbit`, `weex`, `whitebit`, `woo`, and `xt`.
 
-The visual support matrix lives in `docs/exchange_support_matrix.md`. It splits
+The visual support matrix lives in `docs/交易所网关/总览/exchange_support_matrix.md`. It splits
 venues into centralized/custodial exchanges and decentralized or on-chain
 perpetual venues, with remote icons sourced first from CoinGecko exchange
 images and then from CoinGlass or official-domain fallbacks when CoinGecko does
@@ -59,11 +59,11 @@ not list a venue.
 | Public REST | Symbol rules and order book snapshots where each venue exposes stable public endpoints. |
 | Private REST read | Balances, fees, open orders, query order, and recent fills where credential scopes and official APIs allow it. |
 | Private REST write | Place order, quote market order, cancel order, cancel-all, batch place/cancel, and order-list only where the venue exposes compatible native semantics; otherwise explicitly `Unsupported`. |
-| WebSocket | Public/private subscribe payloads, auth payloads, heartbeat policy, parser fixtures, or REST reconciliation fallback per venue. |
+| WebSocket | Public/private subscribe payloads, auth payloads, heartbeat policy, parser fixtures, push interval, order book depth levels, subscription modes, sequence/checksum, and REST reconciliation fallback per venue. |
 | Derivatives | Futures, perpetuals, options, funding, mark/open-interest, leverage/margin/position mode where the adapter and official API support lossless mapping. |
 | Safety boundary | Wallet, payment rails, fiat deposit/withdrawal, transfers, tax reports, and non-trading account operations remain outside gateway runtime unless a venue document explicitly narrows that boundary. |
 
-Per-exchange details live in `docs/<adapter>_adapter.md` and
+Per-exchange details live in `docs/交易所网关/适配器/<adapter>_adapter.md` and
 `crates/rustcta-exchange-gateway/src/adapters/<adapter>/endpoint_mapping.yaml`.
 
 ## Repository Layout

@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/account/fees",
+  "query": {},
+  "auth": "bearer_token",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": null
+}

@@ -1,0 +1,12 @@
+{
+  "operation": "bitopro.get_recent_fills",
+  "method": "GET",
+  "path": "/orders/trades/btc_twd",
+  "query": [
+    [
+      "limit",
+      "100"
+    ]
+  ],
+  "body": null
+}

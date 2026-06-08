@@ -1,0 +1,6 @@
+{
+  "api_secret": "tokocrypto-secret-fixture",
+  "query": "orderId=12345&recvWindow=5000&symbol=BTC_USDT&timestamp=1581720670624",
+  "expected_signature": "feb9fe89f43b3ef9166b8f526626383d943afa8f165c6d4eb56f5e3af9ecf383",
+  "expected_signed_query": "orderId=12345&recvWindow=5000&symbol=BTC_USDT&timestamp=1581720670624&signature=feb9fe89f43b3ef9166b8f526626383d943afa8f165c6d4eb56f5e3af9ecf383"
+}

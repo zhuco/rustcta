@@ -1,0 +1,14 @@
+{
+  "exchange": "btcbox",
+  "operation": "get_balances",
+  "method": "POST",
+  "path": "/api/v1/balance",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "canonical": "coin=btc&key=btcbox-public-key&nonce=1700000000012",
+  "body": "coin=btc&key=btcbox-public-key&nonce=1700000000012&signature=47327a056439d47e0e66a3ebdc45af743b0a3801278d6f2504fa901903b0dc84",
+  "auth": "hmac_sha256_md5_private_key",
+  "expected_signature": "47327a056439d47e0e66a3ebdc45af743b0a3801278d6f2504fa901903b0dc84",
+  "network": "offline_request_spec_only"
+}

@@ -1,0 +1,17 @@
+{
+  "adapter": "exmo",
+  "market_type": "spot",
+  "margin": "unsupported",
+  "perpetual": "unsupported",
+  "futures": "unsupported",
+  "positions": "unsupported",
+  "native_batch_place": "unsupported",
+  "native_batch_cancel": "unsupported",
+  "cancel_all": "unsupported",
+  "amend": "unsupported",
+  "order_list": "unsupported",
+  "excode": "unsupported",
+  "wallet_withdraw": "unsupported",
+  "transfers": "unsupported",
+  "reason": "EXMO spot REST v1.1 does not expose lossless shared mappings for these operations or requires support approval/high-risk wallet permissions."
+}

@@ -1,0 +1,8 @@
+{
+  "algorithm": "http_basic_base64",
+  "api_key": "btm_public_test_key",
+  "api_secret": "btm_private_test_secret",
+  "canonical": "btm_public_test_key:btm_private_test_secret",
+  "expected_authorization": "Basic YnRtX3B1YmxpY190ZXN0X2tleTpidG1fcHJpdmF0ZV90ZXN0X3NlY3JldA==",
+  "sanitized": true
+}

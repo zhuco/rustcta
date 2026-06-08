@@ -1,0 +1,21 @@
+{
+  "destination": "/v1/book/BTC/USDT",
+  "nonce": 42,
+  "timestamp": 1710000000000,
+  "payload": {
+    "ask": [
+      {
+        "price": "62681.15",
+        "quantity": "0.1177424"
+      }
+    ],
+    "bid": [
+      {
+        "price": "62679.15",
+        "quantity": "0.1313988"
+      }
+    ],
+    "totalAsk": "7380.22903576",
+    "totalBid": "8235.96509502"
+  }
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "pair": "BTCEUR",
+    "seqNumber": 96444450,
+    "timestamp": 1567791175553,
+    "qty": 0.01,
+    "price": 65000.0,
+    "side": "sell",
+    "orderID": "fixture-order-fill-1"
+  }
+]

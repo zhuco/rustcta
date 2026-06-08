@@ -1,0 +1,9 @@
+{
+  "op": "auth",
+  "headers": {
+    "Arkham-Api-Key": "<redacted:api_key>",
+    "Arkham-Expires": "1700000300000000",
+    "Arkham-Signature": "<redacted:signature>",
+    "Arkham-Broker-Id": "1001"
+  }
+}

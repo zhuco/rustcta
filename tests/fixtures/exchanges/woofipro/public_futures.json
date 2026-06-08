@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "data": {
+    "rows": [
+      {
+        "symbol": "PERP_BTC_USDC",
+        "index_price": "65000.5",
+        "mark_price": "65001.0",
+        "funding_rate": "0.0000125",
+        "next_funding_time": 1700006400000
+      },
+      {
+        "symbol": "PERP_ETH_USDC",
+        "index_price": "3500.25",
+        "mark_price": "3500.8",
+        "funding_rate": "-0.000003",
+        "next_funding_time": 1700006400000
+      }
+    ]
+  }
+}

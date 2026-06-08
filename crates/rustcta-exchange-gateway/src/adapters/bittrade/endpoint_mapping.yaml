@@ -1,0 +1,231 @@
+schema_version: 1
+exchange: bittrade
+adapter: rustcta_exchange_gateway::adapters::bittrade
+metadata:
+  status: validated
+  notes: "A-10 BitTrade Japan spot adapter. Official docs state leverage trading is not supported; private trading is offline request-spec only."
+market_types:
+  - spot
+products:
+  - spot
+base_urls:
+  rest: https://api-cloud.bittrade.co.jp
+  public_ws: wss://api-cloud.bittrade.co.jp/ws
+  private_ws: wss://api-cloud.bittrade.co.jp/ws/v2
+rest:
+  base_url: https://api-cloud.bittrade.co.jp
+auth:
+  rest:
+    scheme: hmac_sha256_v2_query
+    signature_encoding: base64
+    signing_payload: "METHOD + '\\n' + lower_host + '\\n' + path + '\\n' + ascii_sorted_urlencoded_query"
+    auth_query: [AccessKeyId, SignatureMethod, SignatureVersion, Timestamp, Signature]
+rate_limits:
+  buckets:
+    public_rest:
+      scope: ip
+      interval: 1s
+      limit: 10
+      burst: 10
+    private_rest:
+      scope: api_key
+      interval: 1s
+      limit: 10
+      burst: 10
+    public_ws:
+      scope: websocket
+      interval: 1s
+      limit: 50
+      burst: 50
+    private_ws:
+      scope: api_key
+      interval: 1s
+      limit: 50
+      burst: 50
+pagination:
+  order_history:
+    style: from_direct_size
+    limit_param: size
+    cursor_param: from
+    direction_param: direct
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: unsupported
+  cancel_orders:
+    support: native
+    mode: order_ids_or_client_order_ids
+    atomicity: non_atomic
+    max_orders: 50
+    partial_failure: true
+websocket:
+  public:
+    support: native
+    url: wss://api-cloud.bittrade.co.jp/ws
+    protocol: huobi-style-gzip-json
+    topics:
+      order_book: market.{symbol}.depth.step0
+      bbo: market.{symbol}.bbo
+      trades: market.{symbol}.trade.detail
+      candles: market.{symbol}.kline.{period}
+    heartbeat:
+      direction: server_ping_client_pong
+      interval_ms: 5000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: request_spec_only
+    url: wss://api-cloud.bittrade.co.jp/ws/v2
+    auth: signed_json_payload
+    topics:
+      orders: orders#{symbol}
+      fills: trade.clearing#{symbol}#{mode}
+      accounts: accounts.update#{mode}
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/common/symbols
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /market/depth
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    params:
+      - name: symbol
+      - name: type
+  - operation: get_accounts
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/account/accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/account/accounts/{account-id}/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/orders/place
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/place_limit_order.json
+    notes: "Offline request-spec only; runtime does not expose live order placement."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/orders/{order-id}/submitcancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/cancel_order.json
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1/order/orders/batchcancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/batch_cancel_orders.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/order/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/order/orders/{order-id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bittrade/request_specs/query_order.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/order/matchresults
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    channel: market.{symbol}.depth.step0
+    support: native
+    resync:
+      endpoint_operation: get_order_book
+  - operation: subscribe_public_trades
+    product: spot
+    channel: market.{symbol}.trade.detail
+    support: native
+  - operation: subscribe_private_orders
+    product: spot
+    channel: orders#{symbol}
+    support: request_spec_only
+    auth_renewal:
+      endpoint_operation: get_accounts
+unsupported:
+  - operation: leverage_or_margin_trading
+    reason: "Official BitTrade API introduction states leverage trading is currently unsupported."
+  - operation: futures_or_perpetuals
+    reason: "No official BitTrade futures/perpetual product line is documented for this adapter."
+  - operation: fiat_funding
+    reason: "Fiat deposit, withdrawal, bank transfer, and ledger writes are outside gateway runtime scope."
+  - operation: live_private_write
+    reason: "Private write endpoints are delivered as offline request-spec and signing vectors only."
+  - operation: retail_broker_ordering
+    reason: "BitTrade retail/sales-office APIs are documented separately and are not mapped into exchange spot order routing."

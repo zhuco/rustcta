@@ -1,0 +1,17 @@
+{
+  "exchange": "latoken",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_rest_default_enabled": false,
+  "private_rest_boundary": "request_spec_only",
+  "public_streams": "stomp_spec_only_runtime_unsupported",
+  "private_streams": "unsupported_user_id_auth_unverified",
+  "perpetual": "unsupported_no_official_product_scope_verified",
+  "p2p": "unsupported_out_of_gateway_scope",
+  "withdraw_deposit_transfer": "unsupported_out_of_gateway_scope",
+  "notes": [
+    "Public REST covers spot pairs and order book snapshots.",
+    "Private REST fixtures prove HMAC request construction only; runtime trading stays disabled.",
+    "No fixture contains live credentials, account ids, wallet addresses, phone numbers, emails, or real order ids."
+  ]
+}

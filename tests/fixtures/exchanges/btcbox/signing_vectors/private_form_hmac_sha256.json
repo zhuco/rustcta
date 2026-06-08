@@ -1,0 +1,9 @@
+{
+  "exchange": "btcbox",
+  "algorithm": "hmac_sha256",
+  "private_key_transform": "md5_hex",
+  "private_key": "btcbox-private-key",
+  "md5_private_key": "2e46e2d509362f4aedb1e690e1071d43",
+  "canonical": "amount=0.01&coin=btc&key=btcbox-public-key&nonce=1700000000012&price=5000000&type=buy",
+  "expected_signature": "ca3b82ba48aa7963fc9d162ef64540195808a588c64f027a7713314a57e12654"
+}

@@ -1,0 +1,14 @@
+{
+  "operation": "bitteam.get_balances",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/trade/api/ccxt/balance",
+  "query": {},
+  "headers": {
+    "authorization": "<redacted:basic-auth>"
+  },
+  "canonical_auth_input": "base64(<api_key>:<api_secret>)",
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "bitteam.balances_request_spec_only"
+}

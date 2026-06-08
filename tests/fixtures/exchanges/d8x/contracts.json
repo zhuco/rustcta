@@ -1,0 +1,72 @@
+{
+  "chain_id": 1101,
+  "timestamp": 1742651686476,
+  "contracts": [
+    {
+      "ticker_id": "BTC-USD-USDC",
+      "contract_specs": {
+        "contract_type": "Vanilla",
+        "contract_price_currency": "USD",
+        "contract_price": 65000.1,
+        "contract_collateral_currency": "USDC",
+        "price_tick": "0.1",
+        "lot_size": "0.001",
+        "min_quantity": "0.001",
+        "min_notional": "10"
+      },
+      "base_currency": "BTC",
+      "target_currency": "USD",
+      "last_price": 65000.1,
+      "base_volume": 123.45,
+      "target_volume": 8024250.345,
+      "high": 66000.0,
+      "low": 64000.0,
+      "product_type": "Perpetual",
+      "open_interest": 42.5,
+      "index_price": 65002.0,
+      "index_name": "BTC-USD",
+      "index_currency": "USD",
+      "start_timestamp": 0,
+      "end_timestamp": 0,
+      "funding_rate": 0.0001,
+      "next_funding_rate": 0.0001,
+      "next_funding_rate_timestamp": 1742680486
+    },
+    {
+      "ticker_id": "ETH-USD-USDC",
+      "contract_specs": {
+        "contract_type": "Vanilla",
+        "contract_price_currency": "USD",
+        "contract_price": 3200.15,
+        "contract_collateral_currency": "USDC",
+        "price_tick": "0.01",
+        "lot_size": "0.01",
+        "min_quantity": "0.01",
+        "min_notional": "5"
+      },
+      "base_currency": "ETH",
+      "target_currency": "USD",
+      "last_price": 3200.15,
+      "base_volume": 543.21,
+      "target_volume": 1738390.3815,
+      "high": 3300.0,
+      "low": 3100.0,
+      "product_type": "Perpetual",
+      "open_interest": 120.2,
+      "index_price": 3201.0,
+      "index_name": "ETH-USD",
+      "index_currency": "USD",
+      "start_timestamp": 0,
+      "end_timestamp": 0,
+      "funding_rate": 0.00008,
+      "next_funding_rate": 0.00008,
+      "next_funding_rate_timestamp": 1742680486
+    },
+    {
+      "ticker_id": "USDC-USD-USDC",
+      "product_type": "Spot",
+      "base_currency": "USDC",
+      "target_currency": "USD"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+enabled: false
+adapter: bitopro
+market_types:
+  - spot
+rest_base_url: https://api.bitopro.com/v3
+websocket_base_url: wss://stream.bitopro.com:443/ws
+public_rest:
+  enabled: true
+private_rest:
+  enabled: false
+  api_key_env: RUSTCTA_BITOPRO_API_KEY
+  api_secret_env: RUSTCTA_BITOPRO_API_SECRET
+  api_identity_env: RUSTCTA_BITOPRO_API_IDENTITY
+websocket:
+  public_enabled: true
+  private_enabled: false
+  heartbeat:
+    server_ping_interval_ms: 20000
+    client_pong_timeout_ms: 5000
+symbols:
+  examples:
+    - btc_twd
+    - eth_usdt
+safety:
+  private_write_runtime: unsupported_offline_request_spec_only
+  no_real_orders: true
+  no_withdrawals_or_transfers: true
+unsupported:
+  - perpetual
+  - futures
+  - margin
+  - leverage
+  - positions
+  - funding
+  - wallet_deposit_withdraw_transfer
+  - amend_order
+  - order_lists
+  - dead_man_switch

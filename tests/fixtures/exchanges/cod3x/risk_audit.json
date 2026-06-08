@@ -1,0 +1,15 @@
+{
+  "exchange": "cod3x",
+  "task": "C-48",
+  "surface": "risk",
+  "audit_subjects": ["downstream_funding", "venue_risk", "routing_safety"],
+  "official_docs": [
+    "https://docs.cod3x.org/",
+    "https://www.cod3x.org/"
+  ],
+  "gateway_mapping": {
+    "get_fees": "unsupported_unverified",
+    "risk_snapshot": "unsupported_unverified",
+    "reason": "Funding, fees, liquidation, and margin data remain downstream venue semantics until a Cod3x-native API contract is documented and fixture-verified."
+  }
+}

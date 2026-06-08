@@ -1,0 +1,13 @@
+{
+  "exchange": "hollaex",
+  "name": "place_order_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000",
+  "method": "POST",
+  "request_path": "/v2/order",
+  "payload": "POST/v2/order1710000000{\"symbol\":\"xht-usdt\",\"side\":\"sell\",\"size\":0.1,\"type\":\"limit\",\"price\":1}",
+  "expected_signature": "fb6f4b9e508511deb347dee3439adcac2edd5a39f644262987d29c0bf5294258",
+  "payload_format": "raw_payload",
+  "body": "{\"symbol\":\"xht-usdt\",\"side\":\"sell\",\"size\":0.1,\"type\":\"limit\",\"price\":1}"
+}

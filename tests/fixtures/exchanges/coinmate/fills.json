@@ -1,0 +1,19 @@
+{
+  "error": false,
+  "errorMessage": null,
+  "data": [
+    {
+      "transactionId": "fill-1",
+      "date": 1700000000000,
+      "amount": "0.01000000",
+      "price": "50000.00",
+      "buyOrderId": "offline-order-1",
+      "orderType": "BUY",
+      "type": "BUY",
+      "fee": "0.50",
+      "tradeFeeType": "TAKER",
+      "currencyPair": "BTC_EUR",
+      "clientOrderId": "123456"
+    }
+  ]
+}

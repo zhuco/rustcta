@@ -1,0 +1,227 @@
+schema_version: 1
+exchange: zeta_markets
+adapter: ZetaMarketsGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/zeta_markets_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task C-45 conservative Zeta Markets Solana derivatives audit. The original venue documentation states operations ceased in May 2025; only legacy public data REST fixtures are mapped, while SDK wallet signing, private account reads, streams and trading stay Unsupported.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://api.zeta.markets
+  devnet_rest: https://dex-devnet-webserver-ecs.zeta.markets
+  solana_rpc: https://api.mainnet-beta.solana.com
+auth:
+  public_rest: none
+  private_read_rest: unsupported; historical reads require wallet-owned Solana margin account audit
+  private_write_rest: unsupported; historical trading used wallet-signed Solana SDK transactions and venue is shut down
+rate_limits:
+  zeta_markets_public: { scope: ip, interval_ms: 1000, limit: 5 }
+  zeta_markets_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  public_symbols: { mode: none }
+  public_orderbook: { mode: none }
+  private_history: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  public_orderbook: rest_poll
+  notes: Public WS runtime is not mapped; order book resync falls back to /v2/orderbook polling when the legacy public data API is available.
+batch:
+  place: { support: unsupported, reason: zeta_markets.batch_place_orders_unsupported_venue_ceased_operations }
+  cancel: { support: unsupported, reason: zeta_markets.batch_cancel_orders_unsupported_venue_ceased_operations }
+websocket:
+  public:
+    support: unsupported
+    reason: zeta_markets.public_streams_require_solana_sdk_account_mapping
+    fallback: { mode: rest_poll, endpoint_operation: get_order_book, interval_ms: 30000 }
+  private:
+    support: unsupported
+    reason: zeta_markets.private_streams_require_wallet_owned_margin_account
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /prices/symbols
+    auth: none
+    rate_limit_bucket: zeta_markets_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://zetamarkets.apidocumentation.com/reference#tag/default/GET/prices/symbols
+    request_spec_fixture: tests/fixtures/exchanges/zeta_markets/request_specs/public_symbols.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v2/orderbook?ticker_id={symbol}
+    auth: none
+    rate_limit_bucket: zeta_markets_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://zetamarkets.apidocumentation.com/reference#tag/default/GET/v2/orderbook
+    request_spec_fixture: tests/fixtures/exchanges/zeta_markets/request_specs/public_orderbook.json
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/zeta_markets/balances
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.balances_require_solana_margin_account_sdk_audit
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/zeta_markets/positions
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.positions_require_solana_margin_account_sdk_audit
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/zeta_markets/place_order
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.place_order_unsupported_venue_ceased_operations
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/zeta_markets/cancel_order
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.cancel_order_unsupported_venue_ceased_operations
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/zeta_markets/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.batch_place_orders_unsupported_venue_ceased_operations
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/zeta_markets/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.batch_cancel_orders_unsupported_venue_ceased_operations
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/zeta_markets/cancel_all_orders
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.cancel_all_orders_unsupported_venue_ceased_operations
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/zeta_markets/open_orders
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.open_orders_require_solana_margin_account_sdk_audit
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/zeta_markets/recent_fills
+    auth: unsupported
+    rate_limit_bucket: zeta_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: zeta_markets.recent_fills_public_data_only_margin_account_api_not_runtime_mapped
+streams:
+  - operation: public_orderbook_delta
+    product: perpetual
+    transport: websocket
+    channel: solana_account_subscription
+    auth: unsupported
+    support: unsupported
+    reason: zeta_markets.public_streams_require_solana_sdk_account_mapping
+    resync:
+      endpoint_operation: get_order_book
+      mode: rest_poll
+  - operation: private_user_events
+    product: perpetual
+    transport: websocket
+    channel: solana_margin_account
+    auth: unsupported
+    support: unsupported
+    reason: zeta_markets.private_streams_require_wallet_owned_margin_account

@@ -1,0 +1,31 @@
+gateway:
+  adapters:
+    - hitbtc
+
+hitbtc:
+  enabled: false
+  rest_base_url: "https://api.hitbtc.com/api/3"
+  public_ws_url: "wss://api.hitbtc.com/api/3/ws/public"
+  trading_ws_url: "wss://api.hitbtc.com/api/3/ws/trading"
+  wallet_ws_url: "wss://api.hitbtc.com/api/3/ws/wallet"
+  private_rest_enabled: false
+  auth_window_ms: 10000
+  credentials:
+    api_key_env: HITBTC_API_KEY
+    api_secret_env: HITBTC_API_SECRET
+  runtime_enabled:
+    - public_rest_symbol_rules
+    - public_rest_order_book
+  request_spec_only:
+    - spot_place_order
+    - spot_cancel_order
+    - spot_open_orders
+    - spot_trade_history
+    - ws_login
+  unsupported_runtime:
+    - private_rest_trading
+    - public_ws_supervisor
+    - private_ws_supervisor
+    - margin_trading
+    - futures_trading
+    - wallet_withdraw_transfer

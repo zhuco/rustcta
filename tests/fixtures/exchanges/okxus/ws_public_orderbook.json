@@ -1,0 +1,18 @@
+{
+  "exchange": "okxus",
+  "url": "wss://wsus.okx.com:8443/ws/v5/public",
+  "support": "spec_only_not_wired",
+  "payload": {
+    "op": "subscribe",
+    "args": [
+      {
+        "channel": "books5",
+        "instId": "BTC-USD"
+      }
+    ]
+  },
+  "heartbeat": {
+    "mode": "server_ping_client_pong",
+    "timeout_ms": 30000
+  }
+}

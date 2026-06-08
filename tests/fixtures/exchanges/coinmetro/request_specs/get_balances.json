@@ -1,0 +1,14 @@
+{
+  "exchange": "coinmetro",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/users/balances",
+  "auth": "bearer",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer fixture.jwt.token" },
+    "x-device-id": { "match": "exact", "value": "fixture-device" }
+  },
+  "forbid_header_values_containing": ["secret", "production"]
+}

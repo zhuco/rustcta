@@ -1,0 +1,21 @@
+{
+  "exchange": "d8x",
+  "adapter_id": "d8x",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_write_enabled": false,
+  "private_read_enabled": false,
+  "public_rest_enabled": true,
+  "public_ws_runtime_enabled": false,
+  "market_type": "perpetual",
+  "chain_profile": "polygon_zkevm",
+  "chain_id": 1101,
+  "unsupported": [
+    "wallet contract reads",
+    "wallet contract writes",
+    "private websocket runtime",
+    "limit/conditional order execution",
+    "liquidation and LP operations"
+  ],
+  "reason": "D8X trading uses the Node SDK or direct EVM smart-contract calls with a wallet signer. The gateway adapter only enables public CoinGecko-compatible market-data REST until contract calls, wallet permissions, gas, chain reorg handling and reconciliation are audited."
+}

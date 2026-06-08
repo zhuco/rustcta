@@ -1,0 +1,44 @@
+# Zeta Markets Gateway Adapter
+
+Status date: 2026-06-08
+
+## Scope
+
+`zeta_markets` is a conservative C-45 adapter for the original Zeta Markets Solana derivatives venue. The public Zeta documentation states that the original protocol ceased operations in May 2025, so this adapter is scan-only. It maps legacy public REST market metadata and order book fixtures, and keeps private reads, wallet signing, order writes, batch operations and stream runtime explicitly `Unsupported`.
+
+## Official References
+
+| Item | URL | Adapter use |
+| --- | --- | --- |
+| Main docs | `https://docs.zeta.markets/` | Shutdown and Solana protocol boundary audit |
+| REST API reference | `https://zetamarkets.apidocumentation.com/` | Legacy public data API paths |
+| Data API base URL | `https://api.zeta.markets` | Public symbols and order book fixtures |
+| Devnet historical base URL | `https://dex-devnet-webserver-ecs.zeta.markets` | Documented only; not enabled by default |
+
+## Capability
+
+| Operation | Support | Notes |
+| --- | --- | --- |
+| `get_symbol_rules` | native public REST | Parses `/prices/symbols` style fixture into perpetual `SymbolRules`. |
+| `get_order_book` | native public REST | Parses `/v2/orderbook?ticker_id={symbol}` snapshot fixture. |
+| balances / positions / fees | unsupported | Require wallet-owned Solana margin account and SDK audit. |
+| place / cancel / amend / batch | unsupported | Venue is shut down; no private keys or Solana transactions are built. |
+| WebSocket | unsupported | No stable gateway WS API is mapped; fallback is REST polling only. |
+
+## Unsupported Boundary
+
+The adapter never accepts wallet private keys, seed phrases or production signing material. Historical Solana SDK transaction construction is documented only through a sanitized signing-boundary fixture. Options-specific semantics remain audit-only because the gateway trait does not expose a lossless option contract model.
+
+## Validation
+
+Allowed validation commands:
+
+```bash
+python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/zeta_markets/endpoint_mapping.yaml
+cargo fmt --check --package rustcta-exchange-gateway
+cargo check -p rustcta-exchange-gateway --lib --message-format short
+cargo test -p rustcta-exchange-gateway zeta_markets --lib --message-format short
+cargo test -p rustcta-gateway zeta_markets --message-format short
+```
+
+Do not run `cargo build` for this task.

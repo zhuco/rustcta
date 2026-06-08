@@ -1,0 +1,28 @@
+{
+  "exchange": "hitbtc",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/3/spot/order",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6ZWM3N2VkOWI0MjE4ZmZhNzhhY2Q2YTI3MDJkZDk1ZWM5MGU4ZjA1N2Q0ZWQyMWQxNDU3YmQyNjE5Mzg0MTY5ODoxNzEwMDAwMDAwMDAwOjEwMDAw"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "hitbtc/get_open_orders_hs256"
+}

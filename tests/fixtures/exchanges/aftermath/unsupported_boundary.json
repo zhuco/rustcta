@@ -1,0 +1,20 @@
+{
+  "exchange": "aftermath",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_read_enabled": false,
+  "private_write_enabled": false,
+  "reason": "Aftermath private account reads and writes require Sui account-cap and wallet transaction signing semantics that are not represented by the gateway HMAC/API-key model.",
+  "allowed_operations": [
+    "symbol_rules",
+    "order_book"
+  ],
+  "unsupported_operations": [
+    "balances",
+    "positions",
+    "place_order",
+    "cancel_order",
+    "batch_place_orders",
+    "batch_cancel_orders"
+  ]
+}

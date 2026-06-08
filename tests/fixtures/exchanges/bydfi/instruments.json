@@ -1,0 +1,31 @@
+[
+  {
+    "symbol": "BTC-USDT",
+    "baseAsset": "BTC",
+    "marginAsset": "USDT",
+    "quoteAsset": "USDT",
+    "limitMaxQty": "100",
+    "limitMinQty": "0.001",
+    "marketMaxQty": "50",
+    "marketMinQty": "0.001",
+    "pricePrecision": 2,
+    "basePrecision": 6,
+    "feeRateTaker": "0.0006",
+    "feeRateMaker": "0.0002",
+    "maxLeverageLevel": 100,
+    "volumePrecision": 6,
+    "maxLimitOrderNum": 200,
+    "maxPlanOrderNum": 10,
+    "status": "NORMAL"
+  },
+  {
+    "symbol": "ETH-USDC",
+    "baseAsset": "ETH",
+    "marginAsset": "USDC",
+    "quoteAsset": "USDC",
+    "pricePrecision": 2,
+    "basePrecision": 4,
+    "volumePrecision": 4,
+    "status": "NORMAL"
+  }
+]

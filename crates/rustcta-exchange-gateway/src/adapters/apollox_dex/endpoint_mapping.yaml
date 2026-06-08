@@ -1,0 +1,249 @@
+schema_version: 1
+exchange: apollox_dex
+adapter: rustcta_exchange_gateway::adapters::apollox_dex
+market_types:
+  - perpetual
+rest:
+  base_url: https://fapi.apollox.finance
+  testnet_base_url: ""
+rate_limits:
+  buckets:
+    public_ip:
+      scope: ip
+      interval: 1m
+      limit: 2400
+    signed_uid:
+      scope: uid
+      interval: 1m
+      limit: 2400
+    order_count:
+      scope: account
+      interval: 1m
+      limit: 1200
+pagination:
+  get_recent_fills:
+    style: from_id_or_time_window
+    since_param: startTime
+    until_param: endTime
+    cursor_param: fromId
+    limit_param: limit
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+    - get_balances
+    - get_positions
+  unknown_order_policy: query_order_then_open_orders
+  retry_policy: retry_rate_limited_and_transient
+batch:
+  place_orders:
+    support: spec_only
+    native_batch: true
+    atomicity: partial
+    max_items: 5
+    partial_failure: true
+  cancel_orders:
+    support: unsupported
+    reason: no gateway-safe native batch cancel mapping is enabled
+  cancel_all_orders:
+    support: spec_only
+    native_batch: true
+    atomicity: partial
+    partial_failure: true
+websocket:
+  public:
+    support: spec_only
+    url: wss://fstream.apollox.finance
+    heartbeat:
+      required: true
+      direction: server_ping
+      interval_ms: 300000
+      timeout_ms: 900000
+    max_streams_per_connection: 200
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    auth: listen_key
+    listen_key_path: /fapi/v1/listenKey
+    renewal_ms: 1800000
+    fallback: rest_reconciliation
+unsupported:
+  - product: spot
+    reason: ApolloX spot API family is outside apollox_dex scope
+  - product: v2_onchain_perp
+    reason: V2 requires wallet signing, chain profiles, gas and contract execution modeling
+  - product: testnet
+    reason: no stable V1 REST/WS testnet base was confirmed
+endpoints:
+  - operation: get_symbol_rules
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/exchangeInfo
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: true
+    request_spec_fixture: tests/fixtures/exchanges/apollox_dex/request_specs/exchange_info.json
+    testnet: false
+    official_doc: https://apollox-finance.gitbook.io/apollox-finance/api/api-documentation.md
+  - operation: get_order_book
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/depth
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 5
+    request_spec_required: true
+    request_spec_fixture: tests/fixtures/exchanges/apollox_dex/request_specs/depth.json
+    testnet: false
+  - operation: funding_rate
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/premiumIndex
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    testnet: false
+  - operation: funding_history
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/fundingRate
+    auth: none
+    rate_limit_bucket: public_ip
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    testnet: false
+  - operation: get_balances
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v2/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 5
+    request_spec_required: true
+    support: spec_only
+    testnet: false
+  - operation: get_positions
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v2/positionRisk
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 5
+    request_spec_required: true
+    support: spec_only
+    testnet: false
+  - operation: get_fees
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/commissionRate
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 20
+    request_spec_required: true
+    support: spec_only
+    testnet: false
+  - operation: place_order
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /fapi/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    request_spec_fixture: tests/fixtures/exchanges/apollox_dex/request_specs/place_order.json
+    support: spec_only
+    testnet: false
+  - operation: batch_place_orders
+    transport: rest
+    product: perpetual
+    method: POST
+    path: /fapi/v1/batchOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 5
+    request_spec_required: true
+    support: spec_only
+    native_batch: true
+    atomicity: partial
+    testnet: false
+  - operation: cancel_order
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /fapi/v1/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    testnet: false
+  - operation: cancel_all_orders
+    transport: rest
+    product: perpetual
+    method: DELETE
+    path: /fapi/v1/allOpenOrders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: order_count
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    testnet: false
+  - operation: query_order
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    testnet: false
+  - operation: get_open_orders
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/openOrders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 1
+    request_spec_required: true
+    request_spec_fixture: tests/fixtures/exchanges/apollox_dex/request_specs/open_orders.json
+    support: spec_only
+    testnet: false
+  - operation: get_recent_fills
+    transport: rest
+    product: perpetual
+    method: GET
+    path: /fapi/v1/userTrades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: signed_uid
+    weight: 5
+    request_spec_required: true
+    support: spec_only
+    testnet: false

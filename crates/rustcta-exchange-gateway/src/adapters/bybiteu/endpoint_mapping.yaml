@@ -1,0 +1,210 @@
+schema_version: 1
+exchange: bybiteu
+adapter: rustcta_exchange_gateway::adapters::bybiteu
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: Bybit V5 Integration Guidance and WebSocket Connect docs
+  last_reviewed: "2026-06-08"
+  notes: Bybit EU profile reuses Bybit V5 public REST/WS shapes on EU local-site hosts; private trading remains Unsupported until broker third-party application scope is verified.
+market_types: [spot, perpetual, futures]
+products: [spot, perpetual, futures]
+rest:
+  base_url: https://api.bybit.eu
+base_urls:
+  canonical_rest_base_url: https://api.bybit.com
+  eu_rest_base_url: https://api.bybit.eu
+  public_ws_linear: wss://stream.bybit.eu/v5/public/linear
+  public_ws_spot: wss://stream.bybit.eu/v5/public/spot
+  private_ws: wss://stream.bybit.eu/v5/private
+auth:
+  public_rest: none
+  private_rest: unsupported_without_broker_scope_audit
+  inherited_shape: X-BAPI-SIGN = HMAC_SHA256(timestamp + api_key + recv_window + query_or_json_body)
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_retCode_10006, default_weight: 1 }
+  private_account: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+  private_trade: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+reconciliation:
+  private_stream_fallback: unsupported
+  public_stream_resync: rest_order_book_snapshot
+  unknown_order_policy: unsupported_private_trading
+batch:
+  place_orders:
+    support: unsupported
+    reason: Bybit EU private trading scope is not enabled in this profile.
+  cancel_orders:
+    support: unsupported
+    reason: Bybit EU private trading scope is not enabled in this profile.
+  cancel_all_orders:
+    support: unsupported
+    atomicity: unsupported
+    partial_failure: false
+websocket:
+  public:
+    support: spec_only
+    channels: [orderbook.50, publicTrade, tickers, kline.1]
+    heartbeat: { mode: client_ping, interval_ms: 20000, timeout_ms: 60000 }
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    auth: unsupported_without_broker_scope_audit
+    fallback: unsupported
+unsupported:
+  - operation: get_balances
+    reason: EU site API is documented for broker third-party application connectivity; ordinary private trading/read credentials are not enabled in this profile.
+  - operation: get_positions
+    reason: Same private broker-scope boundary as get_balances.
+  - operation: place_order
+    reason: No EU private write request is enabled without broker-scope audit.
+  - operation: cancel_order
+    reason: No EU private write request is enabled without broker-scope audit.
+  - operation: cancel_all_orders
+    reason: No EU private write request is enabled without broker-scope audit.
+  - operation: query_order
+    reason: Private order readback is disabled pending broker-scope audit.
+  - operation: get_open_orders
+    reason: Private order readback is disabled pending broker-scope audit.
+  - operation: get_recent_fills
+    reason: Private fills readback is disabled pending broker-scope audit.
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /v5/market/instruments-info
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    official_doc: https://bybit-exchange.github.io/docs/v5/market/instrument
+  - operation: get_order_book
+    product: perpetual
+    market_types: [spot, perpetual, futures]
+    transport: rest
+    method: GET
+    path: /v5/market/orderbook
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    official_doc: https://bybit-exchange.github.io/docs/v5/market/orderbook
+  - operation: funding_history
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/market/funding/history
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bybiteu/funding_history.json }
+  - operation: open_interest
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /v5/market/open-interest
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/bybiteu/open_interest.json }
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/get_balances
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private REST read is disabled pending broker third-party application scope audit.
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/get_positions
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private REST read is disabled pending broker third-party application scope audit.
+  - operation: place_order
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/place_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private write is disabled pending broker third-party application scope audit.
+  - operation: cancel_order
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/cancel_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private write is disabled pending broker third-party application scope audit.
+  - operation: cancel_all_orders
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/cancel_all_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private write is disabled pending broker third-party application scope audit.
+  - operation: query_order
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/query_order
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private order readback is disabled pending broker third-party application scope audit.
+  - operation: get_open_orders
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/get_open_orders
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private order readback is disabled pending broker third-party application scope audit.
+  - operation: get_recent_fills
+    product: perpetual
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/bybiteu/get_recent_fills
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: EU profile private fills readback is disabled pending broker third-party application scope audit.

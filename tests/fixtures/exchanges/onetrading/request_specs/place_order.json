@@ -1,0 +1,20 @@
+{
+  "method": "POST",
+  "path": "/account/orders",
+  "query": {},
+  "auth": "bearer_token",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": {
+    "instrument_code": "BTC_EUR",
+    "type": "LIMIT",
+    "side": "BUY",
+    "amount": "0.01",
+    "price": "64000",
+    "client_id": "<redacted:order_id>",
+    "time_in_force": "GOOD_TILL_CANCELLED"
+  }
+}

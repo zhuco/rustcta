@@ -1,0 +1,10 @@
+{
+  "exchange": "aftermath",
+  "operation": "private_write_signing",
+  "supported": false,
+  "reason": "Aftermath order writes build Sui transaction blocks that must be signed by a Sui wallet/account-cap flow, not an API-key HMAC signing vector.",
+  "signing_model": "sui_wallet_transaction_signature",
+  "expected_error": "aftermath.place_order_requires_sui_transaction_signing",
+  "contains_api_private_key": false,
+  "contains_auth_token": false
+}

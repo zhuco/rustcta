@@ -1,0 +1,38 @@
+{
+  "exchange": "binanceus",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/v3/account",
+  "auth": "signed",
+  "query": {
+    "timestamp": {
+      "match": "non_empty"
+    },
+    "recvWindow": {
+      "match": "exact",
+      "value": "5000"
+    },
+    "signature": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "X-MBX-APIKEY": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "binanceus/place_order_limit"
+}

@@ -1,0 +1,156 @@
+schema_version: 1
+exchange: paymium
+adapter: rustcta_exchange_gateway::adapters::paymium
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: https://paymium.github.io/api-documentation/
+  last_reviewed: "2026-06-08"
+  notes: "A-33 Paymium BTC/EUR spot public REST first adapter. Private REST, trading mutations and socket.io runtime stay disabled pending live-validated request-spec promotion."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://paymium.com/api/v1
+auth:
+  private_rest: "Api-Key/Api-Nonce/Api-Signature; HMAC-SHA256 hex over nonce + full_url + body"
+rate_limits:
+  public_rest:
+    scope: ip
+    interval: 1d
+    limit: 86400
+    notes: "official docs describe one request per second on average"
+  private_rest:
+    scope: account
+    interval: 1d
+    limit: 86400
+websocket:
+  public_url: https://paymium.com/public
+  user_url: https://paymium.com/user
+  path: /ws/socket.io
+  protocol: socket.io_v1.3
+  status: payload_descriptor_only
+reconciliation:
+  private_stream_fallback: rest
+  status: "not enabled until private REST and user channel id handling are promoted"
+unsupported:
+  - non_btc_eur_pairs
+  - private_rest_runtime
+  - public_socketio_runtime
+  - private_socketio_runtime
+  - positions
+  - margin
+  - futures
+  - perpetuals
+  - order_list
+  - amend_order
+  - cancel_all_orders
+  - generic_batch_place
+  - generic_batch_cancel
+  - live_trading
+  - merchant_api
+  - payments
+  - withdrawals
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /data/eur/ticker
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1ticker/get
+    request_spec:
+      fixture: tests/fixtures/exchanges/paymium/request_specs/ticker_btc_eur.json
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /data/eur/depth
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1depth/get
+    request_spec:
+      fixture: tests/fixtures/exchanges/paymium/request_specs/orderbook_btc_eur.json
+  - operation: public_trades
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /data/eur/trades
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://paymium.github.io/api-documentation/#tag/Public-data/paths/~1data~1{currency}~1trades/get
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /user/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: "Private REST runtime is deferred; request spec only."
+    request_spec:
+      fixture: tests/fixtures/exchanges/paymium/request_specs/get_open_orders.json
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /user/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported
+    reason: "Trading mutation is request-spec only until live validation and risk controls are promoted."
+    request_spec:
+      fixture: tests/fixtures/exchanges/paymium/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /user/orders/{uuid}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported
+    reason: "Trading mutation is request-spec only until live validation and risk controls are promoted."
+    request_spec:
+      fixture: tests/fixtures/exchanges/paymium/request_specs/cancel_order.json

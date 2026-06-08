@@ -1,0 +1,14 @@
+{
+  "channel": "orderbook/BTC/USDT-P",
+  "sequence": 123457,
+  "bid": {
+    "levels": [
+      { "price": "64999.50", "quantity": "1.20" }
+    ]
+  },
+  "ask": {
+    "levels": [
+      { "price": "65000.00", "quantity": "0.70" }
+    ]
+  }
+}

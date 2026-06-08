@@ -1,0 +1,10 @@
+{
+  "exchange": "coinmetro",
+  "algorithm": "bearer_header",
+  "input_token": " fixture.jwt.token ",
+  "expected_authorization": "Bearer fixture.jwt.token",
+  "already_prefixed_token": "Bearer existing.fixture.jwt",
+  "expected_already_prefixed_authorization": "Bearer existing.fixture.jwt",
+  "device_id": "fixture-device",
+  "expected_ws_token_query": "fixture-device:fixture.jwt.token"
+}

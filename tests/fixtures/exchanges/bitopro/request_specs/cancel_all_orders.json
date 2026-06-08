@@ -1,0 +1,7 @@
+{
+  "operation": "bitopro.cancel_all_orders",
+  "method": "DELETE",
+  "path": "/orders/all",
+  "query": [],
+  "body": null
+}

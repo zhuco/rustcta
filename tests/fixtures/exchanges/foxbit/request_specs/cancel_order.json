@@ -1,0 +1,11 @@
+{
+  "method": "DELETE",
+  "path": "/orders/order-foxbit-1",
+  "auth": "hmac_sha256",
+  "headers": {
+    "X-FB-ACCESS-KEY": "<redacted>",
+    "X-FB-ACCESS-TIMESTAMP": "1700000000000",
+    "X-FB-ACCESS-SIGNATURE": "<computed>",
+    "Content-Type": "application/json"
+  }
+}

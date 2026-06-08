@@ -1,0 +1,11 @@
+{
+  "bookUpdate": {
+    "pair": "BTCEUR",
+    "seqNumber": 96445847,
+    "ask": {
+      "10123.45": 0.5
+    },
+    "bid": {},
+    "checksum": 516605565
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "exchange": "bitteam",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "heartbeat": {
+    "mode": "unsupported"
+  },
+  "rest_reconciliation_fallback": [
+    "/trade/api/ccxt/ordersOfUser",
+    "/trade/api/ccxt/tradesOfUser"
+  ]
+}

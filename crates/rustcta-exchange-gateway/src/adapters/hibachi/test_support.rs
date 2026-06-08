@@ -1,0 +1,33 @@
+#![cfg_attr(not(test), allow(dead_code))]
+
+use rustcta_exchange_api::{RequestContext, SymbolScope, EXCHANGE_API_SCHEMA_VERSION};
+use rustcta_types::{AccountId, CanonicalSymbol, ExchangeId, ExchangeSymbol, MarketType, TenantId};
+
+pub fn hibachi_exchange_id() -> ExchangeId {
+    ExchangeId::new("hibachi").expect("exchange")
+}
+
+pub fn hibachi_context(request_id: &str) -> RequestContext {
+    RequestContext {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        tenant_id: Some(TenantId::new("tenant").expect("tenant")),
+        account_id: Some(AccountId::new("account").expect("account")),
+        run_id: None,
+        request_id: Some(request_id.to_string()),
+        requested_at: chrono::Utc::now(),
+    }
+}
+
+pub fn hibachi_symbol() -> SymbolScope {
+    SymbolScope {
+        exchange: hibachi_exchange_id(),
+        market_type: MarketType::Perpetual,
+        canonical_symbol: Some(CanonicalSymbol::new("BTC", "USDT").expect("canonical")),
+        exchange_symbol: ExchangeSymbol::new(
+            hibachi_exchange_id(),
+            MarketType::Perpetual,
+            "BTC/USDT-P",
+        )
+        .expect("symbol"),
+    }
+}

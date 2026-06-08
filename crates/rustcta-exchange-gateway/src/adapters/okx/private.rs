@@ -25,7 +25,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.ensure_private_rest("okx.place_order")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.place_order",
+            "okxus.place_order",
+            "myokx.place_order",
+        ))?;
         let body = okx_place_order_body(&request)?;
         let value = self
             .rest
@@ -47,7 +51,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.ensure_private_rest("okx.place_quote_market_order")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.place_quote_market_order",
+            "okxus.place_quote_market_order",
+            "myokx.place_quote_market_order",
+        ))?;
         let body = okx_quote_market_order_body(&request)?;
         let value = self
             .rest
@@ -69,7 +77,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.ensure_private_rest("okx.cancel_order")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.cancel_order",
+            "okxus.cancel_order",
+            "myokx.cancel_order",
+        ))?;
         let body = okx_cancel_order_body(&request)?;
         let value = self
             .rest
@@ -92,7 +104,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
         self.ensure_optional_spot(request.market_type)?;
-        self.ensure_private_rest("okx.cancel_all_orders")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.cancel_all_orders",
+            "okxus.cancel_all_orders",
+            "myokx.cancel_all_orders",
+        ))?;
         let symbol = request
             .symbol
             .as_ref()
@@ -141,7 +157,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.ensure_private_rest("okx.amend_order")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.amend_order",
+            "okxus.amend_order",
+            "myokx.amend_order",
+        ))?;
         let body = okx_amend_order_body(&request)?;
         let value = self
             .rest
@@ -163,7 +183,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
         self.ensure_optional_spot(request.market_type)?;
-        self.ensure_private_rest("okx.get_balances")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.get_balances",
+            "okxus.get_balances",
+            "myokx.get_balances",
+        ))?;
         let value = self
             .rest
             .send_signed_get("/api/v5/account/balance", &HashMap::new())
@@ -210,7 +234,11 @@ impl OkxGatewayAdapter {
         request: FeesRequest,
     ) -> ExchangeApiResult<FeesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
-        self.ensure_private_rest("okx.get_fees")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.get_fees",
+            "okxus.get_fees",
+            "myokx.get_fees",
+        ))?;
         if request.symbols.is_empty() {
             return Err(ExchangeApiError::InvalidRequest {
                 message: "okx.get_fees requires at least one symbol".to_string(),
@@ -246,7 +274,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_spot(request.symbol.market_type)?;
-        self.ensure_private_rest("okx.query_order")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.query_order",
+            "okxus.query_order",
+            "myokx.query_order",
+        ))?;
         let mut params = HashMap::new();
         params.insert(
             "instId".to_string(),
@@ -285,7 +317,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
         self.ensure_optional_spot(request.market_type)?;
-        self.ensure_private_rest("okx.get_open_orders")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.get_open_orders",
+            "okxus.get_open_orders",
+            "myokx.get_open_orders",
+        ))?;
         let mut params = HashMap::new();
         params.insert("instType".to_string(), "SPOT".to_string());
         if let Some(symbol) = &request.symbol {
@@ -315,7 +351,11 @@ impl OkxGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
         self.ensure_optional_spot(request.market_type)?;
-        self.ensure_private_rest("okx.get_recent_fills")?;
+        self.ensure_private_rest(self.profile_operation(
+            "okx.get_recent_fills",
+            "okxus.get_recent_fills",
+            "myokx.get_recent_fills",
+        ))?;
         let symbol = request
             .symbol
             .as_ref()

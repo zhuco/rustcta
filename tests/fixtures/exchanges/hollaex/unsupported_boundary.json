@@ -1,0 +1,17 @@
+{
+  "exchange": "hollaex",
+  "task": "A-24",
+  "status": "public_rest_with_offline_private_specs",
+  "runtime_private_rest": false,
+  "runtime_websocket": false,
+  "white_label_profile_generation": false,
+  "contains_real_credentials": false,
+  "unsupported": [
+    "private_rest_runtime",
+    "public_ws_runtime",
+    "private_ws_runtime",
+    "admin_api",
+    "withdrawal_transfer",
+    "arbitrary_hollaex_white_label_deployments"
+  ]
+}

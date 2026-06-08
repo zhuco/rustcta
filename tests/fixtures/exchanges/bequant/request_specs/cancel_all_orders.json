@@ -1,0 +1,13 @@
+{
+  "exchange": "bequant",
+  "operation": "bequant.cancel_all_orders",
+  "method": "DELETE",
+  "path": "/spot/order",
+  "query": {
+    "symbol": "BTCUSDT"
+  },
+  "auth": "basic",
+  "headers": {
+    "Authorization": "Basic Zml4dHVyZS1rZXk6Zml4dHVyZS1zZWNyZXQ="
+  }
+}

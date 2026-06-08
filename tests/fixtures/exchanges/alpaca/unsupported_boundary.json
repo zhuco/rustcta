@@ -1,0 +1,21 @@
+{
+  "exchange": "alpaca",
+  "unsupported": [
+    {
+      "operation": "perpetual_or_futures",
+      "reason": "Alpaca crypto trading is spot-only in the mapped Broker API surface."
+    },
+    {
+      "operation": "margin_leverage_short",
+      "reason": "Alpaca crypto is non-marginable and cannot be sold short."
+    },
+    {
+      "operation": "private_websocket",
+      "reason": "Broker order updates are documented as SSE, not a JSON WebSocket private stream."
+    },
+    {
+      "operation": "recent_fills_rest",
+      "reason": "No Broker-account REST fills endpoint was verified for this adapter; use order/query/open-order reconciliation until a dedicated endpoint is audited."
+    }
+  ]
+}

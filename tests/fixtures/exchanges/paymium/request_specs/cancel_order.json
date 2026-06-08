@@ -1,0 +1,12 @@
+{
+  "operation": "cancel_order",
+  "method": "DELETE",
+  "url": "https://paymium.com/api/v1/user/orders/fixture-order-uuid",
+  "auth": "hmac_sha256",
+  "headers": {
+    "Api-Key": "fixture-key",
+    "Api-Nonce": "1700000000000",
+    "Api-Signature": "fixture-signature"
+  },
+  "runtime": "unsupported_request_spec_only"
+}

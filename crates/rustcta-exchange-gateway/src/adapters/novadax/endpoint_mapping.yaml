@@ -1,0 +1,201 @@
+schema_version: 1
+exchange: novadax
+adapter: NovadaxGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/novadax_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: NovaDAX Brazil spot adapter. BRL markets normalize to BASE_QUOTE. Live private REST remains offline request-spec only.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.novadax.com
+auth:
+  private_rest: X-Nova-Access-Key, X-Nova-Signature, X-Nova-Timestamp HMAC-SHA256 headers
+rate_limits:
+  public: { scope: ip, interval_ms: 1000, limit: 10 }
+  private_read: { scope: api_key, interval_ms: 1000, limit: 5 }
+  private_orders: { scope: api_key, interval_ms: 1000, limit: 5 }
+pagination:
+  open_orders: { mode: page_limit, max_limit: 100 }
+  fills: { mode: page_limit, max_limit: 100 }
+reconciliation:
+  private_state: rest_fallback
+  notes: Private WebSocket is not promoted; use REST request-spec readbacks for balances, orders, and fills.
+batch:
+  place: { support: native_spec_only, native_batch: true, atomicity: partial }
+  cancel: { support: native_spec_only, native_batch: true, atomicity: partial }
+websocket:
+  public:
+    support: payload_helper
+    transport: socket_io
+    channels: ["MARKET.{symbol}.DEPTH", "MARKET.{symbol}.TRADE", "MARKET.{symbol}.TICKER"]
+    heartbeat: { mode: socket_io_ping_pong, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/common/symbols
+    auth: none
+    rate_limit_bucket: novadax_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/market/depth
+    auth: none
+    rate_limit_bucket: novadax_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/account/getBalance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: novadax_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v1/orders/create
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: novadax_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v1/orders/batch-create
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: novadax_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: spec_only
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v1/orders/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: novadax_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v1/orders/batch-cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: novadax_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: spec_only
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v1/orders/cancel-by-symbol
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: novadax_private_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: spec_only
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/orders/get
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: novadax_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/orders/list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: novadax_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v1/orders/fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: novadax_private_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only

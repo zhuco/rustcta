@@ -1,0 +1,13 @@
+[
+  {
+    "currency": "BTC",
+    "available": "0.50",
+    "reserved": "0.10"
+  },
+  {
+    "currency": "USDT",
+    "available": "1000.00",
+    "reserved": "25.00",
+    "total": "1025.00"
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "exchange": "okxus",
+  "profile_of": "okx",
+  "rest_base_url": "https://us.okx.com",
+  "public_ws_url": "wss://wsus.okx.com:8443/ws/v5/public",
+  "private_ws_url": "wss://wsus.okx.com:8443/ws/v5/private",
+  "public_rest": {
+    "status": "profile_audit",
+    "shape": "okx_v5_spot"
+  },
+  "private_rest": {
+    "status": "unsupported_pending_us_scope_audit",
+    "trade_enabled": false,
+    "read_enabled": false,
+    "reason": "OKX US private API credential scope and product availability need a separate audit before read or write trading is enabled."
+  },
+  "websocket": {
+    "public_status": "spec_only_not_wired",
+    "private_status": "unsupported_pending_us_scope_audit",
+    "heartbeat": "server_ping_client_pong",
+    "resync": "rest_order_book_snapshot"
+  },
+  "credential_values": {}
+}

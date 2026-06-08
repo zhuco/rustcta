@@ -1,0 +1,162 @@
+schema_version: 1
+exchange: bit2c
+adapter: rustcta_exchange_gateway::adapters::bit2c
+metadata:
+  status: validated
+  source: https://bit2c.co.il/home/api?language=en-US
+  notes: "Task A-06 G1 scan-only mapping. Public NIS Spot order book is implemented; private REST stays request-spec only because official docs publish no signature vector/testnet."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://bit2c.co.il
+rate_limits:
+  buckets:
+    bit2c_public:
+      scope: rest
+      interval: 1s
+      limit: 1
+      source: orderbook cache note, not official request quota
+    bit2c_private:
+      scope: rest
+      interval: 3s
+      limit: 1
+      source: conservative adapter throttle, no official quota found
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_open_orders, query_order]
+  unknown_order_policy: private_rest_disabled_until_signature_verified
+websocket_policy:
+  public_streams: unsupported
+  private_streams: unsupported
+  heartbeat: not_applicable_no_official_ws
+  resync: rest_order_book_snapshot
+unsupported:
+  - perpetuals
+  - futures
+  - margin
+  - positions
+  - leverage
+  - funding
+  - open_interest
+  - websocket
+  - testnet
+  - batch_place_orders
+  - batch_cancel_orders
+  - cancel_all_orders
+  - amend_order
+  - order_list
+  - withdrawals
+  - merchant_checkout
+  - broker_conversion
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /Exchanges/{BtcNis|EthNis|LtcNis|UsdcNis}/Ticker.json
+    auth: none
+    rate_limit_bucket: bit2c_public
+    weight: 1
+    request_spec_required: false
+    support: native
+    notes: "No official markets endpoint; adapter builds static symbol rules from the official pair enum."
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /Exchanges/{pair}/orderbook.json
+    auth: none
+    rate_limit_bucket: bit2c_public
+    weight: 1
+    request_spec_required: false
+    support: native
+    official_doc: https://bit2c.co.il/home/api?language=en-US
+  - operation: get_order_book_top
+    product: spot
+    transport: rest
+    method: GET
+    path: /Exchanges/{pair}/orderbook-top.json
+    auth: none
+    rate_limit_bucket: bit2c_public
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    official_doc: https://bit2c.co.il/home/api?language=en-US
+  - operation: get_public_trades
+    product: spot
+    transport: rest
+    method: GET
+    path: /Exchanges/{pair}/lasttrades
+    auth: none
+    rate_limit_bucket: bit2c_public
+    weight: 1
+    request_spec_required: false
+    support: spec_only
+    official_doc: https://bit2c.co.il/home/api?language=en-US
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /Account/Balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bit2c_private
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_open_orders.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /Order/MyOrders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bit2c_private
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/query_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /Order/GetById
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bit2c_private
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/get_balances.json
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /Order/AddOrder
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bit2c_private
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/place_order_limit_buy.json
+    notes: "Offline request-spec only; runtime private trading remains disabled."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /Order/CancelOrder
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: bit2c_private
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bit2c/request_specs/cancel_order.json
+    notes: "Offline request-spec only; runtime private trading remains disabled."

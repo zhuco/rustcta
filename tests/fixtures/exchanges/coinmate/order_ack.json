@@ -1,0 +1,9 @@
+{
+  "error": false,
+  "errorMessage": null,
+  "data": {
+    "id": "offline-order-1",
+    "clientOrderId": "123456",
+    "currencyPair": "BTC_EUR"
+  }
+}

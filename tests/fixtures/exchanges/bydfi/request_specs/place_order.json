@@ -1,0 +1,18 @@
+{
+  "exchange": "bydfi",
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/v2/fapi/trade/place_order",
+  "body": {
+    "wallet": "W001",
+    "symbol": "BTC-USDT",
+    "side": "BUY",
+    "positionSide": "LONG",
+    "type": "LIMIT",
+    "quantity": "0.02",
+    "price": "65000",
+    "clientOrderId": "CID-001",
+    "timeInForce": "GTC"
+  },
+  "signing_vector": "bydfi/rest_body_place_order"
+}

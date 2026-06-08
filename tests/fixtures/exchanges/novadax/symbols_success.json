@@ -1,0 +1,16 @@
+{
+  "code": "A10000",
+  "message": "Success",
+  "data": [
+    {
+      "symbol": "BTC_BRL",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "BRL",
+      "amountPrecision": 4,
+      "pricePrecision": 2,
+      "valuePrecision": 2,
+      "minOrderAmount": "0.0001",
+      "minOrderValue": "10"
+    }
+  ]
+}

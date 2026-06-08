@@ -1,0 +1,5 @@
+{
+  "type": "subscribe",
+  "channel": "orderbook:btc-usd-usdc",
+  "chain_id": 1101
+}

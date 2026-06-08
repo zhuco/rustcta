@@ -1,0 +1,15 @@
+{
+  "exchange": "d8x",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "contract",
+  "trade_enabled": false,
+  "private_write_enabled": false,
+  "expected_error": "d8x.place_order_requires_evm_signer_and_contract_audit",
+  "required_future_audit": [
+    "EVM signer custody and permission scope",
+    "contract ABI and calldata construction",
+    "gas, nonce and chain reorg handling",
+    "REST or indexer reconciliation after transaction submission"
+  ]
+}

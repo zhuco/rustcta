@@ -1,0 +1,20 @@
+{
+  "arg": {
+    "channel": "orders",
+    "instType": "SPOT"
+  },
+  "support": "auth_payload_shape_only",
+  "data": [
+    {
+      "instId": "BTC-USDT",
+      "ordId": "sanitized-order-id",
+      "clOrdId": "sanitized-client-id",
+      "side": "buy",
+      "ordType": "limit",
+      "sz": "0.01",
+      "px": "65000",
+      "state": "live"
+    }
+  ],
+  "credential_values": {}
+}

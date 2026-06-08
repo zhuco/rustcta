@@ -1,0 +1,45 @@
+# CEX.IO gateway adapter example. Disabled by default.
+# Credentials are read from environment variables by default:
+# CEX_API_KEY, CEX_API_SECRET, and CEX_USER_ID.
+
+exchange: cex
+adapter: cex
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://cex.io/api
+websocket_url: wss://ws.cex.io/ws/
+
+api_key: ${CEX_API_KEY}
+api_secret: ${CEX_API_SECRET}
+user_id: ${CEX_USER_ID}
+
+# G1 adapter: public REST is implemented. Private REST and streams remain
+# disabled until signed request-specs are promoted by a live-readonly task.
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+request_timeout_ms: 10000
+orderbook_depth: 25
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC/USD
+    - ETH/USD
+
+safety:
+  live_trading_enabled: false
+  unsupported_runtime:
+    - private_rest_runtime
+    - private_websocket_runtime
+    - fiat_deposit_withdrawal_runtime
+    - positions
+    - margin
+    - futures
+    - order_list
+    - batch_place
+    - batch_cancel

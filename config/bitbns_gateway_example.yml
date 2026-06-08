@@ -1,0 +1,48 @@
+# Bitbns scan-only public REST gateway adapter example.
+# Keep disabled by default. Do not place real credentials in this file.
+
+exchange: bitbns
+adapter: bitbns
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://bitbns.com
+private_rest_base_url: https://api.bitbns.com/api/trade/v1
+public_ws_url_template: "https://ws{market}mv2.bitbns.com/?coin={COIN}"
+private_ws_url_template: "https://wsorderv2.bitbns.com/?token={token}"
+testnet: false
+sandbox: false
+
+enabled_public_rest: true
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 20
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC_INR
+    - ETH_USDT
+
+rate_limit:
+  # Official SDK exposes usage counters but no stable time window. Keep this
+  # conservative until live read-only probes establish safe limits.
+  max_requests_per_second: 1
+  burst: 2
+
+permissions:
+  required: []
+  optional:
+    - read_account
+    - spot_trading
+
+notes:
+  - Public REST is scan-only: symbol rules and order book snapshots.
+  - Private REST headers are documented by the official SDK, but account/order/fill routes remain disabled until KYC, region eligibility and read-only calls are verified.
+  - Socket.IO public/private streams are documented as spec-only helpers and are not enabled by this gateway adapter.
+  - INR market minimum notional defaults to 10 INR; USDT market minimum notional defaults to 0.1 USDT when dynamic limits are absent.

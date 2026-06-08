@@ -1,0 +1,215 @@
+schema_version: 1
+exchange: ndax
+adapter: NdaxGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/ndax_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: A-28 NDAX CAD spot scan-only adapter. Runtime exposes public instruments/order-book only; private REST and WebSocket remain offline request-spec/payload boundaries.
+market_types: [spot]
+products: [spot]
+base_urls:
+  public_rest_gateway: https://api.ndax.in/WSGateway/
+  public_ws_gateway: wss://api.ndax.io/WSGateway/
+  sandbox_rest: https://sandbox.ndax.in
+auth:
+  public_gateway: AlphaPoint-style request envelope with m/i/n/o fields.
+  private_rest_v3: HMAC-SHA256 Base64 over timestamp + uppercase method + route + body, using the base64-decoded API secret.
+  private_ws: AuthenticateUser payload helper only; live private streams stay disabled.
+rate_limits:
+  public_gateway: { scope: ip, interval_ms: 60000, limit: 60, notes: conservative local bucket until NDAX publishes endpoint weights }
+  private_rest: { scope: key, interval_ms: 60000, limit: 60, notes: request-spec only }
+pagination:
+  private_history: { mode: cursor_or_time_unverified, notes: not promoted to runtime }
+reconciliation:
+  private_state: rest_fallback
+  notes: Private WebSocket is unsupported at runtime; use account/order REST readback after separate live-dry-run promotion.
+batch:
+  place: { support: unsupported, reason: ndax.native_batch_place_unsupported }
+  cancel: { support: unsupported, reason: ndax.native_batch_cancel_unsupported }
+websocket:
+  public:
+    support: payload_helper
+    url: wss://api.ndax.io/WSGateway/
+    channels:
+      - SubscribeLevel2
+      - SubscribeTrades
+      - SubscribeTicker
+    heartbeat: { mode: ping_pong_or_transport_heartbeat, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: payload_helper_only
+    auth: AuthenticateUser
+    reconciliation: rest_fallback
+unsupported:
+  - perpetuals
+  - futures
+  - margin
+  - leverage
+  - positions
+  - funding
+  - mark_price
+  - open_interest
+  - risk_tiers
+  - withdrawals
+  - transfers
+  - fiat_ledger_runtime
+  - native_batch_place
+  - native_batch_cancel_list
+  - live_private_write_rest
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /WSGateway/
+    auth: none
+    rate_limit_bucket: ndax_public_gateway
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#getinstruments
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/ndax/instruments_success.json }
+    notes: Calls GetInstruments with OMSId 1 and maps running standard instruments to Spot symbol rules.
+  - operation: products
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /WSGateway/
+    auth: none
+    rate_limit_bucket: ndax_public_gateway
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#getproducts
+    support: parser_only
+    response_parser: { status: fixture_only, fixture: tests/fixtures/exchanges/ndax/instruments_success.json }
+    notes: Products are audited for CAD fiat boundaries but not exposed as a separate gateway call.
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /WSGateway/
+    auth: none
+    rate_limit_bucket: ndax_public_gateway
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#getl2snapshot
+    support: native
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/ndax/orderbook_btc_cad.json }
+    notes: Calls GetL2Snapshot with Symbol and Depth. Parser accepts object and legacy numeric row fields.
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /accounts
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: ndax_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://docs.ndax.in/v3/private-endpoints/rest-api
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json }
+    notes: Runtime remains Unsupported until account permissions and fiat ledger semantics are live-dry-run verified.
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: ndax_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#getopenorders
+    support: spec_only
+    request_spec: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json }
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /fills
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: ndax_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#gettradeshistory
+    support: spec_only
+    request_spec: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/get_balances.json }
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: ndax_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#sendorder
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/place_order_limit.json }
+    notes: Offline only; runtime place_order returns ndax.place_order_offline_request_spec_only.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /orders/{order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: ndax_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#cancelorder
+    support: spec_only
+    request_spec: { status: implemented, fixture: tests/fixtures/exchanges/ndax/request_specs/cancel_order.json }
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders/{order_id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: ndax_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://apidoc.ndax.io/#getorderstatus
+    support: spec_only
+    request_spec: { status: planned, fixture: tests/fixtures/exchanges/ndax/request_specs/cancel_order.json }

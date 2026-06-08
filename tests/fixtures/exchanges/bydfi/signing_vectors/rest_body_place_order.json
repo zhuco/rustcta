@@ -1,0 +1,12 @@
+{
+  "exchange": "bydfi",
+  "kind": "rest",
+  "operation": "place_order",
+  "api_key": "sample-key",
+  "api_secret": "sample-secret",
+  "timestamp": "1735660800000",
+  "query_string": "",
+  "body": "{\"clientOrderId\":\"CID-001\",\"positionSide\":\"LONG\",\"price\":\"65000\",\"quantity\":\"0.02\",\"side\":\"BUY\",\"symbol\":\"BTC-USDT\",\"timeInForce\":\"GTC\",\"type\":\"LIMIT\",\"wallet\":\"W001\"}",
+  "prehash": "sample-key1735660800000{\"clientOrderId\":\"CID-001\",\"positionSide\":\"LONG\",\"price\":\"65000\",\"quantity\":\"0.02\",\"side\":\"BUY\",\"symbol\":\"BTC-USDT\",\"timeInForce\":\"GTC\",\"type\":\"LIMIT\",\"wallet\":\"W001\"}",
+  "expected_signature": "5757d9d44f80ba38d14f39ab2db275c0a163adcb4230a0e4f042a87b167645d3"
+}

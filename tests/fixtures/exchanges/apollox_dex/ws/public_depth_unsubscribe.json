@@ -1,0 +1,5 @@
+{
+  "method": "UNSUBSCRIBE",
+  "params": ["btcusdt@depth"],
+  "id": 1
+}

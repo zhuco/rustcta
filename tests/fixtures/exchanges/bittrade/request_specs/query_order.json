@@ -1,0 +1,11 @@
+{
+  "exchange": "bittrade",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/order/orders/59378",
+  "auth": "hmac",
+  "body": null,
+  "strict_body": true
+}

@@ -1,0 +1,20 @@
+{
+  "operation": "latoken.cancel_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/v2/auth/order/cancel",
+  "query": {},
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256",
+    "content-type": "application/json"
+  },
+  "body": {
+    "id": "latoken_test_order_id_001"
+  },
+  "canonical_payload": "POST/v2/auth/order/cancelid=latoken_test_order_id_001",
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "latoken.cancel_order_request_spec_only"
+}

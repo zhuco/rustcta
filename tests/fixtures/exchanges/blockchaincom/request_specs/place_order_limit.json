@@ -1,0 +1,27 @@
+{
+  "exchange": "blockchaincom",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "api_key",
+  "headers": {
+    "Accept": { "match": "exact", "value": "application/json" },
+    "Content-Type": { "match": "exact", "value": "application/json" },
+    "X-API-Token": { "match": "non_empty" }
+  },
+  "body": {
+    "clOrdId": "rustcta-fixture-0001",
+    "symbol": "BTC-USD",
+    "side": "BUY",
+    "ordType": "LIMIT",
+    "timeInForce": "GTC",
+    "orderQty": "0.01",
+    "price": "65000"
+  },
+  "strict_query": true,
+  "strict_body": true,
+  "forbid_header_values_containing": ["real", "secret", "token-secret"],
+  "signing_vector": "tests/fixtures/exchanges/blockchaincom/signing_vectors/token_auth.json"
+}

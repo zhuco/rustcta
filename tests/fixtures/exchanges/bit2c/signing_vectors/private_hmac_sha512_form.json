@@ -1,0 +1,15 @@
+{
+  "exchange": "bit2c",
+  "algorithm": "hmac_sha512_base64",
+  "status": "offline_fixture_no_official_signature_sample",
+  "api_key": "fixture_key",
+  "secret": "secret",
+  "nonce": 1700000000000,
+  "payload": "Amount=0.01&Price=99000&IsBid=true&Pair=BtcNis&nonce=1700000000000",
+  "signature": "eam1//1ne9qUfumUqe8/GAz/kCVxwf+TigdsKWPDdrzpHoWRJ67I+wSHIzzpoUgIq5yQ2L1fZmZO26FIPD6f7w==",
+  "headers": {
+    "key": "fixture_key",
+    "sign": "eam1//1ne9qUfumUqe8/GAz/kCVxwf+TigdsKWPDdrzpHoWRJ67I+wSHIzzpoUgIq5yQ2L1fZmZO26FIPD6f7w==",
+    "content-type": "application/x-www-form-urlencoded"
+  }
+}

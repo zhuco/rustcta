@@ -1,0 +1,28 @@
+{
+  "exchange": "equation",
+  "task": "C-41",
+  "chain": "arbitrum",
+  "chain_id": 42161,
+  "product": "perpetual",
+  "protocol_model": "BRMM_AMM",
+  "scan_only": true,
+  "stable_api_verified": false,
+  "trade_enabled": false,
+  "private_rest_enabled": false,
+  "public_stream_enabled": false,
+  "private_stream_enabled": false,
+  "official_sources": [
+    "https://docs.equation.org/",
+    "https://docs.equation.org/whitepaper-v3/pricing-mechanism",
+    "https://docs.equation.org/whitepaper-v3/funding-rate",
+    "https://github.com/EquationDAO/equation-examples"
+  ],
+  "expected_runtime_errors": {
+    "markets": "equation.markets_unverified",
+    "risk": "equation.risk_and_fees_unverified",
+    "positions": "equation.positions_unverified",
+    "orders": "equation.evm_order_signing_unverified",
+    "public_stream": "equation.public_stream_unverified",
+    "private_stream": "equation.private_stream_unverified"
+  }
+}

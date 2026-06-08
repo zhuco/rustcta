@@ -1,0 +1,11 @@
+{
+  "status": 1,
+  "data": [
+    {
+      "floatPlaces": 8,
+      "inrDecimals": 2,
+      "status": 1
+    }
+  ],
+  "error": null
+}

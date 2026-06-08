@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/markets/btcbrl/orderbook",
+  "query": {
+    "depth": "100"
+  },
+  "auth": "none",
+  "headers": {
+    "Accept": "application/json"
+  }
+}

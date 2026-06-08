@@ -1,0 +1,6 @@
+{
+  "operation": "zaif.cancel_order",
+  "method": "POST",
+  "path": "/tapi",
+  "body": "nonce=1710000001&method=cancel_order&order_id=123456789"
+}

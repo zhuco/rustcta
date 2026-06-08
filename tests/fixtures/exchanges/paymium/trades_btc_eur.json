@@ -1,0 +1,12 @@
+[
+  {
+    "uuid": "fixture-trade-1",
+    "traded_btc": "0.153",
+    "traded_currency": "9800.53",
+    "created_at": "2026-06-08T00:00:00Z",
+    "currency": "EUR",
+    "side": "buy",
+    "price": "64055.75",
+    "created_at_int": 1780876800
+  }
+]

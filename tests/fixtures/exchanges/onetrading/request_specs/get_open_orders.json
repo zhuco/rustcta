@@ -1,0 +1,18 @@
+{
+  "method": "GET",
+  "path": "/account/orders",
+  "query": {
+    "instrument_code": "BTC_EUR",
+    "with_cancelled_and_rejected": "false",
+    "with_just_filled_inactive": "false",
+    "with_just_orders": "true",
+    "max_page_size": "50"
+  },
+  "auth": "bearer_token",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": null
+}

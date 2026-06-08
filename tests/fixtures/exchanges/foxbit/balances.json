@@ -1,0 +1,4 @@
+[
+  { "currency_symbol": "BTC", "available": "0.10", "locked": "0.00" },
+  { "currency_symbol": "BRL", "available": "1000.00", "locked": "350.00" }
+]

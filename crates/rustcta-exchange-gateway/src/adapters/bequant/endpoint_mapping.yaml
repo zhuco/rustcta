@@ -1,0 +1,210 @@
+schema_version: 1
+exchange: bequant
+adapter: rustcta_exchange_gateway::adapters::bequant
+metadata:
+  status: validated
+  source: docs/bequant_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "A-04 Bequant profile. HitBTC v3 API-family semantics are used conservatively; spot REST is mapped, margin/futures remain explicit follow-ups."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.bequant.io/api/3
+base_urls:
+  public_ws: wss://api.bequant.io/api/3/ws/public
+  trading_ws: wss://api.bequant.io/api/3/ws/trading
+  wallet_ws: wss://api.bequant.io/api/3/ws/wallet
+auth:
+  private_rest: HTTP Basic auth with API key as username and secret key as password.
+  private_ws: login using Basic auth header/payload; HS256 is documented but not implemented by this adapter.
+rate_limits:
+  buckets:
+    bequant_public_rest:
+      scope: rest
+      interval: 1s
+      limit: 30
+      burst: 50
+    bequant_private_rest:
+      scope: account
+      interval: 1s
+      limit: 20
+      burst: 30
+    bequant_order_rest:
+      scope: orders
+      interval: 1s
+      limit: 300
+      burst: 450
+    bequant_ws:
+      scope: websocket
+      interval: 1s
+      limit: 10
+      burst: 10
+pagination:
+  get_open_orders:
+    style: time_window_limit
+    limit_param: limit
+    max_limit: 1000
+  get_recent_fills:
+    style: time_window_or_from_id
+    limit_param: limit
+    max_limit: 1000
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills, get_balances]
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: unsupported
+    reason: "No Bequant spot batch create endpoint is mapped to ExchangeClient."
+  cancel_orders:
+    support: unsupported
+    reason: "Bequant spot cancel-all is mapped; batch cancel-by-list is not mapped."
+websocket:
+  public:
+    support: native
+    url: wss://api.bequant.io/api/3/ws/public
+    channels: ["orderbook/D20/1000ms", trades, "ticker/price/1s"]
+    heartbeat:
+      direction: client_ping
+      interval_ms: 30000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    urls:
+      trading: wss://api.bequant.io/api/3/ws/trading
+      wallet: wss://api.bequant.io/api/3/ws/wallet
+    auth: basic
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /public/symbol
+    auth: none
+    rate_limit_bucket: bequant_public_rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://api.bequant.io/
+    response_parser:
+      fixture: tests/fixtures/exchanges/bequant/symbols_success.json
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /public/orderbook/{symbol}
+    auth: none
+    rate_limit_bucket: bequant_public_rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://api.bequant.io/
+    response_parser:
+      fixture: tests/fixtures/exchanges/bequant/orderbook_success.json
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/balance
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bequant_private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bequant/signing_vectors/basic_auth.json
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/fee/{symbol}
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bequant_private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /spot/order
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bequant/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /spot/order/{client_order_id}
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bequant/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /spot/order
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: bequant_order_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/bequant/request_specs/cancel_all_orders.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/order/{client_order_id}
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bequant_order_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/order
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bequant_order_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/history/trade
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bequant_order_rest
+    weight: 1
+    request_spec_required: true
+unsupported:
+  - operation: margin_trading
+    reason: "Official margin endpoints exist, but margin semantics are not mapped in this one-exchange spot adapter."
+  - operation: futures_trading
+    reason: "Official futures endpoints exist, but contract metadata/risk/position semantics require a separate futures profile."
+  - operation: quote_sized_market_order
+    reason: "No Bequant spot quote-order-qty mapping is verified."
+  - operation: amend_order
+    reason: "No generic Bequant spot amend endpoint is mapped."
+  - operation: batch_place_orders
+    reason: "No mapped native batch create endpoint."
+  - operation: batch_cancel_orders
+    reason: "Cancel-all is mapped; batch cancel-by-list remains unsupported."
+  - operation: transfers_withdrawals
+    reason: "Wallet funding operations are outside trading runtime."
+  - operation: hitbtc_byte_for_byte_alias
+    reason: "Bequant is treated as a HitBTC v3 API-family profile, not a full clone."

@@ -1,0 +1,17 @@
+{
+  "operation": "latoken.cancel_all_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/v2/auth/order/cancelAll",
+  "query": {},
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256",
+    "content-type": "application/json"
+  },
+  "body": {},
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "latoken.cancel_all_orders_request_spec_only"
+}

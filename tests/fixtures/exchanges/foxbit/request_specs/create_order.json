@@ -1,0 +1,19 @@
+{
+  "method": "POST",
+  "path": "/orders",
+  "auth": "hmac_sha256",
+  "headers": {
+    "X-FB-ACCESS-KEY": "<redacted>",
+    "X-FB-ACCESS-TIMESTAMP": "1700000000000",
+    "X-FB-ACCESS-SIGNATURE": "<computed>",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "side": "BUY",
+    "type": "LIMIT",
+    "market_symbol": "btcbrl",
+    "quantity": "0.01",
+    "price": "350000",
+    "client_order_id": "offline-fixture"
+  }
+}

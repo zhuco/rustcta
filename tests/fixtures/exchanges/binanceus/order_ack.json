@@ -1,0 +1,19 @@
+{
+  "clientOrderId": "xca-bundle-0001-maker-0",
+  "cummulativeQuoteQty": "0.00000000",
+  "executedQty": "0",
+  "fills": [],
+  "orderId": 9081726354,
+  "orderListId": -1,
+  "origQty": "0.01000000",
+  "price": "65000.10000000",
+  "side": "BUY",
+  "status": "NEW",
+  "stopPrice": "0",
+  "symbol": "BTCUSDT",
+  "timeInForce": "GTC",
+  "transactTime": 1743054549000,
+  "type": "LIMIT",
+  "workingTime": 1743054549000,
+  "selfTradePreventionMode": "NONE"
+}

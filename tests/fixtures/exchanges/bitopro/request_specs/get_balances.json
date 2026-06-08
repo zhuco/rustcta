@@ -1,0 +1,7 @@
+{
+  "operation": "bitopro.get_balances",
+  "method": "GET",
+  "path": "/accounts/balance",
+  "query": [],
+  "body": null
+}

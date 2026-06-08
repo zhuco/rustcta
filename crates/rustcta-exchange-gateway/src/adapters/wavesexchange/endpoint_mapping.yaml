@@ -1,0 +1,272 @@
+schema_version: 1
+exchange: wavesexchange
+adapter: WavesExchangeGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/wavesexchange_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: WX Network matcher Spot public REST is native scan-only; wallet/public-key signed account and order flows remain unsupported.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://matcher.waves.exchange
+  rest_testnet: https://matcher-testnet.waves.exchange
+  public_ws: wss://matcher.waves.exchange/ws/v0
+auth:
+  public_rest: none
+  private_read: Waves public-key Timestamp/Signature headers; unsupported in this adapter
+  private_write: Signed Waves order and cancellation payloads; unsupported in this adapter
+rate_limits:
+  matcher_public: { scope: ip, interval_ms: 1000, limit: 10 }
+  unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  order_book: { mode: depth, values: [10, 100] }
+  private_history: { mode: unsupported }
+reconciliation:
+  order_book:
+    mode: rest_snapshot
+    checksum: unsupported
+    notes: Public WS payloads are fixture/spec-only; runtime resync should reload matcher REST order book.
+  private_state: unsupported
+batch:
+  place: { support: unsupported, reason: wavesexchange.batch_place_orders_not_native }
+  cancel: { support: unsupported, reason: wavesexchange.batch_cancel_orders_not_native }
+websocket:
+  public:
+    support: spec_only
+    endpoint: /ws/v0
+    heartbeat: { mode: server_limit_reconnect, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+    parser_fixtures:
+      - tests/fixtures/exchanges/wavesexchange/ws/updates_orderbook_delta.json
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+streams:
+  - operation: public_orderbook_delta
+    product: spot
+    channel: obs
+    support: spec_only
+    resync: { mode: rest_snapshot, endpoint_operation: order_book }
+    fixture: tests/fixtures/exchanges/wavesexchange/ws/updates_orderbook_delta.json
+  - operation: private_address_updates
+    product: spot
+    channel: unsupported.address_updates
+    support: unsupported
+    reason: wavesexchange.private_streams_require_wallet_scoped_subscription
+endpoints:
+  - operation: symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /matcher/orderbook/{amountAsset}/{priceAsset}/info
+    auth: none
+    rate_limit_bucket: wavesexchange_matcher_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://docs.waves.exchange/en/waves-matcher/matcher-api
+    request_spec_fixture: tests/fixtures/exchanges/wavesexchange/request_specs/markets.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/wavesexchange/market_info.json }
+  - operation: order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /matcher/orderbook/{amountAsset}/{priceAsset}
+    auth: none
+    rate_limit_bucket: wavesexchange_matcher_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://docs.waves.exchange/en/waves-matcher/matcher-api
+    request_spec_fixture: tests/fixtures/exchanges/wavesexchange/request_specs/orderbook.json
+    response_parser: { status: implemented, fixture: tests/fixtures/exchanges/wavesexchange/orderbook.json }
+  - operation: balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /unsupported/wavesexchange/balances
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.balances_require_waves_address_and_node_balance_mapping
+  - operation: positions
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /unsupported/wavesexchange/positions
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.positions_not_applicable_to_spot
+  - operation: fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /unsupported/wavesexchange/fees
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.matcher_fee_rates_are_asset_specific_not_gateway_account_fee_rates
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/wavesexchange/place_order
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.place_order_requires_waves_order_curve25519_signing
+    request_spec_fixture: tests/fixtures/exchanges/wavesexchange/signing_vectors/waves_transaction_unsupported.json
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/wavesexchange/cancel_order
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.cancel_order_requires_waves_public_key_signature
+  - operation: amend_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/wavesexchange/amend_order
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.amend_order_unsupported
+  - operation: batch_place_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/wavesexchange/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.batch_place_orders_not_native
+  - operation: batch_cancel_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/wavesexchange/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.batch_cancel_orders_not_native
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /unsupported/wavesexchange/cancel_all_orders
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.cancel_all_orders_not_native
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /unsupported/wavesexchange/query_order
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.query_order_requires_pair_and_order_id_mapping
+  - operation: open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /unsupported/wavesexchange/open_orders
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.open_orders_require_waves_public_key_signature
+  - operation: recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /unsupported/wavesexchange/recent_fills
+    auth: unsupported
+    rate_limit_bucket: wavesexchange_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: wavesexchange.recent_fills_require_waves_public_key_signature

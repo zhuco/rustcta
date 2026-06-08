@@ -1,0 +1,37 @@
+adapter: bsx
+exchange: bsx
+enabled: false
+market_types:
+  - perpetual
+
+rest_base_url: https://api.bsx.exchange
+testnet_rest_base_url: https://api.testnet.bsx.exchange
+public_ws_url: wss://ws.bsx.exchange/ws
+testnet_public_ws_url: wss://ws.testnet.bsx.exchange/ws
+
+enabled_public_rest: true
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+private_write:
+  enabled: false
+  mode: request_spec_only
+  reason: bsx.place_order_requires_eip712_wallet_signature_audit
+
+credentials:
+  api_key_env: RUSTCTA_BSX_API_KEY
+  api_secret_env: RUSTCTA_BSX_API_SECRET
+  wallet_address_env: RUSTCTA_BSX_WALLET_ADDRESS
+  signer_address_env: RUSTCTA_BSX_SIGNER_ADDRESS
+
+boundaries:
+  trading_enabled: false
+  public_rest: products_and_orderbook
+  private_rest: request_spec_only
+  websocket_runtime: fixture_only
+  unsupported:
+    - balances
+    - positions
+    - private_order_writes
+    - private_streams

@@ -1,0 +1,23 @@
+{
+  "exchange": "equation",
+  "task": "C-41",
+  "chain_id": 42161,
+  "surface": "markets",
+  "audit_subjects": ["markets", "symbols", "oracle_pricing"],
+  "official_docs": [
+    "https://docs.equation.org/",
+    "https://docs.equation.org/whitepaper-v3/pricing-mechanism",
+    "https://github.com/EquationDAO/equation-examples"
+  ],
+  "weak_example_rest": {
+    "host": "https://api-v3-arbitrum.equation.trade",
+    "path": "/v1/markets/{market}",
+    "promoted": false,
+    "reason": "Official examples reference helper endpoints, but no versioned API schema/SLA was verified."
+  },
+  "gateway_mapping": {
+    "get_symbol_rules": "unsupported_unverified",
+    "get_order_book": "unsupported_unverified",
+    "notes": "BRMM depth is AMM-derived and should not be treated as a conventional CLOB order book."
+  }
+}

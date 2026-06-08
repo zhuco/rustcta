@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "data": {
+    "holding": [
+      {
+        "token": "USDC",
+        "holding": "1000.5",
+        "frozen": "25.5"
+      },
+      {
+        "token": "WOO",
+        "holding": "10",
+        "frozen": "0"
+      }
+    ]
+  }
+}

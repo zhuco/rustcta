@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": "mango-markets-unsubscribe-42",
+  "method": "accountUnsubscribe",
+  "params": [
+    42
+  ]
+}

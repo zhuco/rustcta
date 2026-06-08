@@ -1,0 +1,16 @@
+{
+  "exchange": "equation",
+  "task": "C-41",
+  "chain_id": 42161,
+  "surface": "risk",
+  "audit_subjects": ["funding", "liquidation", "margin_risk"],
+  "official_docs": [
+    "https://docs.equation.org/whitepaper-v3/pricing-mechanism",
+    "https://docs.equation.org/whitepaper-v3/funding-rate"
+  ],
+  "gateway_mapping": {
+    "get_fees": "unsupported_unverified",
+    "risk_snapshot": "unsupported_unverified",
+    "reason": "Funding and liquidation semantics are protocol-audit subjects until an account-level risk endpoint or on-chain/indexer parser is maintained."
+  }
+}

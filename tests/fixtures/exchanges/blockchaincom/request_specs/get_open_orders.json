@@ -1,0 +1,19 @@
+{
+  "exchange": "blockchaincom",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders",
+  "auth": "api_key",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTC-USD" },
+    "status": { "match": "exact", "value": "OPEN" }
+  },
+  "headers": {
+    "Accept": { "match": "exact", "value": "application/json" },
+    "X-API-Token": { "match": "non_empty" }
+  },
+  "strict_query": true,
+  "strict_body": true
+}

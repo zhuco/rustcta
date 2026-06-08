@@ -1,0 +1,16 @@
+{
+  "success": true,
+  "timestamp": 1700000000000,
+  "data": {
+    "symbol": "PERP_BTC_USDC",
+    "seq": 424242,
+    "bids": [
+      ["65000.1", "1.25"],
+      ["64999.8", "0.40"]
+    ],
+    "asks": [
+      { "price": "65001.2", "quantity": "0.75" },
+      { "price": "65002.0", "quantity": "2.10" }
+    ]
+  }
+}

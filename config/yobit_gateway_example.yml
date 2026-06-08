@@ -1,0 +1,28 @@
+# YoBit scan-only gateway adapter example.
+# Disabled by default; do not put real credentials in this file.
+
+gateway:
+  adapters:
+    - yobit
+
+yobit:
+  enabled: false
+  rest_base_url: "https://yobit.net"
+  private_rest:
+    enabled: false
+    api_key_env: "RUSTCTA_YOBIT_API_KEY"
+    api_secret_env: "RUSTCTA_YOBIT_API_SECRET"
+  capabilities:
+    spot_public_rest: true
+    private_rest_runtime: false
+    websocket_runtime: false
+  market_types:
+    - spot
+  request_timeout_ms: 10000
+  orderbook_depth: 150
+  testnet: false
+  sandbox: false
+  notes:
+    - "A-37 scan-only adapter: YoBit Public API v3 info and order book only."
+    - "Private /tapi/ is request-spec/signing-vector only and remains disabled."
+    - "Withdrawals, deposit address, Yobicode, Defi swap, perpetuals, batch, and WebSocket runtime are not implemented."

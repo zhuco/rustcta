@@ -1,0 +1,17 @@
+{
+  "exchange": "ndax",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/orders/offline-order-1",
+  "auth": "signed",
+  "headers": {
+    "X-NDAX-APIKEY": { "match": "present" },
+    "X-NDAX-SIGNATURE": { "match": "present" },
+    "X-NDAX-TIMESTAMP": { "match": "present" }
+  },
+  "strict_headers": false,
+  "forbid_header_values_containing": ["fixture-secret", "fixture-passphrase"],
+  "signing_vector": "../signing_vectors/rest_order_signature.json"
+}

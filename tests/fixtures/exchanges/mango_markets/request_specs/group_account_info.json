@@ -1,0 +1,24 @@
+{
+  "exchange": "mango_markets",
+  "operation": "get_symbol_rules",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/",
+  "auth": "none",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "body": {
+    "jsonrpc": "2.0",
+    "id": "mango-markets-group-scan",
+    "method": "getAccountInfo",
+    "params": [
+      "78b8f4cGCwmZ9ysPFMWLaLTkkaYnUjwMJYStWe5RTSSX",
+      {
+        "encoding": "base64",
+        "commitment": "confirmed"
+      }
+    ]
+  }
+}

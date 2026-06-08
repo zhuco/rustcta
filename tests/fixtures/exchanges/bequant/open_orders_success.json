@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1002",
+    "client_order_id": "CLIENTOPEN1",
+    "symbol": "BTCUSDT",
+    "side": "sell",
+    "type": "limit",
+    "status": "new",
+    "quantity": "0.03",
+    "price": "66000",
+    "cum_quantity": "0",
+    "created_at": "2026-06-08T00:00:10.000Z"
+  }
+]

@@ -1,0 +1,28 @@
+{
+  "exchange": "coinmate",
+  "products": ["spot"],
+  "private_write_mode": "offline_request_spec_only",
+  "private_read_mode": "offline_request_spec_only",
+  "public_rest_mode": "enabled",
+  "public_ws_mode": "payload_and_parser_fixture",
+  "private_ws_mode": "payload_and_parser_fixture_with_rest_fallback",
+  "funding_operations": "unsupported",
+  "unsupported_operations": [
+    "perpetuals",
+    "futures",
+    "margin",
+    "leverage",
+    "positions",
+    "funding",
+    "mark_price",
+    "open_interest",
+    "risk_tiers",
+    "withdrawals",
+    "transfers",
+    "bank_wire_withdrawal",
+    "stop_loss_orders",
+    "hidden_orders",
+    "native_batch_place",
+    "native_batch_cancel_list"
+  ]
+}

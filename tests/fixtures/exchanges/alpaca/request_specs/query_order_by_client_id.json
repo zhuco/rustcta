@@ -1,0 +1,25 @@
+{
+  "exchange": "alpaca",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/trading/accounts/acct-123/orders:by_client_order_id",
+  "auth": "api_key",
+  "query": {
+    "client_order_id": {
+      "match": "exact",
+      "value": "client-1"
+    }
+  },
+  "headers": {
+    "APCA-API-KEY-ID": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "APCA-API-SECRET-KEY": {
+      "match": "exact",
+      "value": "test-secret"
+    }
+  }
+}

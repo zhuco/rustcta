@@ -1,0 +1,10 @@
+{
+  "exchange": "hibachi",
+  "market_type": "perpetual",
+  "scan_only": false,
+  "public_rest": true,
+  "trade_enabled": false,
+  "private_write": "request_spec_only",
+  "trustless_signing": "unsupported_until_verified",
+  "testnet": "not_publicly_documented"
+}

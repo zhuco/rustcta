@@ -1,0 +1,28 @@
+{
+  "exchange": "alpaca",
+  "operation": "get_order_book",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1beta3/crypto/us/latest/orderbooks",
+  "auth": "api_key",
+  "query": {
+    "symbols": {
+      "match": "exact",
+      "value": "BTC%2FUSD"
+    }
+  },
+  "headers": {
+    "APCA-API-KEY-ID": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "APCA-API-SECRET-KEY": {
+      "match": "exact",
+      "value": "test-secret"
+    }
+  },
+  "forbid_query_values_containing": [
+    "test-secret"
+  ]
+}

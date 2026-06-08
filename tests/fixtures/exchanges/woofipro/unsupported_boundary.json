@@ -1,0 +1,19 @@
+{
+  "exchange": "woofipro",
+  "product": "perpetual",
+  "broker_id": "woofi_pro",
+  "chain_id": 42161,
+  "full_private_rest": true,
+  "private_runtime_requires_credentials": true,
+  "trade_enabled_with_credentials": true,
+  "private_write_enabled_with_credentials": true,
+  "orderbook_runtime_requires_signed_read": true,
+  "public_ws_runtime_enabled": false,
+  "private_ws_runtime_enabled": false,
+  "unsupported_runtime": [
+    "public_ws_runtime_loop",
+    "private_ws_runtime_loop",
+    "order_list_oco_oto",
+    "builder_or_admin_fee_rate"
+  ]
+}

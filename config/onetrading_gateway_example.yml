@@ -1,0 +1,34 @@
+# One Trading gateway adapter example. Disabled by default.
+
+enabled: false
+exchange: onetrading
+adapter: onetrading
+
+rest:
+  base_url: https://api.onetrading.com/fast/v1
+  public_enabled: true
+  private_enabled: false
+  request_timeout_ms: 10000
+
+websocket:
+  public_url: wss://streams.fast.onetrading.com
+  private_url: wss://streams.onetrading.com
+  public_enabled: false
+  private_enabled: false
+
+credentials:
+  api_token: ${ONETRADING_API_TOKEN}
+  required_scopes:
+    read_only: [read]
+    trade: [trade]
+  live_private_rest_default: false
+
+safety:
+  private_write_live_enabled: false
+  private_ws_live_enabled: false
+  unsupported:
+    - futures_and_perpetuals_in_spot_adapter
+    - withdrawals
+    - websocket_trading_writes
+    - market_orders
+    - dead_man_switch

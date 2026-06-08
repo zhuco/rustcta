@@ -1,0 +1,6 @@
+{
+  "event": "subscribe_success",
+  "data": {
+    "channel": "order_book-BTC_EUR"
+  }
+}

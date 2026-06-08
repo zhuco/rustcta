@@ -1,0 +1,15 @@
+[
+  {
+    "tradeId": "fill-1",
+    "exOrdId": "123456789",
+    "clOrdId": "rustcta-1",
+    "symbol": "BTC-USD",
+    "side": "BUY",
+    "price": "64800",
+    "qty": "0.003",
+    "fee": "0.46",
+    "feeCurrency": "USD",
+    "liquidity": "M",
+    "timestamp": 1700000000100
+  }
+]

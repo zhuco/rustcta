@@ -1,0 +1,17 @@
+{
+  "operation": "bitteam.get_recent_fills",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/trade/api/ccxt/tradesOfUser",
+  "query": {
+    "limit": "1000",
+    "offset": "0",
+    "pair": "BTC_USDT"
+  },
+  "headers": {
+    "authorization": "<redacted:basic-auth>"
+  },
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "bitteam.recent_fills_request_spec_only"
+}

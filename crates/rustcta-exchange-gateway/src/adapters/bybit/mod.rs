@@ -19,7 +19,7 @@ use super::GatewayAdapter;
 use crate::GatewayExchangeStatus;
 
 mod config;
-mod parser;
+pub(crate) mod parser;
 mod private;
 mod private_parser;
 mod public;
@@ -41,7 +41,7 @@ pub struct BybitGatewayAdapter {
 
 impl BybitGatewayAdapter {
     pub fn new(config: BybitGatewayConfig) -> ExchangeApiResult<Self> {
-        let exchange_id = ExchangeId::new("bybit").map_err(validation_error)?;
+        let exchange_id = ExchangeId::new(&config.exchange_id).map_err(validation_error)?;
         let rest = BybitRest::new(
             exchange_id.clone(),
             config.rest_base_url.clone(),
@@ -63,7 +63,10 @@ impl BybitGatewayAdapter {
     fn ensure_exchange(&self, exchange: &ExchangeId) -> ExchangeApiResult<()> {
         if exchange != &self.exchange_id {
             return Err(ExchangeApiError::InvalidRequest {
-                message: format!("bybit adapter cannot serve request for exchange {exchange}"),
+                message: format!(
+                    "{} adapter cannot serve request for exchange {exchange}",
+                    self.exchange_id
+                ),
             });
         }
         Ok(())
@@ -75,7 +78,7 @@ impl BybitGatewayAdapter {
             MarketType::Spot | MarketType::Perpetual | MarketType::Futures
         ) {
             return Err(ExchangeApiError::Unsupported {
-                operation: "bybit.unsupported_market_type",
+                operation: self.config.unsupported_market_type_operation,
             });
         }
         Ok(())
@@ -128,6 +131,18 @@ impl BybitGatewayAdapter {
         Err(ExchangeApiError::Unsupported { operation })
     }
 
+    pub(super) fn profile_operation(
+        &self,
+        bybit_operation: &'static str,
+        bybiteu_operation: &'static str,
+    ) -> &'static str {
+        if self.exchange_id.as_str() == "bybiteu" {
+            bybiteu_operation
+        } else {
+            bybit_operation
+        }
+    }
+
     fn context_account(
         &self,
         context: &rustcta_exchange_api::RequestContext,
@@ -164,7 +179,7 @@ impl GatewayAdapter for BybitGatewayAdapter {
             private_stream_connected: false,
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
-            message: Some("bybit V5 spot + linear perpetual gateway adapter".to_string()),
+            message: Some(self.config.status_message.clone()),
         }
     }
 }
@@ -253,7 +268,10 @@ impl ExchangeClient for BybitGatewayAdapter {
         &self,
         _request: QuoteMarketOrderRequest,
     ) -> ExchangeApiResult<PlaceOrderResponse> {
-        self.unsupported_private("bybit.place_quote_market_order")
+        self.unsupported_private(self.profile_operation(
+            "bybit.place_quote_market_order",
+            "bybiteu.place_quote_market_order",
+        ))
     }
 
     async fn cancel_order(
@@ -267,28 +285,34 @@ impl ExchangeClient for BybitGatewayAdapter {
         &self,
         _request: AmendOrderRequest,
     ) -> ExchangeApiResult<AmendOrderResponse> {
-        self.unsupported_private("bybit.amend_order")
+        self.unsupported_private(self.profile_operation("bybit.amend_order", "bybiteu.amend_order"))
     }
 
     async fn place_order_list(
         &self,
         _request: OrderListRequest,
     ) -> ExchangeApiResult<OrderListResponse> {
-        self.unsupported_private("bybit.place_order_list")
+        self.unsupported_private(
+            self.profile_operation("bybit.place_order_list", "bybiteu.place_order_list"),
+        )
     }
 
     async fn batch_place_orders(
         &self,
         _request: BatchPlaceOrdersRequest,
     ) -> ExchangeApiResult<BatchPlaceOrdersResponse> {
-        self.unsupported_private("bybit.batch_place_orders")
+        self.unsupported_private(
+            self.profile_operation("bybit.batch_place_orders", "bybiteu.batch_place_orders"),
+        )
     }
 
     async fn batch_cancel_orders(
         &self,
         _request: BatchCancelOrdersRequest,
     ) -> ExchangeApiResult<BatchCancelOrdersResponse> {
-        self.unsupported_private("bybit.batch_cancel_orders")
+        self.unsupported_private(
+            self.profile_operation("bybit.batch_cancel_orders", "bybiteu.batch_cancel_orders"),
+        )
     }
 
     async fn cancel_all_orders(

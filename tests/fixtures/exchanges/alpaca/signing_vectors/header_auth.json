@@ -1,0 +1,10 @@
+{
+  "exchange": "alpaca",
+  "algorithm": "header_key_secret",
+  "api_key": "test-key",
+  "api_secret": "test-secret",
+  "expected_headers": {
+    "APCA-API-KEY-ID": "test-key",
+    "APCA-API-SECRET-KEY": "test-secret"
+  }
+}

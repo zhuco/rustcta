@@ -1,0 +1,7 @@
+{
+  "algorithm": "md5(base64(json_body) + api_key)",
+  "api_key": "fixture-api-key",
+  "body": "{\"market\":\"TRX_USDT\",\"quantity\":\"20\"}",
+  "expected_base64_body": "eyJtYXJrZXQiOiJUUlhfVVNEVCIsInF1YW50aXR5IjoiMjAifQ==",
+  "expected_signature": "7a25ed96c474b99df63c8caad23459bc"
+}

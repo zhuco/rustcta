@@ -1,0 +1,18 @@
+{
+  "exchange": "bydfi",
+  "operation": "balances",
+  "method": "GET",
+  "path": "/v1/fapi/account/balance",
+  "query": {
+    "wallet": "W001",
+    "asset": "USDT"
+  },
+  "headers": [
+    "X-API-KEY",
+    "X-API-TIMESTAMP",
+    "X-API-SIGNATURE",
+    "Content-Type",
+    "Accept-Language"
+  ],
+  "signing": "hex_hmac_sha256(accessKey + timestamp + queryString + body)"
+}

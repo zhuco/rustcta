@@ -1,0 +1,17 @@
+{
+  "exchange": "blockchaincom",
+  "name": "rest-header-and-ws-auth-token",
+  "algorithm": "none_api_token_header",
+  "canonical_string": null,
+  "hmac_signature": null,
+  "rest_header": {
+    "X-API-Token": "<redacted-api-key>"
+  },
+  "ws_auth_payload": {
+    "action": "subscribe",
+    "channel": "auth",
+    "token": "<redacted-api-secret>"
+  },
+  "supported": true,
+  "note": "Official Exchange v3 REST docs document X-API-Token header auth and no REST HMAC signing vector."
+}

@@ -1,0 +1,7 @@
+{
+  "operation": "bitopro.query_order",
+  "method": "GET",
+  "path": "/orders/btc_twd/8917255503",
+  "query": [],
+  "body": null
+}

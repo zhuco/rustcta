@@ -1,0 +1,22 @@
+[
+  {
+    "symbol": "BTC",
+    "code": "BTC",
+    "precision": "8",
+    "name": "Bitcoin",
+    "type": "crypto",
+    "deposit": true,
+    "withdraw": true,
+    "charge_plan_limit_min": "0.00000001",
+    "charge_plan_limit_max": "100.0"
+  },
+  {
+    "symbol": "EUR",
+    "code": "EUR",
+    "precision": "2",
+    "name": "Euro",
+    "type": "fiat",
+    "deposit": true,
+    "withdraw": true
+  }
+]

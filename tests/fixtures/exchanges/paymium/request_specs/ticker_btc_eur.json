@@ -1,0 +1,7 @@
+{
+  "operation": "get_symbol_rules",
+  "method": "GET",
+  "url": "https://paymium.com/api/v1/data/eur/ticker",
+  "auth": "none",
+  "notes": "Composes BTC/EUR symbol metadata from official BTC/EUR-only trading docs and ticker currency=EUR."
+}

@@ -1,0 +1,6 @@
+{
+  "method": "POST",
+  "path": "/open/v1/user-listen-token",
+  "query": "recvWindow=5000&timestamp=1581720670624",
+  "body": null
+}

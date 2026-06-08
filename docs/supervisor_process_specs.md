@@ -15,7 +15,7 @@ supervisor-managed before their runtime internals move:
 | Template | Legacy binary | Strategy kind | Default config |
 | --- | --- | --- | --- |
 | `cross_arb_live` | `cross_arb_live` | `cross_exchange_arbitrage` | `config/cross_exchange_arbitrage_usdt.yml` |
-| `funding_arb_live` | `funding_arb_live` | `funding_arbitrage` | `config/funding_rate_arbitrage_usdt.yml` |
+| `funding_arb_live` | `funding_arb_live` | `funding_arbitrage` | `config/funding_rate_arbitrage_live_usdt.yml` |
 | `spot_spot_live_dry_run` | `rustcta` | `spot_spot_taker_arbitrage` | `config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml` |
 | `trend_report` | `trend_report` | `trend_report` | `config/trend_report.yml` |
 | `account_position_reporter` | `account_position_reporter` | `account_position_report` | `config/account_position_reporter.yml` |

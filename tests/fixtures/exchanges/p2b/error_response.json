@@ -1,0 +1,6 @@
+{
+  "success": false,
+  "errorCode": "MARKET_NOT_FOUND",
+  "message": "Market BTC_FAKE was not found",
+  "result": null
+}

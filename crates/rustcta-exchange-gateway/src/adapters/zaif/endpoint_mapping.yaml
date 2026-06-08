@@ -1,0 +1,171 @@
+schema_version: 1
+exchange: zaif
+adapter: rustcta_exchange_gateway::adapters::zaif
+metadata:
+  status: validated
+  notes: "A-38 Zaif: Japanese Spot/Jpy public REST first; private trade API is request-spec/signing-vector only."
+market_types:
+  - spot
+products:
+  - spot
+base_urls:
+  public_rest: https://api.zaif.jp/api/1
+  private_rest: https://api.zaif.jp/tapi
+rest:
+  base_url: https://api.zaif.jp
+auth:
+  rest:
+    scheme: hmac_sha512_form
+    headers: [Key, Sign]
+    signing_payload:
+      post: "URL-encoded form body containing nonce, method and method parameters"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: rest
+      interval: 1s
+      limit: 5
+      burst: 10
+    private_rest:
+      scope: account
+      interval: 1s
+      limit: 5
+      burst: 5
+    orders:
+      scope: orders
+      interval: 1s
+      limit: 3
+      burst: 3
+    websocket:
+      scope: websocket
+      interval: 1m
+      limit: 60
+pagination:
+  recent_fills:
+    style: count_since_end_order
+    limit_param: count
+    max_limit: 1000
+    since_param: since
+    until_param: end
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: get_open_orders
+  after_unknown_cancel: get_open_orders
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: unsupported
+  cancel_orders:
+    support: unsupported
+websocket:
+  public:
+    support: native
+    url: wss://ws.zaif.jp/stream
+    protocol: url_query_stream
+    channels:
+      all_market_events: "?currency_pair={currency_pair}"
+    heartbeat:
+      direction: server_push_no_client_ping_documented
+      interval_ms: 0
+      timeout_ms: 30000
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/currency_pairs/all
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/1/depth/{currency_pair}
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/zaif/request_specs/get_info2.json
+    notes: "Offline request-spec only; fiat account ledger writes are outside gateway scope."
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/zaif/request_specs/active_orders.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/zaif/request_specs/trade_history.json
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/zaif/request_specs/trade_limit.json
+    notes: "Zaif uses action=bid/ask and has no gateway-safe client_order_id mapping."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /tapi
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/zaif/request_specs/cancel_order.json
+unsupported:
+  - operation: private_rest_runtime
+    reason: "A-38 only audits Zaif private signing/request specs; runtime private trading remains disabled pending dedicated live read-only validation."
+  - operation: fiat_funding
+    reason: "JPY deposits, withdrawals, bank transfer, and ledger write operations are outside gateway trading scope."
+  - operation: futures
+    reason: "A-38 scope is Zaif Japanese Spot markets only."
+  - operation: private_websocket
+    reason: "No stable private order stream is mapped; use REST reconciliation after later validation."
+  - operation: client_order_id
+    reason: "Zaif trade API is exchange-order-id based."
+  - operation: amend_order
+    reason: "No standard in-place amend endpoint is exposed."

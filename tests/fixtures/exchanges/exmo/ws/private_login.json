@@ -1,0 +1,7 @@
+{
+  "id": 1,
+  "method": "login",
+  "api_key": "api_key_change_me",
+  "nonce": "1710000000",
+  "sign": "LhRiS3AO7QdKucUIpsV7OqaCd3R58uiA2DkdLmiy7qRtChIStoYeY3z5k8ZJbmzME7AP2gF7vepuyz3h6SZxtw=="
+}

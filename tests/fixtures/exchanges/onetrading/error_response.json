@@ -1,0 +1,5 @@
+{
+  "error": "AUTHENTICATION_FAILED",
+  "message": "invalid or expired bearer token",
+  "status": 401
+}

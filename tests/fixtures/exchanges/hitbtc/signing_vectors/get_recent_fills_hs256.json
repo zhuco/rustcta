@@ -1,0 +1,12 @@
+{
+  "exchange": "hitbtc",
+  "name": "get_recent_fills_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "GET",
+  "request_path": "/api/3/spot/history/trade",
+  "payload": "GET/api/3/spot/history/trade171000000000010000",
+  "expected_signature": "bd0f89666ac42f319619fe46cc473787af345675b6413b1b1613888c2fdcbc30",
+  "payload_format": "raw_payload"
+}

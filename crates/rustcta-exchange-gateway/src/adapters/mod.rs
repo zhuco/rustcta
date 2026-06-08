@@ -22,16 +22,25 @@ use crate::{
     GATEWAY_PROTOCOL_SCHEMA_VERSION,
 };
 
+pub mod aark;
+pub mod aftermath;
+pub mod alpaca;
 pub mod apex;
+pub mod apollox_dex;
+pub mod arkham;
 pub mod ascendex;
 pub mod aster;
 pub mod backpack;
+pub mod bequant;
 pub mod biconomy;
 pub mod bigone;
 pub mod binance;
 pub mod binancecoinm;
+pub mod binanceus;
 pub mod bingx;
+pub mod bit2c;
 pub mod bitbank;
+pub mod bitbns;
 pub mod bitfinex;
 pub mod bitflyer;
 pub mod bitget;
@@ -39,21 +48,33 @@ pub mod bithumb;
 pub mod bitkan;
 pub mod bitmart;
 pub mod bitmex;
+pub mod bitopro;
 pub mod bitrue;
 pub mod bitso;
 pub mod bitstamp;
+pub mod bitteam;
+pub mod bittrade;
 pub mod bitunix;
 pub mod bitvavo;
+pub mod blockchaincom;
 pub mod blofin;
+pub mod bsx;
+pub mod btcbox;
 pub mod btcmarkets;
 pub mod btcturk;
 pub mod bullish;
 pub mod bybit;
+pub mod bybiteu;
+pub mod bydfi;
+pub mod cex;
+pub mod cod3x;
 pub mod coinbase;
 pub mod coinbaseexchange;
 pub mod coincheck;
 pub mod coindcx;
 pub mod coinex;
+pub mod coinmate;
+pub mod coinmetro;
 pub mod coinone;
 pub mod coinsph;
 pub mod coinspot;
@@ -61,16 +82,26 @@ pub mod coinstore;
 pub mod cointr;
 pub mod coinw;
 pub mod cryptocom;
+pub mod cryptomus;
+pub mod d8x;
 pub mod deepcoin;
 pub mod delta;
 pub mod deribit;
 pub mod derive;
+pub mod derive_chain_perps;
 pub mod digifinex;
 pub mod dydx;
+pub mod equation;
+pub mod exmo;
+pub mod fmfwio;
+pub mod foxbit;
 pub mod gateio;
 pub mod gemini;
 pub mod grvt;
 pub mod hashkey_global;
+pub mod hibachi;
+pub mod hitbtc;
+pub mod hollaex;
 pub mod htx;
 pub mod huobi;
 pub mod hyperliquid;
@@ -80,37 +111,63 @@ pub mod kraken;
 pub mod krakenfutures;
 pub mod kucoin;
 pub mod kucoinfutures;
+pub mod latoken;
 pub mod lbank;
 pub mod lighter;
 pub mod luno;
+pub mod mango_markets;
 pub mod mercado;
 pub mod mexc;
+pub mod modetrade;
+pub mod myokx;
+pub mod ndax;
+pub mod novadax;
 pub mod okx;
+pub mod okxus;
+pub mod onetrading;
 pub mod orangex;
 pub mod oxfun;
+pub mod p2b;
 pub mod pacifica;
 pub mod paper;
 pub mod paradex;
+pub mod paymium;
 pub mod phemex;
 pub mod poloniex;
 pub mod tapbit;
+pub mod tokocrypto;
 pub mod toobit;
 pub mod upbit;
+pub mod wavesexchange;
 pub mod weex;
 pub mod whitebit;
 pub mod woo;
+pub mod woofipro;
 pub mod xt;
+pub mod yobit;
+pub mod zaif;
+pub mod zebpay;
+pub mod zeta_markets;
 
+pub use aark::AarkGatewayConfig;
+pub use aftermath::AftermathGatewayConfig;
+pub use alpaca::AlpacaGatewayConfig;
 pub use apex::ApexGatewayConfig;
+pub use apollox_dex::ApolloxDexGatewayConfig;
+pub use arkham::ArkhamGatewayConfig;
 pub use ascendex::AscendexGatewayConfig;
 pub use aster::AsterGatewayConfig;
 pub use backpack::BackpackGatewayConfig;
+pub use bequant::BequantGatewayConfig;
 pub use biconomy::BiconomyGatewayConfig;
 pub use bigone::BigOneGatewayConfig;
 pub use binance::BinanceGatewayConfig;
 pub use binancecoinm::BinanceCoinMGatewayConfig;
+pub use binanceus::BinanceUsGatewayConfig;
 pub use bingx::BingxGatewayConfig;
+pub use bit2c::Bit2cGatewayConfig;
 pub use bitbank::BitbankGatewayConfig;
+pub use bitbns::BitbnsGatewayConfig;
 pub use bitfinex::BitfinexGatewayConfig;
 pub use bitflyer::BitflyerGatewayConfig;
 pub use bitget::BitgetGatewayConfig;
@@ -118,21 +175,33 @@ pub use bithumb::BithumbGatewayConfig;
 pub use bitkan::BitkanGatewayConfig;
 pub use bitmart::BitmartGatewayConfig;
 pub use bitmex::BitmexGatewayConfig;
+pub use bitopro::BitoproGatewayConfig;
 pub use bitrue::BitrueGatewayConfig;
 pub use bitso::BitsoGatewayConfig;
 pub use bitstamp::BitstampGatewayConfig;
+pub use bitteam::BitteamGatewayConfig;
+pub use bittrade::BittradeGatewayConfig;
 pub use bitunix::BitunixGatewayConfig;
 pub use bitvavo::BitvavoGatewayConfig;
+pub use blockchaincom::BlockchainComGatewayConfig;
 pub use blofin::BlofinGatewayConfig;
+pub use bsx::BsxGatewayConfig;
+pub use btcbox::BtcboxGatewayConfig;
 pub use btcmarkets::BtcMarketsGatewayConfig;
 pub use btcturk::BtcTurkGatewayConfig;
 pub use bullish::BullishGatewayConfig;
 pub use bybit::BybitGatewayConfig;
+pub use bybiteu::BybiteuGatewayConfig;
+pub use bydfi::BydfiGatewayConfig;
+pub use cex::CexGatewayConfig;
+pub use cod3x::Cod3xGatewayConfig;
 pub use coinbase::CoinbaseGatewayConfig;
 pub use coinbaseexchange::CoinbaseExchangeGatewayConfig;
 pub use coincheck::CoincheckGatewayConfig;
 pub use coindcx::CoinDcxGatewayConfig;
 pub use coinex::CoinExGatewayConfig;
+pub use coinmate::CoinmateGatewayConfig;
+pub use coinmetro::CoinmetroGatewayConfig;
 pub use coinone::CoinoneGatewayConfig;
 pub use coinsph::CoinsPhGatewayConfig;
 pub use coinspot::CoinspotGatewayConfig;
@@ -140,16 +209,26 @@ pub use coinstore::CoinstoreGatewayConfig;
 pub use cointr::CointrGatewayConfig;
 pub use coinw::CoinwGatewayConfig;
 pub use cryptocom::CryptoComGatewayConfig;
+pub use cryptomus::CryptomusGatewayConfig;
+pub use d8x::D8xGatewayConfig;
 pub use deepcoin::DeepcoinGatewayConfig;
 pub use delta::DeltaGatewayConfig;
 pub use deribit::DeribitGatewayConfig;
 pub use derive::DeriveGatewayConfig;
+pub use derive_chain_perps::DeriveChainPerpsGatewayConfig;
 pub use digifinex::DigiFinexGatewayConfig;
 pub use dydx::DydxGatewayConfig;
+pub use equation::EquationGatewayConfig;
+pub use exmo::ExmoGatewayConfig;
+pub use fmfwio::FmfwioGatewayConfig;
+pub use foxbit::FoxbitGatewayConfig;
 pub use gateio::GateIoGatewayConfig;
 pub use gemini::GeminiGatewayConfig;
 pub use grvt::GrvtGatewayConfig;
 pub use hashkey_global::HashKeyGlobalGatewayConfig;
+pub use hibachi::HibachiGatewayConfig;
+pub use hitbtc::HitbtcGatewayConfig;
+pub use hollaex::HollaexGatewayConfig;
 pub use htx::HtxGatewayConfig;
 pub use huobi::HuobiGatewayConfig;
 pub use hyperliquid::HyperliquidGatewayConfig;
@@ -159,25 +238,43 @@ pub use kraken::KrakenGatewayConfig;
 pub use krakenfutures::KrakenFuturesGatewayConfig;
 pub use kucoin::KuCoinGatewayConfig;
 pub use kucoinfutures::KuCoinFuturesGatewayConfig;
+pub use latoken::LatokenGatewayConfig;
 pub use lbank::LBankGatewayConfig;
 pub use lighter::LighterGatewayConfig;
 pub use luno::LunoGatewayConfig;
+pub use mango_markets::MangoMarketsGatewayConfig;
 pub use mercado::MercadoGatewayConfig;
 pub use mexc::MexcGatewayConfig;
+pub use modetrade::ModetradeGatewayConfig;
+pub use myokx::MyOkxGatewayConfig;
+pub use ndax::NdaxGatewayConfig;
+pub use novadax::NovadaxGatewayConfig;
 pub use okx::OkxGatewayConfig;
+pub use okxus::OkxusGatewayConfig;
+pub use onetrading::OneTradingGatewayConfig;
 pub use orangex::OrangeXGatewayConfig;
 pub use oxfun::OxfunGatewayConfig;
+pub use p2b::P2bGatewayConfig;
 pub use pacifica::PacificaGatewayConfig;
 pub use paradex::ParadexGatewayConfig;
+pub use paymium::PaymiumGatewayConfig;
 pub use phemex::PhemexGatewayConfig;
 pub use poloniex::PoloniexGatewayConfig;
 pub use tapbit::TapbitGatewayConfig;
+pub use tokocrypto::TokocryptoGatewayConfig;
 pub use toobit::ToobitGatewayConfig;
 pub use upbit::UpbitGatewayConfig;
+#[allow(unused_imports)]
+pub use wavesexchange::WavesExchangeGatewayConfig;
 pub use weex::WeexGatewayConfig;
 pub use whitebit::WhiteBitGatewayConfig;
 pub use woo::WooGatewayConfig;
+pub use woofipro::WoofiproGatewayConfig;
 pub use xt::XtGatewayConfig;
+pub use yobit::YobitGatewayConfig;
+pub use zaif::ZaifGatewayConfig;
+pub use zebpay::ZebpayGatewayConfig;
+pub use zeta_markets::ZetaMarketsGatewayConfig;
 
 #[cfg(test)]
 mod paper_tests;
@@ -227,45 +324,73 @@ impl AdapterBackedGateway {
         let adapter = adapter.trim().to_ascii_lowercase();
         match adapter.as_str() {
             "" => Ok(()),
+            "aark" | "aark_digital" | "aark-digital" => self.register_aark_public_adapter(None),
             "apex" | "apexpro" | "apex_pro" => self.register_apex_public_adapter(None),
+            "aftermath" => self.register_aftermath_public_adapter(None),
+            "alpaca" => self.register_alpaca_public_adapter(None),
+            "apollox_dex" | "apollox-dex" | "apollox" | "apx" => {
+                self.register_apollox_dex_public_adapter(None)
+            }
+            "arkham" => self.register_arkham_public_adapter(None),
             "paper" => self.register_paper_adapter(),
             "ascendex" | "ascend_ex" => self.register_ascendex_public_adapter(None),
             "aster" | "asterdex" | "aster_dex" => self.register_aster_public_adapter(None),
             "backpack" => self.register_backpack_public_adapter(None),
+            "bequant" | "be_quant" => self.register_bequant_public_adapter(None),
             "biconomy" => self.register_biconomy_public_adapter(None),
             "binance" => self.register_binance_public_adapter(None),
             "binancecoinm" | "binance_coinm" | "binance-coinm" | "binance_coin_m" => {
                 self.register_binancecoinm_public_adapter(None)
             }
+            "binanceus" | "binance_us" | "binance-us" => {
+                self.register_binanceus_public_adapter(None)
+            }
             "bigone" | "big_one" => self.register_bigone_public_adapter(None),
             "bingx" => self.register_bingx_public_adapter(None),
+            "bit2c" | "bit_2c" | "bit2c.co.il" => self.register_bit2c_public_adapter(None),
             "bitbank" => self.register_bitbank_public_adapter(None),
             "bitflyer" | "bit_flyer" => self.register_bitflyer_public_adapter(None),
             "bitfinex" => self.register_bitfinex_public_adapter(None),
             "bitunix" => self.register_bitunix_public_adapter(None),
             "bybit" => self.register_bybit_public_adapter(None),
+            "bybiteu" | "bybit_eu" | "bybit-eu" => self.register_bybiteu_public_adapter(None),
+            "bydfi" | "bydfi.com" => self.register_bydfi_public_adapter(None),
             "bitkan" => self.register_bitkan_public_adapter(None),
             "bitmart" => self.register_bitmart_public_adapter(None),
+            "bitopro" | "bito_pro" | "bito-pro" => self.register_bitopro_public_adapter(None),
             "bitso" => self.register_bitso_public_adapter(None),
             "bitstamp" => self.register_bitstamp_public_adapter(None),
+            "bitteam" | "bit_team" | "bit.team" => self.register_bitteam_public_adapter(None),
+            "bittrade" | "bittradejp" | "bittrade_jp" | "huobi_japan" => {
+                self.register_bittrade_public_adapter(None)
+            }
             "bitvavo" => self.register_bitvavo_public_adapter(None),
+            "blockchain.com" | "blockchaincom" | "blockchain_com" | "blockchain-com" => {
+                self.register_blockchaincom_public_adapter(None)
+            }
             "bitrue" => self.register_bitrue_public_adapter(None),
             "btcturk" | "btc_turk" | "btc-turk" => self.register_btcturk_public_adapter(None),
             "bitmex" => self.register_bitmex_public_adapter(None),
             "bitget" => self.register_bitget_public_adapter(None),
             "bithumb" => self.register_bithumb_public_adapter(None),
             "blofin" | "blo_fin" => self.register_blofin_public_adapter(None),
+            "bsx" => self.register_bsx_public_adapter(None),
+            "btcbox" | "btc_box" => self.register_btcbox_public_adapter(None),
             "btcmarkets" | "btc_markets" => self.register_btcmarkets_public_adapter(None),
             "bullish" => self.register_bullish_public_adapter(None),
+            "cex" | "cexio" | "cex.io" => self.register_cex_public_adapter(None),
             "coinbase" => self.register_coinbase_public_adapter(None),
             "coinbaseexchange" | "coinbase_exchange" | "coinbase-exchange" => {
                 self.register_coinbaseexchange_public_adapter(None)
             }
             "coincheck" => self.register_coincheck_public_adapter(None),
+            "coinmate" | "coin_mate" => self.register_coinmate_public_adapter(None),
             "coindcx" | "coin_dcx" => self.register_coindcx_public_adapter(None),
+            "coinmetro" | "coin_metro" => self.register_coinmetro_public_adapter(None),
             "coinstore" => self.register_coinstore_public_adapter(None),
             "cointr" => self.register_cointr_public_adapter(None),
             "coinw" => self.register_coinw_public_adapter(None),
+            "cod3x" | "cod3x_ai" | "cod3x-ai" => self.register_cod3x_public_adapter(None),
             "coinex" => self.register_coinex_public_adapter(None),
             "coinone" => self.register_coinone_public_adapter(None),
             "coinspot" | "coin_spot" => self.register_coinspot_public_adapter(None),
@@ -273,20 +398,36 @@ impl AdapterBackedGateway {
             "crypto.com" | "cryptocom" | "crypto_com" => {
                 self.register_cryptocom_public_adapter(None)
             }
+            "cryptomus" | "crypto_mus" => self.register_cryptomus_public_adapter(None),
+            "d8x" | "d8x_exchange" | "d8x-exchange" => self.register_d8x_public_adapter(None),
             "deepcoin" | "deep_coin" => self.register_deepcoin_public_adapter(None),
             "delta" | "delta_exchange" | "delta-exchange" => {
                 self.register_delta_public_adapter(None)
             }
             "deribit" => self.register_deribit_public_adapter(None),
             "derive" => self.register_derive_public_adapter(None),
+            "derive_chain_perps" | "derive-chain-perps" | "derive_chain" => {
+                self.register_derive_chain_perps_public_adapter(None)
+            }
             "digifinex" | "digi_finex" => self.register_digifinex_public_adapter(None),
             "dydx" | "dydx_v4" | "dydxv4" => self.register_dydx_public_adapter(None),
+            "equation" | "equation_dao" | "equationdao" => {
+                self.register_equation_public_adapter(None)
+            }
+            "exmo" => self.register_exmo_public_adapter(None),
+            "fmfwio" | "fmfw.io" | "fmfw" => self.register_fmfwio_public_adapter(None),
+            "foxbit" | "fox_bit" => self.register_foxbit_public_adapter(None),
             "gate" | "gate.io" | "gateio" => self.register_gateio_public_adapter(None),
             "gemini" => self.register_gemini_public_adapter(None),
             "grvt" => self.register_grvt_public_adapter(None),
             "hashkey" | "hashkey_global" | "hashkey-global" => {
                 self.register_hashkey_global_public_adapter(None)
             }
+            "hollaex" | "hollaex_demo" | "hollaex-demo" => {
+                self.register_hollaex_public_adapter(None)
+            }
+            "hibachi" => self.register_hibachi_public_adapter(None),
+            "hitbtc" | "hitbtc.com" | "hit_btc" => self.register_hitbtc_public_adapter(None),
             "hyperliquid" | "hyper_liquid" => self.register_hyperliquid_public_adapter(None),
             "htx" => self.register_htx_public_adapter(None),
             "huobi" => self.register_huobi_public_adapter(None),
@@ -298,6 +439,7 @@ impl AdapterBackedGateway {
             "kucoinfutures" | "kucoin_futures" | "kucoin-futures" => {
                 self.register_kucoinfutures_public_adapter(None)
             }
+            "latoken" => self.register_latoken_public_adapter(None),
             "kraken" => self.register_kraken_public_adapter(None),
             "krakenfutures" | "kraken_futures" | "kraken-futures" => {
                 self.register_krakenfutures_public_adapter(None)
@@ -305,24 +447,54 @@ impl AdapterBackedGateway {
             "lbank" => self.register_lbank_public_adapter(None),
             "lighter" => self.register_lighter_public_adapter(None),
             "luno" => self.register_luno_public_adapter(None),
+            "mango_markets" | "mango-markets" | "mango" | "mango_markets_v4" => {
+                self.register_mango_markets_public_adapter(None)
+            }
             "mercado" | "mercadobitcoin" | "mercado_bitcoin" | "mercado-bitcoin" => {
                 self.register_mercado_public_adapter(None)
             }
             "mexc" => self.register_mexc_public_adapter(None),
+            "modetrade" | "mode_trade" | "mode-trade" => {
+                self.register_modetrade_public_adapter(None)
+            }
+            "myokx" | "my_okx" | "my-okx" | "okx_eea" | "okx-eea" => {
+                self.register_myokx_public_adapter(None)
+            }
+            "ndax" | "ndaxio" | "ndax_io" => self.register_ndax_public_adapter(None),
+            "novadax" | "nova_dax" | "nova-dax" => self.register_novadax_public_adapter(None),
             "okx" => self.register_okx_public_adapter(None),
+            "okxus" | "okx_us" | "okx-us" => self.register_okxus_public_adapter(None),
+            "onetrading" | "one_trading" | "one-trading" => {
+                self.register_onetrading_public_adapter(None)
+            }
             "orange_x" | "orangex" => self.register_orangex_public_adapter(None),
             "ox.fun" | "ox_fun" | "oxfun" => self.register_oxfun_public_adapter(None),
+            "p2b" | "p2pb2b" | "p2pb2b.com" => self.register_p2b_public_adapter(None),
             "pacifica" => self.register_pacifica_public_adapter(None),
             "paradex" => self.register_paradex_public_adapter(None),
+            "paymium" => self.register_paymium_public_adapter(None),
             "phemex" => self.register_phemex_public_adapter(None),
             "poloniex" => self.register_poloniex_public_adapter(None),
             "tapbit" => self.register_tapbit_public_adapter(None),
+            "tokocrypto" | "toko_crypto" | "toko-crypto" => {
+                self.register_tokocrypto_public_adapter(None)
+            }
             "toobit" => self.register_toobit_public_adapter(None),
             "upbit" => self.register_upbit_public_adapter(None),
+            "wavesexchange" | "waves_exchange" | "waves.exchange" => {
+                self.register_wavesexchange_public_adapter(None)
+            }
             "weex" => self.register_weex_public_adapter(None),
             "whitebit" | "white_bit" => self.register_whitebit_public_adapter(None),
             "woo" | "woo_x" | "woox" => self.register_woo_public_adapter(None),
+            "woofipro" | "woofi_pro" | "woofi-pro" => self.register_woofipro_public_adapter(None),
             "xt" | "xt.com" | "xtcom" => self.register_xt_public_adapter(None),
+            "yobit" | "yo_bit" | "yobit.net" => self.register_yobit_public_adapter(None),
+            "zaif" => self.register_zaif_public_adapter(None),
+            "zebpay" | "zeb_pay" => self.register_zebpay_public_adapter(None),
+            "zeta_markets" | "zetamarkets" | "zeta-markets" => {
+                self.register_zeta_markets_public_adapter(None)
+            }
             other => Err(GatewayError::UnsupportedOperation {
                 operation: format!("unknown gateway adapter {other}"),
             }),
@@ -331,6 +503,26 @@ impl AdapterBackedGateway {
 
     pub fn register_paper_adapter(&self) -> Result<(), GatewayError> {
         self.register_adapter(Arc::new(paper::PaperGatewayAdapter::default_paper()?))
+    }
+
+    pub fn register_aark_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = aark::AarkGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_aark_adapter(config)
+    }
+
+    pub fn register_aark_adapter(
+        &self,
+        config: aark::AarkGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            aark::AarkGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
     }
 
     pub fn register_apex_public_adapter(
@@ -350,6 +542,103 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             apex::ApexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_apollox_dex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = apollox_dex::ApolloxDexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_apollox_dex_adapter(config)
+    }
+
+    pub fn register_apollox_dex_adapter(
+        &self,
+        config: apollox_dex::ApolloxDexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = apollox_dex::ApolloxDexGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_aftermath_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = aftermath::AftermathGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_aftermath_adapter(config)
+    }
+
+    pub fn register_aftermath_adapter(
+        &self,
+        config: aftermath::AftermathGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = aftermath::AftermathGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_alpaca_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = alpaca::AlpacaGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.broker_rest_base_url = rest_base_url.clone();
+            config.market_data_rest_base_url = rest_base_url;
+        }
+        self.register_alpaca_adapter(config)
+    }
+
+    pub fn register_alpaca_adapter(
+        &self,
+        config: alpaca::AlpacaGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            alpaca::AlpacaGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_d8x_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = d8x::D8xGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_d8x_adapter(config)
+    }
+
+    pub fn register_d8x_adapter(&self, config: d8x::D8xGatewayConfig) -> Result<(), GatewayError> {
+        let adapter = d8x::D8xGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_arkham_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = arkham::ArkhamGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_arkham_adapter(config)
+    }
+
+    pub fn register_arkham_adapter(
+        &self,
+        config: arkham::ArkhamGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            arkham::ArkhamGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -413,6 +702,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_bequant_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bequant::BequantGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bequant_adapter(config)
+    }
+
+    pub fn register_bequant_adapter(
+        &self,
+        config: bequant::BequantGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bequant::BequantGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_biconomy_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -450,6 +759,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             binance::BinanceGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_binanceus_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = binanceus::BinanceUsGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_binanceus_adapter(config)
+    }
+
+    pub fn register_binanceus_adapter(
+        &self,
+        config: binanceus::BinanceUsGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = binanceus::BinanceUsGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -514,6 +843,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_bit2c_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bit2c::Bit2cGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bit2c_adapter(config)
+    }
+
+    pub fn register_bit2c_adapter(
+        &self,
+        config: bit2c::Bit2cGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bit2c::Bit2cGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_bitbank_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -531,6 +880,46 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             bitbank::BitbankGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bitbns_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitbns::BitbnsGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bitbns_adapter(config)
+    }
+
+    pub fn register_bitbns_adapter(
+        &self,
+        config: bitbns::BitbnsGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitbns::BitbnsGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bittrade_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bittrade::BittradeGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bittrade_adapter(config)
+    }
+
+    pub fn register_bittrade_adapter(
+        &self,
+        config: bittrade::BittradeGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bittrade::BittradeGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -636,6 +1025,45 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_bybiteu_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bybiteu::BybiteuGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bybiteu_adapter(config)
+    }
+
+    pub fn register_bybiteu_adapter(
+        &self,
+        config: bybiteu::BybiteuGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = bybiteu::new_adapter(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bydfi_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bydfi::BydfiGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bydfi_adapter(config)
+    }
+
+    pub fn register_bydfi_adapter(
+        &self,
+        config: bydfi::BydfiGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bydfi::BydfiGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_bitfinex_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -698,6 +1126,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_bitopro_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitopro::BitoproGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bitopro_adapter(config)
+    }
+
+    pub fn register_bitopro_adapter(
+        &self,
+        config: bitopro::BitoproGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitopro::BitoproGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_bitso_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -738,6 +1186,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_bitteam_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bitteam::BitteamGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bitteam_adapter(config)
+    }
+
+    pub fn register_bitteam_adapter(
+        &self,
+        config: bitteam::BitteamGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            bitteam::BitteamGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_bitvavo_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -755,6 +1223,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             bitvavo::BitvavoGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_blockchaincom_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = blockchaincom::BlockchainComGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_blockchaincom_adapter(config)
+    }
+
+    pub fn register_blockchaincom_adapter(
+        &self,
+        config: blockchaincom::BlockchainComGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = blockchaincom::BlockchainComGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -795,6 +1283,42 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             blofin::BlofinGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_bsx_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = bsx::BsxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_bsx_adapter(config)
+    }
+
+    pub fn register_bsx_adapter(&self, config: bsx::BsxGatewayConfig) -> Result<(), GatewayError> {
+        let adapter = bsx::BsxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_btcbox_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = btcbox::BtcboxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_btcbox_adapter(config)
+    }
+
+    pub fn register_btcbox_adapter(
+        &self,
+        config: btcbox::BtcboxGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            btcbox::BtcboxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -899,6 +1423,22 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_cex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = cex::CexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_cex_adapter(config)
+    }
+
+    pub fn register_cex_adapter(&self, config: cex::CexGatewayConfig) -> Result<(), GatewayError> {
+        let adapter = cex::CexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_coinbaseexchange_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -936,6 +1476,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter = coincheck::CoincheckGatewayAdapter::new(config)
             .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_coinmate_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = coinmate::CoinmateGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_coinmate_adapter(config)
+    }
+
+    pub fn register_coinmate_adapter(
+        &self,
+        config: coinmate::CoinmateGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            coinmate::CoinmateGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1017,6 +1577,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             coinex::CoinExGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_coinmetro_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = coinmetro::CoinmetroGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_coinmetro_adapter(config)
+    }
+
+    pub fn register_coinmetro_adapter(
+        &self,
+        config: coinmetro::CoinmetroGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = coinmetro::CoinmetroGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1124,6 +1704,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_cryptomus_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = cryptomus::CryptomusGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_cryptomus_adapter(config)
+    }
+
+    pub fn register_cryptomus_adapter(
+        &self,
+        config: cryptomus::CryptomusGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = cryptomus::CryptomusGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_deepcoin_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1201,6 +1801,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             derive::DeriveGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_derive_chain_perps_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = derive_chain_perps::DeriveChainPerpsGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_derive_chain_perps_adapter(config)
+    }
+
+    pub fn register_derive_chain_perps_adapter(
+        &self,
+        config: derive_chain_perps::DeriveChainPerpsGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = derive_chain_perps::DeriveChainPerpsGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1285,6 +1905,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_latoken_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = latoken::LatokenGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_latoken_adapter(config)
+    }
+
+    pub fn register_latoken_adapter(
+        &self,
+        config: latoken::LatokenGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            latoken::LatokenGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_lbank_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1346,6 +1986,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_mango_markets_public_adapter(
+        &self,
+        solana_rpc_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = mango_markets::MangoMarketsGatewayConfig::default();
+        if let Some(solana_rpc_url) = solana_rpc_url {
+            config.solana_rpc_url = solana_rpc_url;
+        }
+        self.register_mango_markets_adapter(config)
+    }
+
+    pub fn register_mango_markets_adapter(
+        &self,
+        config: mango_markets::MangoMarketsGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = mango_markets::MangoMarketsGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_mercado_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1383,6 +2043,66 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             mexc::MexcGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_modetrade_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = modetrade::ModetradeGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_modetrade_adapter(config)
+    }
+
+    pub fn register_modetrade_adapter(
+        &self,
+        config: modetrade::ModetradeGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = modetrade::ModetradeGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_novadax_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = novadax::NovadaxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_novadax_adapter(config)
+    }
+
+    pub fn register_novadax_adapter(
+        &self,
+        config: novadax::NovadaxGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            novadax::NovadaxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_ndax_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = ndax::NdaxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_ndax_adapter(config)
+    }
+
+    pub fn register_ndax_adapter(
+        &self,
+        config: ndax::NdaxGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            ndax::NdaxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1444,6 +2164,46 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             grvt::GrvtGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_equation_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = equation::EquationGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.docs_base_url = rest_base_url;
+        }
+        self.register_equation_adapter(config)
+    }
+
+    pub fn register_equation_adapter(
+        &self,
+        config: equation::EquationGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            equation::EquationGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_cod3x_public_adapter(
+        &self,
+        docs_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = cod3x::Cod3xGatewayConfig::default();
+        if let Some(docs_base_url) = docs_base_url {
+            config.docs_base_url = docs_base_url;
+        }
+        self.register_cod3x_adapter(config)
+    }
+
+    pub fn register_cod3x_adapter(
+        &self,
+        config: cod3x::Cod3xGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            cod3x::Cod3xGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1546,6 +2306,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_exmo_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = exmo::ExmoGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_exmo_adapter(config)
+    }
+
+    pub fn register_exmo_adapter(
+        &self,
+        config: exmo::ExmoGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            exmo::ExmoGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_hashkey_global_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1564,6 +2344,66 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter = hashkey_global::HashKeyGlobalGatewayAdapter::new(config)
             .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_hollaex_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = hollaex::HollaexGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_hollaex_adapter(config)
+    }
+
+    pub fn register_hollaex_adapter(
+        &self,
+        config: hollaex::HollaexGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            hollaex::HollaexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_hibachi_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = hibachi::HibachiGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.data_rest_base_url = rest_base_url;
+        }
+        self.register_hibachi_adapter(config)
+    }
+
+    pub fn register_hibachi_adapter(
+        &self,
+        config: hibachi::HibachiGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            hibachi::HibachiGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_hitbtc_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = hitbtc::HitbtcGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_hitbtc_adapter(config)
+    }
+
+    pub fn register_hitbtc_adapter(
+        &self,
+        config: hitbtc::HitbtcGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            hitbtc::HitbtcGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1607,6 +2447,46 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_fmfwio_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = fmfwio::FmfwioGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_fmfwio_adapter(config)
+    }
+
+    pub fn register_fmfwio_adapter(
+        &self,
+        config: fmfwio::FmfwioGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            fmfwio::FmfwioGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_foxbit_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = foxbit::FoxbitGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_foxbit_adapter(config)
+    }
+
+    pub fn register_foxbit_adapter(
+        &self,
+        config: foxbit::FoxbitGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            foxbit::FoxbitGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_okx_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1620,6 +2500,64 @@ impl AdapterBackedGateway {
 
     pub fn register_okx_adapter(&self, config: okx::OkxGatewayConfig) -> Result<(), GatewayError> {
         let adapter = okx::OkxGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_okxus_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = okxus::OkxusGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_okxus_adapter(config)
+    }
+
+    pub fn register_okxus_adapter(
+        &self,
+        config: okxus::OkxusGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = okxus::new_adapter(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_onetrading_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = onetrading::OneTradingGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_onetrading_adapter(config)
+    }
+
+    pub fn register_onetrading_adapter(
+        &self,
+        config: onetrading::OneTradingGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = onetrading::OneTradingGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_myokx_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = myokx::MyOkxGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_myokx_adapter(config)
+    }
+
+    pub fn register_myokx_adapter(
+        &self,
+        config: myokx::MyOkxGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = myokx::new_adapter(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1683,6 +2621,22 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_p2b_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = p2b::P2bGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_p2b_adapter(config)
+    }
+
+    pub fn register_p2b_adapter(&self, config: p2b::P2bGatewayConfig) -> Result<(), GatewayError> {
+        let adapter = p2b::P2bGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_paradex_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1700,6 +2654,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             paradex::ParadexGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_paymium_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = paymium::PaymiumGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_paymium_adapter(config)
+    }
+
+    pub fn register_paymium_adapter(
+        &self,
+        config: paymium::PaymiumGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            paymium::PaymiumGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1784,6 +2758,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_tokocrypto_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = tokocrypto::TokocryptoGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_tokocrypto_adapter(config)
+    }
+
+    pub fn register_tokocrypto_adapter(
+        &self,
+        config: tokocrypto::TokocryptoGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = tokocrypto::TokocryptoGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_upbit_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1801,6 +2795,26 @@ impl AdapterBackedGateway {
     ) -> Result<(), GatewayError> {
         let adapter =
             upbit::UpbitGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_wavesexchange_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = wavesexchange::WavesExchangeGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_wavesexchange_adapter(config)
+    }
+
+    pub fn register_wavesexchange_adapter(
+        &self,
+        config: wavesexchange::WavesExchangeGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = wavesexchange::WavesExchangeGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 
@@ -1861,6 +2875,26 @@ impl AdapterBackedGateway {
         self.register_adapter(Arc::new(adapter))
     }
 
+    pub fn register_woofipro_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = woofipro::WoofiproGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_woofipro_adapter(config)
+    }
+
+    pub fn register_woofipro_adapter(
+        &self,
+        config: woofipro::WoofiproGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            woofipro::WoofiproGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
     pub fn register_xt_public_adapter(
         &self,
         rest_base_url: Option<String>,
@@ -1875,6 +2909,86 @@ impl AdapterBackedGateway {
 
     pub fn register_xt_adapter(&self, config: xt::XtGatewayConfig) -> Result<(), GatewayError> {
         let adapter = xt::XtGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_yobit_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = yobit::YobitGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_yobit_adapter(config)
+    }
+
+    pub fn register_yobit_adapter(
+        &self,
+        config: yobit::YobitGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            yobit::YobitGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_zaif_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = zaif::ZaifGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.public_rest_base_url = rest_base_url;
+        }
+        self.register_zaif_adapter(config)
+    }
+
+    pub fn register_zaif_adapter(
+        &self,
+        config: zaif::ZaifGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            zaif::ZaifGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_zebpay_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = zebpay::ZebpayGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_zebpay_adapter(config)
+    }
+
+    pub fn register_zebpay_adapter(
+        &self,
+        config: zebpay::ZebpayGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter =
+            zebpay::ZebpayGatewayAdapter::new(config).map_err(exchange_api_error_to_gateway)?;
+        self.register_adapter(Arc::new(adapter))
+    }
+
+    pub fn register_zeta_markets_public_adapter(
+        &self,
+        rest_base_url: Option<String>,
+    ) -> Result<(), GatewayError> {
+        let mut config = zeta_markets::ZetaMarketsGatewayConfig::default();
+        if let Some(rest_base_url) = rest_base_url {
+            config.rest_base_url = rest_base_url;
+        }
+        self.register_zeta_markets_adapter(config)
+    }
+
+    pub fn register_zeta_markets_adapter(
+        &self,
+        config: zeta_markets::ZetaMarketsGatewayConfig,
+    ) -> Result<(), GatewayError> {
+        let adapter = zeta_markets::ZetaMarketsGatewayAdapter::new(config)
+            .map_err(exchange_api_error_to_gateway)?;
         self.register_adapter(Arc::new(adapter))
     }
 

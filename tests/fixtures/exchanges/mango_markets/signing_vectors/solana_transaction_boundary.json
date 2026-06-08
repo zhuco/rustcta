@@ -1,0 +1,14 @@
+{
+  "exchange": "mango_markets",
+  "operation": "place_order",
+  "status": "unsupported",
+  "program_id": "4MangoMjqJ2firMokCjjGgoK8d4MXcrgL7XJaL3w6fVg",
+  "group": "78b8f4cGCwmZ9ysPFMWLaLTkkaYnUjwMJYStWe5RTSSX",
+  "wallet_public_key": "wallet-public-key-fixture",
+  "mango_account": "mango-account-public-key-fixture",
+  "instruction": "perp_place_order",
+  "instruction_fingerprint": "program=4MangoMjqJ2firMokCjjGgoK8d4MXcrgL7XJaL3w6fVg group=78b8f4cGCwmZ9ysPFMWLaLTkkaYnUjwMJYStWe5RTSSX account=mango-account-public-key-fixture instruction=perp_place_order",
+  "contains_private_key": false,
+  "contains_signature": false,
+  "boundary": "mango_markets order writes are Solana transactions signed by a wallet; no API secret or server-side signing is supported by this adapter"
+}

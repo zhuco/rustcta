@@ -1,0 +1,27 @@
+{
+  "exchange": "cod3x",
+  "task": "C-48",
+  "venue_profiles": ["hyperliquid", "gmx_v2", "lighter"],
+  "product": "perpetual",
+  "protocol_model": "ai_trading_terminal_routing_layer",
+  "scan_only": true,
+  "stable_api_verified": false,
+  "trade_enabled": false,
+  "private_rest_enabled": false,
+  "public_stream_enabled": false,
+  "private_stream_enabled": false,
+  "official_sources": [
+    "https://docs.cod3x.org/",
+    "https://www.cod3x.org/",
+    "https://app.cod3x.org/"
+  ],
+  "boundary_reason": "Cod3x documentation describes an AI trading terminal and downstream venue integrations, not a stable standalone exchange API with native order book, account, signing, or error-code contracts.",
+  "expected_runtime_errors": {
+    "markets": "cod3x.markets_unverified",
+    "risk": "cod3x.risk_and_fees_unverified",
+    "positions": "cod3x.positions_unverified",
+    "orders": "cod3x.routed_order_signing_unverified",
+    "public_stream": "cod3x.public_stream_unverified",
+    "private_stream": "cod3x.private_stream_unverified"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "okxus",
+  "url": "wss://wsus.okx.com:8443/ws/v5/private",
+  "support": "unsupported_pending_us_scope_audit",
+  "auth_shape": {
+    "op": "login",
+    "args": [
+      {
+        "apiKey": "<redacted>",
+        "passphrase": "<redacted>",
+        "timestamp": "<seconds>",
+        "sign": "<base64-hmac>"
+      }
+    ]
+  },
+  "credential_values": {}
+}

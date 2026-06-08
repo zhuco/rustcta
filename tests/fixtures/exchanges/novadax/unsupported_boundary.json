@@ -1,0 +1,10 @@
+{
+  "adapter": "novadax",
+  "products": ["spot"],
+  "private_write_mode": "offline_request_spec_only",
+  "private_streams": "unsupported",
+  "fiat_operations": "unsupported",
+  "withdrawals": "unsupported",
+  "transfers": "unsupported",
+  "margin_or_perpetual": "unsupported"
+}

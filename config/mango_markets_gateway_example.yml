@@ -1,0 +1,51 @@
+# Mango Markets conservative gateway adapter example.
+# The adapter is disabled by default. Mango v4 is an on-chain Solana protocol,
+# so this config records audit inputs only; it does not enable wallet signing,
+# private account state, private streams or order writes.
+
+exchange: mango_markets
+adapter: mango_markets
+enabled: false
+
+market_types:
+  - perpetual
+
+solana_rpc_url: https://api.mainnet-beta.solana.com
+public_ws_url: wss://api.mainnet-beta.solana.com
+mango_program_id: 4MangoMjqJ2firMokCjjGgoK8d4MXcrgL7XJaL3w6fVg
+mango_group: 78b8f4cGCwmZ9ysPFMWLaLTkkaYnUjwMJYStWe5RTSSX
+testnet: false
+sandbox: false
+
+wallet_public_key: ${MANGO_MARKETS_WALLET_PUBLIC_KEY}
+
+enabled_public_scan: false
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+enable_wallet_signing: false
+
+request_timeout_ms: 10000
+log_raw_messages: false
+
+enabled_symbols:
+  perpetual:
+    - SOL-PERP
+    - BTC-PERP
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 5
+
+permissions:
+  required: []
+  optional:
+    - solana_rpc_read
+    - mango_account_read
+    - solana_wallet_signer
+
+notes:
+  - Runtime public REST, private REST, private streams and order writes remain unsupported.
+  - Do not configure wallet private keys or seed phrases for this adapter.
+  - Any future live read-only work must audit MangoAccount health, event queues, oracle data and reconciliation.
+  - Any future trading work must audit Solana transaction construction, wallet authority, account lookup tables, priority fees and confirmation semantics.

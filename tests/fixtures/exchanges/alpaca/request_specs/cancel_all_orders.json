@@ -1,0 +1,20 @@
+{
+  "exchange": "alpaca",
+  "operation": "cancel_all_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/v1/trading/accounts/acct-123/orders",
+  "auth": "api_key",
+  "headers": {
+    "APCA-API-KEY-ID": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "APCA-API-SECRET-KEY": {
+      "match": "exact",
+      "value": "test-secret"
+    }
+  },
+  "strict_body": true
+}

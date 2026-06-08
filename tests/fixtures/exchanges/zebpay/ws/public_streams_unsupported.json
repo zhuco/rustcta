@@ -1,0 +1,16 @@
+{
+  "exchange": "zebpay",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "subscribe_payload": null,
+  "unsubscribe_payload": null,
+  "auth_payload": null,
+  "heartbeat": {
+    "supported": false,
+    "policy": "disabled_until_official_ws_docs_are_verified"
+  },
+  "rest_reconciliation_fallback": [
+    "/orders?trade_pair=BTC-INR&status=pending&orderid=0&page=1&limit=500",
+    "/orders/{order_id}/fills"
+  ]
+}

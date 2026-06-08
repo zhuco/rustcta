@@ -1,0 +1,13 @@
+{
+  "BTC_USD": {
+    "min_quantity": "0.001",
+    "max_quantity": "100",
+    "min_price": "1",
+    "max_price": "10000",
+    "max_amount": "30000",
+    "min_amount": "1",
+    "price_precision": 2,
+    "commission_taker_percent": "0.2",
+    "commission_maker_percent": "0.1"
+  }
+}

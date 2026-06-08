@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/v1/orders/create",
+  "timestamp": "1564988445199",
+  "body": "{\"symbol\":\"BTC_BRL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"amount\":\"0.01\",\"price\":\"350000\",\"clientOrderId\":\"offline-fixture\"}",
+  "body_md5": "dbbec56af776df47a9dc5635ffed9393",
+  "canonical": "POST\n/v1/orders/create\ndbbec56af776df47a9dc5635ffed9393\n1564988445199",
+  "api_key": "<redacted>",
+  "secret": "<redacted-fixture-secret>",
+  "expected_signature_with_fixture_secret": "ca4e0e757283e5c9e719492ef94aca0b925bcd567976c0b2795dea48b120fb01"
+}

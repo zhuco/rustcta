@@ -1,0 +1,15 @@
+{
+  "exchange": "blockchaincom",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/orders/{orderId}",
+  "auth": "api_key",
+  "headers": {
+    "Accept": { "match": "exact", "value": "application/json" },
+    "X-API-Token": { "match": "non_empty" }
+  },
+  "strict_query": true,
+  "strict_body": true
+}

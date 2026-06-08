@@ -1,0 +1,12 @@
+{
+  "exchange": "modetrade",
+  "operation": "get_symbol_rules",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/public/info",
+  "auth": "none",
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true
+}

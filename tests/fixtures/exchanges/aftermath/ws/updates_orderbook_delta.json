@@ -1,0 +1,18 @@
+{
+  "orderbook": {
+    "marketId": "aftermath-perp-btc-usdc",
+    "nonce": 43,
+    "bidsDeltas": [
+      [
+        "64999.5",
+        "0.5"
+      ]
+    ],
+    "asksDeltas": [
+      [
+        "65001.0",
+        "0.25"
+      ]
+    ]
+  }
+}

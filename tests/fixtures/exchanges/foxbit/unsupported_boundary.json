@@ -1,0 +1,9 @@
+{
+  "otc_invest_api": "unsupported",
+  "prime_desk_rfq": "unsupported",
+  "prediction_category": "unsupported_until_product_scope_is_split",
+  "deposits_withdrawals": "unsupported",
+  "private_write_mode": "offline_request_spec_only",
+  "private_stream_runtime": "unsupported_until_read_only_live_validation",
+  "rest_reconciliation_fallback": true
+}

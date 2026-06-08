@@ -1,0 +1,19 @@
+{
+  "exchange": "cryptomus",
+  "market_type": "spot",
+  "payment_api_in_exchange_adapter": false,
+  "payout_api_in_exchange_adapter": false,
+  "merchant_payment_endpoints": [
+    "POST /v1/payment",
+    "POST /v1/payment/info",
+    "POST /v1/payment/services"
+  ],
+  "merchant_payout_endpoints": [
+    "POST /v1/payout",
+    "POST /v1/payout/info",
+    "POST /v1/payout/services"
+  ],
+  "private_rest_default_enabled": false,
+  "market_order_live_write_enabled": false,
+  "withdraw_or_transfer_enabled": false
+}

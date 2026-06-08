@@ -1,0 +1,21 @@
+gateway:
+  adapters:
+    - equation
+
+equation:
+  enabled: true
+  chain: arbitrum
+  chain_id: 42161
+  docs_base_url: https://docs.equation.org
+  app_base_url: https://app.equation.org
+  example_rest_base_url: https://api-v3-arbitrum.equation.trade
+  example_graphql_url: https://graph-arbitrum.equation.trade/subgraphs/name/equation-v3-arbitrum
+  public_rest_enabled: false
+  private_rest_enabled: false
+  public_streams_enabled: false
+  private_streams_enabled: false
+  trade_enabled: false
+  scan_only: true
+  notes:
+    - "C-41 keeps Equation as Arbitrum perpetual protocol-audit only."
+    - "Do not configure wallet private keys or promote contract writes without a maintained on-chain/indexer adapter."

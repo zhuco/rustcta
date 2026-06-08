@@ -1,0 +1,51 @@
+# ModeTrade conservative gateway adapter example.
+# The adapter parses Orderly public perpetual metadata. Signed reads and all
+# private trading remain disabled until account, permission and region
+# boundaries are audited.
+
+exchange: modetrade
+adapter: modetrade
+enabled: false
+
+market_types:
+  - perpetual
+
+rest_base_url: https://api-evm.orderly.org
+testnet_rest_base_url: https://testnet-api-evm.orderly.org
+public_ws_url: wss://ws-evm.orderly.org/ws/stream
+testnet: false
+sandbox: false
+
+orderly_account_id: ${MODETRADE_ORDERLY_ACCOUNT_ID}
+orderly_key: ${MODETRADE_ORDERLY_KEY}
+orderly_secret: ${MODETRADE_ORDERLY_SECRET}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  perpetual:
+    - PERP_BTC_USDC
+    - PERP_ETH_USDC
+
+rate_limit:
+  max_requests_per_second: 10
+  burst: 10
+
+permissions:
+  required: []
+  optional:
+    - orderly_read_only
+    - orderly_trade
+
+notes:
+  - ModeTrade is implemented as a conservative Orderly EVM perpetual profile.
+  - Only public symbol metadata from /v1/public/info is enabled by default.
+  - REST orderbook snapshots require Orderly signed account headers and remain request-spec only.
+  - Do not enable private REST, private WS or order writes until official account, permission, region and reconciliation boundaries are validated.

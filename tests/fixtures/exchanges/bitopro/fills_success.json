@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "tradeId": "3109362209",
+      "orderId": "7977988235",
+      "price": "3000000",
+      "action": "BUY",
+      "baseAmount": "0.01",
+      "quoteAmount": "30000",
+      "fee": "60",
+      "feeSymbol": "twd",
+      "isTaker": true,
+      "timestamp": 1628054591943,
+      "createdTimestamp": 1628054591943
+    }
+  ]
+}

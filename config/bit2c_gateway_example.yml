@@ -1,0 +1,21 @@
+gateway:
+  adapters:
+    - bit2c
+
+exchanges:
+  bit2c:
+    enabled: false
+    market_types:
+      - spot
+    rest_base_url: "https://bit2c.co.il"
+    private_rest:
+      enabled: false
+      api_key_env: "RUSTCTA_BIT2C_API_KEY"
+      api_secret_env: "RUSTCTA_BIT2C_API_SECRET"
+      note: "Private REST is request-spec only until signing is verified out of band."
+    public_streams:
+      enabled: false
+      reason: "No official Bit2C WebSocket API found."
+    private_streams:
+      enabled: false
+      reason: "No official Bit2C private WebSocket API found."

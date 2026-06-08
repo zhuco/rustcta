@@ -1,0 +1,18 @@
+{
+  "channel_name": "ORDER_BOOK",
+  "type": "ORDER_BOOK_SNAPSHOT",
+  "time": 1715268699262970610,
+  "instrument_code": "BTC_EUR",
+  "asks": [
+    [
+      "100000",
+      "4"
+    ]
+  ],
+  "bids": [
+    [
+      "10000",
+      "6"
+    ]
+  ]
+}

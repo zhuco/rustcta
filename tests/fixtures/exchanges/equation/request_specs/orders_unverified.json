@@ -1,0 +1,17 @@
+{
+  "exchange": "equation",
+  "operation": "place_order",
+  "product": "perpetual",
+  "chain_id": 42161,
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "support": "unsupported_unverified",
+  "contracts_from_examples": {
+    "router": "0x33D042215405173b4b71468a2098E4671aD220E2",
+    "position_router": "0xb836ffD8b73Faac466C2A086e1a34A2D8c1394a0",
+    "order_book": "0x3550a8bC1147351632cb439a1E4aaa8428ef3319",
+    "usdt": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+  },
+  "expected_error": "equation.evm_order_signing_unverified",
+  "notes": "Production order support requires maintained ABIs, wallet signing, Arbitrum RPC handling, allowance/plugin approvals, gas/execution-fee handling, and reconciliation."
+}

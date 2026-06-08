@@ -1,0 +1,26 @@
+{
+  "exchange": "bit2c",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/Order/AddOrder",
+  "auth": "signed",
+  "headers": {
+    "key": {
+      "match": "non_empty"
+    },
+    "sign": {
+      "match": "non_empty"
+    },
+    "content-type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": "Amount=0.01&Price=99000&IsBid=true&Pair=BtcNis&nonce=1700000000000",
+  "forbid_header_values_containing": [
+    "fixture_secret"
+  ],
+  "signing_vector": "tests/fixtures/exchanges/bit2c/signing_vectors/private_hmac_sha512_form.json"
+}

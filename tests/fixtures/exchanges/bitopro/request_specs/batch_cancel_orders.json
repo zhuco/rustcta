@@ -1,0 +1,12 @@
+{
+  "operation": "bitopro.batch_cancel_orders",
+  "method": "PUT",
+  "path": "/orders",
+  "query": [],
+  "body": {
+    "BTC_TWD": [
+      "8917255503",
+      "8917255504"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "code": "INVALID_TOKEN",
+  "description": "Authentication token is invalid"
+}

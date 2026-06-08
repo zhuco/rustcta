@@ -1,0 +1,13 @@
+{
+  "error": false,
+  "errorMessage": null,
+  "data": {
+    "currencyPair": "BTC_EUR",
+    "bids": [
+      { "price": "50000.00", "amount": "0.50000000" }
+    ],
+    "asks": [
+      { "price": "50010.00", "amount": "0.40000000" }
+    ]
+  }
+}

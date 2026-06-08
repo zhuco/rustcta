@@ -1,0 +1,6 @@
+{
+  "method": "POST",
+  "path": "/open/v1/orders/cancel",
+  "query": "orderId=12345&recvWindow=5000&symbol=BTC_USDT&timestamp=1581720670624",
+  "body": null
+}

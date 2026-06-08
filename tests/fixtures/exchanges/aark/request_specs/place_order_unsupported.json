@@ -1,0 +1,10 @@
+{
+  "exchange": "aark",
+  "operation": "place_order",
+  "status": "unsupported",
+  "unsupported_reason": "Aark private writes use Orderly account-level Ed25519 signatures and are not enabled by this adapter.",
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "scan_only": true,
+  "expected_error": "aark.place_order_requires_orderly_ed25519_account_audit"
+}

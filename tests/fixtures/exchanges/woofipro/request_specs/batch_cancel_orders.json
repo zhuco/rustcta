@@ -1,0 +1,16 @@
+{
+  "exchange": "woofipro",
+  "operation": "batch_cancel_orders",
+  "method": "DELETE",
+  "path": "/v1/batch-order",
+  "query": {
+    "order_ids": "123456789"
+  },
+  "headers": {
+    "orderly-account-id": "acct_test_account_id",
+    "orderly-key": "ed25519:test-public-key",
+    "orderly-signature": "test-signature-placeholder",
+    "orderly-timestamp": "1700000000000"
+  },
+  "auth": "signed"
+}

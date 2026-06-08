@@ -1,0 +1,5 @@
+{
+  "id": "woofipro-woofi_pro$PERP_BTC_USDC@ticker",
+  "event": "subscribe",
+  "topic": "woofi_pro$PERP_BTC_USDC@ticker"
+}

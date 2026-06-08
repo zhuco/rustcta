@@ -1,0 +1,16 @@
+{
+  "primary": [
+    {
+      "currency": "BTC",
+      "balance": "0.50000000",
+      "available": "0.45000000",
+      "locked": "0.05000000"
+    },
+    {
+      "currency": "USD",
+      "balance": "10000.00",
+      "available": "9800.00",
+      "locked": "200.00"
+    }
+  ]
+}

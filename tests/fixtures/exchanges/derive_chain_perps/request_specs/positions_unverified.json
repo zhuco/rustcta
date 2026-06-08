@@ -1,0 +1,13 @@
+{
+  "exchange": "derive_chain_perps",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "chain_id": 957,
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "support": "unsupported_unverified",
+  "example_host": "https://api.derive.xyz",
+  "example_path": "/v1/positions",
+  "expected_error": "derive_chain_perps.positions_unverified",
+  "notes": "Not promoted because the indexer/API availability and response schema were not verified."
+}

@@ -1,0 +1,26 @@
+{
+  "T": 1775541541009,
+  "E": 1775541541009,
+  "e": "ORDER_TRADE_UPDATE",
+  "o": {
+    "ap": "0",
+    "cid": "CID-001",
+    "ct": "FUTURE",
+    "ev": "0",
+    "fee": "0",
+    "lv": 5,
+    "mt": "CROSS",
+    "o": "9001",
+    "p": "65000",
+    "ps": "LONG",
+    "pt": "HEDGE",
+    "qty": "0.02",
+    "ro": false,
+    "s": "BTC-USDT",
+    "S": "BUY",
+    "st": "NEW",
+    "t": "LIMIT",
+    "u": "0.001",
+    "v": "0.02"
+  }
+}

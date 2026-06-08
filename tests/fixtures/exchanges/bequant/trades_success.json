@@ -1,0 +1,15 @@
+[
+  {
+    "id": "7001",
+    "order_id": "1001",
+    "client_order_id": "CLIENTLIMIT1",
+    "symbol": "BTCUSDT",
+    "side": "buy",
+    "quantity": "0.02",
+    "price": "65000",
+    "fee": "1.30",
+    "fee_currency": "USDT",
+    "liquidity": "T",
+    "timestamp": "2026-06-08T00:00:20.000Z"
+  }
+]

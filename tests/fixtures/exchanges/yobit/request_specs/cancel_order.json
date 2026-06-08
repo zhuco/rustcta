@@ -1,0 +1,20 @@
+{
+  "operation": "yobit.cancel_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/tapi/",
+  "query": {},
+  "headers": {
+    "Key": "<redacted:api-key>",
+    "Sign": "<redacted:hmac-sha512>",
+    "content-type": "application/x-www-form-urlencoded"
+  },
+  "body": {
+    "method": "CancelOrder",
+    "order_id": "yobit_order_fixture_001",
+    "nonce": "1700000004"
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "yobit.cancel_order_request_spec_only"
+}

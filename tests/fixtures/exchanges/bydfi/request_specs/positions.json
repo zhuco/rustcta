@@ -1,0 +1,13 @@
+{
+  "exchange": "bydfi",
+  "operation": "positions",
+  "method": "GET",
+  "path": "/v2/fapi/trade/positions",
+  "query": {
+    "contractType": "FUTURE",
+    "settleCoin": "USDT",
+    "symbol": "BTC-USDT",
+    "wallet": "W001"
+  },
+  "signing": "hex_hmac_sha256(accessKey + timestamp + queryString + body)"
+}

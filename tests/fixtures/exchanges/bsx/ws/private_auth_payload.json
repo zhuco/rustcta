@@ -1,0 +1,8 @@
+{
+  "op": "auth",
+  "args": {
+    "key": "test-api-key",
+    "timestamp": "1700000000000000000",
+    "signature": "da2bdc1bac1d0e734197bc2e9f49384f1cf8e33095ddcd7af8c2a65d6e7fecd6"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "operation": "zebpay.get_open_orders",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/orders",
+  "query": {
+    "trade_pair": "BTC-INR",
+    "status": "pending",
+    "orderid": 0,
+    "page": 1,
+    "limit": 500
+  },
+  "headers": {
+    "client_id": "<redacted:client-id>",
+    "timestamp": "<redacted:unix-ms>",
+    "RequestId": "<redacted:uuid>",
+    "Authorization": "<redacted:bearer-token>"
+  },
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "zebpay.open_orders_request_spec_only"
+}

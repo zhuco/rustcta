@@ -1,0 +1,5 @@
+{
+  "id": 1,
+  "method": "subscribe",
+  "topics": ["spot/order_book_updates:BTC_USD"]
+}

@@ -1,0 +1,14 @@
+{
+  "exchange": "btcbox",
+  "operation": "get_open_orders",
+  "method": "POST",
+  "path": "/api/v1/trade_list",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "canonical": "coin=btc&key=btcbox-public-key&nonce=1700000000012&since=0",
+  "body": "coin=btc&key=btcbox-public-key&nonce=1700000000012&since=0&signature=25f9616a96c075dd02b6b6165d12aa011548f23bf4262f9cff6272b9bae9d77b",
+  "auth": "hmac_sha256_md5_private_key",
+  "expected_signature": "25f9616a96c075dd02b6b6165d12aa011548f23bf4262f9cff6272b9bae9d77b",
+  "network": "offline_request_spec_only"
+}

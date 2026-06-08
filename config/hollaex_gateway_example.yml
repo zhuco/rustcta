@@ -1,0 +1,27 @@
+gateway:
+  adapters:
+    - hollaex
+
+hollaex:
+  enabled: false
+  rest_base_url: "https://api.hollaex.com/v2"
+  ws_url: "wss://api.hollaex.com/stream"
+  private_rest_enabled: false
+  credentials:
+    api_key_env: HOLLAEX_API_KEY
+    api_secret_env: HOLLAEX_API_SECRET
+  runtime_enabled:
+    - public_rest_symbol_rules
+    - public_rest_order_book
+  request_spec_only:
+    - get_balances
+    - spot_place_order
+    - spot_cancel_order
+    - ws_connect_hmac
+  unsupported_runtime:
+    - private_rest_trading
+    - public_ws_supervisor
+    - private_ws_supervisor
+    - admin_api
+    - withdrawal_transfer
+    - arbitrary_white_label_profiles

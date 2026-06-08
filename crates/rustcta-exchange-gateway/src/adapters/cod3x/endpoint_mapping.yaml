@@ -1,0 +1,237 @@
+schema_version: 1
+exchange: cod3x
+adapter: Cod3xGatewayAdapter
+status: audit_only
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/cod3x_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "C-48: Cod3x is audited as an AI perps trading terminal/routing layer, not a standalone exchange venue. Runtime REST/WS/signing remain unsupported_unverified until a stable Cod3x-native API contract is fixture-verified."
+  venue_profiles:
+    - hyperliquid
+    - gmx_v2
+    - lighter
+market_types:
+  - perpetual
+products:
+  - perpetual
+base_urls:
+  docs: https://docs.cod3x.org
+  website: https://www.cod3x.org
+  app: https://app.cod3x.org
+  rest: unsupported_unverified
+auth:
+  private_rest: unsupported
+  routed_signing: unsupported_unverified
+  notes: "No promoted Cod3x API-key/HMAC, terminal token, downstream venue key, or wallet signing path is implemented."
+rate_limits:
+  cod3x_unverified:
+    scope: none
+    notes: "No live HTTP runtime is opened by this adapter."
+reconciliation:
+  positions: unsupported_unverified
+  balances: unsupported_unverified
+  open_orders: unsupported_unverified
+batch:
+  place_orders: unsupported_unverified
+  cancel_orders: unsupported_unverified
+websocket:
+  public: unsupported_unverified
+  private: unsupported_unverified
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/markets
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "No Cod3x-native market metadata API contract is verified; downstream venue markets are not mapped as native Cod3x markets."
+    market_types: [perpetual]
+  - operation: get_order_book
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/orderbook
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "No Cod3x-native order-book snapshot or quote REST contract was verified."
+    market_types: [perpetual]
+  - operation: get_fees
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/downstream-fees
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Risk/funding/liquidation/fee data remain downstream venue semantics and are not a Cod3x-native runtime parser."
+    market_types: [perpetual]
+  - operation: get_positions
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/positions
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Position reads require a verified Cod3x-native account API, routing identity model, and downstream venue reconciliation."
+    market_types: [perpetual]
+  - operation: get_balances
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/balances
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "Collateral/account state source is downstream venue specific and unverified as a Cod3x-native API."
+    market_types: [perpetual]
+  - operation: get_open_orders
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/open-orders
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "No Cod3x-native open-order read API is verified."
+    market_types: [perpetual]
+  - operation: query_order
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/order
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "No Cod3x-native order status source is verified."
+    market_types: [perpetual]
+  - operation: get_recent_fills
+    product: perpetual
+    transport: rest
+    method: GET
+    path: /unsupported/cod3x/fills
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: "No Cod3x-native fill history source is verified."
+    market_types: [perpetual]
+  - operation: place_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/cod3x/place-order
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "Cod3x-native routed order request contract, downstream venue selection, signing ownership, idempotency, and error semantics are not verified."
+    market_types: [perpetual]
+  - operation: cancel_order
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/cod3x/cancel-order
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "Cancel routing/signing and downstream execution semantics are not verified."
+    market_types: [perpetual]
+  - operation: batch_place_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/cod3x/batch-place
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "No verified Cod3x-native batch order routing contract/API."
+    market_types: [perpetual]
+  - operation: batch_cancel_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/cod3x/batch-cancel
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "No verified Cod3x-native batch cancel routing contract/API."
+    market_types: [perpetual]
+  - operation: cancel_all_orders
+    product: perpetual
+    transport: rest
+    method: POST
+    path: /unsupported/cod3x/cancel-all
+    auth: unsupported
+    rate_limit_bucket: cod3x_unverified
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported_unverified
+    reason: "No verified Cod3x-native cancel-all routing contract/API."
+    market_types: [perpetual]

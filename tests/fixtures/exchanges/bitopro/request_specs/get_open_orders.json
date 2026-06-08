@@ -1,0 +1,12 @@
+{
+  "operation": "bitopro.get_open_orders",
+  "method": "GET",
+  "path": "/orders/open",
+  "query": [
+    [
+      "pair",
+      "btc_twd"
+    ]
+  ],
+  "body": null
+}

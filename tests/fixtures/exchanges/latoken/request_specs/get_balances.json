@@ -1,0 +1,18 @@
+{
+  "operation": "latoken.get_balances",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/v2/auth/account",
+  "query": {
+    "zeros": "false"
+  },
+  "headers": {
+    "X-LA-APIKEY": "<redacted:api-key>",
+    "X-LA-SIGNATURE": "<redacted:hmac>",
+    "X-LA-DIGEST": "HMAC-SHA256"
+  },
+  "canonical_payload": "GET/v2/auth/accountzeros=false",
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "latoken.balances_request_spec_only"
+}

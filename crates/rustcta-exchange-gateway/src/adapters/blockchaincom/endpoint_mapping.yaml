@@ -1,0 +1,247 @@
+schema_version: 1
+exchange: blockchaincom
+adapter: rustcta_exchange_gateway::adapters::blockchaincom
+metadata:
+  status: validated
+  source: docs/blockchaincom_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "Blockchain.com Exchange spot adapter; public REST implemented, private REST/WS represented as offline request-spec and payload fixtures."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.blockchain.com/v3/exchange
+base_urls:
+  public_ws: wss://ws.blockchain.info/mercury-gateway/v1/ws
+  private_ws: wss://ws.blockchain.info/mercury-gateway/v1/ws
+auth:
+  private_rest: X-API-Token header; no REST HMAC/canonical signing string is documented.
+  private_ws: subscribe auth channel with API secret token or auth_token cookie.
+  ws_origin: https://exchange.blockchain.com
+rate_limits:
+  buckets:
+    blockchaincom_rest:
+      scope: rest
+      interval: unknown
+      limit: null
+      note: REST rate limit was not found in official Exchange v3 docs.
+    blockchaincom_ws_messages:
+      scope: websocket
+      interval: 1m
+      limit: 1200
+      burst: 1200
+pagination:
+  get_open_orders:
+    style: cursor_or_time_window
+    max_limit: 100
+  get_recent_fills:
+    style: cursor_or_time_window
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  sequence_gap_policy: restart_websocket_then_rest_order_book_snapshot
+batch:
+  place_orders: { support: unsupported, reason: blockchaincom.batch_place_orders_unsupported }
+  cancel_orders: { support: unsupported, reason: blockchaincom.batch_cancel_orders_unsupported }
+websocket:
+  public:
+    support: spec_only
+    url: wss://ws.blockchain.info/mercury-gateway/v1/ws
+    origin_header: https://exchange.blockchain.com
+    channels: [heartbeat, l2, l3, prices, symbols, ticker, trades]
+    heartbeat: { channel: heartbeat, interval_ms: 5000, direction: server_message }
+    sequence: { field: seqnum, gap_action: restart_connection }
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    channels: [auth, balances, trading]
+    auth: api_secret_token_subscribe
+    fallback: rest_reconciliation
+unsupported:
+  - derivatives
+  - futures
+  - perpetuals
+  - margin_positions
+  - lending
+  - brokerage_swaps
+  - wallet_explorer_api
+  - crypto_deposit_address_creation
+  - withdrawals
+  - whitelist_management
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /symbols
+    auth: none
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/blockchaincom/symbols.json
+    official_doc: https://api.blockchain.com/v3/#get-symbols
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /l2/{symbol}
+    auth: none
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: false
+    response_parser:
+      fixture: tests/fixtures/exchanges/blockchaincom/orderbook_l2.json
+    official_doc: https://api.blockchain.com/v3/#get-l2-symbol
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /accounts
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_balances.json
+    official_doc: https://api.blockchain.com/v3/#get-accounts
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /fees
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_fees.json
+    official_doc: https://api.blockchain.com/v3/#get-fees
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /orders
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/place_order_limit.json
+    official_doc: https://api.blockchain.com/v3/#post-orders
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders/{orderId}
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/cancel_order.json
+    official_doc: https://api.blockchain.com/v3/#delete-orders-orderid
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/cancel_all_orders.json
+    official_doc: https://api.blockchain.com/v3/#delete-orders
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders/{orderId}
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/query_order.json
+    official_doc: https://api.blockchain.com/v3/#get-orders-orderid
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_open_orders.json
+    official_doc: https://api.blockchain.com/v3/#get-orders
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /fills
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: blockchaincom_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/blockchaincom/request_specs/get_recent_fills.json
+    official_doc: https://api.blockchain.com/v3/#get-fills
+  - operation: create_deposit_address
+    product: spot
+    transport: rest
+    auth: unsupported
+    support: unsupported
+    reason: "Blockchain.com Exchange POST /deposits/{currency} is a funding surface and is outside trading adapter runtime."
+  - operation: create_withdrawal
+    product: spot
+    transport: rest
+    auth: unsupported
+    support: unsupported
+    reason: "Withdrawals require separate 2FA/beneficiary permissions and are not part of this gateway adapter."
+streams:
+  - operation: public_l2_subscribe
+    channel: l2
+    action: subscribe
+    auth: none
+    support: spec_only
+    resync: get_order_book
+    fixture: tests/fixtures/exchanges/blockchaincom/ws/l2_snapshot.json
+  - operation: public_heartbeat_subscribe
+    channel: heartbeat
+    action: subscribe
+    auth: none
+    support: spec_only
+    interval_ms: 5000
+    fixture: tests/fixtures/exchanges/blockchaincom/ws/heartbeat.json
+  - operation: private_auth_subscribe
+    channel: auth
+    action: subscribe
+    auth: api_secret_token
+    support: spec_only
+    fixture: tests/fixtures/exchanges/blockchaincom/ws/auth_subscribed.json
+  - operation: private_trading_subscribe
+    channel: trading
+    action: subscribe
+    auth: auth_channel
+    support: spec_only
+    resync: get_open_orders
+    fixture: tests/fixtures/exchanges/blockchaincom/ws/trading_snapshot.json

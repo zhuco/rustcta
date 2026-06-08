@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/v1/common/symbols",
+  "auth": "none",
+  "headers": {
+    "Accept": "application/json"
+  }
+}

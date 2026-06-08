@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "data": [
+    {
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT"
+    }
+  ]
+}

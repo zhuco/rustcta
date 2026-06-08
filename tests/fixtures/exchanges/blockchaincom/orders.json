@@ -1,0 +1,16 @@
+[
+  {
+    "exOrdId": "123456789",
+    "clOrdId": "rustcta-1",
+    "symbol": "BTC-USD",
+    "side": "BUY",
+    "ordType": "LIMIT",
+    "ordStatus": "PARTIALLY_FILLED",
+    "price": "65000",
+    "orderQty": "0.010",
+    "leavesQty": "0.007",
+    "cumQty": "0.003",
+    "avgPx": "64800",
+    "timestamp": 1700000000000
+  }
+]

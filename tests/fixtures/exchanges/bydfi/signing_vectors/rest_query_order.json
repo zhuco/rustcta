@@ -1,0 +1,11 @@
+{
+  "exchange": "bydfi",
+  "kind": "rest",
+  "api_key": "sample-key",
+  "api_secret": "sample-secret",
+  "timestamp": "1735660800000",
+  "query_string": "symbol=BTC-USDT",
+  "body": "",
+  "prehash": "sample-key1735660800000symbol=BTC-USDT",
+  "expected_signature": "05a025490b7b6423394d44acdd29fbedfbc09a58096bc5c01968987f6421b5c4"
+}

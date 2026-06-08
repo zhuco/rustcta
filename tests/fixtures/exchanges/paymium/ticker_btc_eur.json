@@ -1,0 +1,16 @@
+{
+  "high": "65000.0",
+  "low": "62000.0",
+  "volume": "12.3456789",
+  "bid": "64100.0",
+  "ask": "64250.0",
+  "midpoint": "64175.0",
+  "vwap": "63300.0",
+  "at": 1700000000,
+  "price": "64100.0",
+  "open": "63000.0",
+  "variation": "1.7",
+  "currency": "EUR",
+  "trade_id": "fixture-trade-id",
+  "size": "0.01"
+}

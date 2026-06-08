@@ -1,0 +1,12 @@
+{
+  "channel": "book",
+  "symbol": "BTC_USDT_PERP",
+  "type": "snapshot",
+  "asks": [
+    { "price": "64020", "size": "0.5" }
+  ],
+  "bids": [
+    { "price": "64000", "size": "0.4" }
+  ],
+  "lastTime": "1700000000000000"
+}

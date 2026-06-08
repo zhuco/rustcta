@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "id": "8917255503",
+      "pair": "btc_twd",
+      "price": "3000000",
+      "avgExecutionPrice": "0",
+      "action": "BUY",
+      "type": "LIMIT",
+      "createdTimestamp": 1639386803663,
+      "updatedTimestamp": 1639386803663,
+      "status": 0,
+      "originalAmount": "0.02",
+      "remainingAmount": "0.02",
+      "executedAmount": "0",
+      "fee": "0",
+      "feeSymbol": "twd",
+      "bitoFee": "0",
+      "total": "0",
+      "seq": "BTCTWD3273528249",
+      "timeInForce": "GTC"
+    }
+  ]
+}

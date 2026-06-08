@@ -1,0 +1,12 @@
+{
+  "event": "executionReport",
+  "symbol": "BTC_USDT",
+  "side": 0,
+  "type": 1,
+  "orderId": 12345,
+  "clientOrderId": "fixture-client-order",
+  "status": "FILLED",
+  "lastExecutedQuantity": "0.01000000",
+  "lastExecutedPrice": "7500.00",
+  "eventTime": 1581720670624
+}

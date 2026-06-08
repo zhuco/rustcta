@@ -1,0 +1,66 @@
+#![cfg_attr(not(test), allow(dead_code))]
+
+use rustcta_exchange_api::{ExchangeApiError, ExchangeApiResult};
+use serde_json::Value;
+
+pub const COD3X_GMX_ARBITRUM_CHAIN_ID: u64 = 42_161;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cod3xAuditBoundary {
+    pub venue_profiles: Vec<String>,
+    pub stable_api_verified: bool,
+    pub trade_enabled: bool,
+    pub scan_only: bool,
+}
+
+pub fn parse_cod3x_audit_boundary(value: &Value) -> ExchangeApiResult<Cod3xAuditBoundary> {
+    let venue_profiles = value
+        .get("venue_profiles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| serialization_error("missing venue_profiles"))?
+        .iter()
+        .map(|profile| {
+            profile
+                .as_str()
+                .map(ToString::to_string)
+                .ok_or_else(|| serialization_error("venue profile must be a string"))
+        })
+        .collect::<ExchangeApiResult<Vec<_>>>()?;
+    Ok(Cod3xAuditBoundary {
+        venue_profiles,
+        stable_api_verified: value
+            .get("stable_api_verified")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| serialization_error("missing stable_api_verified"))?,
+        trade_enabled: value
+            .get("trade_enabled")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| serialization_error("missing trade_enabled"))?,
+        scan_only: value
+            .get("scan_only")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| serialization_error("missing scan_only"))?,
+    })
+}
+
+pub fn parse_cod3x_audit_subjects(value: &Value) -> ExchangeApiResult<Vec<String>> {
+    let subjects = value
+        .get("audit_subjects")
+        .and_then(Value::as_array)
+        .ok_or_else(|| serialization_error("missing audit_subjects"))?;
+    subjects
+        .iter()
+        .map(|subject| {
+            subject
+                .as_str()
+                .map(ToString::to_string)
+                .ok_or_else(|| serialization_error("audit subject must be a string"))
+        })
+        .collect()
+}
+
+fn serialization_error(message: impl Into<String>) -> ExchangeApiError {
+    ExchangeApiError::Serialization {
+        message: message.into(),
+    }
+}

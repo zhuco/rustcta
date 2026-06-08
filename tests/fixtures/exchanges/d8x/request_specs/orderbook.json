@@ -1,0 +1,18 @@
+{
+  "exchange": "d8x",
+  "operation": "get_order_book",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/coingecko/orderbook/btc-usd-usdc",
+  "auth": "none",
+  "query": {
+    "chain_id": {
+      "match": "exact",
+      "value": "1101"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true
+}

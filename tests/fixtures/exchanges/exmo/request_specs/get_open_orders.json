@@ -1,0 +1,11 @@
+{
+  "operation": "exmo.get_open_orders",
+  "method": "POST",
+  "path": "/v1.1/user_open_orders",
+  "content_type": "application/x-www-form-urlencoded",
+  "auth": "hmac_sha512_form",
+  "body": {
+    "pair": "BTC_USD",
+    "nonce": "1710000000004"
+  }
+}

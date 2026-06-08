@@ -1,0 +1,97 @@
+schema_version: 1
+exchange: cex
+adapter: rustcta_exchange_gateway::adapters::cex
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: https://docs.cex.io/
+  last_reviewed: "2026-06-08"
+  notes: "A-15 CEX.IO spot G1 public REST adapter. Private REST and fiat ledger runtime stay disabled pending request-spec promotion."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://cex.io/api
+auth:
+  private_rest: "JSON body nonce/key/signature; HMAC-SHA256 over nonce + user_id + api_key"
+  websocket: "auth message with HMAC-SHA256 over timestamp + api_key"
+rate_limits:
+  public_rest:
+    scope: ip
+    interval: 10m
+    limit: 600
+  private_rest:
+    scope: account
+    interval: 10m
+    limit: 2000
+websocket:
+  url: wss://ws.cex.io/ws/
+  status: payload_only
+  heartbeat: server_ping_client_pong
+  reconnect: "server may drop sessions; reconnect and resubscribe required"
+reconciliation:
+  private_stream_fallback: rest
+  status: "not enabled until private REST request specs are promoted"
+unsupported:
+  - private_rest_runtime
+  - private_websocket_runtime
+  - fiat_deposit_withdrawal_runtime
+  - positions
+  - margin
+  - futures
+  - order_list
+  - generic_batch_place
+  - generic_batch_cancel
+  - live_trading
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /currency_limits
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.cex.io/#currency-limits
+    request_spec:
+      fixture: tests/fixtures/exchanges/cex/request_specs/currency_limits.json
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /order_book/{symbol1}/{symbol2}/
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.cex.io/#orderbook
+    request_spec:
+      fixture: tests/fixtures/exchanges/cex/request_specs/orderbook_btc_usd.json
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /place_order/{symbol1}/{symbol2}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported
+    reason: "Private trading remains request-spec only; the adapter does not send signed order mutations."
+    request_spec:
+      fixture: tests/fixtures/exchanges/cex/request_specs/place_order_unsupported.json

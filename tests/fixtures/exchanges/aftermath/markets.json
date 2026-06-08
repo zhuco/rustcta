@@ -1,0 +1,63 @@
+[
+  {
+    "id": "aftermath-perp-btc-usdc",
+    "symbol": "BTC/USDC:USDC",
+    "base": "BTC",
+    "quote": "USDC",
+    "baseId": "BTC",
+    "quoteId": "USDC",
+    "active": true,
+    "type": "swap",
+    "spot": false,
+    "margin": false,
+    "swap": true,
+    "future": false,
+    "option": false,
+    "contract": true,
+    "settle": "USDC",
+    "settleId": "0x2::usdc::USDC",
+    "contractSize": "1",
+    "linear": true,
+    "inverse": false,
+    "precision": {
+      "price": "0.01",
+      "amount": "0.001"
+    },
+    "limits": {
+      "amount": {
+        "min": "0.001",
+        "max": "100"
+      },
+      "price": {
+        "min": "1",
+        "max": "1000000"
+      },
+      "cost": {
+        "min": "5",
+        "max": "1000000"
+      }
+    }
+  },
+  {
+    "id": "aftermath-spot-sui-usdc",
+    "symbol": "SUI/USDC",
+    "base": "SUI",
+    "quote": "USDC",
+    "active": true,
+    "type": "spot",
+    "spot": true,
+    "swap": false,
+    "precision": {
+      "price": "0.0001",
+      "amount": "0.01"
+    },
+    "limits": {
+      "amount": {
+        "min": "0.01"
+      },
+      "cost": {
+        "min": "1"
+      }
+    }
+  }
+]

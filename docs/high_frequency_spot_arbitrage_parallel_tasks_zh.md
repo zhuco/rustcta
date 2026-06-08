@@ -32,7 +32,7 @@
 1. 运行 `git status --short`，识别无关脏文件。
 2. 阅读本文档、`docs/architecture_module_layout.md`、
    `docs/multi_exchange_spot_arbitrage.md`、
-   `docs/websocket_market_data.md`、`docs/order_reconciliation.md`。
+   `docs/交易所网关/通用机制/websocket_market_data.md`、`docs/交易所网关/通用机制/order_reconciliation.md`。
 3. 只修改自己任务的允许范围。
 4. 不回滚、不覆盖其他 AI 或用户已有改动。
 5. 不绕过 dry-run、live-dry-run、preflight、kill switch、disabled-symbol、
@@ -185,7 +185,7 @@ one_sided_exposure
   仅作为 WebSocket idle 健康检查、监控和报表维护节奏。
 - stale / gap / checksum / reconnect / error 事件会把策略内部 book 标为不可交易，
   不输出可执行机会。
-- `docs/websocket_market_data.md` 已同步说明事件驱动策略路径。
+- `docs/交易所网关/通用机制/websocket_market_data.md` 已同步说明事件驱动策略路径。
 
 收口验证：
 
@@ -274,7 +274,7 @@ cargo fmt --check
 ```text
 你是 AI-2。完成 docs/high_frequency_spot_arbitrage_parallel_tasks_zh.md
 中的 Task 2：严格 L2 订单簿、sequence gap 与自动 resync。先读取全局规则、
-docs/websocket_market_data.md 和相关交易所 public WS parser。只修改 Task 2
+docs/交易所网关/通用机制/websocket_market_data.md 和相关交易所 public WS parser。只修改 Task 2
 允许范围。目标是让支持 sequence 的交易所具备严格 L2 状态机，gap/checksum
 错误必须 stale 并 resync。不要改策略执行和下单逻辑。添加 fixture tests 并
 运行 Task 2 验收命令。
@@ -336,7 +336,7 @@ cargo fmt --check
 ```text
 你是 AI-3。完成 docs/high_frequency_spot_arbitrage_parallel_tasks_zh.md
 中的 Task 3：双腿并发执行、batch order 与单腿恢复。先读取全局规则、
-docs/order_reconciliation.md 和 docs/spot_spot_inventory_rebalance_flow_zh.md。
+docs/交易所网关/通用机制/order_reconciliation.md 和 docs/spot_spot_inventory_rebalance_flow_zh.md。
 只修改 Task 3 允许范围。目标是双腿 taker-taker 并发提交，支持 batch 能力，
 并显式处理 reject/timeout/partial fill/one-leg fill。不要绕过风控和 live gates。
 添加 focused tests 并运行 Task 3 验收命令。
@@ -457,7 +457,7 @@ cargo fmt --check
 ```text
 你是 AI-5。完成 docs/high_frequency_spot_arbitrage_parallel_tasks_zh.md
 中的 Task 5：私有流优先订单状态与 REST reconcile fallback。先读取全局规则、
-docs/order_reconciliation.md 和各交易所 private stream adapter。只修改 Task 5
+docs/交易所网关/通用机制/order_reconciliation.md 和各交易所 private stream adapter。只修改 Task 5
 允许范围。目标是让 execution state 优先由 private WS/user stream 驱动，
 REST 只做 fallback reconcile。添加 fixture tests 并运行 Task 5 验收命令。
 ```
@@ -659,7 +659,7 @@ cargo fmt --check
 ```text
 你是 AI-8。完成 docs/high_frequency_spot_arbitrage_parallel_tasks_zh.md
 中的 Task 8：费用、库存、资金占用与 venue 选择模型。先读取全局规则、
-docs/fee_model.md、docs/spot_spot_inventory_rebalance_flow_zh.md 和现有
+docs/交易所网关/通用机制/fee_model.md、docs/spot_spot_inventory_rebalance_flow_zh.md 和现有
 spot_spot_taker_arbitrage 代码。只修改 Task 8 允许范围。目标是让机会计算
 使用真实费率、库存、资金占用、转账成本和慢 venue penalty，并把套利收益与
 库存恢复收益分开记账。添加 focused tests 并运行 Task 8 验收命令。

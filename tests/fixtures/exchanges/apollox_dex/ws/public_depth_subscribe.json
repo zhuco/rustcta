@@ -1,0 +1,5 @@
+{
+  "method": "SUBSCRIBE",
+  "params": ["btcusdt@depth"],
+  "id": 1
+}

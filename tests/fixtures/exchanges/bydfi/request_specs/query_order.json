@@ -1,0 +1,13 @@
+{
+  "exchange": "bydfi",
+  "operation": "query_order",
+  "method": "GET",
+  "path": "/v2/fapi/trade/open_order",
+  "query": {
+    "clientOrderId": "CID-001",
+    "orderId": "9001",
+    "symbol": "BTC-USDT",
+    "wallet": "W001"
+  },
+  "signing_vector": "bydfi/rest_query_order"
+}

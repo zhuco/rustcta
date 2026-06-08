@@ -1,0 +1,6 @@
+{
+  "operation": "zaif.get_open_orders",
+  "method": "POST",
+  "path": "/tapi",
+  "body": "nonce=1710000003&method=active_orders&currency_pair=btc_jpy"
+}

@@ -1,0 +1,46 @@
+# BIT.TEAM scan-only gateway adapter example.
+# Public Spot metadata/order-book REST is available; private REST remains
+# request-spec-only and disabled until read-only validation is completed.
+
+exchange: bitteam
+adapter: bitteam
+enabled: false
+
+market_types:
+  - spot
+
+api_key: ${BITTEAM_API_KEY}
+api_secret: ${BITTEAM_API_SECRET}
+
+rest_base_url: https://bit.team
+testnet: false
+sandbox: false
+
+enabled_public_rest: true
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTC_USDT
+    - ETH_USDT
+
+rate_limit:
+  public_max_requests_per_minute: 60
+  private_max_requests_per_minute: 60
+
+permissions:
+  required: []
+  optional:
+    - read_only
+    - trade_request_spec_only
+
+notes:
+  - Private REST credentials are read only for request-spec construction and must remain disabled by default.
+  - P2P, withdrawal, transfer, perpetual, batch, and WebSocket runtime surfaces are not implemented.
+  - Do not use browser-only endpoints or undocumented traffic to promote trading behavior.

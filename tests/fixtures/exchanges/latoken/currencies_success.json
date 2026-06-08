@@ -1,0 +1,18 @@
+[
+  {
+    "id": "btc-currency-test-id",
+    "status": "CURRENCY_STATUS_ACTIVE",
+    "type": "CURRENCY_TYPE_CRYPTO",
+    "name": "Bitcoin",
+    "tag": "BTC",
+    "decimals": 8
+  },
+  {
+    "id": "usdt-currency-test-id",
+    "status": "CURRENCY_STATUS_ACTIVE",
+    "type": "CURRENCY_TYPE_CRYPTO",
+    "name": "Tether",
+    "tag": "USDT",
+    "decimals": 6
+  }
+]

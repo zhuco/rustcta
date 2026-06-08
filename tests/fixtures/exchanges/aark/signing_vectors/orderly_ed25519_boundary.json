@@ -1,0 +1,12 @@
+{
+  "exchange": "aark",
+  "operation": "orderly_ed25519_signing",
+  "supported": false,
+  "reason": "Orderly signed REST requires account-scoped Ed25519 key material. The adapter records canonical payload shape but does not submit signed private requests.",
+  "timestamp_ms": 1700000000000,
+  "method": "GET",
+  "path": "/v1/orderbook/PERP_BTC_USDC",
+  "body": "",
+  "canonical_payload": "1700000000000GET/v1/orderbook/PERP_BTC_USDC",
+  "expected_error": "aark.order_book_requires_orderly_account_signed_request"
+}

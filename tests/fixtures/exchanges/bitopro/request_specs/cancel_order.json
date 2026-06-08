@@ -1,0 +1,7 @@
+{
+  "operation": "bitopro.cancel_order",
+  "method": "DELETE",
+  "path": "/orders/btc_twd/8917255503",
+  "query": [],
+  "body": null
+}

@@ -1,0 +1,14 @@
+{
+  "method": "DELETE",
+  "path": "/account/orders",
+  "query": {
+    "instrument_code": "BTC_EUR"
+  },
+  "auth": "bearer_token",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": null
+}

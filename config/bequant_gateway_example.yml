@@ -1,0 +1,43 @@
+# Bequant gateway adapter example. Disabled by default.
+
+exchange: bequant
+adapter: bequant
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://api.bequant.io/api/3
+public_ws_url: wss://api.bequant.io/api/3/ws/public
+trading_ws_url: wss://api.bequant.io/api/3/ws/trading
+wallet_ws_url: wss://api.bequant.io/api/3/ws/wallet
+testnet: false
+sandbox: false
+
+credentials:
+  api_key_env: BEQUANT_API_KEY
+  api_secret_env: BEQUANT_API_SECRET
+
+private_rest_enabled: false
+private_streams_enabled: false
+request_timeout_ms: 10000
+
+enabled_symbols:
+  spot:
+    - BTCUSDT
+    - ETHUSDT
+
+permissions:
+  required_for_read_only:
+    - read_account
+  required_for_trading:
+    - place_cancel_orders
+  excluded:
+    - withdraw
+    - transfer
+    - custody
+
+notes:
+  - Bequant is treated as a conservative HitBTC v3 API-family profile, not a byte-for-byte clone.
+  - Spot REST is mapped; margin and futures/perpetual endpoints are documented but unsupported by this adapter.
+  - Keep this file disabled and load real credentials only through environment variables.

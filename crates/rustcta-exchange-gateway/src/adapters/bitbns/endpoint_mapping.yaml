@@ -1,0 +1,137 @@
+schema_version: 1
+exchange: bitbns
+adapter: BitbnsGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bitbns_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: A-07 scan-only public REST adapter. Private REST signing is documented but disabled until account/readback validation.
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://bitbns.com
+base_urls:
+  public_rest: https://bitbns.com
+  private_rest_v1: https://api.bitbns.com/api/trade/v1
+  private_rest_v2: https://api.bitbns.com/api/trade/v2
+auth:
+  public_rest: none
+  private_rest: "X-BITBNS-APIKEY plus base64 JSON payload signed with HMAC-SHA512; disabled in adapter"
+rate_limits:
+  buckets:
+    bitbns_public:
+      scope: rest
+      interval: 1m
+      limit: 60
+      burst: 5
+    bitbns_private_disabled:
+      scope: orders
+      interval: 1m
+      limit: 0
+      burst: 0
+pagination:
+  public_ohlcv:
+    style: page
+    page_param: page
+reconciliation:
+  private_stream_fallback: unsupported
+  notes: Private order/account/fill readbacks are not enabled; no live-dry-run promotion.
+batch:
+  place_orders:
+    support: unsupported
+    mode: unsupported
+    atomicity: non_atomic
+    max_items: 0
+  cancel_orders:
+    support: unsupported
+    mode: unsupported
+    atomicity: non_atomic
+    max_items: 0
+websocket:
+  public:
+    support: spec_only
+    transport: socket_io
+    url: "https://ws{market}mv2.bitbns.com/?coin={COIN}"
+    heartbeat:
+      method: ping
+      direction: client_ping
+      interval_ms: 30000
+      timeout_ms: 45000
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    url: "https://wsorderv2.bitbns.com/?token={token}"
+    auth: token
+    fallback: unsupported
+unsupported:
+  - operation: private_rest
+    reason: bitbns.private_rest_disabled_until_account_readback_review
+  - operation: place_order
+    reason: bitbns.place_order_disabled_scan_only
+  - operation: cancel_order
+    reason: bitbns.cancel_order_disabled_scan_only
+  - operation: public_stream_runtime
+    reason: bitbns.public_streams_spec_only
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /order/fetchMarkets/
+    auth: none
+    rate_limit_bucket: bitbns_public
+    weight: 1
+    request_spec_required: false
+    testnet: false
+    official_doc: https://github.com/bitbns-official/node-bitbns-api/blob/master/index.js
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchangeData/orderBook
+    auth: none
+    rate_limit_bucket: bitbns_public
+    weight: 1
+    request_spec_required: false
+    testnet: false
+    official_doc: https://github.com/bitbns-official/node-bitbns-api
+    params:
+      - name: coin
+      - name: market
+  - operation: fetch_trades_fixture_only
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchangeData/tradedetails
+    auth: none
+    rate_limit_bucket: bitbns_public
+    weight: 1
+    request_spec_required: false
+    testnet: false
+    official_doc: https://github.com/bitbns-official/node-bitbns-api/blob/master/index.js
+  - operation: fetch_ohlcv_fixture_only
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchangeData/ohlc
+    auth: none
+    rate_limit_bucket: bitbns_public
+    weight: 1
+    request_spec_required: false
+    testnet: false
+    official_doc: https://github.com/bitbns-official/node-bitbns-api/blob/master/index.js
+  - operation: private_rest
+    product: spot
+    transport: rest
+    method: POST
+    path: /api/trade/v1/{method}/{symbol}
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: bitbns_private_disabled
+    weight: 0
+    request_spec_required: true
+    support: unsupported
+    reason: bitbns.private_rest_disabled_until_account_readback_review
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitbns/request_specs/unsupported_private_rest.json

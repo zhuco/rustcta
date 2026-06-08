@@ -1,0 +1,36 @@
+{
+  "exchange": "hollaex",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/v2/order",
+  "auth": "signed",
+  "query": {
+    "order_id": {
+      "match": "exact",
+      "value": "order-fixture-1"
+    }
+  },
+  "headers": {
+    "api-key": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "api-signature": {
+      "match": "exact",
+      "value": "5a63fffbbd7bae31fc86fa444242ada6970d3201a916b9ea57c2ea9ae9b913ab"
+    },
+    "api-expires": {
+      "match": "exact",
+      "value": "1710000000"
+    }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "hollaex/cancel_order_hmac_sha256"
+}

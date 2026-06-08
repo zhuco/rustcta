@@ -1,0 +1,16 @@
+{
+  "op": "update",
+  "channel": "orderbook:xht-usdt",
+  "symbol": "xht-usdt",
+  "data": {
+    "bids": [
+      ["0.1005", "10"],
+      ["0.1000", "25"]
+    ],
+    "asks": [
+      ["0.1010", "42"],
+      ["0.1020", "18"]
+    ],
+    "timestamp": 1710000000123
+  }
+}

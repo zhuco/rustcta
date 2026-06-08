@@ -1,0 +1,16 @@
+{
+  "exchange": "p2b",
+  "task": "A-32",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_rest_default_enabled": false,
+  "private_rest_boundary": "request_spec_only",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "perpetual": "unsupported_no_official_product_scope_verified",
+  "notes": [
+    "Public REST is limited to spot market metadata and two-sided order book fixtures.",
+    "Private REST uses X-TXC-APIKEY, X-TXC-PAYLOAD and X-TXC-SIGNATURE request specs only.",
+    "No fixture contains live credentials, account ids, wallet addresses, phone numbers, emails, or real order ids."
+  ]
+}

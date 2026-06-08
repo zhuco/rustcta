@@ -1,0 +1,20 @@
+{
+  "exchange": "derive_chain_perps",
+  "task": "C-47",
+  "chain_id": 957,
+  "surface": "positions",
+  "audit_subjects": ["positions", "collateral", "account_state"],
+  "official_examples": {
+    "graphql_host": "unsupported_unverified",
+    "positions_path": "/v1/positions",
+    "liquidity_positions_path": "/v1/liquidity-positions",
+    "promoted": false
+  },
+  "gateway_mapping": {
+    "get_positions": "unsupported_unverified",
+    "get_balances": "unsupported_unverified",
+    "get_open_orders": "unsupported_unverified",
+    "query_order": "unsupported_unverified",
+    "get_recent_fills": "unsupported_unverified"
+  }
+}

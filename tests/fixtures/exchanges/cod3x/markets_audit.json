@@ -1,0 +1,19 @@
+{
+  "exchange": "cod3x",
+  "task": "C-48",
+  "surface": "markets",
+  "audit_subjects": ["terminal_routes", "venue_profiles", "market_discovery"],
+  "official_docs": [
+    "https://docs.cod3x.org/",
+    "https://www.cod3x.org/",
+    "https://app.cod3x.org/"
+  ],
+  "venue_profiles_seen": ["hyperliquid", "gmx_v2", "lighter"],
+  "standalone_rest_promoted": false,
+  "standalone_ws_promoted": false,
+  "gateway_mapping": {
+    "get_symbol_rules": "unsupported_unverified",
+    "get_order_book": "unsupported_unverified",
+    "notes": "Do not map downstream Hyperliquid/GMX/Lighter markets as native Cod3x symbol rules or order book snapshots."
+  }
+}

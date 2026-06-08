@@ -1,0 +1,208 @@
+schema_version: 1
+exchange: exmo
+adapter: rustcta_exchange_gateway::adapters::exmo
+metadata:
+  status: validated
+  source: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  notes: "European spot adapter. Public/private REST v1.1 plus WebSocket subscription/auth specs; margin, EX-CODE, wallet withdrawal and native batch operations are unsupported."
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.exmo.com
+  public_websocket: wss://ws-api.exmo.com/v1/public
+  private_websocket: wss://ws-api.exmo.com/v1/private
+rest:
+  base_url: https://api.exmo.com
+auth:
+  rest:
+    scheme: hmac_sha512_form
+    headers: [Key, Sign]
+    nonce: form_field
+  websocket:
+    scheme: hmac_sha512_base64
+    login: "base64(HMAC-SHA512(api_key + nonce, api_secret))"
+rate_limits:
+  buckets:
+    rest:
+      scope: ip_or_user
+      interval: 1s
+      limit: 10
+    websocket:
+      scope: connection
+      interval: 24h
+      limit: 1
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [get_open_orders, get_recent_fills, query_order]
+  after_unknown_place: query_order
+  after_unknown_cancel: get_open_orders
+websocket:
+  public:
+    support: spec_only
+    url: wss://ws-api.exmo.com/v1/public
+    channels: [spot/trades, spot/ticker, spot/order_book_snapshots, spot/order_book_updates]
+    heartbeat: server_ping_client_pong
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    url: wss://ws-api.exmo.com/v1/private
+    channels: [spot/user_trades, spot/wallet, spot/orders]
+    auth: login_hmac_sha512_base64
+    fallback: rest_reconciliation
+streams:
+  - operation: subscribe_public_order_book_delta
+    channel: spot/order_book_updates:{pair}
+    transport: websocket
+    auth: none
+    support: spec_only
+    resync: { mode: rest_snapshot, endpoint_operation: get_order_book }
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/ws/public_orderbook_subscribe.json
+    official_doc: https://support.exmo.com/hc/en-us/articles/14338305227676-Websocket-API
+  - operation: subscribe_private_user_trades
+    channel: spot/user_trades
+    transport: websocket
+    auth: hmac
+    credential_scopes: [read_only]
+    support: spec_only
+    resync: { mode: rest_reconciliation, endpoint_operation: get_recent_fills }
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/ws/private_login.json
+    official_doc: https://support.exmo.com/hc/en-us/articles/14338305227676-Websocket-API
+unsupported:
+  - margin
+  - perpetual
+  - futures
+  - positions
+  - native_batch_place
+  - native_batch_cancel
+  - cancel_all_orders
+  - amend_order
+  - order_list
+  - excode
+  - wallet_withdraw
+  - transfers
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/pair_settings
+    auth: none
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/order_book
+    auth: none
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/pair_settings
+    auth: none
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: false
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/user_info
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/get_balances.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/order_create
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/place_order_limit.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/order_create
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/place_quote_market_order.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/order_cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/cancel_order.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/order_trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/query_order.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+    notes: "Limited filled-order reconciliation; EXMO spot REST has no general single order status endpoint."
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/user_open_orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/get_open_orders.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: POST
+    path: /v1.1/user_trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/exmo/request_specs/get_recent_fills.json
+    official_doc: https://documenter.getpostman.com/view/10287440/SzYXWKPi
+    notes: "EXMO user_trades supports limit up to 100 and offset cursor pagination."

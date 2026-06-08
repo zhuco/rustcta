@@ -1,0 +1,17 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "order_book",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/matcher/orderbook/WAVES/DG2xFkPdDwKUoBkzGAhQtLpSGzfXLiCYPEzeKH2Ad24p",
+  "auth": "none",
+  "query": {
+    "depth": {
+      "match": "exact",
+      "value": "100"
+    }
+  },
+  "strict_query": true,
+  "strict_body": true
+}

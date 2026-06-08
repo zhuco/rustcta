@@ -1,0 +1,15 @@
+enabled: false
+adapter: okxus
+profile_of: okx
+rest_base_url: https://us.okx.com
+public_ws_url: wss://wsus.okx.com:8443/ws/v5/public
+private_ws_url: wss://wsus.okx.com:8443/ws/v5/private
+private_rest:
+  enabled: false
+  reason: OKX US private trading requires separate credential, account eligibility, and product-scope audit.
+products:
+  - spot
+notes:
+  - Uses OKX v5 request and parser shapes with U.S. regional hosts.
+  - Public REST and public WS payload specs are available offline.
+  - Private REST, private WS, non-spot products, and order writes are Unsupported in this profile until credential scope is verified.

@@ -1,0 +1,17 @@
+{
+  "exchange": "apollox_dex",
+  "v1_orderbook_perp": true,
+  "public_rest_runtime_enabled": true,
+  "private_rest_request_spec_only": true,
+  "private_write_runtime_enabled": false,
+  "private_ws_runtime_enabled": false,
+  "v2_onchain_trading_enabled": false,
+  "testnet_enabled": false,
+  "unsupported": [
+    "spot_api_family",
+    "v2_onchain_contract_trading",
+    "deposits_withdrawals_transfers",
+    "broker_proxy_paths",
+    "stable_testnet"
+  ]
+}

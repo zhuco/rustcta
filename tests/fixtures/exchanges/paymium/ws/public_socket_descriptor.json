@@ -1,0 +1,6 @@
+{
+  "url": "https://paymium.com/public",
+  "path": "/ws/socket.io",
+  "event": "stream",
+  "runtime": "unsupported_socketio_v1_3"
+}

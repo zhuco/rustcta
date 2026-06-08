@@ -1,0 +1,12 @@
+[
+  {
+    "wallet": "W001",
+    "asset": "USDT",
+    "balance": "1000",
+    "frozen": "10",
+    "positionMargin": "25",
+    "availableBalance": "965",
+    "canWithdrawAmount": "900",
+    "bonusAmount": "0"
+  }
+]

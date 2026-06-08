@@ -1,0 +1,20 @@
+{
+  "exchange": "equation",
+  "task": "C-41",
+  "chain_id": 42161,
+  "surface": "positions",
+  "audit_subjects": ["positions", "collateral", "account_state"],
+  "official_examples": {
+    "graphql_host": "https://graph-arbitrum.equation.trade/subgraphs/name/equation-v3-arbitrum",
+    "positions_path": "/v1/positions",
+    "liquidity_positions_path": "/v1/liquidity-positions",
+    "promoted": false
+  },
+  "gateway_mapping": {
+    "get_positions": "unsupported_unverified",
+    "get_balances": "unsupported_unverified",
+    "get_open_orders": "unsupported_unverified",
+    "query_order": "unsupported_unverified",
+    "get_recent_fills": "unsupported_unverified"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "exchange": "binanceus",
+  "name": "place_order_limit",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/api/v3/order",
+  "payload": "newClientOrderId=cli-place&price=25000.00000000&quantity=0.01000000&recvWindow=5000&side=BUY&symbol=BTCUSDT&timeInForce=GTC&timestamp=1710000000000&type=LIMIT",
+  "expected_signature": "8d8f19aad6df2bc8c7bf5fbdf83eaca22e2105f9faa907e872e6cfcbe075b0ce",
+  "payload_format": "raw_payload"
+}

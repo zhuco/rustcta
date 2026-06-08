@@ -1,0 +1,19 @@
+{
+  "exchange": "blockchaincom",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fills",
+  "auth": "api_key",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTC-USD" },
+    "limit": { "match": "exact", "value": "100" }
+  },
+  "headers": {
+    "Accept": { "match": "exact", "value": "application/json" },
+    "X-API-Token": { "match": "non_empty" }
+  },
+  "strict_query": true,
+  "strict_body": true
+}

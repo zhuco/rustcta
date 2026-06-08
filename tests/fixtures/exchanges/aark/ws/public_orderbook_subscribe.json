@@ -1,0 +1,5 @@
+{
+  "id": "aark-PERP_BTC_USDC@orderbookupdate",
+  "event": "subscribe",
+  "topic": "PERP_BTC_USDC@orderbookupdate"
+}

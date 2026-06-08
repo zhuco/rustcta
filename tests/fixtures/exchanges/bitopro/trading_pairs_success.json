@@ -1,0 +1,34 @@
+{
+  "data": [
+    {
+      "pair": "btc_twd",
+      "base": "btc",
+      "quote": "twd",
+      "basePrecision": "8",
+      "quotePrecision": "0",
+      "minLimitBaseAmount": "0.0001",
+      "maxLimitBaseAmount": "100",
+      "minMarketBuyQuoteAmount": "100",
+      "orderOpenLimit": "200",
+      "maintain": false,
+      "orderBookQuotePrecision": "0",
+      "orderBookQuoteScaleLevel": "5",
+      "amountPrecision": "4"
+    },
+    {
+      "pair": "eth_usdt",
+      "base": "eth",
+      "quote": "usdt",
+      "basePrecision": "8",
+      "quotePrecision": "2",
+      "minLimitBaseAmount": "0.001",
+      "maxLimitBaseAmount": "1000",
+      "minMarketBuyQuoteAmount": "5",
+      "orderOpenLimit": "200",
+      "maintain": false,
+      "orderBookQuotePrecision": "2",
+      "orderBookQuoteScaleLevel": "4",
+      "amountPrecision": "5"
+    }
+  ]
+}

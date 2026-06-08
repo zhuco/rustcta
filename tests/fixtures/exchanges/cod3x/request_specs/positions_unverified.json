@@ -1,0 +1,11 @@
+{
+  "exchange": "cod3x",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "support": "unsupported_unverified",
+  "downstream_venue_profiles": ["hyperliquid", "gmx_v2", "lighter"],
+  "expected_error": "cod3x.positions_unverified",
+  "notes": "Not promoted because Cod3x does not document a stable native positions API independent of downstream venue accounts."
+}

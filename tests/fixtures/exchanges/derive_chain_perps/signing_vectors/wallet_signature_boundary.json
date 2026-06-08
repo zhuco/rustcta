@@ -1,0 +1,12 @@
+{
+  "exchange": "derive_chain_perps",
+  "chain_id": 957,
+  "account_model": "derive_chain_account",
+  "supported": false,
+  "trade_enabled": false,
+  "api_key_auth": false,
+  "requires_private_key": false,
+  "private_key_fixture_present": false,
+  "expected_error": "derive_chain_perps.derive_chain_order_signing_unverified",
+  "notes": "The gateway does not accept raw wallet private keys for derive_chain_perps in this task; wallet signing remains unsupported."
+}

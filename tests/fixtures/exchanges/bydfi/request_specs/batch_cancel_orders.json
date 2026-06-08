@@ -1,0 +1,13 @@
+{
+  "exchange": "bydfi",
+  "operation": "batch_cancel_orders",
+  "method": "POST",
+  "path": "/v2/fapi/trade/batch_cancel_order",
+  "body": {
+    "wallet": "W001",
+    "symbol": "BTC-USDT",
+    "orderIds": ["9101"],
+    "clientOrderIds": ["BATCH-001"]
+  },
+  "signing_vector": "bydfi/rest_body_batch_cancel_order"
+}

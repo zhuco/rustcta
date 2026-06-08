@@ -1,0 +1,14 @@
+{
+  "secret": "bittrade-secret-fixture",
+  "method": "GET",
+  "host": "api-cloud.bittrade.co.jp",
+  "request_path": "/ws/v2",
+  "query": {
+    "accessKey": "bittrade-key-fixture",
+    "signatureMethod": "HmacSHA256",
+    "signatureVersion": "2.1",
+    "timestamp": "2026-06-08T00:00:00"
+  },
+  "payload": "GET\napi-cloud.bittrade.co.jp\n/ws/v2\naccessKey=bittrade-key-fixture&signatureMethod=HmacSHA256&signatureVersion=2.1&timestamp=2026-06-08T00%3A00%3A00",
+  "expected_signature": "iX48do380tJngb/Y7E8SpKIiL9WfHgW8eCV/kG7fZXU="
+}

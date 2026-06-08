@@ -1,0 +1,21 @@
+{
+  "code": "A10000",
+  "message": "Success",
+  "data": {
+    "page": 1,
+    "limit": 100,
+    "items": [
+      {
+        "id": "novadax-order-1",
+        "clientOrderId": "offline-fixture",
+        "symbol": "BTC_BRL",
+        "side": "BUY",
+        "type": "LIMIT",
+        "price": "350000",
+        "amount": "0.01",
+        "filledAmount": "0",
+        "status": "SUBMITTED"
+      }
+    ]
+  }
+}

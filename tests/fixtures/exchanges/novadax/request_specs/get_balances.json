@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/v1/account/getBalance",
+  "auth": "hmac_sha256",
+  "headers": {
+    "X-Nova-Access-Key": "<redacted>",
+    "X-Nova-Signature": "<computed>",
+    "X-Nova-Timestamp": "<timestamp>"
+  }
+}

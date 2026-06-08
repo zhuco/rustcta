@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "data": [
+    {
+      "symbol": "BTC_USDT",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT",
+      "pricePrecision": 2,
+      "amountPrecision": 6,
+      "tickSize": "0.01",
+      "stepSize": "0.000001",
+      "minAmount": "0.00001",
+      "minTotal": "5",
+      "status": "active"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "exchange": "coinmetro",
+  "runtime_scope": "spot_trading_only",
+  "unsupported_operations": [
+    "margin_orders",
+    "margin_collateral",
+    "swap",
+    "hedge_orders",
+    "close_order_position",
+    "tram_orders",
+    "withdrawals",
+    "deposits",
+    "fiat_payment_rails",
+    "transfers",
+    "positions",
+    "reduce_only",
+    "post_only",
+    "client_order_id",
+    "cancel_all_orders",
+    "batch_orders"
+  ],
+  "expected_runtime_errors": [
+    "coinmetro.positions_unsupported_spot_only",
+    "coinmetro.reduce_only_unsupported_spot",
+    "coinmetro.post_only_unsupported",
+    "coinmetro.client_order_id_unsupported",
+    "coinmetro.cancel_all_orders_no_native_endpoint"
+  ],
+  "trade_enabled": true,
+  "funding_enabled": false
+}

@@ -1,0 +1,17 @@
+{
+  "exchange": "woofipro",
+  "operation": "cancel_order",
+  "method": "DELETE",
+  "path": "/v1/order",
+  "query": {
+    "order_id": "123456789",
+    "symbol": "PERP_BTC_USDC"
+  },
+  "headers": {
+    "orderly-account-id": "acct_test_account_id",
+    "orderly-key": "ed25519:test-public-key",
+    "orderly-signature": "test-signature-placeholder",
+    "orderly-timestamp": "1700000000000"
+  },
+  "auth": "signed"
+}

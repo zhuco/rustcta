@@ -1,0 +1,16 @@
+{
+  "exchange": "bitbns",
+  "operation": "private_post_headers",
+  "api_key": "fixture-key",
+  "api_secret": "fixture-secret",
+  "symbol_path": "/placeOrder/BTC",
+  "nonce": "1700000000000",
+  "body": {
+    "quantity": "0.01",
+    "rate": "65000",
+    "side": "BUY"
+  },
+  "payload": "eyJib2R5Ijp7InF1YW50aXR5IjoiMC4wMSIsInJhdGUiOiI2NTAwMCIsInNpZGUiOiJCVVkifSwic3ltYm9sIjoiL3BsYWNlT3JkZXIvQlRDIiwidGltZVN0YW1wX25vbmNlIjoiMTcwMDAwMDAwMDAwMCJ9",
+  "expected_signature": "f3b5a51bb697da4d2e01ad782da03a1abeda27bcc1753a4ac2c4ef67841ce9fce632531036a8d346d88b1ab014b5e5333c42a65ba1330f57bda2a59380ce455f",
+  "secret_leak_check": false
+}

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "message": "Invalid subscriptionType",
+    "code": "invalid_subscription"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "exchange": "bydfi",
+  "kind": "websocket_login",
+  "api_key": "sample-key",
+  "api_secret": "sample-secret",
+  "timestamp": "1735660800000",
+  "prehash": "sample-key1735660800000",
+  "expected_signature": "9a6cffcb1c843ac2c621868c30989cb8fd303ed35462dd00713a778c0e6d06fc"
+}

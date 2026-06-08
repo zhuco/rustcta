@@ -1,0 +1,9 @@
+{
+  "e": "order-book-subscribe",
+  "data": {
+    "pair": ["BTC", "USD"],
+    "subscribe": true,
+    "depth": 25
+  },
+  "oid": "fixture-order-book-subscribe"
+}

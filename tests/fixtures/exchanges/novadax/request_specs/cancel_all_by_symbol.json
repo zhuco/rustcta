@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "path": "/v1/orders/cancel-by-symbol",
+  "auth": "hmac_sha256",
+  "headers": {
+    "X-Nova-Access-Key": "<redacted>",
+    "X-Nova-Signature": "<computed>",
+    "X-Nova-Timestamp": "<timestamp>"
+  },
+  "body": {
+    "symbol": "BTC_BRL"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "exchange": "bybiteu",
+  "profile_of": "bybit",
+  "operation": "private_rest",
+  "support": "unsupported",
+  "reason": "EU profile private read/write trading is not enabled until broker third-party application scope and credential permissions are audited.",
+  "would_reuse_auth_shape": "bybit_v5_hmac_sha256",
+  "credential_values": {},
+  "endpoints": [
+    "/v5/account/wallet-balance",
+    "/v5/order/create",
+    "/v5/order/cancel",
+    "/v5/order/realtime",
+    "/v5/execution/list"
+  ]
+}

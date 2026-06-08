@@ -1,0 +1,15 @@
+{
+  "exchange": "bydfi",
+  "operation": "amend_order",
+  "method": "POST",
+  "path": "/v2/fapi/trade/edit_order",
+  "body": {
+    "wallet": "W001",
+    "symbol": "BTC-USDT",
+    "orderId": "9001",
+    "clientOrderId": "CID-001",
+    "side": "BUY",
+    "quantity": "0.03"
+  },
+  "signing_vector": "bydfi/rest_body_amend_order"
+}

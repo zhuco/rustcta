@@ -1,0 +1,16 @@
+{
+  "exchange": "blockchaincom",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/accounts",
+  "auth": "api_key",
+  "headers": {
+    "Accept": { "match": "exact", "value": "application/json" },
+    "X-API-Token": { "match": "non_empty" }
+  },
+  "strict_query": true,
+  "strict_body": true,
+  "forbid_header_values_containing": ["real", "secret", "token-secret"]
+}

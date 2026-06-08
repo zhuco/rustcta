@@ -1,0 +1,37 @@
+{
+  "exchange": "bit2c",
+  "operation": "query_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/Order/GetById",
+  "auth": "signed",
+  "query": {
+    "id": {
+      "match": "exact",
+      "value": "123456789"
+    },
+    "nonce": {
+      "match": "non_empty"
+    }
+  },
+  "headers": {
+    "key": {
+      "match": "non_empty"
+    },
+    "sign": {
+      "match": "non_empty"
+    },
+    "content-type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "forbid_query_values_containing": [
+    "fixture_secret"
+  ],
+  "forbid_header_values_containing": [
+    "fixture_secret"
+  ],
+  "signing_vector": "tests/fixtures/exchanges/bit2c/signing_vectors/private_hmac_sha512_form.json"
+}

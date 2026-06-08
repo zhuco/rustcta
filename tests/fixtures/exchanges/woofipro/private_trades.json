@@ -1,0 +1,22 @@
+{
+  "success": true,
+  "data": {
+    "rows": [
+      {
+        "id": "fill-1",
+        "order_id": 123456789,
+        "client_order_id": "cid-woofi-1",
+        "symbol": "PERP_BTC_USDC",
+        "side": "BUY",
+        "executed_price": "65000",
+        "executed_quantity": "0.01",
+        "fee": "0.325",
+        "fee_asset": "USDC",
+        "order_enum_fee_rate": "0.0005",
+        "realized_pnl": "0",
+        "is_maker": 0,
+        "executed_timestamp": 1700000000123
+      }
+    ]
+  }
+}

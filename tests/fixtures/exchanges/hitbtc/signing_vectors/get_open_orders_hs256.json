@@ -1,0 +1,12 @@
+{
+  "exchange": "hitbtc",
+  "name": "get_open_orders_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "GET",
+  "request_path": "/api/3/spot/order",
+  "payload": "GET/api/3/spot/order171000000000010000",
+  "expected_signature": "ec77ed9b4218ffa78acd6a2702dd95ec90e8f057d4ed21d1457bd26193841698",
+  "payload_format": "raw_payload"
+}

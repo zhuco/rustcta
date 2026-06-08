@@ -1,0 +1,10 @@
+{
+  "exchange": "hibachi",
+  "name": "exchange-managed-create-order-hmac",
+  "algorithm": "hmac_sha256_hex_over_binary_payload",
+  "secret": "test-secret",
+  "payload_hex": "0006178313c388000000000200000002540be400000000000000000a000000000000000000001388",
+  "expected_signature": "321447ecf3fb215e0bacd04436254a6f28823f86a728de1701d6f7fa66e68ed8",
+  "cancel_payload_hex": "0809d6e285cf0000",
+  "notes": "Payload shape follows Hibachi signing docs; key material is synthetic."
+}

@@ -1,0 +1,17 @@
+{
+  "operation": "bitteam.cancel_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/trade/api/ccxt/cancelorder",
+  "query": {},
+  "headers": {
+    "authorization": "<redacted:basic-auth>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "id": "btm_test_order_id_001"
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "bitteam.cancel_order_request_spec_only"
+}

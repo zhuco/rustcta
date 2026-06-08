@@ -1,0 +1,19 @@
+{
+  "operation": "zebpay.get_recent_fills",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "GET",
+  "path": "/orders/{order_id}/fills",
+  "query": {},
+  "headers": {
+    "client_id": "<redacted:client-id>",
+    "timestamp": "<redacted:unix-ms>",
+    "RequestId": "<redacted:uuid>",
+    "Authorization": "<redacted:bearer-token>"
+  },
+  "path_params": {
+    "order_id": "zebpay_test_order_id_001"
+  },
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "zebpay.recent_fills_request_spec_only"
+}

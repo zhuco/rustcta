@@ -1,0 +1,26 @@
+{
+  "exchange": "ndax",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "signed",
+  "headers": {
+    "X-NDAX-APIKEY": { "match": "present" },
+    "X-NDAX-SIGNATURE": { "match": "present" },
+    "X-NDAX-TIMESTAMP": { "match": "present" }
+  },
+  "body": {
+    "accountId": 1001,
+    "instrumentId": 1,
+    "limitPrice": "65000",
+    "orderType": 2,
+    "quantity": "0.01",
+    "side": 0,
+    "timeInForce": 1
+  },
+  "strict_body": true,
+  "forbid_header_values_containing": ["fixture-secret", "fixture-passphrase"],
+  "signing_vector": "../signing_vectors/rest_order_signature.json"
+}

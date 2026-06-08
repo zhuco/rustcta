@@ -1,0 +1,22 @@
+{
+  "exchange": "bequant",
+  "scope": "conservative_boundaries",
+  "unsupported": [
+    {
+      "operation": "margin_trading",
+      "reason": "Official API family exposes margin endpoints, but this adapter only maps spot ExchangeClient semantics."
+    },
+    {
+      "operation": "futures_trading",
+      "reason": "Futures/perpetual product lines require separate contract metadata and risk model mapping before enabling."
+    },
+    {
+      "operation": "funding_transfer_withdraw",
+      "reason": "Wallet transfer and withdrawal APIs are outside the trading runtime."
+    },
+    {
+      "operation": "hitbtc_byte_for_byte_alias",
+      "reason": "Bequant is treated as a HitBTC v3 API-family profile, not a guaranteed complete clone."
+    }
+  ]
+}

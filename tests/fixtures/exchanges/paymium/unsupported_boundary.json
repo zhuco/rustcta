@@ -1,0 +1,27 @@
+{
+  "exchange": "paymium",
+  "unsupported": [
+    "non_btc_eur_pairs",
+    "margin",
+    "futures",
+    "perpetuals",
+    "positions",
+    "leverage",
+    "funding",
+    "mark_price",
+    "open_interest",
+    "native_batch_place",
+    "native_batch_cancel",
+    "cancel_all_orders",
+    "amend_order",
+    "client_order_id",
+    "post_only",
+    "stop_orders",
+    "withdrawals",
+    "deposit_address_creation",
+    "email_transfers",
+    "payment_requests",
+    "merchant_api",
+    "private_websocket_runtime"
+  ]
+}

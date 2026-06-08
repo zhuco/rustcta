@@ -1,0 +1,11 @@
+{
+  "exchange": "cod3x",
+  "account_model": "downstream_venue_account_or_wallet",
+  "supported": false,
+  "trade_enabled": false,
+  "api_key_auth": false,
+  "requires_private_key": false,
+  "private_key_fixture_present": false,
+  "expected_error": "cod3x.routed_order_signing_unverified",
+  "notes": "The gateway does not accept Cod3x terminal secrets, downstream venue keys, wallet private keys, or delegated trading tokens for this task."
+}

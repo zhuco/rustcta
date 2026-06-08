@@ -1,0 +1,11 @@
+{
+  "operation": "exmo.cancel_order",
+  "method": "POST",
+  "path": "/v1.1/order_cancel",
+  "content_type": "application/x-www-form-urlencoded",
+  "auth": "hmac_sha512_form",
+  "body": {
+    "order_id": "123456",
+    "nonce": "1710000000002"
+  }
+}

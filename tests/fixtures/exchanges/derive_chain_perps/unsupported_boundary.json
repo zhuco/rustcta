@@ -1,0 +1,28 @@
+{
+  "exchange": "derive_chain_perps",
+  "task": "C-47",
+  "chain": "derive_chain",
+  "chain_id": 957,
+  "product": "perpetual",
+  "protocol_model": "Derive Chain settlement profile",
+  "scan_only": true,
+  "stable_api_verified": false,
+  "trade_enabled": false,
+  "private_rest_enabled": false,
+  "public_stream_enabled": false,
+  "private_stream_enabled": false,
+  "official_sources": [
+    "https://docs.derive.xyz/",
+    "https://docs.derive.xyz/whitepaper-v3/pricing-mechanism",
+    "https://docs.derive.xyz/whitepaper-v3/funding-rate",
+    "https://github.com/deriveprotocol/sdk"
+  ],
+  "expected_runtime_errors": {
+    "markets": "derive_chain_perps.markets_unverified",
+    "risk": "derive_chain_perps.risk_and_fees_unverified",
+    "positions": "derive_chain_perps.positions_unverified",
+    "orders": "derive_chain_perps.derive_chain_order_signing_unverified",
+    "public_stream": "derive_chain_perps.public_stream_unverified",
+    "private_stream": "derive_chain_perps.private_stream_unverified"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "exchange": "wavesexchange",
+  "operation": "symbol_rules",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/matcher/orderbook/WAVES/DG2xFkPdDwKUoBkzGAhQtLpSGzfXLiCYPEzeKH2Ad24p/info",
+  "auth": "none",
+  "strict_query": true,
+  "strict_body": true
+}

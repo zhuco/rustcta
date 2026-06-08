@@ -1,0 +1,227 @@
+schema_version: 1
+exchange: aark
+adapter: AarkGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/aark_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task C-40 conservative Aark profile over Orderly EVM API. Public info is parsed; signed read, liquidation, vault, oracle and trading APIs stay spec-only or unsupported.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://api-evm.orderly.org
+  testnet_rest: https://testnet-api-evm.orderly.org
+  public_ws: wss://ws-evm.orderly.org/ws/stream
+auth:
+  public_rest: none
+  signed_read_rest: Orderly account headers orderly-account-id/orderly-key/orderly-signature/orderly-timestamp
+  private_write_rest: unsupported until Aark account, permission and regional boundaries are audited
+rate_limits:
+  aark_public: { scope: ip, interval_ms: 1000, limit: 10 }
+  aark_orderly_signed_read: { scope: account, interval_ms: 1000, limit: 5 }
+  aark_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  public_info: { mode: none }
+  private_history: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: REST reconciliation fallback is not enabled because account-scoped signed reads are not audited.
+batch:
+  place: { support: unsupported, reason: aark.batch_place_orders_unverified_orderly_semantics }
+  cancel: { support: unsupported, reason: aark.batch_cancel_orders_unverified_orderly_semantics }
+websocket:
+  public:
+    support: spec_only
+    helper_only: true
+    heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/public/info
+    auth: none
+    rate_limit_bucket: aark_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/public/get-available-symbols-public-info
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/public_info.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /v1/orderbook/{symbol}
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: aark_orderly_signed_read
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: aark.order_book_requires_orderly_account_signed_request
+    official_doc: https://orderly.network/docs/build-on-omnichain/evm-api/restful-api/private/orderbook-snapshot
+    request_spec_fixture: tests/fixtures/exchanges/aark/request_specs/orderbook_signed_read.json
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/aark/balances
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.balances_require_orderly_account_audit
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/aark/positions
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.positions_require_orderly_account_audit
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/aark/place_order
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.place_order_requires_orderly_ed25519_account_audit
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/aark/cancel_order
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.cancel_order_requires_orderly_ed25519_account_audit
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/aark/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.batch_place_orders_unverified_orderly_semantics
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/aark/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.batch_cancel_orders_unverified_orderly_semantics
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/aark/cancel_all_orders
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.cancel_all_orders_unverified_orderly_semantics
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/aark/open_orders
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.open_orders_require_orderly_account_audit
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/aark/recent_fills
+    auth: unsupported
+    rate_limit_bucket: aark_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: aark.recent_fills_require_orderly_account_audit
+streams:
+  - operation: public_orderbook_delta
+    product: perpetual
+    transport: websocket
+    channel: "{symbol}@orderbookupdate"
+    auth: none
+    support: spec_only
+    resync:
+      endpoint_operation: get_order_book
+      mode: signed_rest_required
+  - operation: private_user_events
+    product: perpetual
+    transport: websocket
+    channel: executionreport/account
+    auth: signed
+    support: unsupported
+    reason: aark.private_streams_require_orderly_account_auth

@@ -1,0 +1,9 @@
+{
+  "op": "subscribe",
+  "args": [
+    {
+      "channel": "books",
+      "instId": "BTC-USDT"
+    }
+  ]
+}

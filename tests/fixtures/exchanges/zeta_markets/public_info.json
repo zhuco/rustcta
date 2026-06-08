@@ -1,0 +1,30 @@
+{
+  "symbols": [
+    {
+      "ticker_id": "SOL-PERP",
+      "base": "SOL",
+      "quote": "USDC",
+      "tick_size": "0.0001",
+      "lot_size": "0.001",
+      "min_quantity": "0.001"
+    },
+    {
+      "ticker_id": "BTC-PERP",
+      "base": "BTC",
+      "quote": "USDC",
+      "tick_size": "0.1",
+      "lot_size": "0.0001",
+      "min_quantity": "0.0001"
+    },
+    {
+      "ticker_id": "ETH-PERP",
+      "base": "ETH",
+      "quote": "USDC",
+      "tick_size": "0.01",
+      "lot_size": "0.001",
+      "min_quantity": "0.001"
+    }
+  ],
+  "source": "zeta-rest-data-api-fixture",
+  "venue_ceased_operations": true
+}

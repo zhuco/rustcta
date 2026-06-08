@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,12 +70,39 @@ pub enum RequestAuth {
     Signed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FieldExpectation {
     #[serde(rename = "match", default)]
     pub match_kind: FieldMatch,
     #[serde(default)]
     pub value: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for FieldExpectation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum FieldExpectationWire {
+            ExactString(String),
+            Object {
+                #[serde(rename = "match", default)]
+                match_kind: FieldMatch,
+                #[serde(default)]
+                value: Option<String>,
+            },
+        }
+
+        match FieldExpectationWire::deserialize(deserializer)? {
+            FieldExpectationWire::ExactString(value) => Ok(Self {
+                match_kind: FieldMatch::Exact,
+                value: Some(value),
+            }),
+            FieldExpectationWire::Object { match_kind, value } => Ok(Self { match_kind, value }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

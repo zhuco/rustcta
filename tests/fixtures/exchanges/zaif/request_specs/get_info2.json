@@ -1,0 +1,6 @@
+{
+  "operation": "zaif.get_balances",
+  "method": "POST",
+  "path": "/tapi",
+  "body": "nonce=1710000002&method=get_info2"
+}

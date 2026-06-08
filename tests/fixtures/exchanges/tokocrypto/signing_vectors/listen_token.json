@@ -1,0 +1,6 @@
+{
+  "api_secret": "tokocrypto-secret-fixture",
+  "query": "recvWindow=5000&timestamp=1581720670624",
+  "expected_signature": "1993abda01d31d2ca04cb21f929b73cbd6ae1f96d607d7daff7f6412c4a8bc99",
+  "expected_signed_query": "recvWindow=5000&timestamp=1581720670624&signature=1993abda01d31d2ca04cb21f929b73cbd6ae1f96d607d7daff7f6412c4a8bc99"
+}

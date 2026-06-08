@@ -1,0 +1,4 @@
+{
+  "type": "AUTHENTICATE",
+  "api_token": "<redacted:token>"
+}

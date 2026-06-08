@@ -1,0 +1,14 @@
+gateway:
+  adapters:
+    - btcbox
+
+btcbox:
+  enabled: false
+  rest_base_url: "https://www.btcbox.co.jp/api/v1"
+  request_timeout_ms: 10000
+  enabled_private_rest: false
+  api_key: null
+  api_secret: null
+  notes:
+    - "Scan-only public REST adapter for BTCBOX JPY spot markets."
+    - "Do not enable private REST or live trading from this example."

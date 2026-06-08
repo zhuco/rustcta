@@ -1,0 +1,226 @@
+schema_version: 1
+exchange: mango_markets
+adapter: MangoMarketsGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/mango_markets_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task C-44 Mango Markets v4 Solana margin/perp audit. Mango is an on-chain Solana protocol plus SDK, not a conventional REST trading API. This adapter is G0 scan-only; private trading and account state stay unsupported.
+market_types: [perpetual]
+products: [perpetual, margin]
+base_urls:
+  solana_rpc: https://api.mainnet-beta.solana.com
+  solana_ws: wss://api.mainnet-beta.solana.com
+  devnet_rpc: https://api.devnet.solana.com
+auth:
+  public_rest: none
+  solana_rpc: none
+  private_write_rest: unsupported; Mango order writes are Solana transactions signed by a user wallet
+  private_stream: unsupported; account ownership and health/reconciliation are not audited
+rate_limits:
+  mango_markets_rpc_scan: { scope: ip, interval_ms: 1000, limit: 5 }
+  mango_markets_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  group_scan: { mode: none }
+  event_queue_history: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: REST reconciliation fallback is not enabled because MangoAccount health, open orders, event queues and wallet authorization are not audited.
+batch:
+  place: { support: unsupported, reason: mango_markets.batch_place_orders_require_atomic_transaction_audit }
+  cancel: { support: unsupported, reason: mango_markets.batch_cancel_orders_require_atomic_transaction_audit }
+websocket:
+  public:
+    support: spec_only
+    helper_only: true
+    heartbeat: { mode: solana_rpc_ws, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 90000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: none
+    rate_limit_bucket: mango_markets_rpc_scan
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: mango_markets.symbol_rules_require_sdk_or_rpc_scan
+    official_doc: https://github.com/blockworks-foundation/mango-v4
+    request_spec_fixture: tests/fixtures/exchanges/mango_markets/request_specs/group_account_info.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /
+    auth: none
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.order_book_requires_onchain_book_and_event_queue_audit
+    official_doc: https://deepwiki.com/blockworks-foundation/mango-v4/1-overview
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/balances
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.balances_require_mango_account_health_audit
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/positions
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.positions_require_mango_account_perp_audit
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/place_order
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.place_order_requires_solana_wallet_transaction_signing_audit
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/cancel_order
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.cancel_order_requires_solana_wallet_transaction_signing_audit
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.batch_place_orders_require_atomic_transaction_audit
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.batch_cancel_orders_require_atomic_transaction_audit
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/cancel_all_orders
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.cancel_all_requires_open_orders_scan_and_transaction_audit
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/open_orders
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.open_orders_require_mango_account_and_book_scan
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/mango_markets/recent_fills
+    auth: unsupported
+    rate_limit_bucket: mango_markets_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: mango_markets.recent_fills_require_event_queue_and_indexer_audit
+streams:
+  - operation: public_account_subscribe
+    product: perpetual
+    transport: websocket
+    channel: accountSubscribe
+    auth: none
+    support: spec_only
+    resync:
+      endpoint_operation: get_symbol_rules
+      mode: sdk_or_rpc_scan_required
+  - operation: private_user_events
+    product: perpetual
+    transport: websocket
+    channel: accountSubscribe
+    auth: wallet
+    support: unsupported
+    reason: mango_markets.private_stream_requires_wallet_owned_account_audit

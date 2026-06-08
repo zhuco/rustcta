@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "data": {
+    "symbol": "PERP_BTC_USDC",
+    "position_qty": "0.25",
+    "average_open_price": "64000",
+    "mark_price": "65000",
+    "est_liq_price": "51000",
+    "unsettled_pnl": "250",
+    "leverage": "3"
+  }
+}

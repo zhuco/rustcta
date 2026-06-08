@@ -1,0 +1,16 @@
+{
+  "state": 0,
+  "result": [
+    {
+      "symbol": "BTC_USDT",
+      "baseCurrency": "BTC",
+      "quoteCurrency": "USDT",
+      "basePrec": 6,
+      "quotePrec": 2,
+      "baseMinSize": "0.00010000",
+      "baseMaxSize": "10.00000000",
+      "quoteMinSize": "5.00000000",
+      "quoteMaxSize": "1000000.00000000"
+    }
+  ]
+}

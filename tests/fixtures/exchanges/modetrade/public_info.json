@@ -1,0 +1,39 @@
+{
+  "success": true,
+  "timestamp": 1700000000000,
+  "data": {
+    "rows": [
+      {
+        "symbol": "PERP_BTC_USDC",
+        "base": "BTC",
+        "quote": "USDC",
+        "quote_tick": "0.1",
+        "base_tick": "0.0001",
+        "base_min": "0.0001",
+        "base_max": "100",
+        "quote_min": "10",
+        "quote_max": "1000000",
+        "min_notional": "10"
+      },
+      {
+        "symbol": "PERP_ETH_USDC",
+        "base": "ETH",
+        "quote": "USDC",
+        "quote_tick": "0.01",
+        "base_tick": "0.001",
+        "base_min": "0.001",
+        "base_max": "1000",
+        "quote_min": "5",
+        "quote_max": "1000000",
+        "min_notional": "5"
+      },
+      {
+        "symbol": "SPOT_MODE_USDC",
+        "base": "MODE",
+        "quote": "USDC",
+        "quote_tick": "0.0001",
+        "base_tick": "1"
+      }
+    ]
+  }
+}

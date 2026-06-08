@@ -1,0 +1,26 @@
+{
+  "e": "currency_limits",
+  "ok": "ok",
+  "data": {
+    "pairs": [
+      {
+        "symbol1": "BTC",
+        "symbol2": "USD",
+        "minLotSize": 0.0001,
+        "minLotSizeS2": 20,
+        "maxLotSize": 30,
+        "minPrice": "1500",
+        "maxPrice": "35000"
+      },
+      {
+        "symbol1": "ETH",
+        "symbol2": "EUR",
+        "minLotSize": 0.002,
+        "minLotSizeS2": 10,
+        "maxLotSize": 500,
+        "minPrice": "10",
+        "maxPrice": "10000"
+      }
+    ]
+  }
+}

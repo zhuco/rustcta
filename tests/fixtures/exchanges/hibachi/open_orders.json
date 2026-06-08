@@ -1,0 +1,17 @@
+{
+  "orders": [
+    {
+      "accountId": 42,
+      "orderId": 579183763093760000,
+      "contractId": 2,
+      "side": "BID",
+      "orderType": { "type": "LIMIT" },
+      "symbol": "BTC/USDT-P",
+      "status": "OPEN",
+      "totalQuantity": "0.5",
+      "availableQuantity": "0.4",
+      "price": "65000",
+      "creationTime": 1717200000123
+    }
+  ]
+}

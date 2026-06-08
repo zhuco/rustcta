@@ -1,0 +1,61 @@
+# Binance.US gateway adapter example. Disabled by default.
+# Credentials are read from environment variables; never place real secrets here.
+
+exchange: binanceus
+adapter: binanceus
+enabled: false
+
+market_types:
+  - spot
+
+rest_base_url: https://api.binance.us
+public_ws_url: wss://stream.binance.us:9443
+private_ws_url: wss://stream.binance.us:9443
+
+api_key: ${RUSTCTA_BINANCEUS_API_KEY}
+api_secret: ${RUSTCTA_BINANCEUS_API_SECRET}
+recv_window_ms: 5000
+
+# Keep private REST disabled until read-only preflight validates key scope,
+# account region eligibility, symbol filters, and order limits.
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+
+request_timeout_ms: 10000
+orderbook_depth: 20
+log_raw_messages: false
+
+enabled_symbols:
+  spot:
+    - BTCUSDT
+    - ETHUSDT
+
+capabilities:
+  public_rest:
+    - symbol_rules
+    - order_book_snapshot
+  private_rest:
+    - balances
+    - fees
+    - place_order
+    - quote_market_order
+    - cancel_order
+    - cancel_all_orders
+    - query_order
+    - open_orders
+    - recent_fills
+
+safety:
+  live_trading_enabled: false
+  require_read_only_reconciliation: true
+  unsupported_runtime:
+    - non_spot_markets
+    - positions
+    - funding
+    - leverage
+    - margin_mode
+    - amend_order
+    - order_list
+    - public_websocket_runtime
+    - private_websocket_runtime

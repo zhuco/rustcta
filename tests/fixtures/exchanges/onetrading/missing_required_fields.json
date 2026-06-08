@@ -1,0 +1,12 @@
+[
+  {
+    "base": {
+      "code": "BTC"
+    },
+    "quote": {
+      "code": "EUR"
+    },
+    "type": "SPOT",
+    "state": "ACTIVE"
+  }
+]

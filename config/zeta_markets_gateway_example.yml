@@ -1,0 +1,30 @@
+gateway:
+  adapters:
+    - zeta_markets
+
+zeta_markets:
+  enabled: false
+  scan_only: true
+  rest_base_url: https://api.zeta.markets
+  devnet_rest_base_url: https://dex-devnet-webserver-ecs.zeta.markets
+  solana_rpc_url: https://api.mainnet-beta.solana.com
+  public_rest:
+    enabled: true
+    endpoints:
+      - /prices/symbols
+      - /v2/orderbook?ticker_id={symbol}
+  public_streams:
+    enabled: false
+    reason: zeta_markets.public_streams_require_solana_sdk_account_mapping
+  private_rest:
+    enabled: false
+    reason: zeta_markets.place_order_unsupported_venue_ceased_operations
+  private_streams:
+    enabled: false
+  trading:
+    enabled: false
+  credentials:
+    api_key: null
+    api_secret: null
+    passphrase: null
+    wallet_private_key: null

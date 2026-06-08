@@ -1,0 +1,10 @@
+{
+  "exchange": "aftermath",
+  "operation": "build_create_orders",
+  "status": "unsupported",
+  "requires_wallet_signature": true,
+  "signing_model": "sui_wallet_transaction_signature",
+  "expected_error": "aftermath.place_order_requires_sui_transaction_signing",
+  "request_spec_required": false,
+  "trade_enabled": false
+}

@@ -1,0 +1,20 @@
+{
+  "url": "wss://api-cloud.bittrade.co.jp/ws",
+  "topic": "market.btcjpy.depth.step0",
+  "subscribe_payload": {
+    "sub": "market.btcjpy.depth.step0",
+    "id": "rustcta-bittrade-sub"
+  },
+  "unsubscribe_payload": {
+    "unsub": "market.btcjpy.depth.step0",
+    "id": "rustcta-bittrade-unsub"
+  },
+  "heartbeat": {
+    "server_ping": {
+      "ping": 18212558000
+    },
+    "client_pong": {
+      "pong": 18212558000
+    }
+  }
+}

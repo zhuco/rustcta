@@ -1,0 +1,210 @@
+schema_version: 1
+exchange: latoken
+adapter: LatokenGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/latoken_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: A-25 scan-only spot adapter. Public REST is implemented for active pairs and order books; private REST is request-spec-only and disabled.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://api.latoken.com
+  websocket: wss://api.latoken.com/stomp
+auth:
+  private_rest: X-LA-APIKEY + X-LA-SIGNATURE HMAC over METHOD + /v2 path + query params + body params; request-spec-only until validation
+rate_limits:
+  latoken_public:
+    scope: ip
+    interval_ms: 60000
+    limit: unknown
+    notes: Official docs mention TOO_MANY_REQUESTS and X-Rate-Limit-Remaining, but no numeric quota was found.
+  latoken_private:
+    scope: key
+    interval_ms: 60000
+    limit: unknown
+pagination:
+  open_orders: { mode: limit, max_limit: 1000, request_spec_only: true }
+  fills: { mode: limit, max_limit: 1000, request_spec_only: true }
+reconciliation:
+  private_state: rest_request_spec_only
+  readbacks: [get_open_orders, get_recent_fills]
+  notes: Private runtime is disabled; after promotion use /v2/auth/order/active and /v2/auth/trade for REST reconciliation.
+batch:
+  place: { support: unsupported, reason: latoken.batch_place_orders_request_spec_only }
+  cancel: { support: unsupported, reason: latoken.batch_cancel_orders_request_spec_only }
+websocket:
+  public:
+    support: unsupported
+    reason: latoken.public_streams_stomp_spec_only
+    url: wss://api.latoken.com/stomp
+    subscribe_payload: tests/fixtures/exchanges/latoken/ws/public_orderbook_frame.json
+    heartbeat:
+      mode: nonce_gap_reconnect
+      interval_ms: unknown
+  private:
+    support: unsupported
+    reason: latoken.private_streams_user_id_auth_unverified
+    auth: X-LA-APIKEY + X-LA-SIGNATURE over X-LA-SIGDATA timestamp
+    auth_fixture: tests/fixtures/exchanges/latoken/signing_vectors/ws_auth_hmac_sha256.json
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/pair
+    auth: none
+    rate_limit_bucket: latoken_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: get_symbol_rules_currency_lookup
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/currency
+    auth: none
+    rate_limit_bucket: latoken_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/book/{currency}/{quote}
+    auth: none
+    rate_limit_bucket: latoken_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/auth/account
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: latoken.balances_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/get_balances.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v2/auth/order/place
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: latoken.place_order_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/place_order_limit_buy.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v2/auth/order/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: latoken.cancel_order_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/cancel_order.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /v2/auth/order/cancelAll
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: unsupported
+    reason: latoken.cancel_all_orders_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/cancel_all_orders.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/auth/order/active
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: latoken.open_orders_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/get_open_orders.json
+    official_doc: https://api.latoken.com/doc/v2/
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /v2/auth/trade
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: latoken_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: latoken.recent_fills_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/latoken/request_specs/get_recent_fills.json
+    official_doc: https://api.latoken.com/doc/v2/

@@ -1,0 +1,8 @@
+{
+  "seqnum": 2,
+  "event": "snapshot",
+  "channel": "l2",
+  "symbol": "BTC-USD",
+  "bids": [{ "px": 65000, "qty": 0.1, "num": 1 }],
+  "asks": [{ "px": 65010, "qty": 0.2, "num": 1 }]
+}

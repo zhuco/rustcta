@@ -1,0 +1,223 @@
+schema_version: 1
+exchange: d8x
+adapter: D8xGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/d8x_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task C-43 conservative D8X Polygon zkEVM perpetual adapter. Public CoinGecko-compatible market-data REST is enabled; wallet contract reads/writes stay Unsupported.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://drip.d8x.xyz
+  public_ws: unsupported
+auth:
+  public_rest: none
+  private_write_rest: unsupported wallet signer / EVM contract call
+rate_limits:
+  d8x_public: { scope: ip, interval_ms: 1000, limit: 5 }
+  d8x_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  contracts: { mode: none }
+  private_history: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: REST reconciliation fallback is not enabled for private state because wallet/indexer semantics are not audited.
+batch:
+  place: { support: unsupported, reason: d8x.batch_place_orders_not_mapped_to_gateway_contract_semantics }
+  cancel: { support: unsupported, reason: d8x.batch_cancel_orders_not_mapped_to_gateway_contract_semantics }
+websocket:
+  public:
+    support: spec_only
+    helper_only: true
+    heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /coingecko/contracts
+    auth: none
+    rate_limit_bucket: d8x_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://d8x.gitbook.io/d8x/node-sdk/market-data-api#contract-information-endpoint
+    request_spec_fixture: tests/fixtures/exchanges/d8x/request_specs/contracts.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /coingecko/orderbook/{ticker_id}
+    auth: none
+    rate_limit_bucket: d8x_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://d8x.gitbook.io/d8x/node-sdk/market-data-api#order-book-information-endpoint
+    request_spec_fixture: tests/fixtures/exchanges/d8x/request_specs/orderbook.json
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/d8x/balances
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.balances_require_wallet_contract_audit
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/d8x/positions
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.positions_require_wallet_contract_audit
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/d8x/place_order
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: true
+    request_spec_fixture: tests/fixtures/exchanges/d8x/request_specs/place_order_unsupported.json
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.place_order_requires_evm_signer_and_contract_audit
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/d8x/cancel_order
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.cancel_order_requires_evm_signer_and_contract_audit
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/d8x/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.batch_place_orders_not_mapped_to_gateway_contract_semantics
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/d8x/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.batch_cancel_orders_not_mapped_to_gateway_contract_semantics
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/d8x/cancel_all_orders
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.cancel_all_orders_requires_contract_audit
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/d8x/open_orders
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.open_orders_require_sdk_contract_audit
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/d8x/recent_fills
+    auth: unsupported
+    rate_limit_bucket: d8x_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: d8x.recent_fills_require_indexer_contract_audit
+streams:
+  - operation: public_orderbook_delta
+    product: perpetual
+    transport: websocket
+    channel: orderbook:{ticker_id}
+    auth: none
+    support: spec_only
+    resync:
+      endpoint_operation: get_order_book
+      mode: public_rest_snapshot
+  - operation: private_orders
+    product: perpetual
+    transport: websocket
+    channel: unsupported
+    auth: unsupported
+    support: unsupported
+    reason: d8x.private_streams_require_wallet_contract_audit

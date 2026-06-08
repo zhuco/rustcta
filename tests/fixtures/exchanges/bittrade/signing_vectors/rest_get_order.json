@@ -1,0 +1,14 @@
+{
+  "secret": "bittrade-secret-fixture",
+  "method": "GET",
+  "host": "api-cloud.bittrade.co.jp",
+  "request_path": "/v1/order/orders/59378",
+  "query": {
+    "AccessKeyId": "bittrade-key-fixture",
+    "SignatureMethod": "HmacSHA256",
+    "SignatureVersion": "2",
+    "Timestamp": "2026-06-08T00:00:00"
+  },
+  "payload": "GET\napi-cloud.bittrade.co.jp\n/v1/order/orders/59378\nAccessKeyId=bittrade-key-fixture&SignatureMethod=HmacSHA256&SignatureVersion=2&Timestamp=2026-06-08T00%3A00%3A00",
+  "expected_signature": "po6WXQ7MgEQgwZp5SnRSEiqCr0QOacoKWGVVB3qC0w0="
+}

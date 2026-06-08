@@ -1,0 +1,11 @@
+{
+  "exchange": "hibachi",
+  "operation": "get_symbol_rules",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/market/exchange-info",
+  "auth": "none",
+  "strict_query": true,
+  "strict_body": true
+}

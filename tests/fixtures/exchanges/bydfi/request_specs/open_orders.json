@@ -1,0 +1,11 @@
+{
+  "exchange": "bydfi",
+  "operation": "open_orders",
+  "method": "GET",
+  "path": "/v2/fapi/trade/open_order",
+  "query": {
+    "wallet": "W001",
+    "symbol": "BTC-USDT"
+  },
+  "signing_vector": "bydfi/rest_query_order"
+}

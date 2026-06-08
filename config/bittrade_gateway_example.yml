@@ -1,0 +1,57 @@
+# BitTrade Japan spot gateway adapter example.
+# Credentials are read from environment variables by default:
+# BITTRADE_API_KEY and BITTRADE_API_SECRET.
+
+exchange: bittrade
+market_type: spot
+adapter: bittrade
+enabled: false
+
+api_key: ${BITTRADE_API_KEY}
+api_secret: ${BITTRADE_API_SECRET}
+
+rest_base_url: https://api-cloud.bittrade.co.jp
+public_websocket_url: wss://api-cloud.bittrade.co.jp/ws
+private_websocket_url: wss://api-cloud.bittrade.co.jp/ws/v2
+
+testnet: false
+sandbox: false
+dry_run: true
+enable_private_rest: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+stale_book_ms: 10000
+reconnect_interval_ms: 1000
+max_reconnect_attempts: 10
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - btcjpy
+  - ethjpy
+  - xrpjpy
+
+symbol_mappings:
+  BTCJPY: btcjpy
+  BTC_JPY: btcjpy
+  BTC/JPY: btcjpy
+
+rate_limit:
+  public_rest_per_second: 10
+  private_rest_per_second: 10
+  websocket_requests_per_second: 50
+
+permissions:
+  required:
+    - read_market_data
+  offline_only:
+    - read_account
+    - spot_trading
+
+notes:
+  - BitTrade venue symbols use lowercase compact pairs, for example btcjpy.
+  - The adapter exposes public REST symbol rules and order book snapshots.
+  - Private REST order/account endpoints are represented by request specs and signing vectors only.
+  - Leverage, futures, perpetuals, fiat funding, withdrawals, and retail broker ordering are unsupported in gateway runtime.

@@ -1,0 +1,21 @@
+{
+  "operation": "exmo.place_order",
+  "method": "POST",
+  "path": "/v1.1/order_create",
+  "content_type": "application/x-www-form-urlencoded",
+  "auth": "hmac_sha512_form",
+  "headers": {
+    "Key": "api_key_change_me",
+    "Sign": "eabaddf989733ea69ab40d2533fe1dd9734baeb6f6d40273dc25f97909a7cc1cfb278b6789844315dca3ec957729c8c61ae5a8c1ee504b86c28f0a61f0da557e"
+  },
+  "body": {
+    "pair": "BTC_USD",
+    "quantity": "1.56789",
+    "price": "10000.56789",
+    "type": "buy",
+    "exec_type": "post_only",
+    "client_id": "100500",
+    "nonce": "1710000000000"
+  },
+  "canonical_body": "pair=BTC_USD&quantity=1.56789&price=10000.56789&exec_type=post_only&type=buy&client_id=100500&nonce=1710000000000"
+}

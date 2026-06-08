@@ -1,0 +1,14 @@
+{
+  "operation": "zebpay.private_bearer_headers",
+  "client_id": "zebpay_client_id_test",
+  "access_token": "zebpay_access_token_test",
+  "timestamp": "1717200000000",
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "expected_headers": {
+    "client_id": "zebpay_client_id_test",
+    "timestamp": "1717200000000",
+    "RequestId": "00000000-0000-4000-8000-000000000001",
+    "Authorization": "Bearer zebpay_access_token_test"
+  },
+  "sanitization": "test-only values; live tokens must never be committed"
+}

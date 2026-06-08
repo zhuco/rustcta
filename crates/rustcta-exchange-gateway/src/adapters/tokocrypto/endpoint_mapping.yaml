@@ -1,0 +1,226 @@
+schema_version: 1
+exchange: tokocrypto
+adapter: rustcta_exchange_gateway::adapters::tokocrypto
+metadata:
+  status: validated
+  notes: "A-34 Tokocrypto spot adapter. Binance-family HMAC and filters, but Tokocrypto-specific hosts, /open/v1 private paths, symbol forms, and Indonesia/regional scope."
+market_types:
+  - spot
+products:
+  - spot
+base_urls:
+  open_rest: https://www.tokocrypto.com
+  market_rest_type_1: https://www.tokocrypto.site/api/v3
+  market_rest_type_3: https://cloudme-toko.2meta.app
+  public_ws_type_1: wss://stream-cloud.tokocrypto.site/stream
+  public_ws_type_3: wss://stream-toko.2meta.app
+  user_ws_api: wss://ws-api.tokocrypto.site/ws-api/v3
+rest:
+  base_url: https://www.tokocrypto.com
+auth:
+  rest:
+    scheme: hmac_sha256_query
+    signature_encoding: hex
+    api_key_header: X-MBX-APIKEY
+    signing_payload: "URL encoded query string or form body without signature"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: ip
+      interval: 1m
+      limit: 1200
+      burst: 1200
+    private_rest:
+      scope: api_key
+      interval: 1m
+      limit: 1200
+      burst: 1200
+    orders:
+      scope: account
+      interval: 1s
+      limit: 10
+      burst: 10
+    websocket:
+      scope: websocket
+      interval: 1s
+      limit: 5
+      burst: 5
+pagination:
+  orders:
+    style: from_id_direct_limit
+    limit_param: limit
+    max_limit: 1000
+    cursor_param: fromId
+    direction_param: direct
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: unsupported
+  cancel_orders:
+    support: unsupported_unverified
+    atomicity: unsupported
+websocket:
+  public:
+    support: spec_only
+    url: wss://stream-cloud.tokocrypto.site/stream
+    protocol: binance-style-json
+    topics:
+      order_book: "{symbol}@depth"
+      trades: "{symbol}@trade"
+      ticker: "{symbol}@ticker"
+      candles: "{symbol}@kline_{interval}"
+    heartbeat:
+      direction: exchange_defined
+    resync: rest_order_book_snapshot
+  private:
+    support: request_spec_only
+    listen_token_endpoint: /open/v1/user-listen-token
+    deprecated_listen_key_endpoint: /open/v1/user-data-stream
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_server_time
+    product: spot
+    transport: rest
+    method: GET
+    path: /open/v1/common/time
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /open/v1/common/symbols
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /api/v3/depth
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    params:
+      - name: symbol
+      - name: limit
+    notes: "Official docs use tokocrypto.site /api/v3/depth for type=1 symbols and strip underscores from symbols."
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /open/v1/account/spot
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 5
+    request_spec_required: true
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /open/v1/orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/place_limit_order.json
+    notes: "Offline request-spec only; runtime does not expose live order placement."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /open/v1/orders/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /open/v1/orders/detail
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/query_order.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /open/v1/orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /open/v1/orders/trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 5
+    request_spec_required: true
+  - operation: create_user_listen_token
+    product: spot
+    transport: rest
+    method: POST
+    path: /open/v1/user-listen-token
+    auth: hmac
+    credential_scopes: [read_only, trade]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    request_spec:
+      fixture: tests/fixtures/exchanges/tokocrypto/request_specs/listen_token.json
+streams:
+  - operation: subscribe_public_order_book
+    product: spot
+    channel: "{symbol}@depth"
+    support: spec_only
+    resync:
+      endpoint_operation: get_order_book
+  - operation: subscribe_public_trades
+    product: spot
+    channel: "{symbol}@trade"
+    support: spec_only
+  - operation: subscribe_private_orders
+    product: spot
+    channel: listen_token_user_stream
+    support: request_spec_only
+    auth_renewal:
+      endpoint_operation: create_user_listen_token
+unsupported:
+  - operation: futures_or_perpetuals
+    reason: "A-34 scopes Tokocrypto as Binance ecosystem spot; no official futures/perpetual gateway mapping is enabled."
+  - operation: live_private_write
+    reason: "Private trade endpoints are delivered as offline request specs/signing vectors only."
+  - operation: withdrawals
+    reason: "Wallet withdrawal endpoints are documented but out of exchange gateway trading runtime scope."
+  - operation: symbol_type_3_nextme_live_routing
+    reason: "Type=3 Nextme symbols use cloudme-toko.2meta.app endpoints and require a later dedicated profile."
+  - operation: public_ws_runtime
+    reason: "WebSocket subscribe/auth payloads are documented as fixtures; runtime stream connection is not enabled."

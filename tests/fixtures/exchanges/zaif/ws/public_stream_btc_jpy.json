@@ -1,0 +1,8 @@
+{
+  "url": "wss://ws.zaif.jp/stream?currency_pair=btc_jpy",
+  "subscribe_payload": {
+    "currency_pair": "btc_jpy"
+  },
+  "heartbeat_policy": "server_push_no_client_ping_documented",
+  "resync": "rest_order_book_snapshot"
+}

@@ -391,7 +391,7 @@ impl LegacyProcessTemplate {
     pub fn default_config_path(self) -> &'static str {
         match self {
             Self::CrossArbLive => "config/cross_exchange_arbitrage_usdt.yml",
-            Self::FundingArbLive => "config/funding_rate_arbitrage_usdt.yml",
+            Self::FundingArbLive => "config/funding_rate_arbitrage_live_usdt.yml",
             Self::SpotSpotLiveDryRun => "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml",
             Self::TrendReport => "config/trend_report.yml",
             Self::AccountPositionReporter => "config/account_position_reporter.yml",
@@ -419,6 +419,7 @@ impl LegacyProcessTemplate {
                 "--".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
+                "--confirm-live-order".to_string(),
             ],
             Self::SpotSpotLiveDryRun => vec![
                 "run".to_string(),

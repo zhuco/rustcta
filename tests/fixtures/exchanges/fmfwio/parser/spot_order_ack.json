@@ -1,0 +1,15 @@
+{
+  "id": 840450210,
+  "client_order_id": "cli-fmfwio-1",
+  "symbol": "ETHBTC",
+  "side": "sell",
+  "status": "new",
+  "type": "limit",
+  "time_in_force": "GTC",
+  "quantity": "0.063",
+  "price": "0.046016",
+  "quantity_cumulative": "0.000",
+  "post_only": false,
+  "created_at": "2024-04-15T17:01:05.092Z",
+  "updated_at": "2024-04-15T17:01:05.092Z"
+}

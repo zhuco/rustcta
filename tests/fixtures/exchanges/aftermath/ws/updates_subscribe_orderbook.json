@@ -1,0 +1,8 @@
+{
+  "action": "subscribe",
+  "subscriptionType": {
+    "orderbook": {
+      "marketId": "aftermath-perp-btc-usdc"
+    }
+  }
+}

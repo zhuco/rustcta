@@ -1,0 +1,23 @@
+# Example scan-first Cryptomus gateway configuration.
+# Do not commit real credentials.
+
+gateway:
+  bind_addr: 127.0.0.1:18081
+  adapters:
+    - cryptomus
+
+cryptomus:
+  rest_base_url: https://api.cryptomus.com
+  public_ws_url: wss://api-ws.cryptomus.com/ws
+  enabled_public_rest: true
+  enabled_public_streams: false
+  enabled_private_rest: false
+  enabled_private_streams: false
+  api_key_env: CRYPTOMUS_API_KEY
+  user_id_env: CRYPTOMUS_USER_ID
+  excluded_apis:
+    - merchant_payment
+    - merchant_payout
+    - wallet_address
+    - transfer
+    - withdraw

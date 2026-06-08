@@ -19,7 +19,8 @@ impl BybitGatewayAdapter {
         self.ensure_exchange(&subscription.symbol.exchange)?;
         let payload = bybit_public_subscribe_payload(&subscription)?;
         Ok(format!(
-            "bybit:{}:{}",
+            "{}:{}:{}",
+            self.exchange_id,
             self.config.public_ws_url,
             payload["args"][0].as_str().unwrap_or("unknown")
         ))
@@ -31,12 +32,17 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<String> {
         ensure_exchange_api_schema(subscription.schema_version)?;
         self.ensure_exchange(&subscription.exchange)?;
-        let (api_key, api_secret) = self.private_credentials("bybit.subscribe_private_stream")?;
+        let operation = self.profile_operation(
+            "bybit.subscribe_private_stream",
+            "bybiteu.subscribe_private_stream",
+        );
+        let (api_key, api_secret) = self.private_credentials(operation)?;
         let expires = Utc::now().timestamp_millis() + 60_000;
         let auth = bybit_private_auth_payload(api_key, api_secret, expires)?;
         let subscribe = bybit_private_subscribe_payload(&subscription)?;
         Ok(format!(
-            "bybit:{}:{}:{}",
+            "{}:{}:{}:{}",
+            self.exchange_id,
             self.config.private_ws_url,
             auth["op"].as_str().unwrap_or("auth"),
             subscribe["args"][0].as_str().unwrap_or("unknown")

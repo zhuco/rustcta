@@ -1,0 +1,18 @@
+{
+  "method": "POST",
+  "path": "/v1/orders/create",
+  "auth": "hmac_sha256",
+  "headers": {
+    "X-Nova-Access-Key": "<redacted>",
+    "X-Nova-Signature": "<computed>",
+    "X-Nova-Timestamp": "<timestamp>"
+  },
+  "body": {
+    "symbol": "BTC_BRL",
+    "side": "BUY",
+    "type": "LIMIT",
+    "amount": "0.01",
+    "price": "350000",
+    "clientOrderId": "offline-fixture"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "status": "NORMAL",
+  "feeConfig": {
+    "tradeMakerFeeRate": "0.0002",
+    "tradeTakerFeeRate": "0.0005",
+    "transferFeeRate": "0",
+    "depositFees": "0",
+    "withdrawalFees": "0"
+  },
+  "instantWithdrawalLimit": {
+    "USDT": "100000"
+  },
+  "futureContracts": [
+    {
+      "id": 2,
+      "symbol": "BTC/USDT-P",
+      "displayName": "BTC/USDT Perp",
+      "underlyingSymbol": "BTC",
+      "underlyingDecimals": 10,
+      "settlementSymbol": "USDT",
+      "settlementDecimals": 6,
+      "riskFactorForPositions": "0.01",
+      "riskFactorForOrders": "0.01",
+      "maintenanceFactorForPositions": "0.005",
+      "orderbookGranularities": ["0.01", "0.1", "1"],
+      "status": "LIVE",
+      "stepSize": "0.0001",
+      "tickSize": "0.01",
+      "minOrderSize": "0.0001",
+      "minNotional": "5"
+    }
+  ]
+}

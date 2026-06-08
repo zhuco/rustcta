@@ -1,0 +1,21 @@
+{
+  "BTCUSDT": {
+    "type": "spot",
+    "base_currency": "BTC",
+    "quote_currency": "USDT",
+    "quantity_increment": "0.00001",
+    "tick_size": "0.01",
+    "take_rate": "0.001",
+    "make_rate": "0.0009",
+    "fee_currency": "USDT",
+    "status": "working"
+  },
+  "BTCUSD_PERP": {
+    "type": "futures",
+    "base_currency": "BTC",
+    "quote_currency": "USD",
+    "quantity_increment": "1",
+    "tick_size": "0.5",
+    "status": "working"
+  }
+}

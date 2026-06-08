@@ -1,0 +1,10 @@
+{
+  "id": "acct-123",
+  "status": "ACTIVE",
+  "crypto_status": "ACTIVE",
+  "currency": "USD",
+  "cash": "1250.00",
+  "buying_power": "1000.00",
+  "non_marginable_buying_power": "1000.00",
+  "equity": "1250.00"
+}

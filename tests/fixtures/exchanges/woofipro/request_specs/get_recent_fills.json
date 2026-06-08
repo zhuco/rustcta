@@ -1,0 +1,17 @@
+{
+  "exchange": "woofipro",
+  "operation": "get_recent_fills",
+  "method": "GET",
+  "path": "/v1/trades",
+  "query": {
+    "symbol": "PERP_BTC_USDC",
+    "size": "100"
+  },
+  "headers": {
+    "orderly-account-id": "acct_test_account_id",
+    "orderly-key": "ed25519:test-public-key",
+    "orderly-signature": "test-signature-placeholder",
+    "orderly-timestamp": "1700000000000"
+  },
+  "auth": "signed"
+}

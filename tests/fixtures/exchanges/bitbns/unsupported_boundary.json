@@ -1,0 +1,17 @@
+{
+  "exchange": "bitbns",
+  "status": "scan_only_public_rest",
+  "scan_only": true,
+  "trade_enabled": false,
+  "supported": [
+    "bitbns.get_symbol_rules",
+    "bitbns.get_order_book"
+  ],
+  "unsupported_reasons": [
+    "bitbns.private_rest_disabled_until_account_readback_review",
+    "bitbns.place_order_disabled_scan_only",
+    "bitbns.cancel_order_disabled_scan_only",
+    "bitbns.private_streams_disabled",
+    "bitbns.public_streams_spec_only"
+  ]
+}

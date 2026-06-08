@@ -1,0 +1,17 @@
+gateway:
+  adapters:
+    - paymium
+
+paymium:
+  enabled: true
+  rest_base_url: https://paymium.com/api/v1
+  websocket_public_url: https://paymium.com/public
+  websocket_user_url: https://paymium.com/user
+  enabled_private_rest: false
+  enabled_public_streams: false
+  enabled_private_streams: false
+  request_timeout_ms: 10000
+  credentials:
+    api_key_env: PAYMIUM_API_KEY
+    api_secret_env: PAYMIUM_API_SECRET
+    runtime_private_rest: disabled

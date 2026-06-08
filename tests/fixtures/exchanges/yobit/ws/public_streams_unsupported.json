@@ -1,0 +1,12 @@
+{
+  "exchange": "yobit",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "heartbeat": {
+    "mode": "unsupported"
+  },
+  "rest_reconciliation_fallback": [
+    "ActiveOrders",
+    "TradeHistory"
+  ]
+}

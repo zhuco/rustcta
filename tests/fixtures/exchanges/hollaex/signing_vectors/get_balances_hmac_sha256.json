@@ -1,0 +1,12 @@
+{
+  "exchange": "hollaex",
+  "name": "get_balances_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000",
+  "method": "GET",
+  "request_path": "/v2/user/balance",
+  "payload": "GET/v2/user/balance1710000000",
+  "expected_signature": "8702128e0e88dfb231af7f4fa9a4fbc59bea3bbdac92bde24cc2206cace795be",
+  "payload_format": "raw_payload"
+}

@@ -1,0 +1,4 @@
+{
+  "method": "subscribe",
+  "channel": "orderbook/BTC/USDT-P"
+}

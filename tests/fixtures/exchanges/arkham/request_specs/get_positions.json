@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/account/positions",
+  "auth": "arkham_hmac_sha256_base64",
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "Arkham-Api-Key": "<redacted:api_key>",
+    "Arkham-Expires": "<unix-microseconds-expiry>",
+    "Arkham-Signature": "<redacted:signature>",
+    "Arkham-Broker-Id": "1001"
+  },
+  "body": ""
+}

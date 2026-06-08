@@ -1,0 +1,33 @@
+{
+  "exchange": "alpaca",
+  "operation": "get_open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/trading/accounts/acct-123/orders",
+  "auth": "api_key",
+  "query": {
+    "asset_class": {
+      "match": "exact",
+      "value": "crypto"
+    },
+    "status": {
+      "match": "exact",
+      "value": "open"
+    },
+    "symbols": {
+      "match": "exact",
+      "value": "BTCUSD"
+    }
+  },
+  "headers": {
+    "APCA-API-KEY-ID": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "APCA-API-SECRET-KEY": {
+      "match": "exact",
+      "value": "test-secret"
+    }
+  }
+}

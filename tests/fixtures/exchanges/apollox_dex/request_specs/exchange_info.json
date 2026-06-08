@@ -1,0 +1,14 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "get_symbol_rules",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fapi/v1/exchangeInfo",
+  "auth": "none",
+  "query": {},
+  "headers": {},
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false
+}

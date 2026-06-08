@@ -1,0 +1,20 @@
+{
+  "seqnum": 4,
+  "event": "snapshot",
+  "channel": "trading",
+  "orders": [
+    {
+      "exOrdId": "123456789",
+      "clOrdId": "rustcta-1",
+      "symbol": "BTC-USD",
+      "side": "BUY",
+      "ordType": "LIMIT",
+      "ordStatus": "OPEN",
+      "price": "65000",
+      "orderQty": "0.010",
+      "leavesQty": "0.010",
+      "cumQty": "0",
+      "timestamp": 1700000000000
+    }
+  ]
+}

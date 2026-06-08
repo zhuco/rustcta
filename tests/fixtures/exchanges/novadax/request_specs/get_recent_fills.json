@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/v1/orders/fills",
+  "auth": "hmac_sha256",
+  "query": {
+    "symbol": "BTC_BRL",
+    "page": "1",
+    "limit": "100"
+  },
+  "headers": {
+    "X-Nova-Access-Key": "<redacted>",
+    "X-Nova-Signature": "<computed>",
+    "X-Nova-Timestamp": "<timestamp>"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "exchange": "bsx",
+  "algorithm": "eip712_order_boundary",
+  "domain": {
+    "name": "BSX",
+    "chain_id": 8453,
+    "verifying_contract": "0x0000000000000000000000000000000000000000"
+  },
+  "type": "Order(sender,size,price,nonce,productIndex,orderSide)",
+  "canonical_payload": "BSX-EIP712-ORDER(sender,size,price,nonce,productIndex,orderSide)",
+  "expected_error": "bsx.place_order_requires_eip712_wallet_signature_audit"
+}

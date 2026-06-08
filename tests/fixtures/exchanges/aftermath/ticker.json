@@ -1,0 +1,10 @@
+{
+  "symbol": "BTC/USDC:USDC",
+  "timestamp": 1700000000000,
+  "datetime": "2023-11-14T22:13:20.000Z",
+  "bid": "64999.5",
+  "ask": "65001.0",
+  "last": "65000.0",
+  "baseVolume": "123.45",
+  "quoteVolume": "8024250.0"
+}

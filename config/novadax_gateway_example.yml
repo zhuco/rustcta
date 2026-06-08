@@ -1,0 +1,13 @@
+gateway:
+  adapter: novadax
+  enabled: false
+  rest_base_url: https://api.novadax.com
+  public_ws_url: wss://api.novadax.com
+  private_rest_enabled: false
+  public_streams_enabled: false
+  private_streams_enabled: false
+  notes:
+    - Spot-only Brazil markets; BRL pairs use NovaDAX BASE_QUOTE symbols such as BTC_BRL.
+    - Keep API keys, secrets, and account IDs in environment variables; do not place secrets in this file.
+    - Private REST trading is offline request-spec only until live read-only and dry-run validation promote it.
+    - Fiat deposits, withdrawals, transfers, and non-spot products are unsupported.

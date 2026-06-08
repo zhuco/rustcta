@@ -1,0 +1,8 @@
+{
+  "exchange": "bequant",
+  "algorithm": "http_basic_base64",
+  "api_key": "fixture-key",
+  "api_secret": "fixture-secret",
+  "payload": "fixture-key:fixture-secret",
+  "expected_authorization": "Basic Zml4dHVyZS1rZXk6Zml4dHVyZS1zZWNyZXQ="
+}

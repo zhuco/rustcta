@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/account/trades",
+  "query": {
+    "instrument_code": "BTC_EUR",
+    "max_page_size": "100"
+  },
+  "auth": "bearer_token",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": null
+}

@@ -1,0 +1,21 @@
+{
+  "exchange": "coinmetro",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/exchange/orders/create",
+  "auth": "bearer",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer fixture.jwt.token" }
+  },
+  "body": {
+    "orderType": "limit",
+    "buyingCurrency": "BTC",
+    "sellingCurrency": "EUR",
+    "buyingQty": "0.01",
+    "sellingQty": "650",
+    "timeInForce": 1
+  },
+  "forbid_header_values_containing": ["secret", "production"]
+}

@@ -1,0 +1,10 @@
+{
+  "exchange": "bequant",
+  "operation": "bequant.cancel_order",
+  "method": "DELETE",
+  "path": "/spot/order/CLIENTLIMIT1",
+  "auth": "basic",
+  "headers": {
+    "Authorization": "Basic Zml4dHVyZS1rZXk6Zml4dHVyZS1zZWNyZXQ="
+  }
+}

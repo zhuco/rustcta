@@ -1,0 +1,18 @@
+{
+  "operation": "cryptomus.place_order",
+  "method": "POST",
+  "path": "/v2/user-api/exchange/orders",
+  "auth": "cryptomus_md5_base64_body",
+  "headers": {
+    "userId": "<redacted-user-uuid>",
+    "sign": "<md5-base64-body-plus-api-key>",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "market": "TRX_USDT",
+    "quantity": "20",
+    "price": "0.2964",
+    "direction": "buy",
+    "client_order_id": "CLIENT-LIMIT-1"
+  }
+}

@@ -1,0 +1,29 @@
+gateway:
+  adapters:
+    - woofipro
+  rest_base_urls:
+    woofipro: https://api.orderly.org
+
+woofipro:
+  enabled: false
+  full_signed_rest: true
+  market_types:
+    - perpetual
+  broker_id: woofi_pro
+  chain_id: 42161
+  rest_base_url: https://api.orderly.org
+  legacy_evm_rest_base_url: https://api-evm.orderly.org
+  testnet_rest_base_url: https://testnet-api.orderly.org
+  public_ws_url: wss://ws-evm.orderly.org/ws/stream
+  private_ws_url: wss://ws-private-evm.orderly.org/v2/ws/private/stream
+  enabled_public_rest: true
+  enabled_public_streams: false
+  enabled_private_rest: false
+  enabled_private_streams: false
+  credentials:
+    orderly_account_id_env: RUSTCTA_WOOFIPRO_ORDERLY_ACCOUNT_ID
+    orderly_key_env: RUSTCTA_WOOFIPRO_ORDERLY_KEY
+    orderly_secret_env: RUSTCTA_WOOFIPRO_ORDERLY_SECRET
+  notes:
+    - Full signed REST is implemented but disabled unless credentials are configured.
+    - Public/private websocket runtime loops remain disabled; payload fixtures are present.

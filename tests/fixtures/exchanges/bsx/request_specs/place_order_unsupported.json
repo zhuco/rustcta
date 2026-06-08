@@ -1,0 +1,21 @@
+{
+  "exchange": "bsx",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/orders",
+  "auth": "signed",
+  "trade_enabled": false,
+  "expected_error": "bsx.place_order_requires_eip712_wallet_signature_audit",
+  "body_contains": {
+    "product_id": "BTC-PERP",
+    "side": "BUY",
+    "order_type": "LIMIT",
+    "size": "0.01",
+    "price": "65000",
+    "signature": "0xredacted_eip712_signature"
+  },
+  "strict_body": false,
+  "signing_vector": "tests/fixtures/exchanges/bsx/signing_vectors/eip712_order_boundary.json"
+}

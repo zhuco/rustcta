@@ -1,0 +1,19 @@
+{
+  "exchange": "coinmate",
+  "operation": "open_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/openOrders",
+  "auth": "signed",
+  "headers": {
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": {
+    "clientId": "<redacted:client_id>",
+    "publicKey": "<redacted:public_key>",
+    "nonce": "<nonce>",
+    "signature": "<redacted:signature>",
+    "currencyPair": "BTC_EUR"
+  }
+}

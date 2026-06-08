@@ -1,0 +1,11 @@
+{
+  "exchange": "mango_markets",
+  "task": "C-44",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_write_enabled": false,
+  "wallet_signing_enabled": false,
+  "private_stream_enabled": false,
+  "live_rpc_enabled": false,
+  "reason": "Mango Markets v4 is an on-chain Solana protocol; account health, event queue decoding, wallet ownership and transaction signing are not audited by this adapter."
+}

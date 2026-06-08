@@ -1,0 +1,283 @@
+schema_version: 1
+exchange: hibachi
+adapter: HibachiGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/hibachi_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Hibachi perpetual adapter for Task A-22. Public REST is enabled; private read/write and WS runtime remain disabled unless separately validated.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  data_rest: https://data-api.hibachi.xyz
+  account_rest: https://api.hibachi.xyz
+  public_ws: wss://data-api.hibachi.xyz/ws/market
+  account_ws: wss://api.hibachi.xyz/ws/account
+  trade_ws: wss://api.hibachi.xyz/ws/trade
+auth:
+  public_rest: none
+  private_read: API key bearer header plus accountId query
+  private_write: exchange-managed HMAC payload or trustless account signing; runtime disabled in this adapter
+rate_limits:
+  public_rest: { scope: ip, interval_ms: 60000, limit: 60 }
+  private_trade: { scope: account, interval_ms: 60000, limit: 60 }
+pagination:
+  account_trades: { mode: page, max_limit: unknown }
+reconciliation:
+  order_book:
+    mode: rest_snapshot
+    endpoint_operation: get_order_book
+    checksum: unsupported_unverified
+  private_state:
+    mode: rest_readback_required
+    endpoints: [get_open_orders, recent_fills, query_order]
+batch:
+  place: { support: unsupported_unverified, reason: hibachi.batch_write_request_spec_only }
+  cancel: { support: unsupported_unverified, reason: hibachi.batch_cancel_request_spec_only }
+websocket:
+  public:
+    support: parser_only
+    heartbeat: { mode: client_ping, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 90000 }
+    channels:
+      orderbook: { channel: "orderbook/{symbol}", support: payload_fixture_only }
+      trades: { channel: "trades/{symbol}", support: payload_fixture_only }
+  private:
+    support: unsupported
+    account_channel: "wss://api.hibachi.xyz/ws/account?accountId={accountId}"
+    trade_channel: "wss://api.hibachi.xyz/ws/trade"
+    reason: hibachi.private_stream_runtime_spec_only
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /market/exchange-info
+    auth: none
+    rate_limit_bucket: hibachi_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://hibachi-docs.redocly.app/marketapi/market
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/exchange_info.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /market/data/orderbook
+    auth: none
+    rate_limit_bucket: hibachi_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://hibachi-docs.redocly.app/marketapi/market
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/orderbook.json
+  - operation: get_market_prices
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /market/data/prices
+    auth: none
+    rate_limit_bucket: hibachi_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://hibachi-docs.redocly.app/marketapi/market
+  - operation: get_open_interest
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /market/data/open-interest
+    auth: none
+    rate_limit_bucket: hibachi_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://hibachi-docs.redocly.app/marketapi/market
+  - operation: account_info
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trade/account/info
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: hibachi_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.private_rest_disabled
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/account_info_readonly.json
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trade/orders
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: hibachi_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.private_rest_disabled
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+  - operation: query_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trade/order
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: hibachi_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.private_rest_disabled
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+  - operation: recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /trade/account/trades
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: hibachi_private_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.private_rest_disabled
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /trade/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.trade_write_request_spec_only
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/place_order_limit.json
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /trade/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.cancel_write_request_spec_only
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/cancel_order.json
+  - operation: amend_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: PATCH
+    path: /trade/order
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.amend_write_request_spec_only
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /trade/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.cancel_all_request_spec_only
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+    request_spec_fixture: tests/fixtures/exchanges/hibachi/request_specs/cancel_all_orders.json
+  - operation: batch_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /trade/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: hibachi_private_trade
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    support: unsupported_unverified
+    reason: hibachi.batch_write_request_spec_only
+    official_doc: https://hibachi-docs.redocly.app/accountapi/trade
+streams:
+  - operation: public_orderbook_ws
+    product: perpetual
+    channel: "orderbook/{symbol}"
+    auth: none
+    support: parser_only
+    resync:
+      endpoint_operation: get_order_book
+  - operation: private_account_ws
+    product: perpetual
+    channel: "account?accountId={accountId}"
+    auth: api_key
+    support: unsupported_unverified
+    reason: hibachi.private_stream_runtime_spec_only

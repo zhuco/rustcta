@@ -1,0 +1,24 @@
+{
+  "type": "buy",
+  "in_currency": "BTC",
+  "in_amount": "1",
+  "out_currency": "USD",
+  "out_amount": "100",
+  "trades": [
+    {
+      "trade_id": 3,
+      "client_id": 100500,
+      "date": 1435488248,
+      "type": "buy",
+      "pair": "BTC_USD",
+      "order_id": 12345,
+      "quantity": 1,
+      "price": 100,
+      "amount": 100,
+      "exec_type": "taker",
+      "commission_amount": "0.02",
+      "commission_currency": "BTC",
+      "commission_percent": "0.2"
+    }
+  ]
+}

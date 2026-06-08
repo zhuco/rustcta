@@ -1,0 +1,7 @@
+{
+  "operation": "get_order_book",
+  "method": "GET",
+  "url": "https://paymium.com/api/v1/data/eur/depth",
+  "auth": "none",
+  "response_fixture": "tests/fixtures/exchanges/paymium/orderbook_btc_eur.json"
+}

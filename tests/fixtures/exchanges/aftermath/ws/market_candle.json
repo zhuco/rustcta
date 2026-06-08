@@ -1,0 +1,14 @@
+{
+  "marketCandles": {
+    "marketId": "aftermath-perp-btc-usdc",
+    "interval": "1m",
+    "candle": [
+      1700000000000,
+      "64900.0",
+      "65100.0",
+      "64850.0",
+      "65000.0",
+      "12.5"
+    ]
+  }
+}

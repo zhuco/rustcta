@@ -1,0 +1,11 @@
+{
+  "type": "SUBSCRIBE",
+  "channels": [
+    {
+      "name": "ORDER_BOOK",
+      "instrument_codes": [
+        "BTC_EUR"
+      ]
+    }
+  ]
+}

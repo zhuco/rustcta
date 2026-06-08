@@ -1,0 +1,8 @@
+{
+  "exchange": "bsx",
+  "algorithm": "hmac_sha256_hex",
+  "api_key": "test-api-key",
+  "timestamp_ns": "1700000000000000000",
+  "canonical_payload": "test-api-key,1700000000000000000",
+  "expected_signature": "da2bdc1bac1d0e734197bc2e9f49384f1cf8e33095ddcd7af8c2a65d6e7fecd6"
+}

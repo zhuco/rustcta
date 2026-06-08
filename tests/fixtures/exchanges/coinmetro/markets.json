@@ -1,0 +1,5 @@
+[
+  { "pair": "BTCEUR", "precision": 2, "margin": true },
+  { "pair": "ETHBTC", "precision": 6, "margin": false },
+  { "pair": "USDTEUR", "precision": 5, "margin": false }
+]

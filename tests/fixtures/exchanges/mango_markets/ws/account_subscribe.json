@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": "mango-markets-SOL-PERP",
+  "method": "accountSubscribe",
+  "params": [
+    "SOL-PERP",
+    {
+      "encoding": "base64",
+      "commitment": "confirmed"
+    }
+  ],
+  "gateway_note": "fixture-only; real order book requires book side and event queue account mapping"
+}

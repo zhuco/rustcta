@@ -1,0 +1,17 @@
+{
+  "action": "push",
+  "ch": "orders#btcjpy",
+  "data": {
+    "orderSize": "2.000000000000000000",
+    "orderCreateTime": 1583853365586,
+    "accountId": 992701,
+    "orderPrice": "77.000000000000000000",
+    "type": "sell-limit",
+    "orderId": 27163533,
+    "clientOrderId": "fixture-client-order-id",
+    "orderSource": "spot-api",
+    "orderStatus": "submitted",
+    "symbol": "btcjpy",
+    "eventType": "creation"
+  }
+}

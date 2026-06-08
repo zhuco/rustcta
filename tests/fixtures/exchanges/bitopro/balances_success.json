@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "amount": "1.5",
+      "available": "1.0",
+      "currency": "btc",
+      "stake": "0",
+      "tradable": true
+    },
+    {
+      "amount": "30000",
+      "available": "2500",
+      "currency": "twd",
+      "stake": "0",
+      "tradable": true
+    }
+  ]
+}

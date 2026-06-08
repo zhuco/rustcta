@@ -1,0 +1,14 @@
+{
+  "id": "order-quote",
+  "client_order_id": "client-quote",
+  "asset_class": "crypto",
+  "symbol": "BTC/USD",
+  "side": "buy",
+  "type": "market",
+  "time_in_force": "gtc",
+  "status": "new",
+  "notional": "25",
+  "filled_qty": "0",
+  "created_at": "2026-06-08T00:00:00Z",
+  "updated_at": "2026-06-08T00:00:00Z"
+}

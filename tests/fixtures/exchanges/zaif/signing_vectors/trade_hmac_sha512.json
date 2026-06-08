@@ -1,0 +1,6 @@
+{
+  "api_key": "zaif-test-key",
+  "api_secret": "zaif-test-secret",
+  "body": "nonce=1710000000&method=trade&currency_pair=btc_jpy&action=bid&price=6500000&amount=0.01",
+  "expected_signature": "8c89903f9c3581d718f42278b4ea4bb99215cd588ce435249af29cec0203196f8b62add0765318b778cb4fb8cf5300fff5bb4b104b8ecf489b3e29f19a505c26"
+}

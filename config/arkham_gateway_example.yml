@@ -1,0 +1,35 @@
+# Arkham gateway adapter example. Disabled by default.
+
+exchange: arkham
+adapter: arkham
+enabled: false
+
+market_types:
+  - spot
+  - perpetual
+
+rest_base_url: https://arkm.com/api
+public_ws_url: wss://arkm.com/api/ws
+private_ws_url: wss://arkm.com/api/ws
+
+api_key: ${ARKHAM_API_KEY}
+api_secret: ${ARKHAM_API_SECRET}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enabled_public_streams: false
+enabled_private_streams: false
+request_timeout_ms: 10000
+
+unsupported:
+  - arkham_intel_api_as_trading_adapter
+  - withdrawals
+  - transfers
+  - deposit_address_creation
+  - private_websocket_live_auth
+  - trigger_orders
+  - leverage_runtime_mutation
+
+notes:
+  - Private order endpoints are offline request-spec only until live-dry-run gates are added.
+  - Do not put real credentials in this file.

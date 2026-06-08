@@ -1,0 +1,22 @@
+gateway:
+  bind_addr: 127.0.0.1:18081
+  adapters:
+    - paper
+
+alpaca:
+  exchange: alpaca
+  adapter: alpaca
+  enabled: false
+  market_type: spot
+  broker_rest_base_url: https://broker-api.sandbox.alpaca.markets
+  market_data_rest_base_url: https://data.sandbox.alpaca.markets
+  public_ws_url: wss://stream.data.sandbox.alpaca.markets/v1beta3/crypto/us
+  credentials:
+    api_key_env: RUSTCTA_ALPACA_API_KEY
+    api_secret_env: RUSTCTA_ALPACA_API_SECRET
+  required_request_context:
+    account_id: broker_account_id
+  boundaries:
+    private_streams: unsupported_broker_sse_only
+    symbol_scoped_cancel_all: unsupported
+    recent_fills: unsupported

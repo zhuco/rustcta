@@ -1,0 +1,28 @@
+# Aftermath adapter example. Keep disabled unless public perpetual scan-only
+# collection is intentionally enabled.
+exchange: aftermath
+enabled: false
+market_types:
+  - perpetual
+
+rest:
+  base_url: https://aftermath.finance
+  testnet_base_url: https://testnet.aftermath.finance
+public_ws:
+  url: wss://aftermath.finance/api/perpetuals/ws/updates
+
+features:
+  public_rest: true
+  public_streams: false
+  private_rest: false
+  private_streams: false
+  trading: false
+
+auth:
+  access_token_env: RUSTCTA_AFTERMATH_ACCESS_TOKEN
+  private_write_signing: unsupported_sui_wallet_transaction
+
+rate_limits:
+  public_ccxt:
+    interval_ms: 10000
+    limit: 1000

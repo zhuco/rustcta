@@ -1,0 +1,5 @@
+{
+  "op": "subscribe",
+  "channel": "book",
+  "symbol": "BTC_USDT_PERP"
+}

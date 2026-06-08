@@ -1,0 +1,12 @@
+{
+  "event": "data",
+  "channel": "order_book-BTC_EUR",
+  "payload": {
+    "bids": [
+      { "price": "50000.00", "amount": "0.50000000" }
+    ],
+    "asks": [
+      { "price": "50010.00", "amount": "0.40000000" }
+    ]
+  }
+}

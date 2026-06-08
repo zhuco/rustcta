@@ -1,0 +1,21 @@
+{
+  "operation": "bitteam.place_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/trade/api/ccxt/ordercreate",
+  "query": {},
+  "headers": {
+    "authorization": "<redacted:basic-auth>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "pairId": 12501,
+    "side": "buy",
+    "type": "limit",
+    "amount": "0.01",
+    "price": "64000"
+  },
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "bitteam.place_order_request_spec_only"
+}

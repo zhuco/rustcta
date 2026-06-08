@@ -1,0 +1,15 @@
+{
+  "exchange": "cod3x",
+  "task": "C-48",
+  "surface": "positions",
+  "audit_subjects": ["downstream_positions", "wallet_connections", "account_permissions"],
+  "native_account_api_promoted": false,
+  "downstream_accounts": ["hyperliquid", "gmx_v2", "lighter"],
+  "gateway_mapping": {
+    "get_positions": "unsupported_unverified",
+    "get_balances": "unsupported_unverified",
+    "get_open_orders": "unsupported_unverified",
+    "query_order": "unsupported_unverified",
+    "get_recent_fills": "unsupported_unverified"
+  }
+}

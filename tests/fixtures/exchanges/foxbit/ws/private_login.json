@@ -1,0 +1,8 @@
+{
+  "type": "login",
+  "params": {
+    "api_key": "fixture-key",
+    "timestamp": "1700000000000",
+    "signature": "472015d94e7f4fc787ff74ad30bf4498a577db8f7dee13ee89d0df3480b23353"
+  }
+}

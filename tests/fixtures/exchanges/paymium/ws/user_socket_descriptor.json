@@ -1,0 +1,10 @@
+{
+  "url": "https://paymium.com/user",
+  "path": "/ws/socket.io",
+  "emit": [
+    "channel",
+    "USER_CHANNEL_ID"
+  ],
+  "event": "stream",
+  "runtime": "unsupported_requires_user_channel_from_private_rest"
+}

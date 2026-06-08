@@ -1,0 +1,25 @@
+{
+  "exchange": "alpaca",
+  "operation": "get_balances",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/trading/accounts/acct-123/account",
+  "auth": "api_key",
+  "headers": {
+    "APCA-API-KEY-ID": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "APCA-API-SECRET-KEY": {
+      "match": "exact",
+      "value": "test-secret"
+    }
+  },
+  "forbid_query_values_containing": [
+    "test-secret"
+  ],
+  "forbid_header_values_containing": [
+    "real-"
+  ]
+}

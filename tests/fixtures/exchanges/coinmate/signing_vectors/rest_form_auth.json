@@ -1,0 +1,8 @@
+{
+  "exchange": "coinmate",
+  "name": "rest_form_auth_fixture",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "fixture-private",
+  "payload": "1700000000000fixture-clientfixture-public",
+  "expected_signature": "07ea1665fd22a32d201a27b76ad8dc90a32d42e93db39a0926893f3b07843798"
+}

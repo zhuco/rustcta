@@ -1,0 +1,13 @@
+{
+  "name": "bitopro-ws-private-auth-headers",
+  "api_key": "bitopro-key",
+  "api_secret": "bitopro",
+  "identity": "support@example.test",
+  "nonce": 1554380909131,
+  "channel": "/v1/pub/auth/orders",
+  "headers": [
+    "X-BITOPRO-APIKEY",
+    "X-BITOPRO-PAYLOAD",
+    "X-BITOPRO-SIGNATURE"
+  ]
+}

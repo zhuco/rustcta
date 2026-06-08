@@ -1,0 +1,210 @@
+schema_version: 1
+exchange: cryptomus
+adapter: rustcta_exchange_gateway::adapters::cryptomus
+metadata:
+  status: validated
+  source: docs/cryptomus_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "Task 18 spot exchange boundary; merchant payment and payout APIs are explicitly excluded."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.cryptomus.com
+base_urls:
+  public_ws: wss://api-ws.cryptomus.com/ws
+auth:
+  private_rest: MD5 over base64 JSON body plus API key; signed requests send userId and sign headers.
+rate_limits:
+  buckets:
+    cryptomus_public_rest:
+      scope: rest
+      interval: 1m
+      limit: 120
+      burst: 20
+    cryptomus_private_rest:
+      scope: account
+      interval: 1m
+      limit: 120
+      burst: 20
+    cryptomus_orders:
+      scope: orders
+      interval: 1m
+      limit: 60
+      burst: 10
+pagination:
+  get_open_orders:
+    style: limit
+    max_limit: 100
+  get_recent_fills:
+    style: limit
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills]
+  unknown_order_policy: query_active_then_history
+batch:
+  place_orders: { support: unsupported, reason: cryptomus.batch_place_orders_unsupported }
+  cancel_orders: { support: unsupported, reason: cryptomus.batch_cancel_orders_unsupported }
+websocket:
+  public:
+    support: spec_only
+    url: wss://api-ws.cryptomus.com/ws
+    heartbeat:
+      method: ping
+      direction: client_ping
+      interval_ms: 50000
+      timeout_ms: 10000
+    resync: rest_order_book_snapshot
+  private:
+    support: spec_only
+    url: wss://api-ws.cryptomus.com/ws?token=<one-time-token>
+    auth: one_time_ws_token
+    fallback: rest_reconciliation
+unsupported:
+  - merchant_payment_api
+  - merchant_payout_api
+  - wallet_addresses
+  - withdrawals
+  - transfers
+  - fiat_payment_rails
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/user-api/exchange/markets
+    auth: none
+    rate_limit_bucket: cryptomus_public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    official_doc: https://doc.cryptomus.com/methods/exchange/list-of-available-trading-pairs
+    notes: "Exchange market metadata endpoint; merchant payment and payout assets endpoint is not used."
+    response_parser:
+      fixture: tests/fixtures/exchanges/cryptomus/markets.json
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /v1/exchange/market/order-book/{currencyPair}
+    auth: none
+    rate_limit_bucket: cryptomus_public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    params:
+      - name: level
+    official_doc: https://doc.cryptomus.com/methods/market-cap/orderbook
+    response_parser:
+      fixture: tests/fixtures/exchanges/cryptomus/orderbook.json
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/user-api/exchange/account/balance
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cryptomus_private_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    response_parser:
+      fixture: tests/fixtures/exchanges/cryptomus/balances.json
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/user-api/account/tariffs
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cryptomus_private_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    response_parser:
+      fixture: tests/fixtures/exchanges/cryptomus/tariffs.json
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /v2/user-api/exchange/orders
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/cryptomus/request_specs/place_order_limit.json
+    notes: "Market-order writes remain unsupported until live gating is reviewed."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /v2/user-api/exchange/orders/{orderId}
+    auth: signed
+    credential_scopes: [trade]
+    rate_limit_bucket: cryptomus_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/cryptomus/request_specs/cancel_order.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/user-api/exchange/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cryptomus_private_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    notes: "Active order query falls back to /v2/user-api/exchange/orders/history."
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/user-api/exchange/orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cryptomus_private_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    response_parser:
+      fixture: tests/fixtures/exchanges/cryptomus/orders_active.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /v2/user-api/exchange/orders/history
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: cryptomus_private_rest
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    response_parser:
+      fixture: tests/fixtures/exchanges/cryptomus/orders_history.json
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    path: /v2/user-api/exchange/orders/market
+    auth: unsupported
+    support: unsupported
+    reason: cryptomus.market_order_live_write_gated
+streams:
+  - operation: subscribe_public_order_book
+    channel: depth_subscribe
+    support: spec_only
+    resync:
+      endpoint_operation: get_order_book
+    fixture: tests/fixtures/exchanges/cryptomus/ws_public_depth.json
+  - operation: subscribe_private_orders
+    channel: order_subscribe
+    support: spec_only
+    auth_renewal:
+      endpoint_operation: get_balances
+    fixture: tests/fixtures/exchanges/cryptomus/ws_private_order.json

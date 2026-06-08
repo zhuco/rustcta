@@ -1,0 +1,18 @@
+{
+  "state": 0,
+  "result": [
+    {
+      "id": "ORDER-1",
+      "symbol": "BTC_USDT",
+      "clientOrderId": "CLIENT-LIMIT-1",
+      "direction": "buy",
+      "type": "limit",
+      "state": "active",
+      "internalState": "new",
+      "quantity": "0.01",
+      "filledQuantity": "0",
+      "price": "65000.00",
+      "createdAt": "2024-03-09 12:00:00"
+    }
+  ]
+}

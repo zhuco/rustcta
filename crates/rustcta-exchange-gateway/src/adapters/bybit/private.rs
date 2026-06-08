@@ -25,12 +25,12 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<BalancesResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
-        let (tenant_id, account_id) =
-            self.context_account(&request.context, "bybit.get_balances")?;
+        let operation = self.profile_operation("bybit.get_balances", "bybiteu.get_balances");
+        let (tenant_id, account_id) = self.context_account(&request.context, operation)?;
         let mut params = HashMap::new();
         params.insert("accountType".to_string(), "UNIFIED".to_string());
         let value = self
-            .send_signed_get("bybit.get_balances", "/v5/account/wallet-balance", &params)
+            .send_signed_get(operation, "/v5/account/wallet-balance", &params)
             .await?;
         Ok(BalancesResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -54,8 +54,8 @@ impl BybitGatewayAdapter {
         self.ensure_exchange(&request.exchange)?;
         let market_type = request.market_type.unwrap_or(MarketType::Perpetual);
         self.ensure_supported_market_type(market_type)?;
-        let (tenant_id, account_id) =
-            self.context_account(&request.context, "bybit.get_positions")?;
+        let operation = self.profile_operation("bybit.get_positions", "bybiteu.get_positions");
+        let (tenant_id, account_id) = self.context_account(&request.context, operation)?;
         let mut params = HashMap::new();
         params.insert(
             "category".to_string(),
@@ -70,7 +70,7 @@ impl BybitGatewayAdapter {
             params.insert("settleCoin".to_string(), "USDT".to_string());
         }
         let value = self
-            .send_signed_get("bybit.get_positions", "/v5/position/list", &params)
+            .send_signed_get(operation, "/v5/position/list", &params)
             .await?;
         Ok(PositionsResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -92,11 +92,12 @@ impl BybitGatewayAdapter {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
         self.ensure_supported_market_type(request.symbol.market_type)?;
+        let operation = self.profile_operation("bybit.place_order", "bybiteu.place_order");
         let body = bybit_place_order_body(&request)?;
         let exchange = request.symbol.exchange.clone();
         let request_id = request.context.request_id.clone();
         let value = self
-            .send_signed_post_json("bybit.place_order", "/v5/order/create", &body)
+            .send_signed_post_json(operation, "/v5/order/create", &body)
             .await?;
         Ok(PlaceOrderResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -111,6 +112,7 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<CancelOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
+        let operation = self.profile_operation("bybit.cancel_order", "bybiteu.cancel_order");
         let mut body = json!({
             "category": bybit_category(request.symbol.market_type),
             "symbol": normalize_bybit_symbol(&request.symbol.exchange_symbol.symbol)?,
@@ -121,7 +123,7 @@ impl BybitGatewayAdapter {
             request.client_order_id.as_deref(),
         )?;
         let value = self
-            .send_signed_post_json("bybit.cancel_order", "/v5/order/cancel", &body)
+            .send_signed_post_json(operation, "/v5/order/cancel", &body)
             .await?;
         let exchange = request.symbol.exchange.clone();
         let request_id = request.context.request_id.clone();
@@ -139,6 +141,7 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<QueryOrderResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.symbol.exchange)?;
+        let operation = self.profile_operation("bybit.query_order", "bybiteu.query_order");
         let mut params = HashMap::new();
         params.insert(
             "category".to_string(),
@@ -155,7 +158,7 @@ impl BybitGatewayAdapter {
             params.insert("orderLinkId".to_string(), order_link_id.to_string());
         }
         let value = self
-            .send_signed_get("bybit.query_order", "/v5/order/realtime", &params)
+            .send_signed_get(operation, "/v5/order/realtime", &params)
             .await?;
         let mut orders = parse_orders(&self.exchange_id, Some(&request.symbol), &value)?;
         Ok(QueryOrderResponse {
@@ -171,6 +174,7 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<OpenOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
+        let operation = self.profile_operation("bybit.get_open_orders", "bybiteu.get_open_orders");
         let market_type = request.market_type.unwrap_or(MarketType::Perpetual);
         let mut params = HashMap::new();
         params.insert(
@@ -184,7 +188,7 @@ impl BybitGatewayAdapter {
             );
         }
         let value = self
-            .send_signed_get("bybit.get_open_orders", "/v5/order/realtime", &params)
+            .send_signed_get(operation, "/v5/order/realtime", &params)
             .await?;
         Ok(OpenOrdersResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -205,8 +209,9 @@ impl BybitGatewayAdapter {
             .ok_or_else(|| ExchangeApiError::InvalidRequest {
                 message: "bybit get_recent_fills requires symbol".to_string(),
             })?;
-        let (tenant_id, account_id) =
-            self.context_account(&request.context, "bybit.get_recent_fills")?;
+        let operation =
+            self.profile_operation("bybit.get_recent_fills", "bybiteu.get_recent_fills");
+        let (tenant_id, account_id) = self.context_account(&request.context, operation)?;
         let mut params = HashMap::new();
         params.insert(
             "category".to_string(),
@@ -220,7 +225,7 @@ impl BybitGatewayAdapter {
             params.insert("limit".to_string(), limit.min(100).to_string());
         }
         let value = self
-            .send_signed_get("bybit.get_recent_fills", "/v5/execution/list", &params)
+            .send_signed_get(operation, "/v5/execution/list", &params)
             .await?;
         Ok(RecentFillsResponse {
             schema_version: EXCHANGE_API_SCHEMA_VERSION,
@@ -235,6 +240,8 @@ impl BybitGatewayAdapter {
     ) -> ExchangeApiResult<CancelAllOrdersResponse> {
         ensure_exchange_api_schema(request.schema_version)?;
         self.ensure_exchange(&request.exchange)?;
+        let operation =
+            self.profile_operation("bybit.cancel_all_orders", "bybiteu.cancel_all_orders");
         let symbol = request
             .symbol
             .as_ref()
@@ -246,7 +253,7 @@ impl BybitGatewayAdapter {
             "symbol": normalize_bybit_symbol(&symbol.exchange_symbol.symbol)?,
         });
         let value = self
-            .send_signed_post_json("bybit.cancel_all_orders", "/v5/order/cancel-all", &body)
+            .send_signed_post_json(operation, "/v5/order/cancel-all", &body)
             .await?;
         let orders = parse_orders(&self.exchange_id, Some(symbol), &value).unwrap_or_default();
         Ok(CancelAllOrdersResponse {
@@ -261,7 +268,7 @@ impl BybitGatewayAdapter {
         &self,
         _request: FeesRequest,
     ) -> ExchangeApiResult<FeesResponse> {
-        self.unsupported_private("bybit.get_fees")
+        self.unsupported_private(self.profile_operation("bybit.get_fees", "bybiteu.get_fees"))
     }
 }
 

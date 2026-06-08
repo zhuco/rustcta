@@ -1,0 +1,24 @@
+{
+  "operation": "yobit.place_order",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/tapi/",
+  "query": {},
+  "headers": {
+    "Key": "<redacted:api-key>",
+    "Sign": "<redacted:hmac-sha512>",
+    "content-type": "application/x-www-form-urlencoded"
+  },
+  "body": {
+    "method": "Trade",
+    "pair": "btc_usdt",
+    "type": "buy",
+    "rate": "64000",
+    "amount": "0.01",
+    "nonce": "1700000003"
+  },
+  "signing_vector": "tests/fixtures/exchanges/yobit/signing_vectors/rest_tapi_hmac_sha512.json",
+  "credential_scope": "trade",
+  "expected_error_until_promoted": "yobit.place_order_request_spec_only"
+}

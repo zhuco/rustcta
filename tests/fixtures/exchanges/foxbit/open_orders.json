@@ -1,0 +1,9 @@
+[
+  {
+    "id": "order-foxbit-1",
+    "client_order_id": "offline-fixture",
+    "market_symbol": "btcbrl",
+    "side": "BUY",
+    "status": "OPEN"
+  }
+]

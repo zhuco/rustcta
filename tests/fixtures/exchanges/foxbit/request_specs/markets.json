@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/markets",
+  "auth": "none",
+  "headers": {
+    "Accept": "application/json"
+  }
+}

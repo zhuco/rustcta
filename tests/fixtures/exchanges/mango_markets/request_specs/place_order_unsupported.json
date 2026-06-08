@@ -1,0 +1,10 @@
+{
+  "exchange": "mango_markets",
+  "operation": "place_order",
+  "status": "unsupported",
+  "unsupported_reason": "Mango order writes are Solana transactions that require wallet-owned MangoAccount authority, risk/health checks, account lookup tables and transaction confirmation auditing.",
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "scan_only": true,
+  "expected_error": "mango_markets.place_order_requires_solana_wallet_transaction_signing_audit"
+}

@@ -1,0 +1,18 @@
+{
+  "exchange": "bsx",
+  "operation": "get_open_orders",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/orders",
+  "auth": "signed",
+  "headers": {
+    "BSX-KEY": { "match": "exact", "value": "test-api-key" },
+    "BSX-SIGNATURE": { "match": "present" },
+    "BSX-TIMESTAMP": { "match": "exact", "value": "1700000000000000000" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": ["secret", "private"]
+}

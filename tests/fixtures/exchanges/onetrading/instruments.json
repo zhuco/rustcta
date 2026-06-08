@@ -1,0 +1,74 @@
+[
+  {
+    "base": {
+      "code": "BTC",
+      "precision": 5
+    },
+    "quote": {
+      "code": "EUR",
+      "precision": 2
+    },
+    "amount_precision": 5,
+    "market_precision": 2,
+    "min_size": "10.0",
+    "min_price": "1000",
+    "max_price": "10000000",
+    "id": "BTC_EUR",
+    "type": "SPOT",
+    "state": "ACTIVE"
+  },
+  {
+    "base": {
+      "code": "SOL",
+      "precision": 4
+    },
+    "quote": {
+      "code": "EUR",
+      "precision": 2
+    },
+    "amount_precision": 4,
+    "market_precision": 3,
+    "min_size": "10.0",
+    "min_price": "0.01",
+    "max_price": "1000000",
+    "id": "SOL_EUR",
+    "type": "SPOT",
+    "state": "ACTIVE"
+  },
+  {
+    "base": {
+      "code": "BTC",
+      "precision": 5
+    },
+    "quote": {
+      "code": "EUR",
+      "precision": 2
+    },
+    "amount_precision": 5,
+    "market_precision": 2,
+    "min_size": "10.0",
+    "min_price": "1000",
+    "max_price": "10000000",
+    "id": "BTC_EUR_P",
+    "type": "PERP",
+    "state": "ACTIVE"
+  },
+  {
+    "base": {
+      "code": "XRP",
+      "precision": 4
+    },
+    "quote": {
+      "code": "EUR",
+      "precision": 2
+    },
+    "amount_precision": 3,
+    "market_precision": 4,
+    "min_size": "10.0",
+    "min_price": "0.0001",
+    "max_price": "1000",
+    "id": "XRP_EUR",
+    "type": "SPOT",
+    "state": "SUSPENDED"
+  }
+]

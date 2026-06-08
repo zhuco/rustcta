@@ -1,0 +1,14 @@
+[
+  {
+    "orderId": "9001",
+    "clientOrderId": "CID-001",
+    "symbol": "BTC-USDT",
+    "time": 1775541541009,
+    "dealPrice": "65010",
+    "dealQuantity": "0.01",
+    "fee": "0.39006",
+    "side": "BUY",
+    "type": "LIMIT",
+    "tradePnl": "0"
+  }
+]

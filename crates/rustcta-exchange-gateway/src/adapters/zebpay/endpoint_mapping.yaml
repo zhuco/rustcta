@@ -1,0 +1,205 @@
+schema_version: 1
+exchange: zebpay
+adapter: ZebpayGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/zebpay_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: A-39 regional spot scan-only adapter. Public REST is implemented for market list and order book snapshots; private REST is request-spec-only and disabled.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://www.zebapi.com
+auth:
+  private_rest: Bearer access token with client_id, timestamp, and RequestId headers; token acquisition and KYC onboarding are request-spec-only.
+rate_limits:
+  zebpay_public:
+    scope: ip
+    interval_ms: 60000
+    limit: unknown
+    notes: No stable numeric quota was found in the public docs during A-39 audit.
+  zebpay_private:
+    scope: key
+    interval_ms: 60000
+    limit: unknown
+    notes: Private endpoints require API onboarding, KYC, and bearer-token lifecycle validation.
+pagination:
+  open_orders: { mode: page_limit, max_limit: 500, request_spec_only: true }
+  fills: { mode: order_id, max_limit: null, request_spec_only: true }
+reconciliation:
+  private_state: rest_request_spec_only
+  readbacks: [get_open_orders, get_recent_fills]
+  notes: Private runtime is disabled; after promotion use /orders and /orders/{order_id}/fills for REST reconciliation.
+batch:
+  place: { support: unsupported, reason: zebpay.batch_place_orders_unverified }
+  cancel: { support: unsupported, reason: zebpay.batch_cancel_orders_unverified }
+websocket:
+  public:
+    support: unsupported
+    reason: zebpay.public_streams_unverified
+    heartbeat: { mode: unsupported }
+    fallback: REST snapshots over /market/{trade_pair}/book and /market/{trade_pair}/book_long.
+  private:
+    support: unsupported
+    reason: zebpay.private_streams_unverified
+    auth_renewal: { mode: unsupported }
+    fallback: Request-spec-only REST readbacks over /orders and /orders/{order_id}/fills.
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /market
+    auth: none
+    rate_limit_bucket: zebpay_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.zebpay.com/
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /market/{trade_pair}/book
+    auth: none
+    rate_limit_bucket: zebpay_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.zebpay.com/
+  - operation: get_order_book_long
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /market/{trade_pair}/book_long
+    auth: none
+    rate_limit_bucket: zebpay_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.zebpay.com/
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /wallet/balance
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: zebpay_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: zebpay.balances_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/zebpay/request_specs/get_balances.json
+    official_doc: https://docs.zebpay.com/
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: zebpay_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: zebpay.place_order_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/zebpay/request_specs/place_order_limit_buy.json
+    official_doc: https://docs.zebpay.com/
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /orders/{order_id}
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: zebpay_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: zebpay.cancel_order_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/zebpay/request_specs/cancel_order.json
+    official_doc: https://docs.zebpay.com/
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /orders/CancelAll
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: zebpay_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: unsupported
+    reason: zebpay.cancel_all_orders_request_spec_only
+    official_doc: https://docs.zebpay.com/
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: zebpay_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: zebpay.open_orders_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/zebpay/request_specs/get_open_orders.json
+    official_doc: https://docs.zebpay.com/
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /orders/{order_id}/fills
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: zebpay_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: zebpay.recent_fills_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/zebpay/request_specs/get_recent_fills.json
+    official_doc: https://docs.zebpay.com/

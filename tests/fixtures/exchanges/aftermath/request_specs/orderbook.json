@@ -1,0 +1,14 @@
+{
+  "exchange": "aftermath",
+  "operation": "order_book",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/api/ccxt/orderbook",
+  "auth": "none",
+  "body": {
+    "chId": "aftermath-perp-btc-usdc"
+  },
+  "strict_query": true,
+  "strict_body": true
+}

@@ -1,0 +1,14 @@
+{
+  "exchange": "btcbox",
+  "operation": "place_order",
+  "method": "POST",
+  "path": "/api/v1/trade_add",
+  "headers": {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  "canonical": "amount=0.01&coin=btc&key=btcbox-public-key&nonce=1700000000012&price=5000000&type=buy",
+  "body": "amount=0.01&coin=btc&key=btcbox-public-key&nonce=1700000000012&price=5000000&type=buy&signature=ca3b82ba48aa7963fc9d162ef64540195808a588c64f027a7713314a57e12654",
+  "auth": "hmac_sha256_md5_private_key",
+  "expected_signature": "ca3b82ba48aa7963fc9d162ef64540195808a588c64f027a7713314a57e12654",
+  "network": "offline_request_spec_only"
+}

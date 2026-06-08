@@ -1,0 +1,28 @@
+{
+  "exchange": "hitbtc",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/3/spot/order/cli-hitbtc-1",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6ODU4ODJkMjhiZDZmMTc1YTkxZmRlMDExYzM0N2ZhYjU1MzBmMDUzYTRlMjU3OTQ5NWEwZDIzZDc5YzNhNjAyZjoxNzEwMDAwMDAwMDAwOjEwMDAw"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "hitbtc/cancel_order_hs256"
+}

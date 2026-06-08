@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/v1/market/depth",
+  "auth": "none",
+  "query": {
+    "symbol": "BTC_BRL",
+    "limit": "50"
+  },
+  "headers": {
+    "Accept": "application/json"
+  }
+}

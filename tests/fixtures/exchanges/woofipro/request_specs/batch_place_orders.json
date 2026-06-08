@@ -1,0 +1,26 @@
+{
+  "exchange": "woofipro",
+  "operation": "batch_place_orders",
+  "method": "POST",
+  "path": "/v1/batch-order",
+  "body": {
+    "orders": [
+      {
+        "symbol": "PERP_BTC_USDC",
+        "order_type": "LIMIT",
+        "side": "BUY",
+        "order_quantity": 0.01,
+        "order_price": 65000,
+        "client_order_id": "cid-woofi-1",
+        "reduce_only": false
+      }
+    ]
+  },
+  "headers": {
+    "orderly-account-id": "acct_test_account_id",
+    "orderly-key": "ed25519:test-public-key",
+    "orderly-signature": "test-signature-placeholder",
+    "orderly-timestamp": "1700000000000"
+  },
+  "auth": "signed"
+}

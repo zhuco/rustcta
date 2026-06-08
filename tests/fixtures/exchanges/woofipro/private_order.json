@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "data": {
+    "order_id": 123456789,
+    "client_order_id": "cid-woofi-1",
+    "symbol": "PERP_BTC_USDC",
+    "side": "BUY",
+    "order_type": "LIMIT",
+    "order_price": "65000",
+    "order_quantity": "0.01",
+    "total_executed_quantity": "0",
+    "average_executed_price": null,
+    "status": "NEW",
+    "reduce_only": false,
+    "created_time": 1700000000000,
+    "updated_time": 1700000000000
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "exchange": "bybiteu",
+  "profile_of": "bybit",
+  "name": "rest_hmac_shape_disabled",
+  "algorithm": "hmac_sha256_hex",
+  "payload_rule": "timestamp + api_key + recv_window + query_or_json_body",
+  "required_headers": [
+    "X-BAPI-API-KEY",
+    "X-BAPI-TIMESTAMP",
+    "X-BAPI-SIGN",
+    "X-BAPI-RECV-WINDOW"
+  ],
+  "credential_values": {},
+  "status": "shape_only_private_disabled"
+}

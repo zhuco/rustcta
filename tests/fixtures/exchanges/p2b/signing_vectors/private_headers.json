@@ -1,0 +1,19 @@
+{
+  "algorithm": "base64_json_payload_hmac_sha512_hex",
+  "api_key": "p2b_public_test_key",
+  "api_secret": "p2b_private_test_secret",
+  "body": {
+    "market": "BTC_USDT",
+    "side": "buy",
+    "amount": "0.01",
+    "price": "64000",
+    "request": "/api/v2/order/new",
+    "nonce": "1698484860"
+  },
+  "expected_headers": {
+    "X-TXC-APIKEY": "p2b_public_test_key",
+    "X-TXC-PAYLOAD": "eyJhbW91bnQiOiIwLjAxIiwibWFya2V0IjoiQlRDX1VTRFQiLCJub25jZSI6IjE2OTg0ODQ4NjAiLCJwcmljZSI6IjY0MDAwIiwicmVxdWVzdCI6Ii9hcGkvdjIvb3JkZXIvbmV3Iiwic2lkZSI6ImJ1eSJ9",
+    "X-TXC-SIGNATURE": "6f830a51b14e4bb4cb2b1c79fd08d6812e9451f732dbbdfc02b752461a13cb781997c17c0c170a7fef8e87abfeac57645536d6833805ec79bf4a157eb5b17266"
+  },
+  "sanitized": true
+}

@@ -1,0 +1,20 @@
+{
+  "exchange": "bsx",
+  "operation": "cancel_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/orders/test-order-id",
+  "auth": "signed",
+  "trade_enabled": false,
+  "expected_error": "bsx.cancel_order_requires_cancel_v2_semantics_audit",
+  "headers": {
+    "BSX-KEY": { "match": "exact", "value": "test-api-key" },
+    "BSX-SIGNATURE": { "match": "present" },
+    "BSX-TIMESTAMP": { "match": "exact", "value": "1700000000000000000" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": ["secret", "private"]
+}

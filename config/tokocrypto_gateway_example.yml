@@ -1,0 +1,23 @@
+gateway:
+  adapters:
+    - tokocrypto
+
+tokocrypto:
+  enabled: true
+  rest_base_url: "https://www.tokocrypto.com"
+  market_rest_base_url: "https://www.tokocrypto.site"
+  nextme_rest_base_url: "https://cloudme-toko.2meta.app"
+  public_websocket_url: "wss://stream-cloud.tokocrypto.site/stream"
+  private_websocket_url: "wss://ws-api.tokocrypto.site/ws-api/v3"
+  enabled_private_rest: false
+  enabled_public_streams: false
+  enabled_private_streams: false
+  request_timeout_ms: 10000
+  recv_window_ms: 5000
+
+environment:
+  rest_base_url: RUSTCTA_TOKOCRYPTO_REST_BASE_URL
+  market_rest_base_url: RUSTCTA_TOKOCRYPTO_MARKET_REST_BASE_URL
+  nextme_rest_base_url: RUSTCTA_TOKOCRYPTO_NEXTME_REST_BASE_URL
+  api_key: RUSTCTA_TOKOCRYPTO_API_KEY
+  api_secret: RUSTCTA_TOKOCRYPTO_API_SECRET

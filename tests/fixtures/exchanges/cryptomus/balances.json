@@ -1,0 +1,15 @@
+{
+  "state": 0,
+  "result": [
+    {
+      "ticker": "USDT",
+      "available": "100.5",
+      "held": "2.0"
+    },
+    {
+      "ticker": "BTC",
+      "available": "0.1",
+      "held": "0.0"
+    }
+  ]
+}

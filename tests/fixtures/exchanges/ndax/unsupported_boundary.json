@@ -1,0 +1,20 @@
+{
+  "exchange": "ndax",
+  "market_types": ["spot"],
+  "private_write_mode": "offline_request_spec_only",
+  "private_read_runtime": "unsupported_until_account_permissions_and_v3_rest_auth_are_verified",
+  "private_ws_runtime": "unsupported_payload_only",
+  "fiat_ledger_runtime": "unsupported",
+  "unsupported": [
+    "perpetuals",
+    "futures",
+    "margin",
+    "leverage",
+    "positions",
+    "funding",
+    "withdrawals",
+    "transfers",
+    "native_batch_place",
+    "native_batch_cancel_list"
+  ]
+}

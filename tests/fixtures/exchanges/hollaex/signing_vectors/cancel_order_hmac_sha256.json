@@ -1,0 +1,12 @@
+{
+  "exchange": "hollaex",
+  "name": "cancel_order_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000",
+  "method": "DELETE",
+  "request_path": "/v2/order?order_id=order-fixture-1",
+  "payload": "DELETE/v2/order?order_id=order-fixture-11710000000",
+  "expected_signature": "5a63fffbbd7bae31fc86fa444242ada6970d3201a916b9ea57c2ea9ae9b913ab",
+  "payload_format": "raw_payload"
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "symbol": "BTC_USDT",
+    "baseSymbol": "BTC",
+    "baseName": "Bitcoin",
+    "quoteSymbol": "USDT",
+    "quoteName": "Tether",
+    "minTickPrice": "0.01",
+    "minLotSize": "0.00001",
+    "minSize": "0.00001",
+    "maxSize": "9000",
+    "minPrice": "0.01",
+    "maxPrice": "1000000",
+    "minNotional": "5",
+    "pairType": "spot",
+    "maxLeverage": "0",
+    "status": "listed"
+  },
+  {
+    "symbol": "BTC_USDT_PERP",
+    "baseSymbol": "BTC.P",
+    "baseName": "Bitcoin Perpetual",
+    "quoteSymbol": "USDT",
+    "quoteName": "Tether",
+    "minTickPrice": "0.01",
+    "minLotSize": "0.00001",
+    "minSize": "0.00001",
+    "maxSize": "9000",
+    "minPrice": "0.01",
+    "maxPrice": "1000000",
+    "minNotional": "5",
+    "pairType": "perpetual",
+    "marginSchedule": "C",
+    "maxLeverage": "25",
+    "status": "listed"
+  }
+]

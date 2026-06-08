@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "errorCode": "",
+  "message": "",
+  "result": [
+    {
+      "stock": "BTC",
+      "money": "USDT"
+    }
+  ]
+}

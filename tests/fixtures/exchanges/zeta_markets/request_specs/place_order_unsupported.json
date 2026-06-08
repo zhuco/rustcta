@@ -1,0 +1,11 @@
+{
+  "exchange": "zeta_markets",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "solana_sdk",
+  "auth": "wallet_signature",
+  "trade_enabled": false,
+  "expected_error": "zeta_markets.place_order_unsupported_venue_ceased_operations",
+  "private_key_fixture": "absent",
+  "venue_ceased_operations": true
+}

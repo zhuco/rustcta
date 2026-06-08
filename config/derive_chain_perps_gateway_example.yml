@@ -1,0 +1,26 @@
+gateway:
+  adapters:
+    - derive_chain_perps
+
+derive_chain_perps:
+  enabled: false
+  profile_of: derive
+  chain: derive_chain
+  chain_id: 957
+  market_types:
+    - perpetual
+  docs_base_url: https://docs.derive.xyz
+  app_base_url: https://www.derive.xyz
+  rest_base_url: https://api.derive.xyz
+  rpc_url: https://rpc.lyra.finance
+  indexer_url: null
+  public_rest_enabled: false
+  private_rest_enabled: false
+  public_streams_enabled: false
+  private_streams_enabled: false
+  trade_enabled: false
+  scan_only: true
+  notes:
+    - "C-47 keeps derive_chain_perps as a Derive Chain settlement/profile audit only."
+    - "Use the existing derive adapter for Derive Exchange API runtime."
+    - "Do not configure wallet private keys or promote contract writes without maintained Derive Chain/indexer support."

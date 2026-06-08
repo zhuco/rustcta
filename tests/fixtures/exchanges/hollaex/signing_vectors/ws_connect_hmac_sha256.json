@@ -1,0 +1,12 @@
+{
+  "exchange": "hollaex",
+  "name": "ws_connect_hmac_sha256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000",
+  "method": "CONNECT",
+  "request_path": "/stream",
+  "payload": "CONNECT/stream1710000000",
+  "expected_signature": "f99cca59fee066d50d972736fde368157df8a23a4a1d09bd48d19a09c491f986",
+  "payload_format": "raw_payload"
+}

@@ -1,0 +1,5 @@
+{
+  "error": "INVALID_SIGNATURE",
+  "message": "invalid or expired Arkham-Signature",
+  "statusCode": 401
+}

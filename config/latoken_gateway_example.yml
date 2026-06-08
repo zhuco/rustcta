@@ -1,0 +1,22 @@
+# LATOKEN gateway adapter example.
+# Disabled by default; do not put real credentials in this file.
+
+gateway:
+  adapters:
+    - latoken
+
+latoken:
+  enabled: false
+  rest_base_url: "https://api.latoken.com"
+  websocket_url: "wss://api.latoken.com/stomp"
+  private_rest:
+    enabled: false
+    api_key_env: "RUSTCTA_LATOKEN_API_KEY"
+    api_secret_env: "RUSTCTA_LATOKEN_API_SECRET"
+  capabilities:
+    spot_public_rest: true
+    private_rest_runtime: false
+    websocket_runtime: false
+  notes:
+    - "A-25 scan-only adapter: public pairs and order book only."
+    - "Private REST is request-spec/signing-vector only until a separate validation task promotes it."

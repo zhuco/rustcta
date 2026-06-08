@@ -65,7 +65,7 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
             "funding_arb_live.spec.json",
             "funding_arb_live",
             "funding_arbitrage",
-            6,
+            7,
         ),
         (
             "spot_spot_live_dry_run.spec.json",

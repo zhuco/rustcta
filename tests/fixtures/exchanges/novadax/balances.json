@@ -1,0 +1,16 @@
+{
+  "code": "A10000",
+  "message": "Success",
+  "data": [
+    {
+      "currency": "BTC",
+      "available": "0.50000000",
+      "frozen": "0.10000000"
+    },
+    {
+      "currency": "BRL",
+      "available": "1000.00",
+      "frozen": "0.00"
+    }
+  ]
+}

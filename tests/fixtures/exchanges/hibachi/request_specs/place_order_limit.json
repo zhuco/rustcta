@@ -1,0 +1,22 @@
+{
+  "exchange": "hibachi",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/trade/order",
+  "auth": "signed",
+  "body": {
+    "accountId": 42,
+    "nonce": 1714701600000000,
+    "symbol": "BTC/USDT-P",
+    "side": "ASK",
+    "orderType": "LIMIT",
+    "quantity": "1",
+    "price": "10",
+    "signature": "321447ecf3fb215e0bacd04436254a6f28823f86a728de1701d6f7fa66e68ed8",
+    "maxFeesPercent": "0.00005"
+  },
+  "strict_body": true,
+  "signing_vector": "tests/fixtures/exchanges/hibachi/signing_vectors/exchange_managed_hmac.json"
+}

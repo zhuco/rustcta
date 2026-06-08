@@ -1,0 +1,19 @@
+{
+  "exchange": "cex",
+  "operation": "cex.place_order",
+  "method": "POST",
+  "path": "/place_order/BTC/USD",
+  "transport": "rest",
+  "auth": "hmac",
+  "credential_scope": "trade",
+  "body": {
+    "nonce": "1700000000000",
+    "key": "fixture-key",
+    "signature": "33BF9004BAEBB373F6879ADFD86757EF6B36AF67CF246C4D00C0ABF8E6B7EF17",
+    "order_type": "limit",
+    "type": "buy",
+    "amount": "0.01",
+    "price": "10000"
+  },
+  "unsupported_boundary": "CEX.IO private write REST is request-spec only; adapter returns cex.place_order_request_spec_only."
+}

@@ -1,0 +1,30 @@
+{
+  "exchange": "myokx",
+  "profile_of": "okx",
+  "rest_base_url": "https://eea.okx.com",
+  "public_ws_url": "wss://wseea.okx.com:8443/ws/v5/public",
+  "private_ws_url": "wss://wseea.okx.com:8443/ws/v5/private",
+  "products": {
+    "spot": "public_rest_enabled",
+    "swap": "unsupported_regional_profile",
+    "future": "unsupported_regional_profile",
+    "option": "unsupported_regional_profile"
+  },
+  "public_rest": {
+    "status": "profile_audit",
+    "shape": "okx_v5_spot"
+  },
+  "private_rest": {
+    "status": "unsupported_until_eea_credential_scope_audit",
+    "trade_enabled": false,
+    "read_enabled": false,
+    "reason": "The MyOKX EEA profile is wired as Spot public REST first; private REST signing shape is recorded only as an offline fixture."
+  },
+  "websocket": {
+    "public_status": "payload_spec",
+    "private_status": "auth_payload_shape_only",
+    "heartbeat": "server_ping_client_pong",
+    "resync": "rest_order_book_snapshot"
+  },
+  "credential_values": {}
+}

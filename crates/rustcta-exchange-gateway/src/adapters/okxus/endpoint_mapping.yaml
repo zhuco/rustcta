@@ -1,0 +1,228 @@
+schema_version: 1
+exchange: okxus
+adapter: rustcta_exchange_gateway::adapters::okxus
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: OKX US API docs, API FAQ, US Risk & Compliance disclosures, US Terms of Service, and OKX API Agreement
+  last_reviewed: "2026-06-08"
+  notes: OKX US is treated as an OKX v5 regional profile on us.okx.com. This adapter enables spot public REST only; private REST/WS and non-spot products remain Unsupported pending US credential and product-scope audit.
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://us.okx.com
+base_urls:
+  canonical_rest_base_url: https://www.okx.com
+  us_rest_base_url: https://us.okx.com
+  public_ws: wss://wsus.okx.com:8443/ws/v5/public
+  private_ws: wss://wsus.okx.com:8443/ws/v5/private
+  business_ws: wss://wsus.okx.com:8443/ws/v5/business
+auth:
+  public_rest: none
+  private_rest: unsupported_pending_us_scope_audit
+  inherited_shape: OK-ACCESS-SIGN = base64(HMAC_SHA256(timestamp + method + request_path + body))
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_okx_rate_error, default_weight: 1 }
+  private_account: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+  private_trade: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+reconciliation:
+  private_stream_fallback: unsupported
+  public_stream_resync: rest_order_book_snapshot
+  unknown_order_policy: unsupported_private_trading
+batch:
+  place_orders:
+    support: unsupported
+    reason: OKX US private trading scope is not enabled in this profile.
+  cancel_orders:
+    support: unsupported
+    reason: OKX US private trading scope is not enabled in this profile.
+  cancel_all_orders:
+    support: unsupported
+    atomicity: unsupported
+    partial_failure: false
+websocket:
+  public:
+    support: spec_only
+    channels: [books5, trades, tickers, candle1m]
+    heartbeat: { mode: server_ping_client_pong, interval_ms: 25000, timeout_ms: 30000 }
+    resync: rest_order_book_snapshot
+  private:
+    support: unsupported
+    auth: unsupported_pending_us_scope_audit
+    fallback: unsupported
+unsupported:
+  - operation: non_spot_market_types
+    reason: OKX US profile is limited to spot public REST; perpetual swaps, futures, options, and margin are not enabled.
+  - operation: get_balances
+    reason: US private API credential scope and account product availability have not been audited.
+  - operation: get_positions
+    reason: Positions are non-spot/derivatives account state and are Unsupported for this profile.
+  - operation: place_order
+    reason: No OKX US private write request is enabled without credential and product-scope audit.
+  - operation: cancel_order
+    reason: No OKX US private write request is enabled without credential and product-scope audit.
+  - operation: cancel_all_orders
+    reason: No OKX US private write request is enabled without credential and product-scope audit.
+  - operation: query_order
+    reason: Private order readback is disabled pending US scope audit.
+  - operation: get_open_orders
+    reason: Private order readback is disabled pending US scope audit.
+  - operation: get_recent_fills
+    reason: Private fills readback is disabled pending US scope audit.
+  - operation: subscribe_private_stream
+    reason: Private WS auth/subscriptions are disabled pending US scope audit.
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v5/public/instruments
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    official_doc: https://app.okx.com/docs-v5/en/
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v5/market/books
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    official_doc: https://app.okx.com/docs-v5/en/
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/get_balances
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private REST read is disabled pending US credential and product-scope audit.
+  - operation: get_positions
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/get_positions
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US profile is spot-only; positions are Unsupported.
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/get_fees
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private account fee readback is disabled pending US credential and product-scope audit.
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/place_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private write is disabled pending US credential and product-scope audit.
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/place_quote_market_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private write is disabled pending US credential and product-scope audit.
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/cancel_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private write is disabled pending US credential and product-scope audit.
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/cancel_all_orders
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private write is disabled pending US credential and product-scope audit.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/amend_order
+    auth: unsupported
+    credential_scopes: [trade]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private write is disabled pending US credential and product-scope audit.
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/query_order
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private order readback is disabled pending US credential and product-scope audit.
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/get_open_orders
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private order readback is disabled pending US credential and product-scope audit.
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/okxus/get_recent_fills
+    auth: unsupported
+    credential_scopes: [read_only]
+    rate_limit_bucket: unsupported
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: OKX US private fills readback is disabled pending US credential and product-scope audit.

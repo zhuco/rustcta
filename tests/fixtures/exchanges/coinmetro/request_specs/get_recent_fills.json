@@ -1,0 +1,13 @@
+{
+  "exchange": "coinmetro",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/exchange/fills/1567791175000",
+  "auth": "bearer",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer fixture.jwt.token" }
+  },
+  "forbid_header_values_containing": ["secret", "production"]
+}

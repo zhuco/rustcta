@@ -1,0 +1,16 @@
+{
+  "exchange": "hibachi",
+  "operation": "get_order_book",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/market/data/orderbook",
+  "auth": "none",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTC/USDT-P" },
+    "depth": { "match": "exact", "value": "100" },
+    "granularity": { "match": "exact", "value": "0.01" }
+  },
+  "strict_query": true,
+  "strict_body": true
+}

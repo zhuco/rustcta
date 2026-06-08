@@ -1,0 +1,20 @@
+{
+  "status": 1,
+  "data": [
+    {
+      "coin": "BTC",
+      "market": "INR",
+      "floatPlaces": 8,
+      "inrDecimals": 2,
+      "min_notional": "10",
+      "status": 1
+    },
+    {
+      "symbol": "ETH_USDT",
+      "floatPlaces": 6,
+      "usdtDecimals": 3,
+      "status": 1
+    }
+  ],
+  "error": null
+}

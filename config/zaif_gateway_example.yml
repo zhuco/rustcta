@@ -1,0 +1,55 @@
+# Zaif Japanese Spot/Jpy gateway adapter example.
+# Credentials are read from environment variables by default:
+# ZAIF_API_KEY and ZAIF_API_SECRET.
+
+exchange: zaif
+market_type: spot
+adapter: zaif
+enabled: false
+
+api_key: ${ZAIF_API_KEY}
+api_secret: ${ZAIF_API_SECRET}
+
+public_base_url: https://api.zaif.jp/api/1
+private_base_url: https://api.zaif.jp/tapi
+websocket_url: wss://ws.zaif.jp/stream
+
+testnet: false
+sandbox: false
+dry_run: true
+enable_private_rest: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+order_timeout_ms: 10000
+stale_book_ms: 10000
+reconnect_interval_ms: 1000
+max_reconnect_attempts: 10
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  - btc_jpy
+  - eth_jpy
+  - xym_jpy
+
+symbol_mappings:
+  BTCJPY: btc_jpy
+  ETHJPY: eth_jpy
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 5
+
+permissions:
+  required:
+    - read_public_market_data
+  optional:
+    - read_account_request_spec
+    - spot_trading_request_spec
+
+notes:
+  - Zaif venue symbols use lowercase base_quote pairs, for example btc_jpy.
+  - Private REST trading is request-spec/signing-vector only in this adapter.
+  - JPY fiat deposit, withdrawal, bank transfer, and ledger write APIs are not configured.
+  - Futures, private WebSocket, client order IDs, amend, and batch operations are unsupported.

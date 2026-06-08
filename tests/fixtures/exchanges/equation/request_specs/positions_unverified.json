@@ -1,0 +1,13 @@
+{
+  "exchange": "equation",
+  "operation": "get_positions",
+  "product": "perpetual",
+  "chain_id": 42161,
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "support": "unsupported_unverified",
+  "example_host": "https://api-v3-arbitrum.equation.trade",
+  "example_path": "/v1/positions",
+  "expected_error": "equation.positions_unverified",
+  "notes": "Not promoted because the indexer/API availability and response schema were not verified."
+}

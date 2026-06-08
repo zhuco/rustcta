@@ -1,0 +1,318 @@
+schema_version: 1
+exchange: bitopro
+adapter: rustcta_exchange_gateway::adapters::bitopro
+metadata:
+  status: validated
+  last_reviewed: "2026-06-08"
+  source: "BitoPro official v3 REST and WebSocket docs"
+  notes: "A-08 Bitopro: Taiwan Spot exchange. Public REST is executable; private read REST is signed when credentials plus identity are configured; private writes are offline request-spec only."
+market_types:
+  - spot
+products:
+  - spot
+base_urls:
+  rest: https://api.bitopro.com/v3
+  websocket: wss://stream.bitopro.com:443/ws
+rest:
+  base_url: https://api.bitopro.com/v3
+auth:
+  rest:
+    scheme: hmac_sha384_base64_payload
+    headers:
+      - X-BITOPRO-APIKEY
+      - X-BITOPRO-PAYLOAD
+      - X-BITOPRO-SIGNATURE
+    signing_payload:
+      get_delete: "base64(json({identity, nonce_millis}))"
+      post: "base64(json_body)"
+      signature: "hex(hmac_sha384(payload_base64, api_secret))"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: ip
+      interval: 1m
+      limit: 600
+    private_rest:
+      scope: ip_and_uid
+      interval: 1m
+      limit: 600
+    orders_create:
+      scope: ip_and_uid
+      interval: 1m
+      limit: 1200
+    orders_cancel:
+      scope: ip_and_uid
+      interval: 1m
+      limit: 900
+    open_orders:
+      scope: ip_and_uid
+      interval: 1s
+      limit: 5
+    batch_create:
+      scope: ip_and_uid
+      interval: 1m
+      limit: 90
+    batch_cancel:
+      scope: ip
+      interval: 1s
+      limit: 2
+    cancel_all:
+      scope: ip_and_uid
+      interval: 1s
+      limit: 2
+pagination:
+  recent_fills:
+    style: trade_id_offset_with_time_window
+    limit_param: limit
+    max_limit: 1000
+    since_param: startTimestamp
+    until_param: endTimestamp
+    cursor_param: tradeId
+    max_history_window: 90d
+reconciliation:
+  private_stream_fallback: rest
+  readbacks:
+    - query_order
+    - get_open_orders
+    - get_recent_fills
+  after_unknown_place: query_order
+  after_unknown_cancel: query_order
+  after_ws_gap: rest_order_book_snapshot
+batch:
+  place_orders:
+    support: spec_only
+    max_items: 10
+    atomicity: unknown
+  cancel_orders:
+    support: spec_only
+    mode: pair_to_order_ids_map
+    atomicity: partial
+websocket:
+  public:
+    support: native
+    url: wss://stream.bitopro.com:443/ws
+    protocol: url_path_subscription
+    channels:
+      order_book_snapshot: /v1/pub/order-books/{PAIR}:{limit}
+      trades: /v1/pub/trades/{PAIR}
+      ticker: /v1/pub/tickers/{PAIR}
+    heartbeat:
+      direction: server_ping_client_pong
+      interval_ms: 20000
+      timeout_ms: 5000
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://stream.bitopro.com:443/ws
+    protocol: authenticated_websocket_handshake_headers
+    channels:
+      orders: /v1/pub/auth/orders
+      order_history: /v1/pub/auth/orders/histories
+      balances: /v1/pub/auth/account-balance
+      user_trades: /v1/pub/auth/user-trades
+    auth: X-BITOPRO headers on websocket request
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /provisioning/trading-pairs
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/public/get_trading_pair_info.md
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /order-book/{pair}
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/public/get_orderbook_data.md
+    params:
+      - name: limit
+      - name: scale
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /accounts/balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/get_account_balance.md
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/get_balances.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders/{pair}/{orderId}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/get_an_order_data.md
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/query_order.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders/open
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: open_orders
+    weight: 1
+    request_spec_required: true
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/get_open_orders_data.md
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/get_open_orders.json
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders/trades/{pair}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_rest
+    weight: 1
+    request_spec_required: true
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/get_trades_data.md
+    request_spec:
+      status: implemented
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/get_recent_fills.json
+    params:
+      - name: startTimestamp
+      - name: endTimestamp
+      - name: orderId
+      - name: tradeId
+      - name: limit
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /orders/{pair}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders_create
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/create_an_order.md
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/place_order_limit.json
+    notes: "Runtime write path returns Unsupported; fixture proves offline request construction only."
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders/{pair}/{orderId}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: orders_cancel
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    atomicity: not_applicable
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/cancel_an_order.md
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/cancel_order.json
+    notes: "Runtime cancel path returns Unsupported; fixture proves offline request construction only."
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /orders/all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: cancel_all
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    atomicity: partial
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/cancel_all_orders.md
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/cancel_all_orders.json
+  - operation: batch_place_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /orders/batch
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: batch_create
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    native_batch: true
+    atomicity: unknown
+    max_items: 10
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/create_batch_orders.md
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/batch_place_orders.json
+  - operation: batch_cancel_orders
+    product: spot
+    transport: rest
+    method: PUT
+    path: /orders
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: batch_cancel
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    native_batch: true
+    atomicity: partial
+    testnet: false
+    official_doc: https://github.com/bitoex/bitopro-official-api-docs/blob/master/api/v3/private/cancel_batch_orders.md
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/bitopro/request_specs/batch_cancel_orders.json
+  - operation: get_fees
+    product: spot
+    transport: rest
+    support: unsupported
+    reason: "Public limitations-and-fees returns venue/VIP schedule, not verified account effective fee rate."
+  - operation: amend_order
+    product: spot
+    transport: rest
+    support: unsupported
+    reason: "No official in-place amend endpoint was found in BitoPro v3 docs."
+unsupported:
+  - operation: private_write_runtime
+    reason: "Place/cancel/batch/cancel-all are documented and have offline request-spec/signing fixtures, but runtime live writes stay Unsupported by global task rule."
+  - operation: futures_perpetual_margin
+    reason: "Official reviewed BitoPro v3 docs cover Spot exchange APIs only."
+  - operation: wallet_deposit_withdraw_transfer
+    reason: "Wallet endpoints are official but outside trading gateway runtime scope."
+  - operation: testnet
+    reason: "No official sandbox/testnet base URL found in reviewed docs."
+  - operation: json_ws_subscribe_unsubscribe
+    reason: "Official WebSocket subscription model is URL/path based; no JSON subscribe/unsubscribe frame is documented."

@@ -1,0 +1,13 @@
+{
+  "exchange": "coinmetro",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "PUT",
+  "path": "/exchange/orders/cancel/fixture-order-1",
+  "auth": "bearer",
+  "headers": {
+    "authorization": { "match": "exact", "value": "Bearer fixture.jwt.token" }
+  },
+  "forbid_header_values_containing": ["secret", "production"]
+}

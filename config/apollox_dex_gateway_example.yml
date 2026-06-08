@@ -1,0 +1,49 @@
+# ApolloX DEX / APX V1 orderbook perpetual gateway adapter example.
+# Default is disabled and private trading remains request-spec only.
+
+exchange: apollox_dex
+adapter: apollox_dex
+enabled: false
+
+market_types:
+  - perpetual
+
+rest_base_url: https://fapi.apollox.finance
+testnet_rest_base_url: null
+public_ws_url: wss://fstream.apollox.finance
+testnet: false
+sandbox: false
+
+api_key: ${APOLLOX_DEX_API_KEY}
+api_secret: ${APOLLOX_DEX_API_SECRET}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 100
+log_raw_messages: false
+
+enabled_symbols:
+  perpetual:
+    - BTCUSDT
+    - ETHUSDT
+
+rate_limit:
+  request_weight_per_minute: 2400
+  orders_per_minute: 1200
+  max_ws_streams_per_connection: 200
+
+permissions:
+  required: []
+  optional:
+    - read_only
+    - trade
+
+notes:
+  - This adapter targets APX/ApolloX V1 orderbook perpetual REST at https://fapi.apollox.finance.
+  - Spot API, broker proxy paths and V2 on-chain contract trading are outside this adapter.
+  - Private REST request specs and signing vectors are offline only; do not enable live writes without a separate validation task.
+  - No stable V1 API testnet base is declared.

@@ -1,0 +1,31 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "place_order",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/fapi/v1/order",
+  "auth": "signed",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "side": { "match": "exact", "value": "BUY" },
+    "type": { "match": "exact", "value": "LIMIT" },
+    "timeInForce": { "match": "exact", "value": "GTC" },
+    "quantity": { "match": "exact", "value": "0.01" },
+    "price": { "match": "exact", "value": "65000.5" },
+    "reduceOnly": { "match": "exact", "value": "false" },
+    "newClientOrderId": { "match": "exact", "value": "cli-apollox-place" },
+    "timestamp": { "match": "exact", "value": "1700000000000" },
+    "recvWindow": { "match": "exact", "value": "5000" },
+    "signature": { "match": "non_empty" }
+  },
+  "headers": {
+    "X-MBX-APIKEY": { "match": "exact", "value": "test-key" },
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "forbid_query_values_containing": ["test-secret"],
+  "signing_vector": "apollox_dex/place_order_hmac"
+}

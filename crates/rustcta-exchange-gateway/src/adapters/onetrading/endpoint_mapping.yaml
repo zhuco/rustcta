@@ -1,0 +1,260 @@
+schema_version: 1
+exchange: onetrading
+adapter: rustcta_exchange_gateway::adapters::onetrading
+metadata:
+  status: draft
+  source: docs/onetrading_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "A-31 One Trading spot adapter. Public REST is parser/transport ready for active SPOT instruments; private REST and WS trading remain offline request-spec only."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.onetrading.com/fast/v1
+base_urls:
+  public_ws: wss://streams.fast.onetrading.com
+  private_ws: wss://streams.onetrading.com
+auth:
+  private_rest: Authorization bearer token generated in the One Trading UI with Read or Trade permission.
+rate_limits:
+  buckets:
+    onetrading_rest:
+      scope: rest
+      interval: 1m
+      limit: 240
+      burst: 240
+    onetrading_orders:
+      scope: orders
+      interval: 1m
+      limit: 240
+      burst: 240
+pagination:
+  open_orders:
+    style: cursor_or_time_window
+    max_window_days: 30
+  recent_fills:
+    style: cursor_or_time_window
+    max_limit: 100
+    max_window_days: 30
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills, get_balances]
+  unknown_order_policy: query_by_exchange_order_id_then_client_id_then_open_orders_then_recent_fills
+batch:
+  place_orders: { support: unsupported, reason: onetrading.batch_place_orders_unsupported }
+  cancel_orders: { support: unsupported, reason: onetrading.batch_cancel_orders_unsupported }
+  cancel_all_orders: { support: spec_only, native_batch: true, atomicity: unknown, notes: "Official docs describe best-effort cancel-all behavior." }
+websocket:
+  public:
+    support: spec_only
+    url: wss://streams.fast.onetrading.com
+    heartbeat: { direction: server_heartbeat_client_ping, interval_ms: 30000, timeout_ms: 45000 }
+    resync: rest_order_book_snapshot
+    fixtures:
+      subscribe: tests/fixtures/exchanges/onetrading/ws_public_orderbook.json
+      snapshot: tests/fixtures/exchanges/onetrading/ws_orderbook_snapshot.json
+      update: tests/fixtures/exchanges/onetrading/ws_orderbook_update.json
+  private:
+    support: unsupported_unverified
+    url: wss://streams.onetrading.com
+    auth: bearer_token_authenticate_message
+    auth_fixture: tests/fixtures/exchanges/onetrading/ws_private_auth.json
+    fallback: rest_reconciliation
+unsupported:
+  - futures_and_perpetuals_in_spot_adapter
+  - withdrawals
+  - deposits
+  - private_websocket_live_auth
+  - websocket_trading_writes
+  - market_orders
+  - quote_market_orders
+  - amend_or_move_order
+  - dead_man_switch
+  - duplicate_client_id_cancel_guarantee
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /instruments
+    auth: none
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.onetrading.com/rest/public/instruments
+    params:
+      - name: type
+        value: SPOT
+    response_parser:
+      fixture: tests/fixtures/exchanges/onetrading/instruments.json
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /order-book/{instrument_code}
+    auth: none
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://docs.onetrading.com/rest/public/orderbook
+    params:
+      - name: instrument_code
+      - name: level
+      - name: depth
+    response_parser:
+      fixture: tests/fixtures/exchanges/onetrading/orderbook.json
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /account/balances
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/balances
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/get_balances.json
+  - operation: get_fees
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /account/fees
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/fees
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/get_fees.json
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /account/orders
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/get-orders
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/get_open_orders.json
+  - operation: query_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /account/orders/{order_id}
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/get-order-order-id
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/query_order.json
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /account/trades
+    auth: bearer
+    credential_scopes: [read_only]
+    rate_limit_bucket: onetrading_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/get-trades
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/get_recent_fills.json
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /account/orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: onetrading_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/create-order
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/place_order.json
+    notes: Only LIMIT orders are documented for REST create order.
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /account/orders/{order_id}
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: onetrading_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/cancel-order-order-id
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: DELETE
+    path: /account/orders
+    auth: bearer
+    credential_scopes: [trade]
+    rate_limit_bucket: onetrading_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: unknown
+    testnet: false
+    support: spec_only
+    official_doc: https://docs.onetrading.com/rest/trading/cancel-all-orders
+    request_spec:
+      fixture: tests/fixtures/exchanges/onetrading/request_specs/cancel_all_orders.json
+    notes: Official docs describe best-effort cancel-all behavior.

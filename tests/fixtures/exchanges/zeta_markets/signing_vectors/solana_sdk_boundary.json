@@ -1,0 +1,8 @@
+{
+  "exchange": "zeta_markets",
+  "operation": "place_order",
+  "boundary": "zeta_markets trading used wallet-signed Solana SDK transactions; the venue ceased operations and this adapter never handles private keys",
+  "canonical_payload": "program=zeta-v2;instruction=place_order;market=SOL-PERP;wallet_scope=wallet-owned;runtime=unsupported",
+  "contains_private_key": false,
+  "contains_seed_phrase": false
+}

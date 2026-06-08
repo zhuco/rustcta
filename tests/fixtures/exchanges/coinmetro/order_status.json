@@ -1,0 +1,27 @@
+{
+  "orderType": "limit",
+  "buyingCurrency": "BTC",
+  "sellingCurrency": "EUR",
+  "buyingQty": 0.01,
+  "sellingQty": 650.0,
+  "orderID": "fixture-order-filled-1",
+  "timeInForce": 4,
+  "boughtQty": 0.01,
+  "soldQty": 650.0,
+  "creationTime": 1577110841411,
+  "seqNumber": 139378520,
+  "firstFillTime": 1577110841411,
+  "lastFillTime": 1577110841411,
+  "fills": [
+    {
+      "seqNumber": 139378519,
+      "timestamp": 1577110841411,
+      "qty": 0.01,
+      "price": 65000.0,
+      "side": "buy"
+    }
+  ],
+  "completionTime": 1577110841412,
+  "takerQty": 0.01,
+  "fees": 0.001
+}

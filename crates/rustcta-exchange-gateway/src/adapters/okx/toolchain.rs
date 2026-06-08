@@ -7,33 +7,49 @@ use rustcta_types::MarketType;
 pub(super) fn apply_toolchain_capabilities(
     capabilities: &mut ExchangeClientCapabilities,
     private_rest_enabled: bool,
+    exchange_id: &str,
 ) {
+    let label = profile_label(exchange_id);
+    let regional_profile = exchange_id != "okx";
     capabilities.capabilities_v2.public_rest = CapabilitySupport::native();
     capabilities.capabilities_v2.private_rest = if private_rest_enabled {
         CapabilitySupport::native()
+    } else if regional_profile {
+        CapabilitySupport::unsupported(format!(
+            "{label} private REST is disabled pending regional credential scope audit"
+        ))
     } else {
         CapabilitySupport::unsupported(
             "OKX private REST requires enabled API key, secret, and passphrase",
         )
     };
-    capabilities.capabilities_v2.public_streams =
-        CapabilitySupport::unsupported("OKX public WS runtime is not wired in this adapter yet");
-    capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(
-        "OKX private WS login/order stream is not wired; use REST reconciliation through balance, orders-pending, order, and fills-history",
-    );
+    capabilities.capabilities_v2.public_streams = CapabilitySupport::unsupported(format!(
+        "{label} public WS runtime is not wired in this adapter yet"
+    ));
+    capabilities.capabilities_v2.private_streams = CapabilitySupport::unsupported(format!(
+        "{label} private WS login/order stream is not wired; use REST reconciliation after private enablement"
+    ));
     capabilities.capabilities_v2.batch_place_orders =
-        BatchCapability::unsupported("OKX batch place order is not implemented");
-    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability::unsupported(
-        "OKX batch cancel order is only used internally by cancel_all_orders",
-    );
+        BatchCapability::unsupported(format!("{label} batch place order is not implemented"));
+    capabilities.capabilities_v2.batch_cancel_orders = BatchCapability::unsupported(format!(
+        "{label} batch cancel order is only used internally by cancel_all_orders when private REST is enabled"
+    ));
     capabilities.capabilities_v2.cancel_all_orders = if private_rest_enabled {
         CapabilitySupport::composed("loads open orders then calls native cancel-batch-orders")
+    } else if regional_profile {
+        CapabilitySupport::unsupported(format!(
+            "{label} cancel-all is disabled pending regional private REST audit"
+        ))
     } else {
         CapabilitySupport::unsupported("OKX cancel-all requires private REST credentials")
     };
     capabilities.capabilities_v2.order_history = HistoryCapability {
         support: if private_rest_enabled {
             CapabilitySupport::native()
+        } else if regional_profile {
+            CapabilitySupport::unsupported(format!(
+                "{label} order queries are disabled pending regional private REST audit"
+            ))
         } else {
             CapabilitySupport::unsupported("OKX order queries require private REST credentials")
         },
@@ -48,6 +64,10 @@ pub(super) fn apply_toolchain_capabilities(
     capabilities.capabilities_v2.fills_history = HistoryCapability {
         support: if private_rest_enabled {
             CapabilitySupport::native()
+        } else if regional_profile {
+            CapabilitySupport::unsupported(format!(
+                "{label} fills-history is disabled pending regional private REST audit"
+            ))
         } else {
             CapabilitySupport::unsupported("OKX fills-history requires private REST credentials")
         },
@@ -64,11 +84,12 @@ pub(super) fn apply_toolchain_capabilities(
     } else {
         Vec::new()
     };
-    capabilities.capabilities_v2.endpoints = endpoint_capabilities(private_rest_enabled);
+    capabilities.capabilities_v2.endpoints =
+        endpoint_capabilities(private_rest_enabled, exchange_id);
     capabilities.apply_v2_to_legacy_flags();
 }
 
-fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> {
+fn endpoint_capabilities(private_rest_enabled: bool, exchange_id: &str) -> Vec<EndpointCapability> {
     let mut endpoints = vec![
         rest_endpoint(
             "get_symbol_rules",
@@ -94,6 +115,11 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
 
     let private_support = if private_rest_enabled {
         CapabilitySupport::native()
+    } else if exchange_id != "okx" {
+        CapabilitySupport::unsupported(format!(
+            "{} private REST disabled pending regional credential scope audit",
+            profile_label(exchange_id)
+        ))
     } else {
         CapabilitySupport::unsupported("private REST credentials unavailable")
     };
@@ -169,15 +195,33 @@ fn endpoint_capabilities(private_rest_enabled: bool) -> Vec<EndpointCapability> 
             1,
         ),
     ] {
+        let (method, path, auth, rate_limit_bucket, weight) =
+            if !private_rest_enabled && exchange_id != "okx" {
+                (
+                    "UNSUPPORTED",
+                    format!("/unsupported/{exchange_id}/{operation}"),
+                    EndpointAuth::None,
+                    Some("unsupported"),
+                    Some(0),
+                )
+            } else {
+                (
+                    method,
+                    path.to_string(),
+                    EndpointAuth::Hmac,
+                    Some("private_uid"),
+                    Some(weight),
+                )
+            };
         endpoints.push(rest_endpoint(
             operation,
             private_support.clone(),
             method,
-            path,
-            EndpointAuth::Hmac,
+            &path,
+            auth,
             vec![credential_scope],
-            Some("private_uid"),
-            Some(weight),
+            rate_limit_bucket,
+            weight,
         ));
     }
 
@@ -206,5 +250,13 @@ fn rest_endpoint(
         rate_limit_bucket: rate_limit_bucket.map(str::to_string),
         weight,
         supports_testnet: true,
+    }
+}
+
+fn profile_label(exchange_id: &str) -> &'static str {
+    match exchange_id {
+        "myokx" => "MyOKX",
+        "okxus" => "OKX US",
+        _ => "OKX",
     }
 }

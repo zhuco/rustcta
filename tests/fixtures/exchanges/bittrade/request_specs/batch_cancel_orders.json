@@ -1,0 +1,17 @@
+{
+  "exchange": "bittrade",
+  "operation": "batch_cancel_orders",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v1/order/orders/batchcancel",
+  "auth": "hmac",
+  "body": {
+    "order-ids": [
+      "1",
+      "2",
+      "3"
+    ]
+  },
+  "strict_body": true
+}

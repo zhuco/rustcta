@@ -1,0 +1,24 @@
+{
+  "exchange": "coinmate",
+  "operation": "place_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/sellLimit",
+  "auth": "signed",
+  "headers": {
+    "Content-Type": { "match": "exact", "value": "application/x-www-form-urlencoded" }
+  },
+  "body": {
+    "clientId": "<redacted:client_id>",
+    "publicKey": "<redacted:public_key>",
+    "nonce": "<nonce>",
+    "signature": "<redacted:signature>",
+    "currencyPair": "BTC_EUR",
+    "amount": "0.02",
+    "price": "51000",
+    "immediateOrCancel": true,
+    "clientOrderId": "123457"
+  },
+  "forbid_header_values_containing": ["fixture-private", "real-credential-value"]
+}

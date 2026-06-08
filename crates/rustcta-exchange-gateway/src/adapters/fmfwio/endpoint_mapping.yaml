@@ -1,0 +1,191 @@
+schema_version: 1
+exchange: fmfwio
+adapter: rustcta_exchange_gateway::adapters::fmfwio
+metadata:
+  status: validated
+  source: https://api.fmfw.io/
+  last_reviewed: "2026-06-08"
+  notes: "A-20 FMFW.io HitBTC-family profile. Runtime is G1 public spot REST; private REST and WS are offline request-spec/parser boundaries only until a canonical HitBTC-family adapter exists."
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://api.fmfw.io/api/3
+base_urls:
+  public_ws: wss://api.fmfw.io/api/3/ws/public
+  trading_ws: wss://api.fmfw.io/api/3/ws/trading
+  wallet_ws: wss://api.fmfw.io/api/3/ws/wallet
+auth:
+  rest_hs256: "Authorization: HS256 base64(api_key:hmac_sha256(method+path+query+body+timestamp+window):timestamp:window)"
+  ws_hs256: "login params with type=HS256, api_key, timestamp, optional window and HMAC-SHA256(timestamp+window)"
+rate_limits:
+  buckets:
+    fmfwio_public_rest:
+      scope: ip
+      interval: 1s
+      limit: 30
+      burst: 50
+    fmfwio_default_rest:
+      scope: ip
+      interval: 1s
+      limit: 20
+      burst: 30
+    fmfwio_order_rest:
+      scope: ip
+      interval: 1s
+      limit: 300
+      burst: 450
+    fmfwio_public_ws:
+      scope: ip
+      interval: 1s
+      limit: 10
+      burst: 10
+reconciliation:
+  private_stream_fallback: rest
+  public_order_book_resync: get_order_book
+  private_readbacks: [get_open_orders, get_recent_fills]
+  notes: "After WS reconnect or ambiguous private events, use REST order book and private order/trade readbacks once private REST is promoted."
+websocket:
+  support: spec_only
+  public_url: wss://api.fmfw.io/api/3/ws/public
+  trading_url: wss://api.fmfw.io/api/3/ws/trading
+  wallet_url: wss://api.fmfw.io/api/3/ws/wallet
+  heartbeat:
+    direction: server_ping
+    interval_ms: 30000
+    timeout_ms: 10000
+  public_subscribe:
+    method: subscribe
+    channel: orderbook/D5/1000ms
+    fixture: tests/fixtures/exchanges/fmfwio/ws/orderbook_partial.json
+  private_auth:
+    method: login
+    auth: hmac
+    fixture: tests/fixtures/exchanges/fmfwio/signing_vectors/ws_login_hs256.json
+unsupported:
+  - operation: hitbtc_family_canonical_profile
+    reason: "A-20 keeps FMFW.io as a conservative HitBTC-family profile and does not refactor shared HitBTC-family core code owned by parallel tasks."
+  - operation: private_rest_runtime
+    reason: "Private REST is request-spec/signing-vector only for this task."
+  - operation: public_ws_runtime
+    reason: "Public WS payloads and parser fixtures are present, but no production supervisor is wired."
+  - operation: private_ws_runtime
+    reason: "Private WS auth payload is present, but no long-running private stream is enabled."
+  - operation: margin_trading
+    reason: "Margin account/order semantics are outside the spot-only runtime."
+  - operation: futures_trading
+    reason: "FMFW.io futures endpoints are documented but not enabled by A-20."
+  - operation: wallet_withdraw_transfer
+    reason: "Funds movement is outside gateway trading runtime."
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /public/symbol
+    auth: none
+    rate_limit_bucket: fmfwio_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://api.fmfw.io/#symbols
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /public/orderbook/{symbol}?depth={depth}
+    auth: none
+    rate_limit_bucket: fmfwio_public_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://api.fmfw.io/#order-books
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /spot/order
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported
+    reason: "Offline request-spec only; runtime write path remains Unsupported."
+    official_doc: https://api.fmfw.io/#create-new-spot-order
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/place_order.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: DELETE
+    path: /spot/order/{client_order_id}
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: false
+    support: unsupported
+    reason: "Offline request-spec only; runtime cancel path remains Unsupported."
+    official_doc: https://api.fmfw.io/#cancel-spot-order
+    request_spec_fixture: tests/fixtures/exchanges/fmfwio/request_specs/cancel_order.json
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/order
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: fmfwio_order_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: "Private readback endpoint mapped for reconciliation but not enabled at runtime."
+    official_doc: https://api.fmfw.io/#get-all-active-spot-orders
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /spot/history/trade
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: fmfwio_default_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: "Private trade history endpoint mapped for reconciliation but not enabled at runtime."
+    official_doc: https://api.fmfw.io/#spot-trades-history
+streams:
+  - operation: public_orderbook_snapshot
+    channel: orderbook/D5/1000ms
+    scope: public
+    support: spec_only
+    heartbeat: server_ping_30s
+    resync:
+      endpoint_operation: get_order_book
+    parser_fixture: tests/fixtures/exchanges/fmfwio/ws/orderbook_partial.json
+  - operation: private_trading_reports
+    channel: spot_subscribe
+    scope: private
+    support: spec_only
+    auth: hs256_login
+    auth_renewal:
+      endpoint_operation: get_open_orders
+    reconciliation:
+      endpoint_operation: get_open_orders

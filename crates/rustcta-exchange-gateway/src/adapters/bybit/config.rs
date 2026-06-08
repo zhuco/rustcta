@@ -1,5 +1,6 @@
 #[derive(Debug, Clone)]
 pub struct BybitGatewayConfig {
+    pub exchange_id: String,
     pub rest_base_url: String,
     pub public_ws_url: String,
     pub private_ws_url: String,
@@ -9,11 +10,14 @@ pub struct BybitGatewayConfig {
     pub request_timeout_ms: u64,
     pub enabled_private_rest: bool,
     pub enabled: bool,
+    pub status_message: String,
+    pub unsupported_market_type_operation: &'static str,
 }
 
 impl Default for BybitGatewayConfig {
     fn default() -> Self {
         Self {
+            exchange_id: "bybit".to_string(),
             rest_base_url: "https://api.bybit.com".to_string(),
             public_ws_url: "wss://stream.bybit.com/v5/public/linear".to_string(),
             private_ws_url: "wss://stream.bybit.com/v5/private".to_string(),
@@ -29,6 +33,8 @@ impl Default for BybitGatewayConfig {
                 .or_else(|| env_bool("BYBIT_PRIVATE_REST_ENABLED"))
                 .unwrap_or(true),
             enabled: true,
+            status_message: "bybit V5 spot + linear perpetual gateway adapter".to_string(),
+            unsupported_market_type_operation: "bybit.unsupported_market_type",
         }
     }
 }

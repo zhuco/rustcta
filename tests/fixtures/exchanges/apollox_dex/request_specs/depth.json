@@ -1,0 +1,17 @@
+{
+  "exchange": "apollox_dex",
+  "operation": "get_order_book",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/fapi/v1/depth",
+  "auth": "none",
+  "query": {
+    "symbol": { "match": "exact", "value": "BTCUSDT" },
+    "limit": { "match": "exact", "value": "100" }
+  },
+  "headers": {},
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false
+}

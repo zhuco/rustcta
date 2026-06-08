@@ -1,0 +1,230 @@
+schema_version: 1
+exchange: myokx
+adapter: rustcta_exchange_gateway::adapters::myokx
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: MyOKX / OKX V5 API docs and CCXT myokx profile
+  last_reviewed: "2026-06-08"
+  notes: MyOKX is wired as an OKX EEA Spot profile. Runtime private trading stays disabled until regional credential scope is audited.
+market_types: [spot]
+products: [spot]
+rest:
+  base_url: https://eea.okx.com
+base_urls:
+  canonical_okx_rest_base_url: https://www.okx.com
+  eea_rest_base_url: https://eea.okx.com
+  public_ws: wss://wseea.okx.com:8443/ws/v5/public
+  private_ws: wss://wseea.okx.com:8443/ws/v5/private
+  business_ws: wss://wseea.okx.com:8443/ws/v5/business
+auth:
+  public_rest: none
+  private_rest: unsupported_until_eea_credential_scope_audit
+  inherited_shape: OK-ACCESS-SIGN = base64(HMAC_SHA256(timestamp + method + requestPath + body))
+rate_limits:
+  public_market: { scope: ip, retry_after: http_429_or_code_50011, default_weight: 1 }
+  private_account: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+  private_trade: { scope: unsupported, retry_after: not_applicable, default_weight: 0 }
+reconciliation:
+  private_stream_fallback: rest_reconciliation_after_private_enablement
+  public_stream_resync: rest_order_book_snapshot
+  unknown_order_policy: unsupported_private_trading
+batch:
+  place_orders:
+    support: unsupported
+    reason: MyOKX private trading is disabled in this profile.
+  cancel_orders:
+    support: unsupported
+    reason: MyOKX private trading is disabled in this profile.
+  cancel_all_orders:
+    support: unsupported
+    atomicity: unsupported
+    partial_failure: false
+websocket:
+  public:
+    support: payload_spec
+    url: wss://wseea.okx.com:8443/ws/v5/public
+    channels: [books, books5, trades, tickers, candle1m]
+    subscribe_payload_fixture: tests/fixtures/exchanges/myokx/ws/public_books_subscribe.json
+    parser_fixture: tests/fixtures/exchanges/myokx/ws/public_books_snapshot.json
+    heartbeat: { mode: server_ping_client_pong, pong_payload: pong, idle_timeout_ms: 30000 }
+    resync: rest_order_book_snapshot
+  private:
+    support: auth_payload_shape_only
+    url: wss://wseea.okx.com:8443/ws/v5/private
+    auth: login_message
+    signing_vector: tests/fixtures/exchanges/myokx/signing_vectors/ws_login.json
+    parser_fixture: tests/fixtures/exchanges/myokx/ws/private_orders_unsupported.json
+    fallback: rest_reconciliation_after_private_enablement
+unsupported:
+  - operation: market_type_perpetual
+    reason: CCXT myokx profile and this gateway task treat MyOKX as Spot-only.
+  - operation: market_type_futures
+    reason: CCXT myokx profile and this gateway task treat MyOKX as Spot-only.
+  - operation: market_type_options
+    reason: CCXT myokx profile and this gateway task treat MyOKX as Spot-only.
+  - operation: get_balances
+    reason: Private REST read is disabled until EEA credential permissions are audited.
+  - operation: get_fees
+    reason: Private REST account fee read is disabled until EEA credential permissions are audited.
+  - operation: get_positions
+    reason: MyOKX profile is Spot-only and private REST is disabled.
+  - operation: place_order
+    reason: Private write is disabled until EEA credential permissions are audited.
+  - operation: place_quote_market_order
+    reason: Private write is disabled until EEA credential permissions are audited.
+  - operation: cancel_order
+    reason: Private write is disabled until EEA credential permissions are audited.
+  - operation: cancel_all_orders
+    reason: Private write is disabled until EEA credential permissions are audited.
+  - operation: amend_order
+    reason: Private write is disabled until EEA credential permissions are audited.
+  - operation: query_order
+    reason: Private order readback is disabled until EEA credential permissions are audited.
+  - operation: get_open_orders
+    reason: Private order readback is disabled until EEA credential permissions are audited.
+  - operation: get_recent_fills
+    reason: Private fills readback is disabled until EEA credential permissions are audited.
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v5/public/instruments
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    official_doc: https://my.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /api/v5/market/books
+    auth: none
+    rate_limit_bucket: public_market
+    weight: 1
+    request_spec_required: false
+    official_doc: https://my.okx.com/docs-v5/en/#order-book-trading-market-data-get-order-book
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/get_balances
+    auth: none
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST read is disabled pending EEA credential scope audit.
+  - operation: get_fees
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/get_fees
+    auth: none
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST account fee read is disabled pending EEA credential scope audit.
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/place_order
+    auth: none
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST write is disabled pending EEA credential scope audit.
+  - operation: place_quote_market_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/place_quote_market_order
+    auth: none
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST write is disabled pending EEA credential scope audit.
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/cancel_order
+    auth: none
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST write is disabled pending EEA credential scope audit.
+  - operation: cancel_all_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/cancel_all_orders
+    auth: none
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST write is disabled pending EEA credential scope audit.
+  - operation: amend_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/amend_order
+    auth: none
+    credential_scopes: [trade]
+    rate_limit_bucket: private_trade
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private REST write is disabled pending EEA credential scope audit.
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/query_order
+    auth: none
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private order readback is disabled pending EEA credential scope audit.
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/get_open_orders
+    auth: none
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private order readback is disabled pending EEA credential scope audit.
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: UNSUPPORTED
+    path: /unsupported/myokx/get_recent_fills
+    auth: none
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_account
+    weight: 0
+    request_spec_required: false
+    support: unsupported
+    reason: Private fills readback is disabled pending EEA credential scope audit.

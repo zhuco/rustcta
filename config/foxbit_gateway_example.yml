@@ -1,0 +1,33 @@
+gateway:
+  id: foxbit-local-disabled
+  adapter: foxbit
+  enabled: false
+
+foxbit:
+  enabled: false
+  rest_base_url: https://api.foxbit.com.br/rest/v3
+  public_ws_url: wss://api.foxbit.com.br/ws/v3/public
+  private_ws_url: wss://api.foxbit.com.br/ws/v3/private
+  enabled_private_rest: false
+  enabled_public_streams: false
+  enabled_private_streams: false
+  request_timeout_ms: 10000
+  credentials:
+    source: env
+    api_key_env: RUSTCTA_FOXBIT_API_KEY
+    api_secret_env: RUSTCTA_FOXBIT_API_SECRET
+    receive_window_ms_env: RUSTCTA_FOXBIT_RECEIVE_WINDOW_MS
+    live_trading_enabled: false
+
+capability_boundary:
+  products: [spot]
+  public_rest: spec_only
+  private_rest: offline_request_spec_only
+  public_ws: payload_helper
+  private_ws: auth_payload_only_rest_reconciliation_fallback
+  unsupported:
+    - foxbit_invest_otc
+    - prime_desk_rfq
+    - prediction_category
+    - deposits_withdrawals_transfers
+    - live_private_write_without_separate_validation

@@ -1,0 +1,14 @@
+{
+  "secret": "api_secret_change_me",
+  "params": [
+    {"key": "pair", "value": "BTC_USD"},
+    {"key": "quantity", "value": "1.56789"},
+    {"key": "price", "value": "10000.56789"},
+    {"key": "exec_type", "value": "post_only"},
+    {"key": "type", "value": "buy"},
+    {"key": "client_id", "value": "100500"},
+    {"key": "nonce", "value": "1710000000000"}
+  ],
+  "expected_body": "pair=BTC_USD&quantity=1.56789&price=10000.56789&exec_type=post_only&type=buy&client_id=100500&nonce=1710000000000",
+  "expected_signature": "eabaddf989733ea69ab40d2533fe1dd9734baeb6f6d40273dc25f97909a7cc1cfb278b6789844315dca3ec957729c8c61ae5a8c1ee504b86c28f0a61f0da557e"
+}

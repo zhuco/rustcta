@@ -1,0 +1,12 @@
+{
+  "exchange": "cex",
+  "operation": "cex.get_order_book",
+  "method": "GET",
+  "path": "/order_book/BTC/USD/",
+  "transport": "rest",
+  "auth": "none",
+  "query": {
+    "depth": "25"
+  },
+  "body": null
+}

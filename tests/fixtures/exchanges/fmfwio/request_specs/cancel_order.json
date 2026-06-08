@@ -1,0 +1,28 @@
+{
+  "exchange": "fmfwio",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "DELETE",
+  "path": "/api/3/spot/order/cli-fmfwio-1",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6OTM1YmU3ODYxMDMzZGYyYWNiYmNkM2I3MGRjMWNmNDFjMzIxZmYzNzExZDMxNmJmNDMwOWQ1ZTYzMWM0MjcyZToxNzEwMDAwMDAwMDAwOjEwMDAw"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "fmfwio/cancel_order_hs256"
+}

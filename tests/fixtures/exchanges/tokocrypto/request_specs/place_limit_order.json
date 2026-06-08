@@ -1,0 +1,6 @@
+{
+  "method": "POST",
+  "path": "/open/v1/orders",
+  "query": "price=7500&quantity=0.16&recvWindow=5000&side=0&symbol=BTC_USDT&timeInForce=1&timestamp=1581720670624&type=1",
+  "body": null
+}

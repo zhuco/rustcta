@@ -1,0 +1,12 @@
+{
+  "event": "data",
+  "channel": "private-open_orders-fixture-client-BTC_EUR",
+  "payload": [
+    {
+      "id": "offline-order-1",
+      "clientOrderId": "123456",
+      "currencyPair": "BTC_EUR",
+      "orderChangePushEvent": "SNAPSHOT"
+    }
+  ]
+}

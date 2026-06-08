@@ -1,0 +1,120 @@
+exchange: coinmetro
+schema_version: 1
+websocket:
+  public:
+    support: native
+    url: wss://api.coinmetro.com/ws
+    channels: [book_update, tick]
+    subscription: query_pairs
+    resync: rest_order_book_snapshot
+  private:
+    support: native
+    url: wss://api.coinmetro.com/ws
+    auth: jwt_query_token
+    channels: [orderStatus, walletUpdate]
+    fallback: rest_reconciliation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /markets
+    auth: none
+    rate_limit_bucket: rest_ip
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchange/book/{pair}
+    auth: none
+    rate_limit_bucket: market_data
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: GET
+    path: /users/balances
+    auth: bearer
+    rate_limit_bucket: account_slow
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /exchange/orders/create
+    auth: bearer
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: PUT
+    path: /exchange/orders/cancel/{orderID}
+    auth: bearer
+    rate_limit_bucket: orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchange/orders/status/{orderID}
+    auth: bearer
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchange/orders/active
+    auth: bearer
+    rate_limit_bucket: key
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS
+  - operation: get_recent_fills
+    product: spot
+    transport: rest
+    method: GET
+    path: /exchange/fills/{since?}
+    auth: bearer
+    rate_limit_bucket: history_slow
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: non_atomic
+    testnet: true
+    official_doc: https://documenter.getpostman.com/view/3653795/SVfWN6KS

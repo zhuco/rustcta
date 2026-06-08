@@ -1,0 +1,30 @@
+{
+  "exchange": "alpaca",
+  "operation": "place_quote_market_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v1/trading/accounts/acct-123/orders",
+  "auth": "api_key",
+  "headers": {
+    "APCA-API-KEY-ID": {
+      "match": "exact",
+      "value": "test-key"
+    },
+    "APCA-API-SECRET-KEY": {
+      "match": "exact",
+      "value": "test-secret"
+    }
+  },
+  "body_contains": {
+    "symbol": "BTC/USD",
+    "notional": "25",
+    "side": "buy",
+    "type": "market",
+    "time_in_force": "gtc",
+    "client_order_id": "client-quote"
+  },
+  "forbid_query_values_containing": [
+    "test-secret"
+  ]
+}

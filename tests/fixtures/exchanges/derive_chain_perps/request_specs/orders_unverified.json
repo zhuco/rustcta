@@ -1,0 +1,18 @@
+{
+  "exchange": "derive_chain_perps",
+  "operation": "place_order",
+  "product": "perpetual",
+  "chain_id": 957,
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "support": "unsupported_unverified",
+  "settlement_surfaces": {
+    "rest_base_url": "https://api.derive.xyz",
+    "rpc_url": "https://rpc.lyra.finance",
+    "chain_id": 957,
+    "contract_abis": "unsupported_unverified",
+    "wallet_signing": "unsupported_unverified"
+  },
+  "expected_error": "derive_chain_perps.derive_chain_order_signing_unverified",
+  "notes": "Production order support requires maintained ABIs, wallet signing, Derive Chain RPC handling, allowance/plugin approvals, gas/execution-fee handling, and reconciliation."
+}

@@ -1,0 +1,14 @@
+{
+  "exchange": "woofipro",
+  "operation": "query_order",
+  "method": "GET",
+  "path": "/v1/order/123456789",
+  "query": {},
+  "headers": {
+    "orderly-account-id": "acct_test_account_id",
+    "orderly-key": "ed25519:test-public-key",
+    "orderly-signature": "test-signature-placeholder",
+    "orderly-timestamp": "1700000000000"
+  },
+  "auth": "signed"
+}

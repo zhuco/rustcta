@@ -1,0 +1,14 @@
+{
+  "exchange": "bydfi",
+  "operation": "recent_fills",
+  "method": "GET",
+  "path": "/v2/fapi/trade/history_trade",
+  "query": {
+    "contractType": "FUTURE",
+    "wallet": "W001",
+    "settleCoin": "USDT",
+    "symbol": "BTC-USDT",
+    "limit": "100"
+  },
+  "signing_vector": "bydfi/rest_query_order"
+}

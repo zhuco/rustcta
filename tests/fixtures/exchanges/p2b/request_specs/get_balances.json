@@ -1,0 +1,21 @@
+{
+  "operation": "p2b.get_balances",
+  "request_spec_only": true,
+  "trade_enabled": false,
+  "method": "POST",
+  "path": "/api/v2/account/balances",
+  "query": {},
+  "headers": {
+    "X-TXC-APIKEY": "<redacted:api-key>",
+    "X-TXC-PAYLOAD": "<redacted:base64-json-payload>",
+    "X-TXC-SIGNATURE": "<redacted:hmac-sha512-hex>",
+    "content-type": "application/json"
+  },
+  "body": {
+    "request": "/api/v2/account/balances",
+    "nonce": "1698508469"
+  },
+  "canonical_auth_input": "base64(json-body) signed with HMAC-SHA512",
+  "credential_scope": "read_only",
+  "expected_error_until_promoted": "p2b.balances_request_spec_only"
+}

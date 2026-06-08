@@ -1,0 +1,10 @@
+{
+  "exchange": "cex",
+  "operation": "cex.get_symbol_rules",
+  "method": "GET",
+  "path": "/currency_limits",
+  "transport": "rest",
+  "auth": "none",
+  "query": {},
+  "body": null
+}

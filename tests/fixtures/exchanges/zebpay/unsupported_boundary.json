@@ -1,0 +1,16 @@
+{
+  "exchange": "zebpay",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_rest_default_enabled": false,
+  "private_rest_boundary": "request_spec_only",
+  "region_kyc_boundary": "requires_zebpay_api_onboarding",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "perpetual": "unsupported_out_of_scope_for_a39_spot_adapter",
+  "notes": [
+    "Public REST is limited to spot market list and order book snapshots.",
+    "Private REST request specs use redacted bearer-token headers and are disabled at runtime until KYC, token lifecycle, and permission scopes are verified.",
+    "No fixture contains live credentials, account ids, wallet addresses, phone numbers, emails, or real order ids."
+  ]
+}

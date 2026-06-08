@@ -1,0 +1,19 @@
+{
+  "exchange": "yobit",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_rest_default_enabled": false,
+  "private_rest_boundary": "request_spec_only",
+  "public_streams": "unsupported_unverified",
+  "private_streams": "unsupported_unverified",
+  "withdrawals": false,
+  "deposit_address": false,
+  "yobicode": false,
+  "defi_swap": false,
+  "perpetual": "unsupported_no_official_product_scope_verified",
+  "notes": [
+    "Public REST is limited to YoBit v3 spot pairs and order book fixtures.",
+    "Private Trade API uses /tapi/ HMAC-SHA512 request specs only.",
+    "No fixture contains live credentials, account ids, wallet addresses, phone numbers, emails, or real order ids."
+  ]
+}

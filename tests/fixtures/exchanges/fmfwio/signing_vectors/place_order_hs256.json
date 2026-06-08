@@ -1,0 +1,13 @@
+{
+  "exchange": "fmfwio",
+  "name": "place_order_hs256",
+  "algorithm": "hmac_sha256_hex",
+  "secret": "test-secret",
+  "timestamp": "1710000000000",
+  "method": "POST",
+  "request_path": "/api/3/spot/order",
+  "payload": "POST/api/3/spot/orderclient_order_id=cli-fmfwio-1&price=0.046016&quantity=0.063&side=sell&symbol=ETHBTC&type=limit171000000000010000",
+  "expected_signature": "b3f62b36441bf2714f0363d913b3ddc4e033673b6f0ba6f094183722211a44b6",
+  "payload_format": "raw_payload",
+  "body": "client_order_id=cli-fmfwio-1&price=0.046016&quantity=0.063&side=sell&symbol=ETHBTC&type=limit"
+}

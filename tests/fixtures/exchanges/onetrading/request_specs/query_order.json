@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/account/orders/<redacted:order_id>",
+  "query": {},
+  "auth": "bearer_token",
+  "headers": {
+    "Authorization": "<redacted:authorization>",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "body": null
+}

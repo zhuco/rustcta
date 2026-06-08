@@ -1,0 +1,6 @@
+{
+  "operation": "zaif.place_order",
+  "method": "POST",
+  "path": "/tapi",
+  "body": "nonce=1710000000&method=trade&currency_pair=btc_jpy&action=bid&price=6500000&amount=0.01"
+}

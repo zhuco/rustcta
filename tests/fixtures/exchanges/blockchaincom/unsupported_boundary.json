@@ -1,0 +1,19 @@
+{
+  "exchange": "blockchaincom",
+  "product_scope": ["spot"],
+  "public_rest": true,
+  "private_rest_runtime": false,
+  "trade_runtime": false,
+  "private_write_request_spec_only": true,
+  "unsupported": [
+    "derivatives",
+    "futures",
+    "perpetuals",
+    "margin_positions",
+    "brokerage_swaps",
+    "wallet_explorer_api",
+    "deposits",
+    "withdrawals",
+    "whitelist_management"
+  ]
+}

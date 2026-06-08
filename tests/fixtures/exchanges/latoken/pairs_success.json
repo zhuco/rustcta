@@ -1,0 +1,31 @@
+[
+  {
+    "id": "btc-usdt-pair-test-id",
+    "status": "PAIR_STATUS_ACTIVE",
+    "baseCurrency": "btc-currency-test-id",
+    "quoteCurrency": "usdt-currency-test-id",
+    "priceTick": "0.010000000",
+    "priceDecimals": 2,
+    "quantityTick": "0.000001000",
+    "quantityDecimals": 6,
+    "costDisplayDecimals": 2,
+    "created": 1710000000000,
+    "minOrderQuantity": "0.00001",
+    "maxOrderCostUsd": "999999999",
+    "minOrderCostUsd": "5",
+    "externalSymbol": ""
+  },
+  {
+    "id": "inactive-pair-test-id",
+    "status": "PAIR_STATUS_INACTIVE",
+    "baseCurrency": "btc-currency-test-id",
+    "quoteCurrency": "usdt-currency-test-id",
+    "priceTick": "0.010000000",
+    "priceDecimals": 2,
+    "quantityTick": "0.000001000",
+    "quantityDecimals": 6,
+    "minOrderQuantity": "0.00001",
+    "minOrderCostUsd": "5",
+    "externalSymbol": ""
+  }
+]

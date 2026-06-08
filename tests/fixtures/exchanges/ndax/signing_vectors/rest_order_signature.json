@@ -1,0 +1,13 @@
+{
+  "exchange": "ndax",
+  "name": "rest_order_signature_decoded_secret",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "fixture-secret",
+  "payload": "1700000000POST/orders{\"accountId\":1001,\"instrumentId\":1,\"limitPrice\":\"65000\",\"orderType\":2,\"quantity\":\"0.01\",\"side\":0,\"timeInForce\":1}",
+  "expected_signature": "Gzj+heNRZlaUpsntUhFPdFjxfTEJiUlDUSuGp6hhhJU=",
+  "payload_format": "timestamp_method_path_body",
+  "timestamp": "1700000000",
+  "method": "POST",
+  "request_path": "/orders",
+  "body": "{\"accountId\":1001,\"instrumentId\":1,\"limitPrice\":\"65000\",\"orderType\":2,\"quantity\":\"0.01\",\"side\":0,\"timeInForce\":1}"
+}

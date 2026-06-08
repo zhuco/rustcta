@@ -1,0 +1,12 @@
+{
+  "operation": "cryptomus.cancel_order",
+  "method": "DELETE",
+  "path": "/v2/user-api/exchange/orders/01JEXAFCCC5ZVJPZAAHHDKQBNG",
+  "auth": "cryptomus_md5_base64_body",
+  "headers": {
+    "userId": "<redacted-user-uuid>",
+    "sign": "<md5-base64-body-plus-api-key>",
+    "Content-Type": "application/json"
+  },
+  "body": {}
+}

@@ -1,0 +1,163 @@
+schema_version: 1
+exchange: bitteam
+adapter: BitteamGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: validated
+  source: docs/bitteam_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: A-09 scan-only spot adapter. Public REST is implemented for pairs and order books; private REST is request-spec-only and disabled.
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://bit.team
+auth:
+  private_rest: HTTP Basic authorization; request-spec-only until read-only/live-dry-run validation
+rate_limits:
+  bitteam_public: { scope: ip, interval_ms: 60000, limit: 60 }
+  bitteam_private: { scope: key, interval_ms: 60000, limit: 60 }
+pagination:
+  open_orders: { mode: offset_limit, max_limit: 1000, request_spec_only: true }
+  fills: { mode: offset_limit, max_limit: 1000, request_spec_only: true }
+reconciliation:
+  private_state: rest_request_spec_only
+  readbacks: [get_open_orders, get_recent_fills]
+  notes: Private REST is not enabled by capabilities; after promotion use ordersOfUser/tradesOfUser as REST reconciliation fallback.
+batch:
+  place: { support: unsupported, reason: bitteam.batch_place_orders_unverified }
+  cancel: { support: unsupported, reason: bitteam.batch_cancel_orders_unverified }
+websocket:
+  public:
+    support: unsupported
+    reason: bitteam.public_streams_unverified
+    heartbeat: { mode: unsupported }
+  private:
+    support: unsupported
+    reason: bitteam.private_streams_unverified
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /trade/api/ccxt/pairs
+    auth: none
+    rate_limit_bucket: bitteam_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://bit.team/trade/api/documentation
+  - operation: get_order_book
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /trade/api/orderbooks/{symbol}
+    auth: none
+    rate_limit_bucket: bitteam_public
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://bit.team/trade/api/documentation
+  - operation: get_balances
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /trade/api/ccxt/balance
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitteam_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: bitteam.balances_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitteam/request_specs/get_balances.json
+    official_doc: https://bit.team/trade/api/documentation
+  - operation: place_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /trade/api/ccxt/ordercreate
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: bitteam_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: bitteam.place_order_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitteam/request_specs/place_order_limit_buy.json
+    official_doc: https://bit.team/trade/api/documentation
+  - operation: cancel_order
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: POST
+    path: /trade/api/ccxt/cancelorder
+    auth: api_key
+    credential_scopes: [trade]
+    rate_limit_bucket: bitteam_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: bitteam.cancel_order_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitteam/request_specs/cancel_order.json
+    official_doc: https://bit.team/trade/api/documentation
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /trade/api/ccxt/ordersOfUser
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitteam_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: bitteam.open_orders_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitteam/request_specs/get_open_orders.json
+    official_doc: https://bit.team/trade/api/documentation
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot]
+    transport: rest
+    method: GET
+    path: /trade/api/ccxt/tradesOfUser
+    auth: api_key
+    credential_scopes: [read_only]
+    rate_limit_bucket: bitteam_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: unsupported
+    reason: bitteam.recent_fills_request_spec_only
+    request_spec:
+      fixture: tests/fixtures/exchanges/bitteam/request_specs/get_recent_fills.json
+    official_doc: https://bit.team/trade/api/documentation

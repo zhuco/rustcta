@@ -1,0 +1,13 @@
+{
+  "exchange": "myokx",
+  "name": "ws-login-shape",
+  "algorithm": "hmac_sha256_base64",
+  "secret": "sanitized-secret",
+  "payload": "2024-01-02T03:04:05.678ZGET/users/self/verify",
+  "expected_signature": "a0MDIulYJQaElTnlapCjleP7mvQDr+c3RzQsN4laVDM=",
+  "payload_format": "timestamp_method_path_body",
+  "timestamp": "2024-01-02T03:04:05.678Z",
+  "method": "GET",
+  "request_path": "/users/self/verify",
+  "body": ""
+}

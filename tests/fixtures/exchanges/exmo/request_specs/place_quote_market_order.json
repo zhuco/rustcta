@@ -1,0 +1,15 @@
+{
+  "operation": "exmo.place_quote_market_order",
+  "method": "POST",
+  "path": "/v1.1/order_create",
+  "content_type": "application/x-www-form-urlencoded",
+  "auth": "hmac_sha512_form",
+  "body": {
+    "pair": "BTC_USD",
+    "quantity": "100",
+    "price": "0",
+    "type": "market_buy_total",
+    "client_id": "100501",
+    "nonce": "1710000000001"
+  }
+}

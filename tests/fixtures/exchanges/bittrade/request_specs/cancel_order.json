@@ -1,0 +1,11 @@
+{
+  "exchange": "bittrade",
+  "operation": "cancel_order",
+  "product": "spot",
+  "transport": "rest",
+  "method": "POST",
+  "path": "/v1/order/orders/59378/submitcancel",
+  "auth": "hmac",
+  "body": {},
+  "strict_body": true
+}

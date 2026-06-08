@@ -1,0 +1,30 @@
+{
+  "BTC-USD": {
+    "base_currency": "BTC",
+    "base_currency_scale": 8,
+    "counter_currency": "USD",
+    "counter_currency_scale": 2,
+    "min_price_increment": 1000,
+    "min_price_increment_scale": 2,
+    "min_order_size": 50,
+    "min_order_size_scale": 2,
+    "max_order_size": 100000000,
+    "lot_size": 5,
+    "status": "open",
+    "id": 1
+  },
+  "ETH-USD": {
+    "base_currency": "ETH",
+    "base_currency_scale": 8,
+    "counter_currency": "USD",
+    "counter_currency_scale": 2,
+    "min_price_increment": 10,
+    "min_price_increment_scale": 2,
+    "min_order_size": 100,
+    "min_order_size_scale": 4,
+    "max_order_size": 100000000,
+    "lot_size": 10,
+    "status": "open",
+    "id": 2
+  }
+}

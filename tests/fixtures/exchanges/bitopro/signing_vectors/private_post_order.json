@@ -1,0 +1,10 @@
+{
+  "name": "bitopro-post-order-hmac-sha384",
+  "api_key": "bitopro-key",
+  "api_secret": "bitopro",
+  "method": "POST",
+  "path": "/orders/btc_twd",
+  "body": "{\"action\":\"BUY\",\"amount\":\"0.01\",\"clientId\":12345,\"price\":\"3000000\",\"timeInForce\":\"POST_ONLY\",\"timestamp\":1554380909131,\"type\":\"LIMIT\"}",
+  "payload_base64": "eyJhY3Rpb24iOiJCVVkiLCJhbW91bnQiOiIwLjAxIiwiY2xpZW50SWQiOjEyMzQ1LCJwcmljZSI6IjMwMDAwMDAiLCJ0aW1lSW5Gb3JjZSI6IlBPU1RfT05MWSIsInRpbWVzdGFtcCI6MTU1NDM4MDkwOTEzMSwidHlwZSI6IkxJTUlUIn0=",
+  "expected_signature": "b0b01bc293d9ec53643bb06534982499f455a86b167449d29fb729e82002b0fedec86e99caadef1c069dd39117534edb"
+}

@@ -1,0 +1,22 @@
+{
+  "exchange": "bitopro",
+  "market_types": [
+    "spot"
+  ],
+  "scan_only": false,
+  "trade_enabled": false,
+  "private_write_runtime": "unsupported_offline_request_spec_only",
+  "unsupported": [
+    "perpetual",
+    "futures",
+    "margin",
+    "positions",
+    "funding",
+    "leverage",
+    "withdrawals",
+    "transfers",
+    "amend_order",
+    "order_lists",
+    "dead_man_switch"
+  ]
+}

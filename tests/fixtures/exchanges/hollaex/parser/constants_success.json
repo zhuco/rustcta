@@ -1,0 +1,40 @@
+{
+  "coins": {
+    "xht": {
+      "fullname": "HollaEx Token",
+      "symbol": "xht"
+    },
+    "usdt": {
+      "fullname": "Tether USD",
+      "symbol": "usdt"
+    }
+  },
+  "pairs": {
+    "btc-usdt": {
+      "pair_base": "btc",
+      "pair_2": "usdt",
+      "min_size": 0.0001,
+      "max_size": 100,
+      "min_price": 0.01,
+      "max_price": 1000000,
+      "increment_size": 0.0001,
+      "increment_price": 0.01,
+      "active": true,
+      "verified": true,
+      "is_public": true
+    },
+    "xht-usdt": {
+      "pair_base": "xht",
+      "pair_2": "usdt",
+      "min_size": 0.01,
+      "max_size": 100000,
+      "min_price": 0.0001,
+      "max_price": 100,
+      "increment_size": 0.01,
+      "increment_price": 0.0001,
+      "active": true,
+      "verified": true,
+      "is_public": true
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "exchange": "bsx",
+  "scan_only": false,
+  "trade_enabled": false,
+  "private_write_enabled": false,
+  "native_public_rest": ["products", "orderbook"],
+  "request_spec_only": ["place_order", "cancel_order", "open_orders", "private_ws_auth"],
+  "unsupported": [
+    "bsx.place_order_requires_eip712_wallet_signature_audit",
+    "bsx.cancel_order_requires_cancel_v2_semantics_audit",
+    "bsx.private_streams_require_auth_lifecycle_audit"
+  ]
+}

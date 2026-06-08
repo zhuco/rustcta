@@ -1,0 +1,24 @@
+{
+  "exchange": "modetrade",
+  "operation": "get_order_book_signed_read",
+  "product": "perpetual",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/v1/orderbook/PERP_BTC_USDC",
+  "auth": "signed",
+  "headers": {
+    "orderly-account-id": { "match": "non_empty" },
+    "orderly-key": { "match": "non_empty" },
+    "orderly-signature": { "match": "non_empty" },
+    "orderly-timestamp": { "match": "exact", "value": "1700000000000" }
+  },
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "real",
+    "secret",
+    "private"
+  ],
+  "signing_vector": "tests/fixtures/exchanges/modetrade/signing_vectors/orderly_ed25519_boundary.json"
+}

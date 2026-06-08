@@ -1,0 +1,10 @@
+[
+  {
+    "id": "trade-foxbit-1",
+    "order_id": "order-foxbit-1",
+    "market_symbol": "btcbrl",
+    "side": "BUY",
+    "quantity": "0.01",
+    "price": "350000.00"
+  }
+]

@@ -1,0 +1,12 @@
+gateway:
+  adapters:
+    - coinmetro
+coinmetro:
+  enabled: false
+  rest_base_url: "https://api.coinmetro.com"
+  demo_rest_base_url: "https://api.coinmetro.com/open"
+  ws_url: "wss://api.coinmetro.com/ws"
+  demo_ws_url: "wss://api.coinmetro.com/open/ws"
+  enabled_private_rest: false
+  api_token_env: "RUSTCTA_COINMETRO_API_TOKEN"
+  device_id_env: "RUSTCTA_COINMETRO_DEVICE_ID"

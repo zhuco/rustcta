@@ -1,0 +1,20 @@
+{
+  "operation": "place_order",
+  "method": "POST",
+  "url": "https://paymium.com/api/v1/user/orders",
+  "auth": "hmac_sha256",
+  "headers": {
+    "Api-Key": "fixture-key",
+    "Api-Nonce": "1700000000000",
+    "Api-Signature": "ff5ed709bbc679919dc37bf549478110e737c0d9be643e7ad43283e057cbbdbe",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "type": "LimitOrder",
+    "currency": "EUR",
+    "direction": "buy",
+    "price": 50000,
+    "amount": 0.01
+  },
+  "runtime": "unsupported_request_spec_only"
+}

@@ -1,0 +1,15 @@
+{
+  "restrictions": {
+    "WAVES-DG2xFkPdDwKUoBkzGAhQtLpSGzfXLiCYPEzeKH2Ad24p": {
+      "min-amount": 0.001,
+      "max-amount": 1000000,
+      "step-amount": "0.00000001",
+      "min-price": 0.001,
+      "max-price": 100000,
+      "step-price": "0.00000001"
+    }
+  },
+  "matchingRules": {
+    "tickSize": "0.00000001"
+  }
+}

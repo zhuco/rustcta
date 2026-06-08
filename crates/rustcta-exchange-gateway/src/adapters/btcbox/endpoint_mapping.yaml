@@ -1,0 +1,189 @@
+schema_version: 1
+exchange: btcbox
+adapter: rustcta_exchange_gateway::adapters::btcbox
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/btcbox_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "A-12 scan-only Japanese Spot adapter. BTCBOX public REST is documented, but service suspension code 901 keeps private/live trading disabled."
+market_types: [spot]
+products: [spot]
+base_urls:
+  rest: https://www.btcbox.co.jp/api/v1
+rest:
+  base_url: https://www.btcbox.co.jp/api/v1
+auth:
+  private_rest:
+    scheme: hmac_sha256_md5_private_key
+    body: application/x-www-form-urlencoded
+    signing_payload: "URL-encoded POST params without signature"
+rate_limits:
+  buckets:
+    public_rest:
+      scope: ip
+      interval: 1s
+      limit: 1
+      notes: "Public endpoints have no fixed cap; conservative bucket avoids large depth polling."
+    private_balance:
+      scope: account
+      interval: 1s
+      limit: 2
+    private_trade_list:
+      scope: account
+      interval: 1s
+      limit: 1
+    private_trade_view:
+      scope: account
+      interval: 1s
+      limit: 1
+    private_orders:
+      scope: account
+      interval: 1s
+      limit: 2
+reconciliation:
+  private_state: rest_only_when_future_private_rest_is_verified
+  readbacks: [trade_view, trade_list]
+  after_ws_gap: unsupported_no_official_ws
+batch:
+  place_orders: { support: unsupported, reason: "No native batch place endpoint." }
+  cancel_orders: { support: unsupported, reason: "No native batch cancel endpoint." }
+websocket:
+  public:
+    support: unsupported
+    reason: "No official stable WebSocket API found for BTCBOX public books."
+  private:
+    support: unsupported
+    fallback: rest_reconciliation_after_future_private_rest_verification
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    transport: rest
+    method: GET
+    path: /tickers
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    notes: "No dedicated market metadata endpoint; adapter derives JPY Spot symbols from ticker keys."
+  - operation: get_order_book
+    product: spot
+    transport: rest
+    method: GET
+    path: /depth
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    support: native
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    params:
+      - name: coin
+        required: false
+        values: [btc, bch, ltc, eth]
+    notes: "Docs confirm depth for BTC/BCH/LTC/ETH. Adapter sorts levels locally."
+  - operation: public_trades
+    product: spot
+    transport: rest
+    method: GET
+    path: /orders
+    auth: none
+    rate_limit_bucket: public_rest
+    weight: 1
+    request_spec_required: false
+    support: unsupported
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    params:
+      - name: coin
+        required: false
+        values: [btc, bch, ltc, eth]
+    notes: "Documented endpoint, but this A-12 scan-only adapter does not expose a public trades method/parser yet."
+  - operation: get_balances
+    product: spot
+    transport: rest
+    method: POST
+    path: /balance
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_balance
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/btcbox/request_specs/balance.json
+    notes: "Runtime remains disabled during scan-only phase."
+  - operation: get_open_orders
+    product: spot
+    transport: rest
+    method: POST
+    path: /trade_list
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_trade_list
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_list.json
+  - operation: query_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /trade_view
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: private_trade_view
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_view.json
+  - operation: cancel_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /trade_cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_cancel.json
+    notes: "Offline request construction only; ExchangeClient returns Unsupported."
+  - operation: place_order
+    product: spot
+    transport: rest
+    method: POST
+    path: /trade_add
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: private_orders
+    weight: 1
+    request_spec_required: true
+    support: spec_only
+    official_doc: https://blog.btcbox.jp/en/archives/8762
+    request_spec:
+      status: fixture_only
+      fixture: tests/fixtures/exchanges/btcbox/request_specs/trade_add_limit.json
+    notes: "Offline request construction only; ExchangeClient returns Unsupported."
+unsupported:
+  - operation: private_rest_runtime
+    reason: "Documented private API is left disabled until account/KYC/API-key and service-state validation are handled by a later live-readonly task."
+  - operation: websocket
+    reason: "No official stable WebSocket API was found."
+  - operation: fiat_funding
+    reason: "JPY funding, deposits, withdrawals, and wallet operations are out of gateway trading runtime scope."
+  - operation: non_jpy_markets
+    reason: "Official public docs list JPY Spot pairs only."

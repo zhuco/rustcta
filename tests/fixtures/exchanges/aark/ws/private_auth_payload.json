@@ -1,0 +1,9 @@
+{
+  "id": "aark-auth",
+  "event": "auth",
+  "params": {
+    "orderly_key": "ed25519:test-public-key",
+    "timestamp": 1700000000000,
+    "sign": "test-signature-placeholder"
+  }
+}

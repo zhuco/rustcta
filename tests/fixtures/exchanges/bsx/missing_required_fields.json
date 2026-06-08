@@ -1,0 +1,8 @@
+{
+  "products": [
+    {
+      "product_type": "perpetual",
+      "base_asset": "BTC"
+    }
+  ]
+}

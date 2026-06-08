@@ -1,0 +1,16 @@
+{
+  "exchange": "myokx",
+  "profile_of": "okx",
+  "operation": "private_rest",
+  "support": "unsupported",
+  "reason": "MyOKX private REST is not enabled until EEA credential permissions and regional product scope are audited.",
+  "would_reuse_auth_shape": "okx_v5_hmac_sha256_base64",
+  "credential_values": {},
+  "endpoints": [
+    "/api/v5/account/balance",
+    "/api/v5/trade/order",
+    "/api/v5/trade/cancel-order",
+    "/api/v5/trade/orders-pending",
+    "/api/v5/trade/fills-history"
+  ]
+}

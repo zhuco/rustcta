@@ -1,0 +1,51 @@
+# D8X conservative gateway adapter example.
+# The adapter parses public CoinGecko-compatible perpetual market data from
+# drip.d8x.xyz. Wallet contract reads/writes remain disabled until audited.
+
+exchange: d8x
+adapter: d8x
+enabled: false
+
+market_types:
+  - perpetual
+
+rest_base_url: https://drip.d8x.xyz
+chain_profile: zkevm
+chain_id: 1101
+testnet_chain_id: 2442
+public_ws_url: null
+testnet: false
+sandbox: false
+
+wallet_address: ${D8X_WALLET_ADDRESS}
+signer_private_key: ${D8X_SIGNER_PRIVATE_KEY}
+
+enabled_public_rest: true
+enabled_private_rest: false
+enable_public_stream: false
+enable_private_stream: false
+
+request_timeout_ms: 10000
+orderbook_depth: 50
+log_raw_messages: false
+
+enabled_symbols:
+  perpetual:
+    - BTC-USD-USDC
+    - ETH-USD-USDC
+
+rate_limit:
+  max_requests_per_second: 5
+  burst: 5
+
+permissions:
+  required: []
+  optional:
+    - evm_read_only
+    - evm_trade
+
+notes:
+  - D8X is implemented as a conservative Polygon zkEVM perpetual public-market-data adapter.
+  - Public REST uses /coingecko/contracts and /coingecko/orderbook/{ticker_id}?chain_id=1101.
+  - Private REST, private WS and order writes require wallet signer/contract-call semantics and remain Unsupported.
+  - Do not place real orders, sign contract transactions or enable private runtime from this example.

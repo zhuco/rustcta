@@ -1,0 +1,17 @@
+enabled: false
+adapter: bybiteu
+profile_of: bybit
+rest_base_url: https://api.bybit.eu
+public_ws_url: wss://stream.bybit.eu/v5/public/linear
+private_ws_url: wss://stream.bybit.eu/v5/private
+private_rest:
+  enabled: false
+  reason: EU profile private trading requires broker third-party application scope audit.
+products:
+  - spot
+  - perpetual
+  - futures
+notes:
+  - Uses Bybit V5 request and parser shapes with EU local-site hosts.
+  - Public REST and public WS payload specs are available offline.
+  - Private REST, private WS, and order writes are Unsupported in this profile until credential scope is verified.

@@ -1,0 +1,9 @@
+{
+  "exchange": "cex",
+  "algorithm": "hmac_sha256_lower_hex",
+  "timestamp": "1448034533",
+  "api_key": "1WZbtMTbMbo2NsW12vOz9IuPM",
+  "secret": "1IuUeW4IEWatK87zBTENHj1T17s",
+  "payload": "14480345331WZbtMTbMbo2NsW12vOz9IuPM",
+  "signature": "7d581adb01ad22f1ed38e1159a7f08ac5d83906ae1a42fe17e7d977786fe9694"
+}

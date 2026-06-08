@@ -1,0 +1,12 @@
+{
+  "exchange": "bydfi",
+  "kind": "rest",
+  "operation": "batch_cancel_orders",
+  "api_key": "sample-key",
+  "api_secret": "sample-secret",
+  "timestamp": "1735660800000",
+  "query_string": "",
+  "body": "{\"clientOrderIds\":[\"BATCH-001\"],\"orderIds\":[\"9101\"],\"symbol\":\"BTC-USDT\",\"wallet\":\"W001\"}",
+  "prehash": "sample-key1735660800000{\"clientOrderIds\":[\"BATCH-001\"],\"orderIds\":[\"9101\"],\"symbol\":\"BTC-USDT\",\"wallet\":\"W001\"}",
+  "expected_signature": "00d9ba80b12736b874021094112a4832293f47397478facd7be625796a1a17a6"
+}

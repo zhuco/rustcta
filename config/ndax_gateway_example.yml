@@ -1,0 +1,26 @@
+# NDAX scan-only gateway adapter example. Keep disabled unless CAD spot public
+# market data is intentionally enabled for local/offline validation.
+gateway:
+  adapters:
+    ndax:
+      enabled: false
+      market_types:
+        - spot
+      rest_base_url: "https://api.ndax.in"
+      ws_url: "wss://api.ndax.io/WSGateway/"
+      oms_id: 1
+      enabled_public_rest: true
+      enabled_public_streams: false
+      enabled_private_rest: false
+      enabled_private_streams: false
+      credentials:
+        api_key_env: RUSTCTA_NDAX_API_KEY
+        api_secret_env: RUSTCTA_NDAX_API_SECRET
+        passphrase_env: RUSTCTA_NDAX_API_PASSPHRASE
+        user_id_env: RUSTCTA_NDAX_USER_ID
+        account_id_env: RUSTCTA_NDAX_ACCOUNT_ID
+      notes:
+        - "A-28 NDAX CAD spot scan-only adapter."
+        - "Runtime exposes public symbol rules and order book snapshots only."
+        - "Private REST, private WebSocket, fiat ledger, withdrawals and transfers remain Unsupported."
+        - "Private order request specs and signing vectors are offline-only and sanitized."

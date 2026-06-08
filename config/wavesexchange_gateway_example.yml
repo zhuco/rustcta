@@ -1,0 +1,28 @@
+# WavesExchange adapter example. Keep disabled unless public spot scan-only
+# collection is intentionally enabled.
+exchange: wavesexchange
+enabled: false
+market_types:
+  - spot
+
+rest:
+  base_url: https://matcher.waves.exchange
+  testnet_base_url: https://matcher-testnet.waves.exchange
+
+public_ws:
+  url: wss://matcher.waves.exchange/ws/v0
+
+features:
+  public_rest: true
+  public_streams: false
+  private_rest: false
+  private_streams: false
+  trading: false
+
+auth:
+  private_write_signing: unsupported_waves_order_curve25519_signature
+
+rate_limits:
+  matcher_public:
+    interval_ms: 1000
+    limit: 10

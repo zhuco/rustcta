@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "path": "/v1/orders/get",
+  "auth": "hmac_sha256",
+  "query": {
+    "id": "novadax-order-1"
+  },
+  "headers": {
+    "X-Nova-Access-Key": "<redacted>",
+    "X-Nova-Signature": "<computed>",
+    "X-Nova-Timestamp": "<timestamp>"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "order-1",
+  "client_order_id": "client-1",
+  "asset_class": "crypto",
+  "symbol": "BTC/USD",
+  "side": "buy",
+  "type": "limit",
+  "time_in_force": "gtc",
+  "status": "new",
+  "qty": "0.01",
+  "limit_price": "50000",
+  "filled_qty": "0",
+  "filled_avg_price": null,
+  "created_at": "2026-06-08T00:00:00Z",
+  "updated_at": "2026-06-08T00:00:00Z"
+}

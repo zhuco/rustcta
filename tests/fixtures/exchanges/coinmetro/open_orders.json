@@ -1,0 +1,16 @@
+[
+  {
+    "orderType": "limit",
+    "buyingCurrency": "EUR",
+    "sellingCurrency": "BTC",
+    "buyingQty": 650.0,
+    "sellingQty": 0.01,
+    "orderID": "fixture-order-open-1",
+    "timeInForce": 1,
+    "boughtQty": 0,
+    "soldQty": 0,
+    "creationTime": 1567788344656,
+    "seqNumber": 96416990,
+    "fees": 0
+  }
+]

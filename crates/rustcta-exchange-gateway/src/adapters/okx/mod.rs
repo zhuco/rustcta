@@ -15,7 +15,7 @@ use super::GatewayAdapter;
 use crate::GatewayExchangeStatus;
 
 mod config;
-mod parser;
+pub(crate) mod parser;
 mod private;
 #[cfg(test)]
 mod private_tests;
@@ -42,7 +42,7 @@ pub struct OkxGatewayAdapter {
 
 impl OkxGatewayAdapter {
     pub fn new(config: OkxGatewayConfig) -> ExchangeApiResult<Self> {
-        let exchange_id = ExchangeId::new("okx").map_err(validation_error)?;
+        let exchange_id = ExchangeId::new(&config.exchange_id).map_err(validation_error)?;
         let credentials = OkxPrivateCredentials::from_config(&config);
         let rest = OkxRest::new(
             exchange_id.clone(),
@@ -65,7 +65,10 @@ impl OkxGatewayAdapter {
     fn ensure_exchange(&self, exchange: &ExchangeId) -> ExchangeApiResult<()> {
         if exchange != &self.exchange_id {
             return Err(ExchangeApiError::InvalidRequest {
-                message: format!("okx adapter cannot serve request for exchange {exchange}"),
+                message: format!(
+                    "{} adapter cannot serve request for exchange {exchange}",
+                    self.exchange_id
+                ),
             });
         }
         Ok(())
@@ -74,7 +77,7 @@ impl OkxGatewayAdapter {
     fn ensure_spot(&self, market_type: MarketType) -> ExchangeApiResult<()> {
         if market_type != MarketType::Spot {
             return Err(ExchangeApiError::Unsupported {
-                operation: "okx.non_spot_market_type",
+                operation: self.config.unsupported_market_type_operation,
             });
         }
         Ok(())
@@ -97,6 +100,19 @@ impl OkxGatewayAdapter {
         }
         Ok(())
     }
+
+    pub(super) fn profile_operation(
+        &self,
+        okx_operation: &'static str,
+        okxus_operation: &'static str,
+        myokx_operation: &'static str,
+    ) -> &'static str {
+        match self.exchange_id.as_str() {
+            "myokx" => myokx_operation,
+            "okxus" => okxus_operation,
+            _ => okx_operation,
+        }
+    }
 }
 
 #[async_trait]
@@ -110,12 +126,11 @@ impl GatewayAdapter for OkxGatewayAdapter {
             last_heartbeat_at: Some(Utc::now()),
             rate_limit_used: None,
             message: Some(
-                if self.config.private_rest_available() {
-                    "okx public + private readback REST gateway adapter"
+                if self.config.private_rest_available() && self.exchange_id.as_str() == "okx" {
+                    "okx public + private readback REST gateway adapter".to_string()
                 } else {
-                    "okx public REST gateway adapter"
-                }
-                .to_string(),
+                    self.config.status_message.clone()
+                },
             ),
         }
     }
@@ -165,6 +180,7 @@ impl ExchangeClient for OkxGatewayAdapter {
         toolchain::apply_toolchain_capabilities(
             &mut capabilities,
             self.config.private_rest_available(),
+            self.exchange_id.as_str(),
         );
         capabilities
     }
@@ -177,7 +193,11 @@ impl ExchangeClient for OkxGatewayAdapter {
         &self,
         _request: PositionsRequest,
     ) -> ExchangeApiResult<PositionsResponse> {
-        self.unsupported_private("okx.get_positions")
+        self.unsupported_private(self.profile_operation(
+            "okx.get_positions",
+            "okxus.get_positions",
+            "myokx.get_positions",
+        ))
     }
 
     async fn get_symbol_rules(
@@ -259,7 +279,11 @@ impl ExchangeClient for OkxGatewayAdapter {
         _subscription: PublicStreamSubscription,
     ) -> ExchangeApiResult<String> {
         Err(ExchangeApiError::Unsupported {
-            operation: "okx.subscribe_public_stream",
+            operation: self.profile_operation(
+                "okx.subscribe_public_stream",
+                "okxus.subscribe_public_stream",
+                "myokx.subscribe_public_stream",
+            ),
         })
     }
 
@@ -267,7 +291,11 @@ impl ExchangeClient for OkxGatewayAdapter {
         &self,
         _subscription: PrivateStreamSubscription,
     ) -> ExchangeApiResult<String> {
-        self.unsupported_private("okx.subscribe_private_stream")
+        self.unsupported_private(self.profile_operation(
+            "okx.subscribe_private_stream",
+            "okxus.subscribe_private_stream",
+            "myokx.subscribe_private_stream",
+        ))
     }
 }
 

@@ -188,6 +188,14 @@ pub const LEGACY_BIN_MIGRATIONS: &[LegacyBinMigration] = &[
         rationale: "preflight command belongs under industrial CLI composition",
     },
     LegacyBinMigration {
+        source: "cross_arb_ws_opportunity_probe.rs",
+        target: LegacyBinTarget::ToolOps,
+        compatibility: LegacyBinRetirement::Warn,
+        new_command: "planned rustcta-tools-ops probe cross-arb-ws-opportunity",
+        retirement_milestone: "after websocket opportunity probe output and safety flags are root-free",
+        rationale: "operator websocket opportunity probe, not a strategy runtime",
+    },
+    LegacyBinMigration {
         source: "exchange_order_canary.rs",
         target: LegacyBinTarget::ToolOps,
         compatibility: LegacyBinRetirement::Warn,

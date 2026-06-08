@@ -1,0 +1,10 @@
+{
+  "exchange": "cex",
+  "algorithm": "hmac_sha256_upper_hex",
+  "nonce": "1700000000000",
+  "user_id": "user123",
+  "api_key": "fixture-key",
+  "secret": "fixture-secret",
+  "payload": "1700000000000user123fixture-key",
+  "signature": "33BF9004BAEBB373F6879ADFD86757EF6B36AF67CF246C4D00C0ABF8E6B7EF17"
+}

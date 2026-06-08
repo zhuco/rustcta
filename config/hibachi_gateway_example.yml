@@ -1,0 +1,30 @@
+adapter: hibachi
+enabled: false
+market_types:
+  - perpetual
+
+rest:
+  data_base_url: https://data-api.hibachi.xyz
+  account_base_url: https://api.hibachi.xyz
+websocket:
+  public_url: wss://data-api.hibachi.xyz/ws/market
+  account_url: wss://api.hibachi.xyz/ws/account
+  trade_url: wss://api.hibachi.xyz/ws/trade
+
+features:
+  public_rest: true
+  public_streams: false
+  private_rest: false
+  private_streams: false
+  trading: false
+
+credentials:
+  api_key_env: RUSTCTA_HIBACHI_API_KEY
+  account_id_env: RUSTCTA_HIBACHI_ACCOUNT_ID
+  private_key_env: RUSTCTA_HIBACHI_PRIVATE_KEY
+  public_key_env: RUSTCTA_HIBACHI_PUBLIC_KEY
+
+boundaries:
+  private_write: request_spec_only
+  trustless_signing: unsupported_until_verified
+  testnet: not_publicly_documented

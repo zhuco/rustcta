@@ -1,0 +1,260 @@
+schema_version: 1
+exchange: arkham
+adapter: rustcta_exchange_gateway::adapters::arkham
+metadata:
+  status: draft
+  source: docs/arkham_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: "A-03 Arkham Exchange adapter. Public spot/perpetual market data is parser/transport ready; private trading remains offline request-spec only."
+market_types: [spot, perpetual]
+products: [spot, perpetual]
+rest:
+  base_url: https://arkm.com/api
+base_urls:
+  public_ws: wss://arkm.com/api/ws
+  private_ws: wss://arkm.com/api/ws
+auth:
+  private_rest: Arkham-Api-Key plus Arkham-Expires and base64 HMAC-SHA256 over api_key + expires + method + path + body using the base64-decoded secret.
+rate_limits:
+  buckets:
+    arkham_rest:
+      scope: rest
+      interval: 1s
+      limit: 150
+      burst: 150
+    arkham_orders:
+      scope: orders
+      interval: 1s
+      limit: 40
+      burst: 40
+pagination:
+  open_orders:
+    style: cursor_or_time_window
+    status: unverified
+  recent_fills:
+    style: cursor_or_time_window
+    max_limit: 100
+reconciliation:
+  private_stream_fallback: rest
+  readbacks: [query_order, get_open_orders, get_recent_fills, get_positions, get_balances]
+  unknown_order_policy: query_by_exchange_order_id_then_open_orders_then_recent_fills
+batch:
+  place_orders: { support: unsupported, reason: arkham.batch_place_orders_unverified }
+  cancel_orders: { support: unsupported, reason: arkham.batch_cancel_orders_unverified }
+  cancel_all_orders: { support: spec_only, native_batch: true, atomicity: unknown }
+websocket:
+  public:
+    support: spec_only
+    url: wss://arkm.com/api/ws
+    heartbeat: { direction: client_ping, interval_ms: 30000, timeout_ms: 45000 }
+    resync: rest_order_book_snapshot
+    fixtures:
+      subscribe: tests/fixtures/exchanges/arkham/ws_public_orderbook.json
+      parser: tests/fixtures/exchanges/arkham/ws_orderbook_update.json
+  private:
+    support: unsupported_unverified
+    url: wss://arkm.com/api/ws
+    auth: arkham_hmac_headers
+    auth_fixture: tests/fixtures/exchanges/arkham/ws_private_auth.json
+    fallback: rest_reconciliation
+unsupported:
+  - arkham_intel_api_as_trading_adapter
+  - withdrawals
+  - transfers
+  - deposit_address_creation
+  - private_websocket_live_auth
+  - trigger_orders
+  - leverage_runtime_mutation
+endpoints:
+  - operation: get_symbol_rules
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /public/pairs
+    auth: none
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://arkm.com/docs#get/public/pairs
+    response_parser:
+      fixture: tests/fixtures/exchanges/arkham/pairs.json
+  - operation: get_order_book
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /public/book
+    auth: none
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: false
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: native
+    official_doc: https://arkm.com/docs#get/public/book
+    params:
+      - name: symbol
+      - name: limit
+    response_parser:
+      fixture: tests/fixtures/exchanges/arkham/orderbook.json
+  - operation: get_balances
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /account/balances
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#get/account/balances
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/get_balances.json
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /account/positions
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#get/account/positions
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/get_positions.json
+  - operation: get_fees
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /account/fees
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#get/account/fees
+  - operation: place_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders/new
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#post/orders/new
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/place_order.json
+    notes: Signing vector tests/fixtures/exchanges/arkham/signing_vectors/rest_hmac_sha256.json
+  - operation: cancel_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders/cancel
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: unknown
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#post/orders/cancel
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/cancel_order.json
+  - operation: cancel_all_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: POST
+    path: /orders/cancel/all
+    auth: hmac
+    credential_scopes: [trade]
+    rate_limit_bucket: arkham_orders
+    weight: 1
+    request_spec_required: true
+    native_batch: true
+    atomicity: unknown
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#post/orders/cancel/all
+    request_spec:
+      fixture: tests/fixtures/exchanges/arkham/request_specs/cancel_all_orders.json
+  - operation: query_order
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /orders/{id}
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#get/orders/{id}
+  - operation: get_open_orders
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /orders
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#get/orders
+  - operation: get_recent_fills
+    product: spot
+    market_types: [spot, perpetual]
+    transport: rest
+    method: GET
+    path: /trades
+    auth: hmac
+    credential_scopes: [read_only]
+    rate_limit_bucket: arkham_rest
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: false
+    support: spec_only
+    official_doc: https://arkm.com/docs#get/trades

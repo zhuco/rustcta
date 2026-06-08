@@ -1,0 +1,15 @@
+{
+  "id": 2,
+  "method": "order_update",
+  "params": [
+    {
+      "id": "ORDER-2",
+      "market": "BTC_USDT",
+      "direction": "buy",
+      "state": "completed",
+      "internalState": "filled",
+      "quantity": "0.01",
+      "filledQuantity": "0.01"
+    }
+  ]
+}

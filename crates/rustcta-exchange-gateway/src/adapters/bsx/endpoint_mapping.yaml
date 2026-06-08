@@ -1,0 +1,232 @@
+schema_version: 1
+exchange: bsx
+adapter: BsxGatewayAdapter
+status_date: "2026-06-08"
+metadata:
+  status: draft
+  source: docs/bsx_adapter.md
+  last_reviewed: "2026-06-08"
+  notes: Task C-46 BSX Base perpetual adapter. Public products and orderbook REST are native; private account reads, EIP-712 order writes and WS runtime remain request-spec-only or unsupported.
+market_types: [perpetual]
+products: [perpetual]
+base_urls:
+  rest: https://api.bsx.exchange
+  testnet_rest: https://api.testnet.bsx.exchange
+  public_ws: wss://ws.bsx.exchange/ws
+  testnet_public_ws: wss://ws.testnet.bsx.exchange/ws
+auth:
+  public_rest: none
+  signed_read_rest: BSX-KEY/BSX-SIGNATURE/BSX-TIMESTAMP account headers
+  private_write_rest: EIP-712 wallet order signature plus API headers; request-spec-only until account and cancel semantics are audited
+rate_limits:
+  bsx_public: { scope: ip, interval_ms: 1000, limit: 10 }
+  bsx_private: { scope: account, interval_ms: 1000, limit: 5 }
+  bsx_unsupported: { scope: exchange, interval_ms: 1000, limit: 0 }
+pagination:
+  products: { mode: none }
+  private_history: { mode: unsupported }
+reconciliation:
+  private_state: unsupported
+  notes: REST reconciliation fallback is not enabled because account-scoped reads are not audited.
+batch:
+  place: { support: unsupported, reason: bsx.batch_place_orders_requires_eip712_wallet_signature_audit }
+  cancel: { support: unsupported, reason: bsx.batch_cancel_orders_requires_cancel_v2_semantics_audit }
+websocket:
+  public:
+    support: spec_only
+    helper_only: true
+    heartbeat: { mode: ping_payload, interval_ms: 30000, timeout_ms: 45000, stale_message_ms: 60000 }
+  private:
+    support: unsupported
+    auth_renewal: { mode: unsupported }
+endpoints:
+  - operation: get_symbol_rules
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /products
+    auth: none
+    rate_limit_bucket: bsx_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://api-docs.bsx.exchange/reference/get-products
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/products.json
+  - operation: get_order_book
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /products/{product_id}/book
+    auth: none
+    rate_limit_bucket: bsx_public
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: native
+    official_doc: https://api-docs.bsx.exchange/reference/get-product-book
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/orderbook.json
+  - operation: get_open_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /orders
+    auth: signed
+    credential_scopes: [read_only]
+    rate_limit_bucket: bsx_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: bsx.open_orders_require_account_scope_audit
+    official_doc: https://api-docs.bsx.exchange/reference/get-orders
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/open_orders_spec_only.json
+  - operation: get_balances
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/bsx/balances
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.balances_require_account_scope_audit
+  - operation: get_positions
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/bsx/positions
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.positions_require_account_scope_audit
+  - operation: place_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /orders
+    auth: signed
+    rate_limit_bucket: bsx_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: spec_only
+    reason: bsx.place_order_requires_eip712_wallet_signature_audit
+    official_doc: https://api-docs.bsx.exchange/reference/post-order
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/place_order_unsupported.json
+  - operation: cancel_order
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /orders/{order_id}
+    auth: signed
+    rate_limit_bucket: bsx_private
+    weight: 1
+    request_spec_required: true
+    native_batch: false
+    atomicity: not_applicable
+    testnet: true
+    support: unsupported
+    reason: bsx.cancel_order_requires_cancel_v2_semantics_audit
+    request_spec_fixture: tests/fixtures/exchanges/bsx/request_specs/cancel_order_unsupported.json
+  - operation: batch_place_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: POST
+    path: /unsupported/bsx/batch_place_orders
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.batch_place_orders_requires_eip712_wallet_signature_audit
+  - operation: batch_cancel_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/bsx/batch_cancel_orders
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.batch_cancel_orders_requires_cancel_v2_semantics_audit
+  - operation: cancel_all_orders
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: DELETE
+    path: /unsupported/bsx/cancel_all_orders
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.cancel_all_orders_requires_cancel_v2_semantics_audit
+  - operation: get_recent_fills
+    product: perpetual
+    market_types: [perpetual]
+    transport: rest
+    method: GET
+    path: /unsupported/bsx/recent_fills
+    auth: unsupported
+    rate_limit_bucket: bsx_unsupported
+    weight: 0
+    request_spec_required: false
+    native_batch: false
+    atomicity: unsupported
+    testnet: false
+    support: unsupported
+    reason: bsx.recent_fills_require_account_scope_audit
+streams:
+  - operation: public_orderbook_delta
+    product: perpetual
+    transport: websocket
+    channel: book
+    auth: none
+    support: spec_only
+    resync:
+      endpoint_operation: get_order_book
+      mode: public_rest_snapshot
+  - operation: private_user_events
+    product: perpetual
+    transport: websocket
+    channel: orders/account
+    auth: signed
+    support: unsupported
+    reason: bsx.private_streams_require_auth_lifecycle_audit

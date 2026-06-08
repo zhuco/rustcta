@@ -1,0 +1,28 @@
+{
+  "exchange": "hitbtc",
+  "operation": "get_recent_fills",
+  "product": "spot",
+  "transport": "rest",
+  "method": "GET",
+  "path": "/api/3/spot/history/trade",
+  "auth": "signed",
+  "query": {},
+  "headers": {
+    "Authorization": {
+      "match": "exact",
+      "value": "HS256 dGVzdC1rZXk6YmQwZjg5NjY2YWM0MmYzMTk2MTlmZTQ2Y2M0NzM3ODdhZjM0NTY3NWI2NDEzYjFiMTYxMzg4OGMyZmRjYmMzMDoxNzEwMDAwMDAwMDAwOjEwMDAw"
+    },
+    "Content-Type": {
+      "match": "exact",
+      "value": "application/x-www-form-urlencoded"
+    }
+  },
+  "body": null,
+  "strict_query": true,
+  "strict_headers": false,
+  "strict_body": true,
+  "forbid_header_values_containing": [
+    "test-secret"
+  ],
+  "signing_vector": "hitbtc/get_recent_fills_hs256"
+}

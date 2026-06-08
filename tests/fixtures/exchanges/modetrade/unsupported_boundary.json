@@ -1,0 +1,14 @@
+{
+  "exchange": "modetrade",
+  "underlying_api_profile": "orderly_evm",
+  "status": "scan_only_public_info",
+  "unsupported_reasons": [
+    "modetrade.order_book_requires_orderly_account_signed_request",
+    "modetrade.balances_require_orderly_account_audit",
+    "modetrade.place_order_requires_orderly_ed25519_account_audit",
+    "modetrade.private_streams_require_orderly_account_auth"
+  ],
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_write_enabled": false
+}

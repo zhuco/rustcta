@@ -1,0 +1,24 @@
+{
+  "exchange": "bybiteu",
+  "profile_of": "bybit",
+  "rest_base_url": "https://api.bybit.eu",
+  "public_ws_url": "wss://stream.bybit.eu/v5/public/linear",
+  "private_ws_url": "wss://stream.bybit.eu/v5/private",
+  "public_rest": {
+    "status": "profile_audit",
+    "shape": "bybit_v5"
+  },
+  "private_rest": {
+    "status": "unsupported_without_broker_scope_audit",
+    "trade_enabled": false,
+    "read_enabled": false,
+    "reason": "Bybit V5 docs state EEA users use api.bybit.eu and EU site API only supports Connect to Third-Party Applications for API broker users."
+  },
+  "websocket": {
+    "public_status": "spec_only",
+    "private_status": "unsupported_without_broker_scope_audit",
+    "heartbeat": "client_ping_20000ms",
+    "resync": "rest_order_book_snapshot"
+  },
+  "credential_values": {}
+}

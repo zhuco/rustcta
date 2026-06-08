@@ -1,0 +1,9 @@
+{
+  "state": 0,
+  "result": {
+    "current_tariff_step": {
+      "maker_percent": "-1.5",
+      "taker_percent": "4"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "exchange": "zeta_markets",
+  "mode": "rest_reconciliation",
+  "symbol": "SOL-PERP",
+  "orderbook_path": "/v2/orderbook?ticker_id=SOL-PERP",
+  "interval_ms": 30000,
+  "stream_runtime": "unsupported"
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "wallet": "W001",
+    "symbol": "BTC-USDT",
+    "side": "BUY",
+    "quantity": "0.5",
+    "avgPrice": "65000",
+    "liqPrice": "50000",
+    "markPrice": "65100",
+    "unPnl": "10",
+    "positionMargin": "1000",
+    "settleCoin": "USDT",
+    "im": "1200",
+    "mm": "800",
+    "leverage": 5
+  }
+]

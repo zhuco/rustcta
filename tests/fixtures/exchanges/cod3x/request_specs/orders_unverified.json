@@ -1,0 +1,11 @@
+{
+  "exchange": "cod3x",
+  "operation": "place_order",
+  "product": "perpetual",
+  "request_spec_required": false,
+  "trade_enabled": false,
+  "support": "unsupported_unverified",
+  "downstream_venue_profiles": ["hyperliquid", "gmx_v2", "lighter"],
+  "expected_error": "cod3x.routed_order_signing_unverified",
+  "notes": "Production order support requires a documented Cod3x-native request contract, routing semantics, downstream venue selection, signing ownership, idempotency, order errors, and reconciliation."
+}

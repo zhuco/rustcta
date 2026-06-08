@@ -1,0 +1,14 @@
+{
+  "exchange": "onetrading",
+  "public_rest_live_enabled": true,
+  "private_rest_live_enabled": false,
+  "private_write_live_enabled": false,
+  "private_ws_live_enabled": false,
+  "futures_live_enabled": false,
+  "withdrawals_enabled": false,
+  "notes": [
+    "One Trading public REST is limited to active SPOT instruments in this adapter.",
+    "Private REST endpoints use bearer tokens and are covered by offline request specs only.",
+    "Futures, WebSocket trading writes, withdrawals, and dead-man-switch are explicit Unsupported boundaries."
+  ]
+}

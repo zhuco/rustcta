@@ -1,0 +1,19 @@
+{
+  "exchange": "btcbox",
+  "scan_only": true,
+  "trade_enabled": false,
+  "private_rest_runtime_enabled": false,
+  "public_ws_enabled": false,
+  "private_ws_enabled": false,
+  "default_market_type": "spot",
+  "quote_asset_scope": "JPY",
+  "service_suspension_code": 901,
+  "unsupported": [
+    "private_rest_runtime",
+    "place_order_runtime",
+    "cancel_order_runtime",
+    "batch_orders",
+    "websocket",
+    "fiat_funding"
+  ]
+}

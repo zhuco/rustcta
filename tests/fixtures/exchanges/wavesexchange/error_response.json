@@ -1,0 +1,5 @@
+{
+  "error": "Invalid request",
+  "message": "chId is required",
+  "statusCode": 400
+}

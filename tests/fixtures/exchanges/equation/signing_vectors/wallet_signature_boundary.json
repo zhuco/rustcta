@@ -1,0 +1,12 @@
+{
+  "exchange": "equation",
+  "chain_id": 42161,
+  "account_model": "evm_wallet",
+  "supported": false,
+  "trade_enabled": false,
+  "api_key_auth": false,
+  "requires_private_key": true,
+  "private_key_fixture_present": false,
+  "expected_error": "equation.evm_order_signing_unverified",
+  "notes": "The gateway does not accept raw wallet private keys for Equation in this task."
+}
