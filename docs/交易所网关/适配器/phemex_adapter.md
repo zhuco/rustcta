@@ -57,6 +57,10 @@ Private WebSocket auth uses `user.auth` with signature over
 | public WebSocket | `orderbook`, `trade`, `kline`, `market24h` methods | Spot and perpetual subscription payloads and parsers |
 | private WebSocket | `wo.subscribe`, `aop_p.subscribe`, `ras_p.subscribe` | Spot wallet/order/fill, USDT-M account/order/position, risk account parser |
 
+## Public WebSocket Order Book
+
+Official `orderbook.subscribe` / `orderbook_p.subscribe` supports depth 0/1/5/10/30. The fast mode is about 20ms for requested depth, the aggregated mode is about 120ms, and full depth is 100ms; Phemex also publishes snapshot messages roughly every 60s for self-verification. Messages carry `sequence` and `type=snapshot/incremental`; no checksum is declared, so sequence continuity plus fresh REST/WS snapshot rebuild is required after gaps.
+
 ## Phemex-Specific Extensions
 
 - Public REST helpers for server time, fullbook, index sources, ticker variants,

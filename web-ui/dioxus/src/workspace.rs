@@ -1,10 +1,7 @@
 use dioxus::prelude::*;
 use serde_json::json;
 
-use crate::api::{
-    create_strategy, fetch_strategy_config_for_strategy, save_strategy_config_for_strategy,
-    send_strategy_command,
-};
+use crate::api::{create_strategy, send_strategy_command};
 use crate::i18n::{s, t};
 use crate::types::{
     AgentWorkspaceRowData, CredentialStatusRowData, DashboardData, GatewayWorkspaceData, Language,
@@ -25,11 +22,8 @@ pub(crate) fn StrategyWorkspacePanel(
     let mut strategy_kind = use_signal(|| default_preset.kind.to_string());
     let mut config_path = use_signal(|| default_preset.config_path.to_string());
     let mut log_path = use_signal(|| default_preset.log_path.to_string());
-    let mut command = use_signal(|| default_preset.command.to_string());
-    let mut args = use_signal(|| default_preset.args.to_string());
     let mut selected_strategy_id = use_signal(String::new);
     let mut selected_config_path = use_signal(String::new);
-    let mut selected_config_content = use_signal(String::new);
     let strategies = StrategyWorkspaceRowData::from_rows(&data().strategies, lang);
     if selected_strategy_id().is_empty() {
         if let Some(row) = strategies.first() {
@@ -53,9 +47,6 @@ pub(crate) fn StrategyWorkspacePanel(
                 "tenant_id": "local",
                 "config_path": config_path(),
                 "log_path": log_path(),
-                "command": command(),
-                "args": args().split_whitespace().map(ToString::to_string).collect::<Vec<_>>(),
-                "working_dir": ".",
             });
             wasm_bindgen_futures::spawn_local(async move {
                 match create_strategy(&token_value, &body).await {
@@ -64,28 +55,6 @@ pub(crate) fn StrategyWorkspacePanel(
                         t(lang, "workspace_strategy_created"),
                         compact(&value)
                     )),
-                    Err(error) => message.set(error),
-                }
-            });
-        }
-    };
-    let load_selected_config = {
-        let token = token.clone();
-        let mut message = message;
-        move |_| {
-            let token_value = token.clone();
-            let strategy_id = selected_strategy_id();
-            if strategy_id.trim().is_empty() {
-                message.set(s(lang, "workspace_select_strategy").to_string());
-                return;
-            }
-            wasm_bindgen_futures::spawn_local(async move {
-                match fetch_strategy_config_for_strategy(&token_value, &strategy_id, lang).await {
-                    Ok(draft) => {
-                        selected_config_path.set(draft.path);
-                        selected_config_content.set(draft.content);
-                        message.set(t(lang, "config_loaded").to_string());
-                    }
                     Err(error) => message.set(error),
                 }
             });
@@ -134,8 +103,7 @@ pub(crate) fn StrategyWorkspacePanel(
                                         message,
                                         lang,
                                         selected_strategy_id,
-                                        selected_config_path,
-                                        selected_config_content
+                                        selected_config_path
                                     }
                                 }
                             }
@@ -203,9 +171,7 @@ pub(crate) fn StrategyWorkspacePanel(
                                     if let Some(preset) = StrategyCreatePreset::for_kind(&value) {
                                         config_path.set(preset.config_path.to_string());
                                         log_path.set(preset.log_path.to_string());
-                                        command.set(preset.command.to_string());
-                                        args.set(preset.args.to_string());
-                                    }
+                                }
                                 },
                                 for preset in StrategyCreatePreset::ALL {
                                     option { value: preset.kind, "{preset.kind}" }
@@ -226,20 +192,6 @@ pub(crate) fn StrategyWorkspacePanel(
                                 oninput: move |event| log_path.set(event.value())
                             }
                         }
-                        label { class: "form-field",
-                            span { {s(lang, "workspace_command")} }
-                            input {
-                                value: "{command()}",
-                                oninput: move |event| command.set(event.value())
-                            }
-                        }
-                        label { class: "form-field",
-                            span { {s(lang, "workspace_args")} }
-                            input {
-                                value: "{args()}",
-                                oninput: move |event| args.set(event.value())
-                            }
-                        }
                         button { class: "button primary", onclick: create_strategy, {s(lang, "workspace_create_strategy")} }
                     }
                     div { class: "config-editor-panel",
@@ -257,7 +209,6 @@ pub(crate) fn StrategyWorkspacePanel(
                                     if let Some(row) = strategies.iter().find(|row| row.strategy_id == selected) {
                                         selected_config_path.set(row.config_path.clone());
                                     }
-                                    selected_config_content.set(String::new());
                                 },
                                 for row in strategies.iter() {
                                     option { value: "{row.strategy_id}", "{row.strategy_id}" }
@@ -267,25 +218,7 @@ pub(crate) fn StrategyWorkspacePanel(
                         div { class: "config-grid",
                             div { span { {s(lang, "workspace_config_path")} } strong { "{selected_config_path()}" } }
                         }
-                        textarea {
-                            class: "config-editor",
-                            value: "{selected_config_content()}",
-                            placeholder: s(lang, "workspace_load_strategy_config_hint"),
-                            oninput: move |event| selected_config_content.set(event.value())
-                        }
-                        div { class: "actions",
-                            button { class: "button", onclick: load_selected_config, {s(lang, "load_config")} }
-                            button {
-                                class: "button",
-                                onclick: save_strategy_config_click(token.clone(), selected_strategy_id, selected_config_content, message, lang, false),
-                                {s(lang, "save_config")}
-                            }
-                            button {
-                                class: "button primary",
-                                onclick: save_strategy_config_click(token.clone(), selected_strategy_id, selected_config_content, message, lang, true),
-                                {s(lang, "save_and_restart")}
-                            }
-                        }
+                        p { class: "muted", {s(lang, "credential_setup_hint")} }
                     }
                     div { class: "workspace-side-summary",
                         h3 { {s(lang, "workspace_agents_gateway")} }
@@ -392,8 +325,6 @@ struct StrategyCreatePreset {
     strategy_id: &'static str,
     config_path: &'static str,
     log_path: &'static str,
-    command: &'static str,
-    args: &'static str,
 }
 
 impl StrategyCreatePreset {
@@ -404,8 +335,6 @@ impl StrategyCreatePreset {
         strategy_id: "spot-arb-local",
         config_path: "config/spot_spot_taker_arbitrage.yml",
         log_path: "logs/control_panel/spot-arb-local.log",
-        command: "cargo",
-        args: "run --bin rustcta -- --strategy spot_spot_taker_arbitrage --config config/spot_spot_taker_arbitrage.yml",
     };
 
     const CROSS_ARB: Self = Self {
@@ -413,8 +342,6 @@ impl StrategyCreatePreset {
         strategy_id: "contract-arb-local",
         config_path: "config/cross_exchange_arbitrage_usdt.yml",
         log_path: "logs/control_panel/contract-arb-local.log",
-        command: "cargo",
-        args: "run --bin cross_arb_live -- --config config/cross_exchange_arbitrage_usdt.yml --skip-private-audit --run",
     };
 
     const FUNDING_ARB: Self = Self {
@@ -422,8 +349,6 @@ impl StrategyCreatePreset {
         strategy_id: "funding-arb-local",
         config_path: "config/funding_rate_arbitrage_live_usdt.yml",
         log_path: "logs/control_panel/funding-arb-local.log",
-        command: "cargo",
-        args: "run --bin funding_arb_live -- --config config/funding_rate_arbitrage_live_usdt.yml --confirm-live-order",
     };
 
     const CUSTOM: Self = Self {
@@ -431,8 +356,6 @@ impl StrategyCreatePreset {
         strategy_id: "custom-local",
         config_path: "",
         log_path: "logs/custom-local.log",
-        command: "cargo",
-        args: "",
     };
 
     const ALL: [Self; 4] = [
@@ -455,7 +378,6 @@ fn StrategyWorkspaceRow(
     lang: Language,
     mut selected_strategy_id: Signal<String>,
     mut selected_config_path: Signal<String>,
-    mut selected_config_content: Signal<String>,
 ) -> Element {
     let strategy_id = row.strategy_id.clone();
     let status = row.status.clone();
@@ -488,7 +410,6 @@ fn StrategyWorkspaceRow(
             onclick: move |_| {
                 selected_strategy_id.set(row_strategy_id.clone());
                 selected_config_path.set(row_config_path.clone());
-                selected_config_content.set(String::new());
             },
             td { "{strategy_id}" }
             td { "{row.strategy_kind}" }
@@ -563,35 +484,6 @@ fn strategy_lifecycle_click(
                     t(lang, "workspace_strategy_command_accepted"),
                     compact(&value)
                 )),
-                Err(error) => message.set(error),
-            }
-        });
-    }
-}
-
-fn save_strategy_config_click(
-    token: String,
-    selected_strategy_id: Signal<String>,
-    selected_config_content: Signal<String>,
-    mut message: Signal<String>,
-    lang: Language,
-    restart: bool,
-) -> impl FnMut(Event<MouseData>) + 'static {
-    move |_| {
-        let token_value = token.clone();
-        let strategy_id = selected_strategy_id();
-        let content = selected_config_content();
-        if strategy_id.trim().is_empty() {
-            message.set(s(lang, "workspace_select_strategy").to_string());
-            return;
-        }
-        wasm_bindgen_futures::spawn_local(async move {
-            match save_strategy_config_for_strategy(&token_value, &strategy_id, content, restart)
-                .await
-            {
-                Ok(value) => {
-                    message.set(format!("{}: {}", t(lang, "config_saved"), compact(&value)))
-                }
                 Err(error) => message.set(error),
             }
         });

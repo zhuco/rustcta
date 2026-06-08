@@ -1,0 +1,19 @@
+[package]
+name = "rustcta-runtime-control"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+parking_lot = "0.12"
+log = "0.4"
+rustcta-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"

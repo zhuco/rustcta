@@ -328,14 +328,14 @@ pub struct NotificationConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
-    pub wechat_webhook_url: Option<String>,
+    pub channel_id: Option<String>,
 }
 
 impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
             enabled: default_true(),
-            wechat_webhook_url: None,
+            channel_id: None,
         }
     }
 }

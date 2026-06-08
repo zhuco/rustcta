@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::api::{
-    fetch_strategy_config_draft, post_exchange_control, post_symbol_control,
-    refresh_spot_exchange_control, refresh_spot_symbol_control, save_strategy_config_draft,
+    post_exchange_control, post_symbol_control, refresh_spot_exchange_control,
+    refresh_spot_symbol_control,
 };
 use crate::i18n::{s, t};
 use crate::overview::BalanceTrendPanel;
@@ -48,9 +48,6 @@ pub(crate) fn SpotArbPanel(
     let mut selected_symbol = use_signal(String::new);
     let mut strategy_log_tab = use_signal(|| "all".to_string());
     let mut strategy_log_page = use_signal(|| 0usize);
-    let mut config_editor_open = use_signal(|| false);
-    let mut config_text = use_signal(String::new);
-    let mut config_path = use_signal(String::new);
     let source = SpotArbSourceData::from_dashboard(SpotArbDashboardInput {
         spot_arb: &spot_arb,
         books,
@@ -250,32 +247,6 @@ pub(crate) fn SpotArbPanel(
         lang,
         "kill_switch",
     );
-    let edit_token = source_token.clone();
-    let load_config_editor = move |_| {
-        let token_value = edit_token.clone();
-        wasm_bindgen_futures::spawn_local(async move {
-            match fetch_strategy_config_draft(&token_value, lang).await {
-                Ok(value) => {
-                    config_path.set(value.path);
-                    config_text.set(value.content);
-                    config_editor_open.set(true);
-                    message.set(t(lang, "config_loaded").to_string());
-                }
-                Err(error) => message.set(error),
-            }
-        });
-    };
-    let save_config_token = source_token.clone();
-    let save_config = move |_| {
-        let token_value = save_config_token.clone();
-        let content = config_text();
-        wasm_bindgen_futures::spawn_local(async move {
-            match save_strategy_config_draft(&token_value, content, true).await {
-                Ok(_) => message.set(t(lang, "config_saved_restarting").to_string()),
-                Err(error) => message.set(error),
-            }
-        });
-    };
     let symbol_action = |symbol: String, command: &'static str, label_key: &'static str| {
         let token_value = source_token.clone();
         let mut action_message = message;
@@ -371,7 +342,7 @@ pub(crate) fn SpotArbPanel(
                 button { class: "button", onclick: pause_strategy, {s(lang, "pause_strategy")} }
                 button { class: "button primary", onclick: resume_strategy, {s(lang, "resume_strategy")} }
                 button { class: "button danger", onclick: kill_strategy, {s(lang, "kill_switch")} }
-                button { class: "button", onclick: load_config_editor, {s(lang, "edit_config")} }
+                span { class: "pill neutral", {s(lang, "credential_setup_external")} }
                 span { class: "pill neutral", "{s(lang, \"refresh_target\")}: {panel_data.target_refresh_ms} ms" }
                 span { class: "muted", {s(lang, "spot_control_note")} }
             }
@@ -413,25 +384,6 @@ pub(crate) fn SpotArbPanel(
                 div { class: "status-cell",
                     span { {s(lang, "total_equity")} }
                     strong { "{format_usdt(total_equity_usdt)}" }
-                }
-            }
-            if config_editor_open() {
-                div { class: "panel config-editor-panel",
-                    div { class: "panel-title-row",
-                        div {
-                            h2 { {s(lang, "edit_config")} }
-                            p { class: "muted", "{config_path()}" }
-                        }
-                        div { class: "actions",
-                            button { class: "button primary", onclick: save_config, {s(lang, "save_and_restart")} }
-                            button { class: "button", onclick: move |_| config_editor_open.set(false), {s(lang, "close")} }
-                        }
-                    }
-                    textarea {
-                        class: "config-editor",
-                        value: "{config_text()}",
-                        oninput: move |event| config_text.set(event.value())
-                    }
                 }
             }
             BalanceTrendPanel { data: BalanceTrendData::from_history(&balance_history), lang }

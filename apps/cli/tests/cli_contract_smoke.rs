@@ -48,10 +48,7 @@ fn command_tree_help_should_cover_operator_surfaces() {
         &["--help"],
         &["Commands:", "migration", "ledger", "supervisor", "ops"],
     );
-    assert_success(
-        &["migration", "--help"],
-        &["legacy-bin-plan", "verify-legacy-bins"],
-    );
+    assert_success(&["migration", "--help"], &["verify-retired-src"]);
     assert_success(&["ledger", "--help"], &["validate", "summary"]);
     assert_success(
         &["supervisor", "--help"],
@@ -63,7 +60,7 @@ fn command_tree_help_should_cover_operator_surfaces() {
         ],
     );
     assert_success(&["ops", "--help"], &["smart-money", "reporter", "symbols"]);
-    assert_success(&["cross-arb", "--help"], &["preflight"]);
+    assert_success(&["cross-arb", "--help"], &["preflight", "observe"]);
     assert_success(
         &["cross-arb", "preflight", "--help"],
         &[
@@ -74,6 +71,10 @@ fn command_tree_help_should_cover_operator_surfaces() {
             "--private-symbol-sample",
         ],
     );
+    assert_success(
+        &["cross-arb", "observe", "--help"],
+        &["Usage:", "observe", "--config", "--request-timeout-ms"],
+    );
 }
 
 #[test]
@@ -83,17 +84,8 @@ fn safe_command_tree_should_pass_binary_contract_smoke() {
 
     assert_success(&["doctor"], &["industrial workspace scaffold is installed"]);
     assert_success(
-        &["migration", "legacy-bin-plan", "--target", "tool-ops"],
-        &["account_position_reporter.rs", "tool_ops"],
-    );
-    assert_success(
-        &[
-            "migration",
-            "verify-legacy-bins",
-            "--src-bin-dir",
-            "src/bin",
-        ],
-        &["unclassified_bins", "stale_migrations"],
+        &["migration", "verify-retired-src"],
+        &["\"src_dir\": \"src\"", "\"retired\": true"],
     );
     assert_success(
         &[
@@ -143,6 +135,7 @@ fn safe_command_tree_should_pass_binary_contract_smoke() {
         &["cross-arb", "preflight", "--help"],
         &["Usage:", "preflight"],
     );
+    assert_success(&["cross-arb", "observe", "--help"], &["Usage:", "observe"]);
 }
 
 #[test]
@@ -190,6 +183,65 @@ fn cross_arb_preflight_bridge_should_emit_offline_plan_without_network_paths() {
         assert!(
             legacy_args.iter().any(|arg| arg == expected),
             "preflight bridge legacy args missing {expected}: {legacy_args:#?}"
+        );
+    }
+}
+
+#[test]
+fn cross_arb_observe_bridge_should_emit_offline_contract_without_network_paths() {
+    let output = run_industrial(&[
+        "cross-arb",
+        "observe",
+        "--config",
+        "config/cross_exchange_arbitrage_usdt.yml",
+        "--request-timeout-ms",
+        "456",
+        "--max-symbols",
+        "2",
+    ]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "rustcta-industrial cross-arb observe failed with status {:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        output.status.code()
+    );
+
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("observe bridge should emit json");
+    assert_eq!(report["command"], "cross-arb observe");
+    assert_eq!(report["legacy_binary"], "cross_arb_observe");
+    assert_eq!(report["network_access"], "disabled");
+    assert_eq!(report["live_order_access"], "disabled");
+    assert_eq!(report["request_timeout_ms"], 456);
+    assert_eq!(report["max_symbols"], 2);
+    assert_eq!(report["summary"]["mode"], "observe");
+    assert_eq!(report["summary"]["books_loaded"], 0);
+    assert_eq!(report["summary"]["funding_loaded"], 0);
+    let output_fields = report["output_fields_preserved"]
+        .as_array()
+        .expect("output_fields_preserved should be an array");
+    for expected in ["opportunities", "errors", "exchanges_seen"] {
+        assert!(
+            output_fields.iter().any(|field| field == expected),
+            "observe bridge output fields missing {expected}: {output_fields:#?}"
+        );
+    }
+    let legacy_args = report["legacy_args"]
+        .as_array()
+        .expect("legacy_args should be an array");
+    for expected in [
+        "--config",
+        "config/cross_exchange_arbitrage_usdt.yml",
+        "--request-timeout-ms",
+        "456",
+        "--max-symbols",
+        "2",
+    ] {
+        assert!(
+            legacy_args.iter().any(|arg| arg == expected),
+            "observe bridge legacy args missing {expected}: {legacy_args:#?}"
         );
     }
 }

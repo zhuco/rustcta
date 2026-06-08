@@ -20,6 +20,10 @@ Product line:
 
 - `MarketType::Spot` only in runtime.
 - HollaEx is a white-label exchange framework. This adapter maps only the official `api.hollaex.com` demo/API surface and does not generate profiles for arbitrary HollaEx-based venues.
+- Official P6 product-line verification found no standard futures/perpetual/options
+  surface for this official demo/API profile, so standard contracts are
+  `交易所不支持合约` for this adapter. Arbitrary HollaEx white-label venues require
+  separate verification before they can be mapped.
 
 Authentication:
 

@@ -2,7 +2,7 @@
 
 RustCTA has two exchange-facing contracts:
 
-- `ExchangeClient` in `src/exchanges/unified.rs` for Spot and market-neutral
+- `ExchangeClient` in `retired exchange tree/unified.rs` for Spot and market-neutral
   client behavior.
 - `TradingAdapter` plus `MarketDataAdapter` in `src/execution/` and
   `src/market/` for cross-exchange execution and market-data routing.
@@ -50,14 +50,14 @@ Spot arbitrage currently uses these adapter families:
 
 | Exchange | Spot client path | Notes |
 | --- | --- | --- |
-| Binance | `src/exchanges/binance/spot.rs` | REST orders, balances, fees, public/private streams, dry-run acks |
-| OKX | `src/exchanges/okx/spot.rs` | REST orders, balances, fees, public/private streams, dry-run acks |
-| Bitget | `src/exchanges/bitget/mod.rs` | Spot client support for scanner/arbitrage paths |
-| Gate.io | `src/exchanges/gateio/mod.rs` | Spot client support for scanner/arbitrage paths |
-| MEXC | `src/exchanges/mexc/mod.rs` | Spot client support for scanner/arbitrage paths |
-| CoinEx | `src/exchanges/coinex/mod.rs` | Spot client support for scanner/arbitrage paths |
-| KuCoin | `src/exchanges/kucoin/mod.rs` | Spot client support for scanner/arbitrage paths |
-| Paper | `src/exchanges/paper/mod.rs` | Deterministic paper execution and user-stream events |
+| Binance | `retired exchange tree/binance/spot.rs` | REST orders, balances, fees, public/private streams, dry-run acks |
+| OKX | `retired exchange tree/okx/spot.rs` | REST orders, balances, fees, public/private streams, dry-run acks |
+| Bitget | `retired exchange tree/bitget/mod.rs` | Spot client support for scanner/arbitrage paths |
+| Gate.io | `retired exchange tree/gateio/mod.rs` | Spot client support for scanner/arbitrage paths |
+| MEXC | `retired exchange tree/mexc/mod.rs` | Spot client support for scanner/arbitrage paths |
+| CoinEx | `retired exchange tree/coinex/mod.rs` | Spot client support for scanner/arbitrage paths |
+| KuCoin | `retired exchange tree/kucoin/mod.rs` | Spot client support for scanner/arbitrage paths |
+| Paper | `retired exchange tree/paper/mod.rs` | Deterministic paper execution and user-stream events |
 
 The Spot arbitrage runtime can scan and compare multiple exchanges. Live
 trading is still controlled per exchange by config, dry-run mode, preflight, and
@@ -67,10 +67,10 @@ control-plane state.
 
 USDT perpetual market data and execution are routed through:
 
-- `src/exchanges/market_adapters/`
-- `src/exchanges/private_perp/`
-- `src/exchanges/trading_adapters/`
-- `src/exchanges/registry.rs`
+- `retired exchange tree/market_adapters/`
+- `retired exchange tree/private_perp/`
+- `retired exchange tree/trading_adapters/`
+- `retired exchange tree/registry.rs`
 
 This path is used by `cross_exchange_arbitrage` and funding-rate tooling, not by
 the Spot-to-Spot arbitrage runtime.
@@ -86,7 +86,7 @@ The compatibility layer now consists of:
 
 Removed compatibility:
 
-- `src/exchanges/adapters/`
+- `retired exchange tree/adapters/`
 - deleted single-file exchange shims that were superseded by directory modules
 - legacy strategy exports for removed strategy families
 

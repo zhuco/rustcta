@@ -740,4 +740,58 @@ mod tests {
             .expect("snapshot should serialize");
         assert_eq!(stopped_snapshot.status, StrategyStatus::Stopped);
     }
+
+    #[test]
+    fn strategy_spec_contract_should_round_trip_schemas_and_subscriptions() {
+        #[derive(Debug, Deserialize)]
+        struct MockConfig {
+            symbol: String,
+        }
+
+        let strategy = MockStrategy::new();
+        let spec = strategy.spec();
+        let encoded = serde_json::to_value(&spec).expect("spec should serialize");
+        let decoded: StrategySpec =
+            serde_json::from_value(encoded).expect("spec should deserialize");
+        let config: MockConfig =
+            serde_json::from_value(json!({ "symbol": "BTC/USDT" })).expect("config should parse");
+
+        assert_eq!(config.symbol, "BTC/USDT");
+        assert_eq!(decoded.strategy_kind, "mock_strategy");
+        assert_eq!(decoded.supported_commands[0].command_kind, "rebalance_now");
+        assert_eq!(
+            decoded.market_data_subscriptions[0].channels,
+            vec![MarketDataChannel::OrderBookTop]
+        );
+        assert_eq!(
+            decoded.required_account_permissions[0].permission,
+            AccountPermission::TradeSpot
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn raw_execution_intent_should_round_trip_through_sdk_client() {
+        let execution = MockExecutionClient::default();
+        let ack = execution
+            .submit_raw_intent(ExecutionIntent {
+                schema_version: 1,
+                intent_kind: "dry_run_order_plan".to_string(),
+                tenant_id: "tenant-1".to_string(),
+                account_id: "account-1".to_string(),
+                strategy_id: "strategy-1".to_string(),
+                run_id: "run-1".to_string(),
+                idempotency_key: "strategy-1:run-1:intent-1".to_string(),
+                requested_at: Utc::now(),
+                payload: json!({
+                    "dry_run": true,
+                    "orders": []
+                }),
+            })
+            .await
+            .expect("intent should be accepted");
+
+        assert!(ack.accepted);
+        assert_eq!(ack.intent_kind, "dry_run_order_plan");
+        assert_eq!(ack.payload["accepted_by"], json!("mock"));
+    }
 }

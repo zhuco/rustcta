@@ -15,6 +15,14 @@ Status date: 2026-06-08
 | Data API base URL | `https://api.zeta.markets` | Public symbols and order book fixtures |
 | Devnet historical base URL | `https://dex-devnet-webserver-ecs.zeta.markets` | Documented only; not enabled by default |
 
+## Product Lines
+
+| Product | MarketType | Status |
+| --- | --- | --- |
+| Perpetual futures | `Perpetual` | Legacy public REST fixture only; original Zeta Markets stopped operations in 2025-05. |
+| Spot | n/a | 交易所不支持现货。 |
+| Current trading/private API/public WS runtime | n/a | 交易所不支持当前交易/私有接口/公共 WS runtime；只保留 legacy scan。 |
+
 ## Capability
 
 | Operation | Support | Notes |
@@ -23,7 +31,7 @@ Status date: 2026-06-08
 | `get_order_book` | native public REST | Parses `/v2/orderbook?ticker_id={symbol}` snapshot fixture. |
 | balances / positions / fees | unsupported | Require wallet-owned Solana margin account and SDK audit. |
 | place / cancel / amend / batch | unsupported | Venue is shut down; no private keys or Solana transactions are built. |
-| WebSocket | unsupported | No stable gateway WS API is mapped; fallback is REST polling only. |
+| WebSocket | unsupported | 交易所不支持当前公共 WS runtime；fallback is REST polling only for legacy fixtures. |
 
 ## Unsupported Boundary
 

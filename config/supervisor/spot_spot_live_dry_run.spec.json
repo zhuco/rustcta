@@ -1,20 +1,22 @@
 {
   "schema_version": 1,
   "strategy_id": "spot_spot_live_dry_run",
-  "strategy_kind": "spot_spot_taker_arbitrage",
+  "strategy_kind": "spot_spot_arbitrage",
   "run_id": "local",
   "tenant_id": "local",
   "config_path": "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml",
   "command": "cargo",
   "args": [
     "run",
+    "-p",
+    "rustcta-strategy-spot-spot-arbitrage",
     "--bin",
-    "rustcta",
+    "spot-spot-arbitrage-runtime",
     "--",
-    "--strategy",
-    "spot_spot_taker_arbitrage",
     "--config",
-    "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml"
+    "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml",
+    "--strategy-id",
+    "spot_spot_live_dry_run"
   ],
   "working_dir": ".",
   "log_path": "logs/supervisor/spot_spot_live_dry_run.log",

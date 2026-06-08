@@ -39,7 +39,9 @@ Fixtures use placeholder keys and synthetic order IDs only.
 ## Boundaries
 
 - Fiat rails, deposits, withdrawals, transfers, tax reports, and KYC workflows are unsupported.
-- Perpetual, margin, futures, leverage, and position APIs are unsupported.
+- Official P6 product-line verification found no standard futures, perpetual,
+  options, or margin API in the current NovaDAX docs; standard contracts are
+  `交易所不支持合约`.
 - Private streams are not promoted; private state should reconcile through REST request specs.
 - Live private REST remains disabled by default. Write APIs are request-spec only and must not place real orders in this task.
 

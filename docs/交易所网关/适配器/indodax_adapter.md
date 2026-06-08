@@ -23,7 +23,9 @@ Signing:
 Boundaries:
 
 - Runtime support is limited to `MarketType::Spot`.
-- Public/private streams are unsupported; the adapter is REST-only.
+- Official P6 product-line verification found only IDR spot public/private API
+  surfaces; standard futures/perpetual/options are `交易所不支持合约`.
+- Public/private streams are unsupported; the adapter is REST-only. 当前官方 PDF/GitHub API 未见公共订单簿 WS，写 `交易所不支持公共 WS 行情`。
 - Client order IDs, amend orders, order lists, cancel-all, positions, leverage/margin, reduce-only, post-only, stop orders, IOC/FOK, transfers, deposits, withdrawals, fiat banking, and payment APIs are explicitly unsupported.
 - Fiat IDR is treated only as a spot quote asset in balances/orders; fiat payment and withdrawal flows are not represented in runtime APIs.
 - Generic cancel and batch-cancel are unsupported because Indodax `cancelOrder` requires buy/sell side context that `CancelOrderRequest` does not carry.

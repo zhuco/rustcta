@@ -20,7 +20,7 @@ Rules:
   crates unless a documented SDK contract change requires it.
 - Do not import concrete exchange adapter modules.
 - Do not depend on `rustcta-exchange-api`, `rustcta-exchange-gateway`,
-  `rustcta-execution-router`, `rustcta-control-api`, `rustcta-core-compat`, or
+  `rustcta-execution-router`, `rustcta-control-api`, `retired-core-compat`, or
   the legacy root `rustcta` package.
 - Do not read `.env` or exchange API credentials.
 - Do not bypass execution router, risk gates, or idempotency identity.

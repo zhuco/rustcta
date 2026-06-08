@@ -8,11 +8,15 @@
   "command": "cargo",
   "args": [
     "run",
+    "-p",
+    "rustcta-strategy-cross-exchange-arbitrage",
     "--bin",
-    "cross_arb_live",
+    "cross-exchange-arbitrage-runtime",
     "--",
     "--config",
-    "config/cross_exchange_arbitrage_usdt.yml"
+    "config/cross_exchange_arbitrage_usdt.yml",
+    "--strategy-id",
+    "cross_arb_live"
   ],
   "working_dir": ".",
   "log_path": "logs/supervisor/cross_arb_live.log",

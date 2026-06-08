@@ -121,6 +121,13 @@ Public WS support is declared as spec payload plus parser runtime capability for
 auth plus order/fill event parsing on `order:cash` and `futures-order`; account,
 balance, and position stream event normalization remains unsupported.
 
+官方 WS 细项核验见 [WebSocket 官方核验 P3 P2 公共 WS 缺口交易所](../WebSocket官方核验_P3_P2公共WS缺口交易所.md)。`depth:<symbol>` L2 depth
+默认 300ms throttle；`bbo:<symbol>` 是 L1 best bid/ask 变更推送；
+`depth-snapshot` 最多 500 档，另有 `depth-snapshot-top100`；`seqnum`
+必须逐条 +1，断档后需要重新订阅并请求 snapshot。当前项目已具备
+payload/parser 证据，但还需要把 interval、depth、snapshot/resync 规则结构化进
+`endpoint_mapping.yaml`。
+
 Heartbeat policy is JSON ping/pong, 15 second ping interval, 30 second pong
 timeout, and 30 second stale-message timeout. Auth renewal is reconnect and
 re-auth; AscendEX does not use a listen-key lease in this adapter.

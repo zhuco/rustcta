@@ -2,30 +2,24 @@
 
 Status date: 2026-06-07
 
-This document covers the current local Dioxus control panel path and the
-workspace control API migration. During `industrial-workspace-migration`, there
-are two control API entrypoints:
-
-- Legacy local console: root binary `control_api`, launched by
-  `scripts/separated_control_panel.sh`. It owns the current token-protected
-  local UI workflow on `127.0.0.1:8091`.
-- Workspace control API: `apps/control-api` binary `rustcta-control-api`. It is
-  the migrating generic multi-strategy API surface and should be the target for
-  new control-plane route/model work.
+This document covers the local Dioxus control panel path after the workspace
+control API migration. The default entrypoint is `apps/control-api` binary
+`rustcta-control-api`; the root `control_api` binary is a compatibility path and
+must not be used for new control-panel work.
 
 ## Process Boundary
 
 ```text
 browser
   |
-  | static Dioxus assets + /api/* with Bearer token
+  | static Dioxus assets + /api/*
   v
-legacy control_api process
-  | reads sanitized runtime snapshots
-  | appends authenticated operator command records
+rustcta-control-api process
+  | serves static Dioxus assets
+  | exposes secret-free read models
+  | appends audited operator/local-agent command records
   v
-data/control_api/dashboard_snapshot.json
-data/control_api/control_commands.jsonl
+supervisor registry, runtime snapshots, audit ledger, local-agent queue
   ^
   | sanitized MonitoringState snapshot writer
   |
@@ -36,9 +30,9 @@ strategy runtime process
   - no browser UI binding by default
 ```
 
-The Dioxus frontend has no exchange credentials, no exchange API clients, and
-no trading execution code. In the legacy local console flow it calls only
-`control_api`. In the workspace flow it should call `rustcta-control-api`.
+The Dioxus frontend has no exchange credentials, no exchange API clients, no
+local shell execution, and no trading execution code. It calls
+`rustcta-control-api` only.
 
 ## Migrated Features
 
@@ -56,24 +50,25 @@ no trading execution code. In the legacy local console flow it calls only
 | Logs | `/api/logs` | Logs |
 | Config summary | `/api/config`, `/api/config/summary` | Config |
 | Inventory, fees, disabled symbols | `/api/inventory`, `/api/fees`, `/api/disabled` | Config |
-| Control actions | `/api/control/pause`, `/api/control/resume`, `/api/control/kill_switch` | Controls |
+| Control actions | `/api/local-agent/commands` | Controls |
 
-Write-like legacy control routes now append queued JSONL commands only. They include `would_submit_order=false`, `applied_to_runtime=false`, and a warning that runtime command consumption is not enabled.
+Write-like UI actions either call the audited strategy command route or append a
+local-agent command. The browser never executes shell scripts and never calls
+exchange APIs.
 
 ## Build
 
 ```bash
-cargo build --release --bin rustcta --bin control_api
-cargo build --release -p rustcta-control-api-app --bin rustcta-control-api
 cd web-ui/dioxus
 dx build --release
 ```
 
-The helper script builds the current legacy local-console binaries, builds the
-Dioxus app, and syncs the Dioxus release output into `web-ui/dioxus/dist`:
+For production-style static hosting, sync the Dioxus release output into
+`web-ui/dioxus/dist` and point the control API app at that directory:
 
 ```bash
-scripts/separated_control_panel.sh build
+RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \
+cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```
 
 If `dx` is missing:
@@ -88,10 +83,13 @@ Dioxus 0.7 writes release web assets under `web-ui/dioxus/target/dx/rustcta-cont
 ## Local Run
 
 ```bash
-export RUSTCTA_MONITOR_TOKEN="$(openssl rand -hex 32)"
-scripts/separated_control_panel.sh build
-scripts/separated_control_panel.sh start
-scripts/separated_control_panel.sh status
+export RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091
+export RUSTCTA_CONTROL_API_AGENT_ID=local-agent
+export RUSTCTA_CONTROL_API_TENANT_ID=local
+export RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=run/supervisor/registry.json
+export RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=data/control_api/audit.jsonl
+export RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist
+cargo run -p rustcta-control-api-app --bin rustcta-control-api
 ```
 
 Open:
@@ -100,24 +98,22 @@ Open:
 http://127.0.0.1:8091
 ```
 
-Paste the token into the Dioxus auth token input. Port `8091` is the canonical
-local entrypoint for the legacy console. The `control_api` process serves both
-the Dioxus static assets and every `/api/*` route on `127.0.0.1:8091`.
+Port `8091` is the canonical local control panel entrypoint. The
+`rustcta-control-api` process serves both the Dioxus static assets and every
+`/api/*` route on `127.0.0.1:8091`.
 
 Do not use `dx serve` to run the operator control panel. `dx serve` starts a
 separate frontend-only development server on another port and is useful only for
 isolated UI work; it is not the live control API endpoint. For normal local
-operation use `scripts/separated_control_panel.sh start` or
-`scripts/separated_control_panel.sh start-control-api`.
+operation use `rustcta-control-api` with `RUSTCTA_CONTROL_API_STATIC_DIR`.
 
-Static assets are public on the local listener. Every `/api/*` route requires
-`Authorization: Bearer $RUSTCTA_MONITOR_TOKEN`.
+Static assets are public on the local listener. `/api/*` routes return
+secret-free read models and audited command responses.
 
 Safe shutdown:
 
 ```bash
-scripts/separated_control_panel.sh stop-control-api
-scripts/separated_control_panel.sh stop-strategy
+pkill -f 'rustcta-control-api' || true
 ```
 
 Pid and log files:
@@ -125,7 +121,7 @@ Pid and log files:
 | Process | PID | Log pointer |
 | --- | --- | --- |
 | Strategy runtime | `run/strategy.pid` | `run/strategy.log_path` |
-| Control API | `run/control_api.pid` | `run/control_api.log_path` |
+| Control API | process manager specific | process manager specific |
 
 Static assets are served from `web-ui/dioxus/dist` by default.
 
@@ -139,25 +135,12 @@ target/release/rustcta \
   --config config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml
 ```
 
-Legacy control API on loopback:
-
-```bash
-export RUSTCTA_MONITOR_TOKEN="<strong random token>"
-target/release/control_api \
-  --bind-addr 127.0.0.1:8091 \
-  --snapshot-path data/control_api/dashboard_snapshot.json \
-  --command-path data/control_api/control_commands.jsonl \
-  --token-env RUSTCTA_MONITOR_TOKEN \
-  --static-dir web-ui/dioxus/dist
-```
-
 Workspace control API on loopback:
 
 ```bash
 RUSTCTA_CONTROL_API_BIND=127.0.0.1:8091 \
 RUSTCTA_CONTROL_API_AGENT_ID=local-agent \
 RUSTCTA_CONTROL_API_TENANT_ID=local \
-RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=data/control_api/dashboard_snapshot.json \
 RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=run/supervisor/registry.json \
 RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=data/control_api/audit.jsonl \
 RUSTCTA_CONTROL_API_STATIC_DIR=web-ui/dioxus/dist \
@@ -182,7 +165,7 @@ Then open:
 http://127.0.0.1:8091
 ```
 
-This keeps the control API off the public interface. API calls still require the monitor token.
+This keeps the control API off the public interface.
 
 ### Option B: Nginx HTTPS Reverse Proxy
 
@@ -217,33 +200,12 @@ Firewall notes:
 
 ### Direct Public Bind
 
-Direct `0.0.0.0` binding is intentionally guarded for the legacy local console.
-It requires both:
-
-```bash
-CONTROL_API_EXTERNAL_ACCESS_ENABLED=true
-RUSTCTA_MONITOR_TOKEN=<at least 24 characters>
-```
-
-and the explicit runtime flag:
-
-```bash
-target/release/control_api \
-  --bind-addr 0.0.0.0:8091 \
-  --external-access-enabled \
-  --snapshot-path data/control_api/dashboard_snapshot.json \
-  --command-path data/control_api/control_commands.jsonl \
-  --token-env RUSTCTA_MONITOR_TOKEN \
-  --static-dir web-ui/dioxus/dist
-```
-
-Use this only behind a firewall or reverse proxy. The service refuses non-loopback binding without the explicit flag and token.
+Direct `0.0.0.0` binding is not the default control panel mode. Prefer a
+loopback listener behind SSH tunneling or an HTTPS reverse proxy.
 
 ## API Contract
 
-Legacy local-console endpoints:
-
-Core endpoints:
+Workspace control API endpoints:
 
 - `GET /api/status`
 - `GET /api/config`
@@ -256,18 +218,6 @@ Core endpoints:
 - `GET /api/logs`
 - `GET /api/health`
 - `GET /api/events` via SSE
-- `POST /api/control/pause`
-- `POST /api/control/resume`
-- `POST /api/control/kill_switch`
-
-Compatibility read endpoints from the old dashboard are preserved under
-`/api/*`, including `live_preflight`, `small_live_gate`, `scanner`,
-`hedge-policy`, `runtime-publisher`, order reconciliation, balance
-reconciliation, and spot-control snapshot routes.
-
-Workspace control API endpoints:
-
-- `GET /api/health`
 - `GET /api/workspace`
 - `GET /api/agents`
 - `GET /api/agents/:agent_id`
@@ -285,8 +235,13 @@ Workspace control API endpoints:
 - `GET /api/logs`
 - `GET /api/strategy-logs`
 - `GET /api/credentials/status`
+- `GET /api/strategy-snapshots`
+- `GET /api/strategies/:strategy_id/snapshot`
 - `POST /api/commands`
 - `GET /api/commands/:command_id`
+- `GET /api/local-agent/status`
+- `POST /api/local-agent/commands`
+- `POST /api/local-agent/strategy-config`
 
 Dioxus workspace route usage:
 
@@ -294,17 +249,16 @@ Dioxus workspace route usage:
   `strategies`, `gateway/status`, and `credentials/status` first.
 - Status, config, risk, logs, fees, inventory, books, exchanges, symbols,
   opportunities, and strategy logs prefer workspace control API routes when
-  present and retain legacy local-console read-route fallback.
+  present.
 - The credential panel is read-only. It uses `/api/credentials/status` for
-  public slots and may read the legacy `/api/exchange-api-keys` status response
-  only as a redacted schema/account fallback. It does not post, delete, persist,
-  or locally store raw credential fields.
+  public slots. It does not post, delete, persist, or locally store raw
+  credential fields.
+- Strategy create/lifecycle controls are queued through `/api/local-agent/commands`;
+  the public control API router remains read-only.
 
 ## Safety Model
 
-- The old embedded HTTP server remains opt-in through `monitoring.http_enabled=false` defaults.
-- `control_api` and `rustcta-control-api` return only sanitized snapshot/read
-  model data.
+- `rustcta-control-api` returns only sanitized snapshot/read model data.
 - The frontend contains no secrets and no exchange credential fields.
 - API response bodies are screened for common secret markers before being returned.
 - Control actions are queued to JSONL only.
@@ -314,32 +268,25 @@ Dioxus workspace route usage:
 
 ## Smoke Tests
 
-Start the legacy `control_api` on loopback, then run:
+Run the new app smoke test:
 
 ```bash
-export RUSTCTA_MONITOR_TOKEN="<same token used by control_api>"
-CONTROL_API_BASE_URL=http://127.0.0.1:8091 \
-COMMAND_PATH=data/control_api/control_commands.jsonl \
 scripts/control_api_smoke_test.sh
 ```
 
 The smoke test checks:
 
-- unauthenticated `/api/status` returns `401`
-- authenticated status and health respond with sanitized JSON
+- status and health respond with sanitized JSON
 - Dioxus static index loads
 - SPA fallback loads
 - secret markers are absent from checked API responses
-- control action POST appends JSONL with `would_submit_order=false`
-- the live-dry-run config does not enable unsafe settings
+- supervisor registry, strategy log, and runtime snapshot read models load
 
 ## Troubleshooting
 
-- `401 Unauthorized`: verify `RUSTCTA_MONITOR_TOKEN` in the control API process and browser token input.
 - Wrong port or blank UI: use `http://127.0.0.1:8091`. Do not use an ad-hoc `dx serve` port for operator access.
-- Empty/default dashboard: the runtime has not written `data/control_api/dashboard_snapshot.json` yet, or `monitoring.enabled` is false.
-- Missing static UI: run `scripts/separated_control_panel.sh build` and confirm `web-ui/dioxus/dist/index.html` exists.
-- Public link unreachable over SSH tunnel: confirm `control_api` is listening on `127.0.0.1:8091` on the server and the SSH session is still open.
+- Empty/default workspace: the supervisor registry or typed runtime snapshots are not configured yet.
+- Missing static UI: build Dioxus and confirm `web-ui/dioxus/dist/index.html` exists, then set `RUSTCTA_CONTROL_API_STATIC_DIR`.
+- Public link unreachable over SSH tunnel: confirm `rustcta-control-api` is listening on `127.0.0.1:8091` on the server and the SSH session is still open.
 - Public HTTPS unreachable: check DNS, Nginx TLS config, firewall `443/tcp`, and that Nginx can reach `127.0.0.1:8091`.
-- Direct public bind refused: set `--external-access-enabled` only after setting a strong `RUSTCTA_MONITOR_TOKEN`; prefer SSH tunnel or Nginx instead.
 - Commands appear not to pause the runtime: this is expected. Commands are queued unless an approved runtime command consumer is added later.

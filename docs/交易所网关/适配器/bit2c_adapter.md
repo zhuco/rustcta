@@ -15,7 +15,7 @@ snapshots for the documented exchange pairs:
 
 Broker conversion, merchant checkout, custody, withdrawals, OTC, tax services,
 futures, perpetuals, margin, leverage, positions, funding, and open interest are
-out of scope.
+out of scope. 官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)；当前官方 API 未见标准 futures/perpetual/options，所以标准合约写 `交易所不支持合约`。
 
 ## Official Sources
 
@@ -29,7 +29,7 @@ out of scope.
 | Public trades | `GET /Exchanges/{pair}/lasttrades`, `GET /Exchanges/{pair}/trades.json` |
 | Private auth | `key` and `sign` headers, HMAC-SHA512 over form data plus increasing `nonce` |
 | Testnet | Not found |
-| WebSocket | Not found |
+| WebSocket | 交易所不支持公共 WS 行情（当前官方 API 只见 REST public/private） |
 
 ## Endpoint Mapping
 
@@ -69,9 +69,10 @@ Explicitly unsupported:
 
 - Private REST runtime, including balances, order placement, cancellation, open
   orders, query order, fills, and fees
-- WebSocket public/private streams
+- WebSocket public/private streams：交易所不支持公共 WS 行情；REST orderbook/top book is the polling fallback
 - Batch place/cancel, cancel-all, amend, order lists
 - Any funds, withdrawal, merchant, broker, or OTC flow
+- Standard futures/perpetual/options: `交易所不支持合约` under the current official API scope.
 
 Private REST remains request-spec only because Bit2C does not publish an
 official signature vector, no testnet was found, and live trading credentials

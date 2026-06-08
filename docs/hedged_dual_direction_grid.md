@@ -6,7 +6,7 @@
   - 每个交易对可独立设定底仓方向（Long/Short）与网格参数。
   - 多币种组合中同时存在做多网格与做空网格，实现组合级对冲。
   - 库存不足时，自动将网格中心贴近最新成交价，维持做 T 频率。
-  - 成交后的挂单补单流程由 `src/strategies/hedged_grid` 内部引擎维护。
+  - 成交后的挂单补单流程由 `retired strategy tree/hedged_grid` 内部引擎维护。
 
 ## 2. 适用场景与收益来源
 - **行情条件**：主流币、平台币、L2 核心标的等具有高流动性、强相关性，波动中枢呈缓慢趋势或震荡；对极端单边行情需配套杀阈。
@@ -26,7 +26,7 @@
 
 ## 4. 策略结构设计
 ```
-src/strategies/hedged_grid/
+retired strategy tree/hedged_grid/
 ├── config.rs      # 策略配置、底仓与网格定义
 ├── mod.rs         # 内部模块导出
 ├── controller.rs  # 配置解析、依赖注入、任务启动

@@ -6,15 +6,17 @@ Adapter id: `biconomy`
 
 Implementation status: Spot REST and WebSocket request/parser/session specs are implemented behind `rustcta-exchange-api::ExchangeClient`. The adapter covers public symbol rules, order book snapshots, private balances, fee readback, order lifecycle, open orders, recent fills, gateway-composed batch place/cancel, symbol-scoped cancel-all, current public JSON-RPC WebSocket subscription payloads/parsers, private WebSocket order/balance subscription payloads and standard stream-event parsers, and ping/pong heartbeat helpers.
 
-Futures/perpetual support is intentionally not declared yet. During task 23, the stable public Biconomy documentation surface available for implementation only supported the Spot-style REST/WS paths used here. Futures positions and non-Spot market requests return `Unsupported` instead of using unverified endpoints.
+Official product-line follow-up found Biconomy Futures product pages, but the stable API surface wired in this adapter remains Spot-style REST/WS. Futures positions and non-Spot market requests return `Unsupported` instead of using unverified endpoints.
 
 ## Product Lines
 
 | Product | MarketType | Status |
 | --- | --- | --- |
 | Spot | `Spot` | Public REST + private REST + public/private WS specs |
-| Futures/perpetual | n/a | Explicit `Unsupported` until official endpoint specs are confirmed |
+| Futures/perpetual | n/a | `项目未实现`; official futures product exists, but endpoint specs still need confirmation before implementation |
 | Testnet | n/a | Unsupported; no stable public sandbox host verified |
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Biconomy Futures/Perpetual 不能写成 `交易所不支持合约`；当前结论是项目未实现，并且要先补 futures endpoint spec 核验。
 
 REST base URL: `https://www.biconomy.com`
 Public WS: `wss://bei.biconomy.com/ws`
@@ -68,3 +70,13 @@ Use Biconomy with private REST disabled until read-only account, fee and open-or
 - WS policy: public/private WS are spec/parser ready with heartbeat helpers; public books and private order/balance messages convert into standard stream events. REST snapshots/open orders remain resync source.
 - Rate-limit/pagination/reconciliation/batch: declared in endpoint mapping and capabilities v2. Batch is gateway-composed with per-item partial failure; native atomic batch is not declared.
 - Live boundary: keep private REST/WS behind credential gates and use REST reconciliation until live read-only and live-dry-run validation.
+
+## Official WebSocket Order Book Detail
+
+Official Biconomy API docs expose `depth.subscribe` with depth values
+5/10/15/20/30/50/100 and precision choices. Pushes arrive as `depth.update`
+with `is_full` to distinguish full and incremental messages. No fixed push
+milliseconds, sequence, or checksum is documented. Mapping should add
+depth/precision, full/incremental semantics, and REST snapshot fallback. Source
+batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).

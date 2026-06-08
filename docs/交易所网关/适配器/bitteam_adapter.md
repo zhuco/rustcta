@@ -25,8 +25,10 @@ validated beyond offline request specs.
 | --- | --- | --- |
 | Spot | `Spot` | Public REST G1 for symbol rules and order book. |
 | P2P | n/a | Unsupported; not a central exchange order-book/trading surface. |
-| Perpetual/futures | n/a | Unsupported; no stable official perpetual product scope verified for this adapter. |
+| Perpetual/futures/options | n/a | `交易所不支持合约`; current official docs/API list Spot/P2P and CCXT-style spot endpoints, with no stable standard contracts product scope verified for this adapter. |
 | Testnet | n/a | Unsupported; no stable public sandbox host verified. |
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。P2P 不属于中心化订单簿交易 surface；标准 futures/perpetual/options 写 `交易所不支持合约`。
 
 Default REST base URL: `https://bit.team`
 
@@ -42,7 +44,7 @@ Default REST base URL: `https://bit.team`
 | Open orders | `GET /trade/api/ccxt/ordersOfUser` | Request-spec-only REST reconciliation candidate. |
 | Recent fills | `GET /trade/api/ccxt/tradesOfUser` | Request-spec-only REST reconciliation candidate. |
 | Batch place/cancel | Not verified | Unsupported. |
-| WebSocket | Not verified | Public/private streams unsupported; REST reconciliation fallback documented for future private promotion. |
+| WebSocket | 交易所不支持公共 WS 行情 | 当前官方 docs/OpenAPI 只给 REST/CCXT-style endpoints，未给 WSS endpoint 和订单簿订阅规格；REST reconciliation fallback documented for future private promotion. |
 
 ## Authentication
 

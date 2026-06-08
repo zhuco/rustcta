@@ -1,0 +1,7 @@
+{
+  "account_id": "supervisor-fixture",
+  "total_equity_usdt": 1000.0,
+  "usdt_balance_value": 1000.0,
+  "min_position_value_usdt": 1.0,
+  "positions": []
+}

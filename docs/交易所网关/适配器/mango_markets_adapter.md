@@ -30,7 +30,7 @@ capabilities.
 | --- | --- | --- |
 | Perpetual futures | `Perpetual` | Fixture parser for sanitized group/perp market metadata only. Runtime scan remains `Unsupported`. |
 | Cross-margin/lending | n/a | Audited as protocol context; not mapped to exchange gateway balances or risk. |
-| Spot/OpenBook | n/a | Unsupported in this adapter. |
+| Spot/OpenBook | n/a | 项目未实现 Spot/OpenBook。当前 adapter 不接 spot，不能写成交易所不支持。 |
 
 Default Solana RPC URL: `https://api.mainnet-beta.solana.com`
 

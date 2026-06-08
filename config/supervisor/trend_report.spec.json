@@ -8,9 +8,11 @@
   "command": "cargo",
   "args": [
     "run",
-    "--bin",
-    "trend_report",
+    "-p",
+    "rustcta-tools-ops",
     "--",
+    "reporter",
+    "trend",
     "--config",
     "config/trend_report.yml"
   ],

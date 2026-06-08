@@ -42,7 +42,7 @@ Dependency direction:
 - `rustcta-control-api` is a presentation/control boundary. It may expose
   secret-free status and lifecycle command views, but it must not own order
   routing, strategy logic, or adapter details.
-- `rustcta-core-compat` is temporary migration glue. Do not add new business
+- `retired-core-compat` is temporary migration glue. Do not add new business
   logic there, and do not make new apps or strategies rely on it unless a
   migration handoff explicitly requires it.
 
@@ -64,7 +64,7 @@ Ownership:
   implementation. Log tailing APIs, runtime snapshot collection, crash recovery,
   and durable process registry storage remain in this crate.
 - `rustcta-control-api`: web/control API view models and routes only.
-- `rustcta-core-compat`: temporary compatibility exports during migration.
+- `retired-core-compat`: temporary compatibility exports during migration.
 
 Parallel work guidance:
 

@@ -19,7 +19,7 @@ validated beyond offline request specs.
 | Public order book | `GET /api/v2/public/book?market=...&side=...&offset=0&limit=...`. | `get_order_book` issues one buy request and one sell request, then merges the two sides into a snapshot. |
 | Private REST | `POST /api/v2/account/balances`, `/api/v2/order/new`, `/api/v2/order/cancel`, `/api/v2/orders`, `/api/v2/account/market_deals`. | Request-spec and signing fixtures only; runtime stays unsupported. |
 | Auth | Private examples use `X-TXC-APIKEY`, `X-TXC-PAYLOAD`, and `X-TXC-SIGNATURE`. | `signing.rs` builds base64 JSON payload and HMAC-SHA512 hex signature from sanitized fixture keys. |
-| WebSocket | P2B WSS public docs list `wss://apiws.p2pb2b.com/`, `server.ping`, and depth subscriptions. | Documented as unverified; runtime streams remain unsupported. |
+| WebSocket | P2B WSS public docs list `wss://apiws.p2pb2b.com/`, `server.ping`, and `depth.subscribe`. | 项目未实现公共 WS runtime；官方 depth limit 1-100，increment 每 1s，full flag 每 60s。 |
 
 ## Product Lines
 
@@ -27,7 +27,7 @@ validated beyond offline request specs.
 | --- | --- | --- |
 | Spot | `Spot` | Public REST G1 for symbol rules and order book. |
 | P2P | n/a | Unsupported; not a central exchange order-book/trading surface. |
-| Perpetual/futures | n/a | Unsupported; no stable official perpetual product scope verified for this adapter. |
+| Perpetual/futures | n/a | `交易所不支持合约`; P6 official verification found only spot/P2P API surfaces. |
 | Testnet | n/a | Unsupported; no stable public sandbox host verified. |
 
 Default REST base URL: `https://api.p2pb2b.com`
@@ -44,7 +44,7 @@ Default REST base URL: `https://api.p2pb2b.com`
 | Open orders | `POST /api/v2/orders` | Request-spec-only REST reconciliation candidate. |
 | Recent fills | `POST /api/v2/account/market_deals` | Request-spec-only REST reconciliation candidate. |
 | Batch place/cancel | Not verified | Unsupported. |
-| WebSocket | `wss://apiws.p2pb2b.com/` | Public/private streams unsupported; REST reconciliation fallback documented for future private promotion. |
+| WebSocket | `wss://apiws.p2pb2b.com/` | Public/private streams unsupported in runtime; official public depth support is a `项目未实现公共 WS 行情` task. |
 
 ## Authentication
 

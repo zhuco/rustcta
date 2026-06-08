@@ -38,8 +38,17 @@ If Bithumb account-level policy or region controls are stricter for a key, runti
 - Private write REST: place order, quote market buy, cancel order request construction
 - Private WS: order/fill/balance subscription payloads and REST reconciliation fallback
 
+## Official Public WS Order Book Details
+
+- Public URL: `wss://ws-api.bithumb.com/websocket/v1`.
+- Order book channel: JSON request type `orderbook`, with optional snapshot-only and realtime-only flags.
+- Push interval: official docs do not state a fixed millisecond interval.
+- Depth: response contains `orderbook_units`; `level` is a price grouping unit, not a fixed 10/20/50-depth selector.
+- Sequence/checksum: official orderbook page exposes timestamp fields but no sequence/checksum; runtime must use REST snapshot/stale-book fallback.
+
 ## Unsupported Boundary
 
+- Futures, perpetuals, options, and standard contract trading: `交易所不支持合约` under the current official Open API scope.
 - Positions, leverage, margin mode, position mode: unsupported because Bithumb Spot has no standard derivative position model.
 - Amend order: unsupported until a native endpoint is verified against the shared Spot amend contract.
 - Batch place/cancel and cancel-all: unsupported; no native atomic batch endpoint is claimed.

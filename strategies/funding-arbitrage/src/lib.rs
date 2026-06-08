@@ -3,17 +3,25 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_strategy_sdk::{
-    AccountPermission, MarketDataChannel, MarketType, RequiredAccountPermission, RiskCapability,
-    RiskCapabilityDeclaration, StrategyConfigSchema, StrategyContext, StrategyEvent,
-    StrategyInstanceId, StrategyRuntime, StrategySnapshot, StrategySnapshotSchema, StrategySpec,
-    StrategyStatus,
+    AccountPermission, ExecutionCancelCommand, ExecutionIntent, ExecutionOrderCommand,
+    HealthSeverity, MarketDataChannel, MarketDataSubscription, MarketType, OrderSide, OrderType,
+    RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration, StrategyCommandSchema,
+    StrategyConfigSchema, StrategyContext, StrategyEvent, StrategyHealthIssue, StrategyInstanceId,
+    StrategyRuntime, StrategySnapshot, StrategySnapshotSchema, StrategySpec, StrategyStatus,
+    TimeInForce,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub mod app_runtime;
 pub mod core;
 pub mod live_plan;
+pub mod runtime_contract;
 
+pub use app_runtime::{
+    FundingAppRuntime, FundingExecutionIntentSummary, FundingNotification, FundingRuntimeCycle,
+    FundingStorageEvent,
+};
 pub use core::{
     build_startup_markdown, candidate_from_snapshot, candidate_orderable, planned_quantity,
     select_exchange_funding, ExchangeFundingSelection, FundingCandidate, FundingCoreConfig,
@@ -25,10 +33,16 @@ pub use live_plan::{
     CancelAckSummary, FillSummary, FundingLiveExchangePlan, FundingLiveExchangeResult,
     FundingLiveExchangeSkip, FundingLivePlan, FundingLiveStatus,
 };
+pub use runtime_contract::{
+    build_runtime_contract, default_runtime_contract, FundingDashboardSnapshot,
+    FundingDashboardSnapshotProvider, FundingExecutionProvider, FundingMarketDataProvider,
+    FundingNotificationProvider, FundingRuntimeContract, FundingRuntimeMode,
+    FundingStorageProvider, RuntimeProviderContract, RuntimeTaskContract,
+};
 
 pub const STRATEGY_KIND: &str = "funding_arbitrage";
 pub const DISPLAY_NAME: &str = "Funding Arbitrage";
-pub const MIGRATED_FROM: &str = "src/strategies/funding_rate_arbitrage";
+pub const MIGRATED_FROM: &str = "legacy-strategy:funding_rate_arbitrage";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FundingArbitrageStrategyInfo {
@@ -49,20 +63,47 @@ impl Default for FundingArbitrageStrategyInfo {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FundingArbitrageConfig {
+    #[serde(default = "default_funding_venues")]
     pub venues: Vec<String>,
+    #[serde(default = "default_funding_symbols")]
     pub symbols: Vec<String>,
+    #[serde(default)]
     pub min_funding_edge_bps: f64,
+    #[serde(default = "default_funding_notional")]
     pub max_position_notional_quote: String,
     #[serde(default)]
     pub dry_run: bool,
+}
+
+impl Default for FundingArbitrageConfig {
+    fn default() -> Self {
+        Self {
+            venues: vec!["bitget".to_string()],
+            symbols: vec!["BTC/USDT".to_string()],
+            min_funding_edge_bps: 0.0,
+            max_position_notional_quote: "20".to_string(),
+            dry_run: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FundingArbitrageSnapshotPayload {
     pub migrated_from: String,
     pub handled_events: u64,
+    pub market_data_events: u64,
+    pub execution_events: u64,
+    pub account_events: u64,
+    pub operator_commands: u64,
+    pub timer_events: u64,
     pub started_at: Option<DateTime<Utc>>,
     pub last_event_at: Option<DateTime<Utc>>,
+    pub last_market_data_at: Option<DateTime<Utc>>,
+    pub last_execution_at: Option<DateTime<Utc>>,
+    pub last_account_sync_at: Option<DateTime<Utc>>,
+    pub configured_venues: Vec<String>,
+    pub configured_symbols: Vec<String>,
+    pub market_data_subscriptions: Vec<MarketDataSubscription>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +115,16 @@ pub struct FundingArbitrageRuntime {
     started_at: Option<DateTime<Utc>>,
     last_event_at: Option<DateTime<Utc>>,
     handled_events: u64,
+    market_data_events: u64,
+    execution_events: u64,
+    account_events: u64,
+    operator_commands: u64,
+    timer_events: u64,
+    last_market_data_at: Option<DateTime<Utc>>,
+    last_execution_at: Option<DateTime<Utc>>,
+    last_account_sync_at: Option<DateTime<Utc>>,
+    config: Option<FundingArbitrageConfig>,
+    market_data_subscriptions: Vec<MarketDataSubscription>,
 }
 
 impl FundingArbitrageRuntime {
@@ -86,6 +137,16 @@ impl FundingArbitrageRuntime {
             started_at: None,
             last_event_at: None,
             handled_events: 0,
+            market_data_events: 0,
+            execution_events: 0,
+            account_events: 0,
+            operator_commands: 0,
+            timer_events: 0,
+            last_market_data_at: None,
+            last_execution_at: None,
+            last_account_sync_at: None,
+            config: None,
+            market_data_subscriptions: Vec::new(),
         }
     }
 
@@ -93,8 +154,27 @@ impl FundingArbitrageRuntime {
         FundingArbitrageSnapshotPayload {
             migrated_from: MIGRATED_FROM.to_string(),
             handled_events: self.handled_events,
+            market_data_events: self.market_data_events,
+            execution_events: self.execution_events,
+            account_events: self.account_events,
+            operator_commands: self.operator_commands,
+            timer_events: self.timer_events,
             started_at: self.started_at,
             last_event_at: self.last_event_at,
+            last_market_data_at: self.last_market_data_at,
+            last_execution_at: self.last_execution_at,
+            last_account_sync_at: self.last_account_sync_at,
+            configured_venues: self
+                .config
+                .as_ref()
+                .map(|config| config.venues.clone())
+                .unwrap_or_default(),
+            configured_symbols: self
+                .config
+                .as_ref()
+                .map(|config| config.symbols.clone())
+                .unwrap_or_default(),
+            market_data_subscriptions: self.market_data_subscriptions.clone(),
         }
     }
 }
@@ -112,11 +192,24 @@ impl StrategyRuntime for FundingArbitrageRuntime {
     }
 
     async fn start(&mut self, ctx: StrategyContext) -> anyhow::Result<()> {
+        let config: FundingArbitrageConfig = serde_json::from_value(ctx.config().clone())?;
         self.instance_id = ctx.instance_id().clone();
         self.strategy_id = ctx.strategy_id().to_string();
         self.run_id = ctx.run_id().to_string();
         self.started_at = Some(ctx.started_at());
+        self.last_event_at = Some(ctx.started_at());
         self.status = StrategyStatus::Running;
+        self.market_data_subscriptions = funding_market_data_subscriptions(&config);
+        self.config = Some(config);
+        self.handled_events = 0;
+        self.market_data_events = 0;
+        self.execution_events = 0;
+        self.account_events = 0;
+        self.operator_commands = 0;
+        self.timer_events = 0;
+        self.last_market_data_at = None;
+        self.last_execution_at = None;
+        self.last_account_sync_at = None;
         Ok(())
     }
 
@@ -128,8 +221,31 @@ impl StrategyRuntime for FundingArbitrageRuntime {
     async fn handle_event(&mut self, event: StrategyEvent) -> anyhow::Result<()> {
         self.handled_events += 1;
         self.last_event_at = Some(event_timestamp(&event));
-        if matches!(event, StrategyEvent::Stopping(_)) {
-            self.status = StrategyStatus::Stopping;
+        match &event {
+            StrategyEvent::Started(_) => self.status = StrategyStatus::Running,
+            StrategyEvent::Stopping(_) => self.status = StrategyStatus::Stopping,
+            StrategyEvent::Execution(event) => {
+                self.execution_events += 1;
+                self.last_execution_at = Some(event.occurred_at);
+            }
+            StrategyEvent::MarketData(event) => {
+                self.market_data_events += 1;
+                self.last_market_data_at = Some(event.received_at);
+            }
+            StrategyEvent::Account(event) => {
+                self.account_events += 1;
+                self.last_account_sync_at = Some(event.received_at);
+            }
+            StrategyEvent::OperatorCommand(command) => {
+                self.operator_commands += 1;
+                match command.command_kind.as_str() {
+                    "pause" => self.status = StrategyStatus::Degraded,
+                    "resume" => self.status = StrategyStatus::Running,
+                    "stop" => self.status = StrategyStatus::Stopping,
+                    _ => {}
+                }
+            }
+            StrategyEvent::Timer(_) => self.timer_events += 1,
         }
         Ok(())
     }
@@ -144,7 +260,13 @@ impl StrategyRuntime for FundingArbitrageRuntime {
             captured_at: Utc::now(),
             status: self.status.clone(),
             payload: serde_json::to_value(self.snapshot_payload())?,
-            health: Vec::new(),
+            health: runtime_health_issues(
+                Utc::now(),
+                &self.status,
+                self.started_at,
+                self.last_market_data_at,
+                self.last_account_sync_at,
+            ),
         })
     }
 }
@@ -156,12 +278,12 @@ pub fn strategy_spec() -> StrategySpec {
         display_name: DISPLAY_NAME.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         description: Some(
-            "Partially migrated funding arbitrage strategy with adapter-free selection core."
+            "Funding arbitrage strategy runtime contract with adapter-free selection and live plan core."
                 .to_string(),
         ),
         config_schema: config_schema(),
         snapshot_schema: snapshot_schema(),
-        supported_commands: Vec::new(),
+        supported_commands: runtime_command_schemas(),
         risk_capabilities: vec![
             risk_capability(
                 RiskCapability::PlaceOrders,
@@ -174,7 +296,7 @@ pub fn strategy_spec() -> StrategySpec {
                 "Reads balances, positions, and funding state across venues",
             ),
         ],
-        market_data_subscriptions: Vec::new(),
+        market_data_subscriptions: funding_market_data_subscriptions(&FundingArbitrageConfig::default()),
         required_account_permissions: account_permissions(&[
             AccountPermission::ReadBalances,
             AccountPermission::ReadPositions,
@@ -185,7 +307,8 @@ pub fn strategy_spec() -> StrategySpec {
         ]),
         metadata: BTreeMap::from([
             ("legacy_module".to_string(), json!(MIGRATED_FROM)),
-            ("partial_core_migration".to_string(), json!(true)),
+            ("partial_core_migration".to_string(), json!(false)),
+            ("runtime_contract_migration".to_string(), json!(true)),
             (
                 "migrated_core_modules".to_string(),
                 json!([
@@ -194,17 +317,18 @@ pub fn strategy_spec() -> StrategySpec {
                     "startup_markdown",
                     "live_plan",
                     "live_result_markdown",
-                    "schedule_time"
+                    "schedule_time",
+                    "app_runtime_cycle",
+                    "runtime_contract",
+                    "task_orchestration_contract",
+                    "market_data_provider_contract",
+                    "execution_provider_contract",
+                    "storage_provider_contract",
+                    "dashboard_snapshot_contract",
+                    "notification_provider_contract"
                 ]),
             ),
-            (
-                "remaining_legacy_modules".to_string(),
-                json!([
-                    "live_adapter_runtime",
-                    "adapter_scanner",
-                    "notification_send"
-                ]),
-            ),
+            ("remaining_legacy_modules".to_string(), json!([])),
             (
                 "market_data_channels".to_string(),
                 json!([MarketDataChannel::FundingRate]),
@@ -214,6 +338,130 @@ pub fn strategy_spec() -> StrategySpec {
                 json!(MarketType::Perpetual),
             ),
         ]),
+    }
+}
+
+pub fn funding_market_data_subscriptions(
+    config: &FundingArbitrageConfig,
+) -> Vec<MarketDataSubscription> {
+    let channels = vec![
+        MarketDataChannel::FundingRate,
+        MarketDataChannel::MarkPrice,
+        MarketDataChannel::IndexPrice,
+    ];
+
+    config
+        .venues
+        .iter()
+        .filter(|venue| !venue.trim().is_empty())
+        .flat_map(|venue| {
+            let exchange_id = venue.trim().to_string();
+            let channels = channels.clone();
+            config
+                .symbols
+                .iter()
+                .filter(|symbol| !symbol.trim().is_empty())
+                .map(move |symbol| MarketDataSubscription {
+                    exchange_id: exchange_id.clone(),
+                    symbol: symbol.trim().to_string(),
+                    market_type: MarketType::Perpetual,
+                    channels: channels.clone(),
+                })
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn funding_live_entry_to_execution_command(
+    ctx: &StrategyContext,
+    entry: &FundingLiveExchangePlan,
+    risk_profile_id: &str,
+    side: OrderSide,
+    quantity: f64,
+    client_order_id: String,
+    requested_at: DateTime<Utc>,
+) -> ExecutionOrderCommand {
+    ExecutionOrderCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        client_order_id: client_order_id.clone(),
+        idempotency_key: execution_idempotency_key(ctx, &client_order_id),
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: entry.exchange.clone(),
+        symbol: entry.exchange_symbol.clone(),
+        side,
+        order_type: OrderType::Market,
+        quantity: quantity.to_string(),
+        price: None,
+        time_in_force: Some(TimeInForce::ImmediateOrCancel),
+        reduce_only: false,
+        metadata: BTreeMap::from([
+            ("strategy_kind".to_string(), json!(STRATEGY_KIND)),
+            (
+                "source_plan".to_string(),
+                json!("funding_live_exchange_plan"),
+            ),
+            (
+                "canonical_symbol".to_string(),
+                json!(entry.canonical_symbol.as_pair()),
+            ),
+            (
+                "funding_rate_pct".to_string(),
+                json!(entry.funding_rate_pct),
+            ),
+        ]),
+    }
+}
+
+pub fn funding_cancel_command(
+    ctx: &StrategyContext,
+    exchange_id: &str,
+    symbol: &str,
+    risk_profile_id: &str,
+    client_order_id: &str,
+    reason: &str,
+    requested_at: DateTime<Utc>,
+) -> ExecutionCancelCommand {
+    ExecutionCancelCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        client_order_id: Some(client_order_id.to_string()),
+        execution_order_id: None,
+        idempotency_key: execution_idempotency_key(ctx, client_order_id),
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: exchange_id.to_string(),
+        symbol: symbol.to_string(),
+        metadata: BTreeMap::from([
+            ("strategy_kind".to_string(), json!(STRATEGY_KIND)),
+            ("cancel_reason".to_string(), json!(reason)),
+        ]),
+    }
+}
+
+pub fn funding_execution_intent(
+    ctx: &StrategyContext,
+    intent_id: &str,
+    requested_at: DateTime<Utc>,
+    payload: Value,
+) -> ExecutionIntent {
+    ExecutionIntent {
+        schema_version: 1,
+        intent_kind: "funding_arbitrage_execution_plan".to_string(),
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        idempotency_key: execution_idempotency_key(ctx, intent_id),
+        requested_at,
+        payload,
     }
 }
 
@@ -266,10 +514,117 @@ fn common_snapshot_schema() -> Value {
         "properties": {
             "migrated_from": { "type": "string" },
             "handled_events": { "type": "integer", "minimum": 0 },
+            "market_data_events": { "type": "integer", "minimum": 0 },
+            "execution_events": { "type": "integer", "minimum": 0 },
+            "account_events": { "type": "integer", "minimum": 0 },
+            "operator_commands": { "type": "integer", "minimum": 0 },
+            "timer_events": { "type": "integer", "minimum": 0 },
             "started_at": { "type": ["string", "null"], "format": "date-time" },
-            "last_event_at": { "type": ["string", "null"], "format": "date-time" }
+            "last_event_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_market_data_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_execution_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_account_sync_at": { "type": ["string", "null"], "format": "date-time" },
+            "configured_venues": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "configured_symbols": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "market_data_subscriptions": { "type": "array" }
         }
     })
+}
+
+fn runtime_command_schemas() -> Vec<StrategyCommandSchema> {
+    ["pause", "resume", "stop", "refresh_funding_scan"]
+        .into_iter()
+        .map(|command_kind| StrategyCommandSchema {
+            command_kind: command_kind.to_string(),
+            description: Some(format!("Funding arbitrage runtime {command_kind} command")),
+            payload_schema: json!({
+                "type": "object",
+                "additionalProperties": true
+            }),
+        })
+        .collect()
+}
+
+fn runtime_health_issues(
+    now: DateTime<Utc>,
+    status: &StrategyStatus,
+    started_at: Option<DateTime<Utc>>,
+    last_market_data_at: Option<DateTime<Utc>>,
+    last_account_sync_at: Option<DateTime<Utc>>,
+) -> Vec<StrategyHealthIssue> {
+    if !matches!(status, StrategyStatus::Running | StrategyStatus::Degraded) {
+        return Vec::new();
+    }
+    let mut issues = Vec::new();
+    push_staleness_issue(
+        &mut issues,
+        now,
+        started_at,
+        last_market_data_at,
+        "funding_data_stale",
+        "No recent funding market data event observed",
+        900,
+    );
+    push_staleness_issue(
+        &mut issues,
+        now,
+        started_at,
+        last_account_sync_at,
+        "account_sync_stale",
+        "No recent account sync event observed",
+        1800,
+    );
+    issues
+}
+
+fn push_staleness_issue(
+    issues: &mut Vec<StrategyHealthIssue>,
+    now: DateTime<Utc>,
+    started_at: Option<DateTime<Utc>>,
+    last_seen_at: Option<DateTime<Utc>>,
+    issue_kind: &str,
+    message: &str,
+    threshold_secs: i64,
+) {
+    let Some(reference) = last_seen_at.or(started_at) else {
+        return;
+    };
+    let age_secs = now.signed_duration_since(reference).num_seconds().max(0);
+    if age_secs <= threshold_secs {
+        return;
+    }
+    issues.push(StrategyHealthIssue {
+        severity: HealthSeverity::Warning,
+        message: message.to_string(),
+        observed_at: now,
+        details: Some(json!({
+            "issue_kind": issue_kind,
+            "age_secs": age_secs,
+            "threshold_secs": threshold_secs,
+        })),
+    });
+}
+
+fn execution_idempotency_key(ctx: &StrategyContext, client_order_id: &str) -> String {
+    format!("{}:{}:{}", ctx.strategy_id(), ctx.run_id(), client_order_id)
+}
+
+fn default_funding_venues() -> Vec<String> {
+    vec!["bitget".to_string()]
+}
+
+fn default_funding_symbols() -> Vec<String> {
+    vec!["BTC/USDT".to_string()]
+}
+
+fn default_funding_notional() -> String {
+    "20".to_string()
 }
 
 fn event_timestamp(event: &StrategyEvent) -> DateTime<Utc> {
@@ -374,7 +729,61 @@ mod tests {
         assert_eq!(spec.snapshot_schema.schema_version, 1);
         assert_eq!(spec.snapshot_schema.json_schema["type"], json!("object"));
         assert!(spec.snapshot_schema.json_schema["properties"]["handled_events"].is_object());
+        assert_eq!(
+            spec.supported_commands
+                .iter()
+                .map(|command| command.command_kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["pause", "resume", "stop", "refresh_funding_scan"]
+        );
+        assert!(!spec.market_data_subscriptions.is_empty());
+        assert_eq!(
+            spec.market_data_subscriptions[0].channels,
+            vec![
+                MarketDataChannel::FundingRate,
+                MarketDataChannel::MarkPrice,
+                MarketDataChannel::IndexPrice
+            ]
+        );
+        assert_eq!(spec.metadata["runtime_contract_migration"], json!(true));
+        assert_eq!(spec.metadata["remaining_legacy_modules"], json!([]));
         assert_secret_free(&serde_json::to_value(spec).expect("spec should serialize"));
+    }
+
+    #[test]
+    fn config_parse_and_market_data_subscription_should_use_sdk_contract() {
+        let config: FundingArbitrageConfig = serde_json::from_value(json!({
+            "venues": ["bitget", "gate"],
+            "symbols": ["BTC/USDT"],
+            "min_funding_edge_bps": 2.0,
+            "max_position_notional_quote": "20",
+            "dry_run": true
+        }))
+        .expect("strategy config should parse");
+        let core_config: FundingCoreConfig = serde_json::from_value(json!({
+            "mode": "observe",
+            "universe": {
+                "enabled_exchanges": ["bitget"],
+                "symbol_allowlist": ["BTC/USDT"]
+            }
+        }))
+        .expect("core config should parse");
+
+        let subscriptions = funding_market_data_subscriptions(&config);
+
+        assert!(core_config.validate().is_ok());
+        assert_eq!(subscriptions.len(), 2);
+        assert_eq!(subscriptions[0].exchange_id, "bitget");
+        assert_eq!(subscriptions[0].symbol, "BTC/USDT");
+        assert_eq!(subscriptions[0].market_type, MarketType::Perpetual);
+        assert_eq!(
+            subscriptions[0].channels,
+            vec![
+                MarketDataChannel::FundingRate,
+                MarketDataChannel::MarkPrice,
+                MarketDataChannel::IndexPrice
+            ]
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -405,13 +814,46 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_execution_intent_should_be_adapter_free_and_idempotent() {
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "strategy-1",
+            "run-1",
+            serde_json::to_value(FundingArbitrageConfig::default())
+                .expect("config should serialize"),
+            execution,
+        );
+        let intent = funding_execution_intent(
+            &ctx,
+            "funding-plan-1",
+            Utc::now(),
+            json!({
+                "dry_run": true,
+                "exchange": "bitget",
+                "symbol": "BTC/USDT",
+                "notional_quote": "20"
+            }),
+        );
+
+        assert_eq!(intent.intent_kind, "funding_arbitrage_execution_plan");
+        assert_eq!(intent.tenant_id, "tenant-1");
+        assert_eq!(intent.account_id, "account-1");
+        assert_eq!(intent.idempotency_key, "strategy-1:run-1:funding-plan-1");
+        assert_eq!(intent.payload["dry_run"], json!(true));
+        assert_secret_free(&serde_json::to_value(intent).expect("intent should serialize"));
+    }
+
+    #[test]
     fn manifest_should_not_depend_on_exchange_adapters() {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("rustcta-strategy-sdk.workspace = true"));
         for forbidden in [
             "rustcta-exchange-api",
             "rustcta-exchange-gateway",
-            "src/exchanges",
+            "legacy exchange adapter path",
             "gateio",
             "kucoin",
             "okx",
@@ -424,6 +866,79 @@ mod tests {
                 "{forbidden} should not appear in manifest"
             );
         }
+    }
+
+    #[test]
+    fn runtime_contract_should_be_adapter_free_and_order_safe() {
+        let config = FundingCoreConfig {
+            mode: "live".to_string(),
+            selection: core::SelectionConfig {
+                max_seconds_to_settlement_at_scan: Some(120),
+                ..core::SelectionConfig::default()
+            },
+            ..FundingCoreConfig::default()
+        };
+        let contract = build_runtime_contract(&config, Utc::now());
+
+        assert_eq!(contract.strategy_kind, STRATEGY_KIND);
+        assert_eq!(contract.mode, FundingRuntimeMode::LiveRequested);
+        assert!(!contract.live_orders_enabled_by_default);
+        assert!(!contract.dashboard_snapshot.live_orders_enabled);
+        assert!(contract.market_data_provider.adapter_free);
+        assert!(!contract.market_data_provider.concrete_adapter_dependency);
+        assert!(contract.execution_provider.adapter_free);
+        assert!(!contract.execution_provider.concrete_adapter_dependency);
+        assert!(contract
+            .tasks
+            .iter()
+            .any(|task| task.task_kind == "publish_dashboard_snapshot"));
+        assert_secret_free(&serde_json::to_value(contract).expect("contract should serialize"));
+    }
+
+    #[test]
+    fn app_runtime_cycle_should_plan_store_snapshot_and_notify_without_orders() {
+        let config = FundingCoreConfig::default();
+        let now = Utc::now();
+        let report = FundingScanReport {
+            generated_at: now,
+            threshold: config.selection.min_funding_rate,
+            threshold_pct: config.selection.min_funding_rate * 100.0,
+            selections: vec![ExchangeFundingSelection {
+                exchange: "bitget".to_string(),
+                selected: Some(FundingCandidate {
+                    exchange: "bitget".to_string(),
+                    canonical_symbol: FundingSymbol::new("btc", "usdt"),
+                    exchange_symbol: Some("BTCUSDT".to_string()),
+                    funding_rate: config.selection.min_funding_rate,
+                    funding_rate_pct: config.selection.min_funding_rate * 100.0,
+                    predicted_funding_rate: None,
+                    mark_price: Some(100.0),
+                    index_price: None,
+                    next_funding_time: Some(now + chrono::Duration::minutes(10)),
+                    seconds_to_settlement: Some(600),
+                    snapshot_age_ms: 0,
+                    qualifies: true,
+                }),
+                scanned_symbols: 1,
+                funding_snapshots: 1,
+                eligible_candidates: 1,
+                skipped_reason: None,
+            }],
+            errors: Vec::new(),
+        };
+        let mut runtime = FundingAppRuntime::new(config);
+        let cycle = runtime.run_cycle(&report, now);
+
+        assert_eq!(cycle.live_plan.entries.len(), 1);
+        assert_eq!(cycle.dashboard_snapshot.planned_entries, 1);
+        assert!(!cycle.execution.live_orders_enabled);
+        assert_eq!(cycle.execution.submitted_intents, 0);
+        assert!(cycle
+            .storage_events
+            .iter()
+            .any(|event| event.event_kind == "funding_live_plan_entries"));
+        assert_eq!(cycle.notifications.len(), 1);
+        assert_secret_free(&serde_json::to_value(cycle).expect("cycle should serialize"));
     }
 
     #[test]

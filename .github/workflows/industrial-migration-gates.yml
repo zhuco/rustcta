@@ -33,10 +33,10 @@ jobs:
       - name: Clippy all targets and features
         run: cargo clippy --all-targets --all-features
 
-      - name: Classified legacy bin inventory
+      - name: Verify retired root source
         run: |
-          cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
-          cargo run -q -p rustcta-tools-ops -- legacy-bin-plan
+          cargo run -q -p rustcta-tools-ops -- verify-retired-src
+          cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
 
       - name: Industrial boundary checks
         run: scripts/check_industrial_boundaries.sh

@@ -11,6 +11,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod money;
+
 pub const CURRENT_SCHEMA_VERSION_MAJOR: u16 = 1;
 pub const CURRENT_SCHEMA_VERSION_MINOR: u16 = 0;
 
@@ -737,6 +739,109 @@ impl OrderBookSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarketTrade {
+    pub schema_version: SchemaVersion,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub trade_id: Option<String>,
+    pub side: Option<OrderSide>,
+    pub price: f64,
+    pub quantity: f64,
+    pub quote_quantity: Option<f64>,
+    pub exchange_timestamp: Option<DateTime<Utc>>,
+    pub received_at: DateTime<Utc>,
+}
+
+impl MarketTrade {
+    pub fn new(
+        exchange_id: ExchangeId,
+        market_type: MarketType,
+        canonical_symbol: CanonicalSymbol,
+        price: f64,
+        quantity: f64,
+        received_at: DateTime<Utc>,
+    ) -> Result<Self, ValidationError> {
+        validate_positive("price", price)?;
+        validate_positive("quantity", quantity)?;
+        Ok(Self {
+            schema_version: SchemaVersion::current(),
+            exchange_id,
+            market_type,
+            canonical_symbol,
+            exchange_symbol: None,
+            trade_id: None,
+            side: None,
+            price,
+            quantity,
+            quote_quantity: None,
+            exchange_timestamp: None,
+            received_at,
+        })
+    }
+
+    pub fn notional(&self) -> f64 {
+        self.quote_quantity.unwrap_or(self.price * self.quantity)
+    }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_positive("price", self.price)?;
+        validate_positive("quantity", self.quantity)?;
+        validate_optional_non_negative("quote_quantity", self.quote_quantity)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingRateSnapshot {
+    pub schema_version: SchemaVersion,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub funding_rate: f64,
+    pub predicted_funding_rate: Option<f64>,
+    pub mark_price: Option<f64>,
+    pub index_price: Option<f64>,
+    pub next_funding_at: Option<DateTime<Utc>>,
+    pub observed_at: DateTime<Utc>,
+}
+
+impl FundingRateSnapshot {
+    pub fn new(
+        exchange_id: ExchangeId,
+        market_type: MarketType,
+        canonical_symbol: CanonicalSymbol,
+        funding_rate: f64,
+        observed_at: DateTime<Utc>,
+    ) -> Result<Self, ValidationError> {
+        validate_finite("funding_rate", funding_rate)?;
+        Ok(Self {
+            schema_version: SchemaVersion::current(),
+            exchange_id,
+            market_type,
+            canonical_symbol,
+            exchange_symbol: None,
+            funding_rate,
+            predicted_funding_rate: None,
+            mark_price: None,
+            index_price: None,
+            next_funding_at: None,
+            observed_at,
+        })
+    }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_finite("funding_rate", self.funding_rate)?;
+        validate_optional_finite("predicted_funding_rate", self.predicted_funding_rate)?;
+        validate_optional_positive("mark_price", self.mark_price)?;
+        validate_optional_positive("index_price", self.index_price)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fill {
     pub schema_version: SchemaVersion,
     pub tenant_id: TenantId,
@@ -989,6 +1094,49 @@ impl SymbolCapability {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SymbolPrecision {
+    pub schema_version: SchemaVersion,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: CanonicalSymbol,
+    pub exchange_symbol: ExchangeSymbol,
+    pub price_precision: Option<u32>,
+    pub quantity_precision: Option<u32>,
+    pub tick_size: Option<f64>,
+    pub step_size: Option<f64>,
+    pub min_quantity: Option<f64>,
+    pub min_notional: Option<f64>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl SymbolPrecision {
+    pub fn from_capability(capability: &SymbolCapability, updated_at: DateTime<Utc>) -> Self {
+        Self {
+            schema_version: SchemaVersion::current(),
+            exchange_id: capability.exchange_id.clone(),
+            market_type: capability.market_type,
+            canonical_symbol: capability.canonical_symbol.clone(),
+            exchange_symbol: capability.exchange_symbol.clone(),
+            price_precision: capability.price_precision,
+            quantity_precision: capability.quantity_precision,
+            tick_size: capability.tick_size,
+            step_size: capability.step_size,
+            min_quantity: capability.min_quantity,
+            min_notional: capability.min_notional,
+            updated_at,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        validate_optional_positive("tick_size", self.tick_size)?;
+        validate_optional_positive("step_size", self.step_size)?;
+        validate_optional_positive("min_quantity", self.min_quantity)?;
+        validate_optional_positive("min_notional", self.min_notional)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataCapability {
     pub supports_rest_order_book: bool,
@@ -1084,6 +1232,151 @@ impl ExchangeCapability {
 
     pub fn supports_market_type(&self, market_type: MarketType) -> bool {
         self.market_types.contains(&market_type)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteHealthStatus {
+    Unknown,
+    Healthy,
+    Degraded,
+    Stale,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteHealth {
+    pub schema_version: SchemaVersion,
+    pub route_id: String,
+    pub exchange_id: Option<ExchangeId>,
+    pub market_type: Option<MarketType>,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub component: String,
+    pub status: RouteHealthStatus,
+    pub last_success_at: Option<DateTime<Utc>>,
+    pub last_error_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub latency_ms: Option<u64>,
+    pub observed_at: DateTime<Utc>,
+}
+
+impl RouteHealth {
+    pub fn new(
+        route_id: impl Into<String>,
+        component: impl Into<String>,
+        status: RouteHealthStatus,
+        observed_at: DateTime<Utc>,
+    ) -> Result<Self, ValidationError> {
+        let route_id = route_id.into().trim().to_string();
+        if route_id.is_empty() {
+            return Err(ValidationError::Empty { field: "route_id" });
+        }
+        let component = component.into().trim().to_string();
+        if component.is_empty() {
+            return Err(ValidationError::Empty { field: "component" });
+        }
+        Ok(Self {
+            schema_version: SchemaVersion::current(),
+            route_id,
+            exchange_id: None,
+            market_type: None,
+            canonical_symbol: None,
+            component,
+            status,
+            last_success_at: None,
+            last_error_at: None,
+            last_error: None,
+            latency_ms: None,
+            observed_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePublisherStatus {
+    Unknown,
+    Ok,
+    Degraded,
+    Stale,
+    Error,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimePublisherSnapshot {
+    pub schema_version: SchemaVersion,
+    pub publisher_id: String,
+    pub status: RuntimePublisherStatus,
+    pub running: bool,
+    pub source: String,
+    pub last_snapshot_id: Option<String>,
+    pub last_snapshot_at: Option<DateTime<Utc>>,
+    pub snapshots_generated: u64,
+    pub snapshots_persisted: u64,
+    pub route_health: Vec<RouteHealth>,
+    pub errors: Vec<String>,
+    pub observed_at: DateTime<Utc>,
+}
+
+impl RuntimePublisherSnapshot {
+    pub fn new(
+        publisher_id: impl Into<String>,
+        source: impl Into<String>,
+        observed_at: DateTime<Utc>,
+    ) -> Result<Self, ValidationError> {
+        let publisher_id = publisher_id.into().trim().to_string();
+        if publisher_id.is_empty() {
+            return Err(ValidationError::Empty {
+                field: "publisher_id",
+            });
+        }
+        let source = source.into().trim().to_string();
+        if source.is_empty() {
+            return Err(ValidationError::Empty { field: "source" });
+        }
+        Ok(Self {
+            schema_version: SchemaVersion::current(),
+            publisher_id,
+            status: RuntimePublisherStatus::Unknown,
+            running: false,
+            source,
+            last_snapshot_id: None,
+            last_snapshot_at: None,
+            snapshots_generated: 0,
+            snapshots_persisted: 0,
+            route_health: Vec::new(),
+            errors: Vec::new(),
+            observed_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarketDataReadModelSnapshot {
+    pub schema_version: SchemaVersion,
+    pub generated_at: DateTime<Utc>,
+    pub order_books: Vec<OrderBookSnapshot>,
+    pub recent_trades: Vec<MarketTrade>,
+    pub funding_rates: Vec<FundingRateSnapshot>,
+    pub symbols: Vec<SymbolCapability>,
+    pub route_health: Vec<RouteHealth>,
+    pub publisher: Option<RuntimePublisherSnapshot>,
+}
+
+impl MarketDataReadModelSnapshot {
+    pub fn empty(generated_at: DateTime<Utc>) -> Self {
+        Self {
+            schema_version: SchemaVersion::current(),
+            generated_at,
+            order_books: Vec::new(),
+            recent_trades: Vec::new(),
+            funding_rates: Vec::new(),
+            symbols: Vec::new(),
+            route_health: Vec::new(),
+            publisher: None,
+        }
     }
 }
 
@@ -1345,6 +1638,94 @@ mod tests {
         .expect("valid snapshot");
 
         assert_eq!(snapshot.mid_price(), Some(100.0));
+    }
+
+    #[test]
+    fn market_trade_and_funding_snapshots_should_validate_market_data_contracts() {
+        let symbol = CanonicalSymbol::new("BTC", "USDT").expect("valid symbol");
+        let trade = MarketTrade::new(
+            exchange_id(),
+            MarketType::Spot,
+            symbol.clone(),
+            50_000.0,
+            0.2,
+            Utc::now(),
+        )
+        .expect("valid trade");
+
+        assert_eq!(trade.notional(), 10_000.0);
+        trade.validate().expect("valid trade");
+        assert!(MarketTrade::new(
+            exchange_id(),
+            MarketType::Spot,
+            symbol.clone(),
+            0.0,
+            1.0,
+            Utc::now()
+        )
+        .is_err());
+
+        let funding = FundingRateSnapshot::new(
+            exchange_id(),
+            MarketType::Perpetual,
+            symbol,
+            0.0001,
+            Utc::now(),
+        )
+        .expect("valid funding");
+
+        funding.validate().expect("valid funding");
+    }
+
+    #[test]
+    fn symbol_precision_should_be_derived_from_symbol_capability() {
+        let canonical_symbol = CanonicalSymbol::new("ETH", "USDT").expect("valid symbol");
+        let exchange_symbol = ExchangeSymbol::new(exchange_id(), MarketType::Spot, "ETHUSDT")
+            .expect("valid exchange symbol");
+        let mut capability = SymbolCapability::new(
+            exchange_id(),
+            MarketType::Spot,
+            canonical_symbol,
+            exchange_symbol,
+        );
+        capability.price_precision = Some(2);
+        capability.quantity_precision = Some(6);
+        capability.tick_size = Some(0.01);
+        capability.step_size = Some(0.000001);
+        capability.min_quantity = Some(0.00001);
+        capability.min_notional = Some(5.0);
+
+        let precision = SymbolPrecision::from_capability(&capability, Utc::now());
+
+        assert_eq!(precision.price_precision, Some(2));
+        assert_eq!(precision.min_notional, Some(5.0));
+        precision.validate().expect("valid precision");
+    }
+
+    #[test]
+    fn route_health_and_publisher_snapshot_should_form_secret_free_contract() {
+        let route = RouteHealth::new(
+            "public:gateio:spot:BTCUSDT:book",
+            "gateway_public_stream",
+            RouteHealthStatus::Healthy,
+            Utc::now(),
+        )
+        .expect("valid route health");
+        let mut publisher =
+            RuntimePublisherSnapshot::new("spot-control", "typed_runtime_snapshot", Utc::now())
+                .expect("valid publisher");
+        publisher.status = RuntimePublisherStatus::Ok;
+        publisher.running = true;
+        publisher.route_health.push(route);
+
+        let value = serde_json::to_value(&publisher).expect("serializes");
+
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["source"], "typed_runtime_snapshot");
+        assert_eq!(
+            value["route_health"][0]["component"],
+            "gateway_public_stream"
+        );
     }
 
     #[test]

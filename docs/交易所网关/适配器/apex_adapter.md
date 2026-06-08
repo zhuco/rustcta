@@ -14,7 +14,7 @@ to API-key HMAC headers.
 | Product | MarketType | Current status |
 | --- | --- | --- |
 | Omni perpetual | `Perpetual` | Primary Task 7 scope; public symbol-rules/order-book REST implemented. |
-| Spot | n/a | Unsupported in this gateway task. |
+| Spot | n/a | 项目未实现 Spot。ApeX Omni 官方 API 已出现 Spot account/wallet 线索，当前 `apex` adapter 只接 perpetual，不能写成交易所不支持。 |
 | RWA / prediction / transfer / withdrawal | n/a | Unsupported; outside trading runtime scope. |
 
 REST base URLs:
@@ -85,6 +85,15 @@ Public WS uses payloads such as:
 ```
 
 Heartbeat uses client `ping` roughly every 15 seconds.
+
+Official order book channel is `orderBook{limit}.H.{symbol}` on
+`wss://quote.omni.apex.exchange/realtime_public`; `limit` supports 25 or 200.
+The docs label this as high-frequency but do not give a fixed millisecond
+interval. The feed is snapshot plus delta; official guidance is to apply updates
+in timestamp/ID order and rebuild from snapshot on disorder or gaps. No checksum
+was found. Current project support is native but still needs interval/depth and
+rebuild fields in the mapping. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 Private WS logs in with an `op = "login"` message whose `args` contains a JSON
 string with API key fields, signature, and `ws_zk_accounts_v3` topics. Runtime

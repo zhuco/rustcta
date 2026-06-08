@@ -19,11 +19,14 @@ Implemented:
 Explicit boundaries:
 
 - Non-AUD markets are rejected as unsupported.
-- Streams are unsupported.
+- Streams are unsupported；当前官方 API/V2 API 未见公共订单簿 WS，写 `交易所不支持公共 WS 行情`。
 - Positions are unsupported because CoinSpot is spot-only.
+- Standard futures/perpetual/options/margin are `交易所不支持合约` under the current official API scope.
 - Cancel, amend, query-order, and batch operations are unsupported because CoinSpot exposes side-specific order APIs that are not safely mapped from generic gateway requests without side/order-context guarantees.
 - Fill history filters and pagination are unsupported.
 - Fiat deposit, withdrawal, and payment APIs are documentation boundaries only and are not runtime gateway operations.
+
+官方核验见 [产品线官方核验 P6 剩余区域现货 CEX](../产品线官方核验_P6_剩余区域现货_CEX.md)。
 
 Validation:
 

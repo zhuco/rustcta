@@ -7,9 +7,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
-    ControlApiConfigSummary, ControlApiState, CreateStrategyRequest, CredentialStatusResponse,
-    StrategyProcessView, StrategySnapshotEnvelope, StrategySnapshotSource, WorkspaceSummary,
-    CONTROL_API_SCHEMA_VERSION,
+    read_models, ControlApiConfigSummary, ControlApiState, ControlApiStateSnapshot,
+    CreateStrategyRequest, CredentialStatusResponse, LegacyDashboardReadView, StrategyProcessView,
+    StrategySnapshotEnvelope, StrategySnapshotSource, WorkspaceSummary, CONTROL_API_SCHEMA_VERSION,
 };
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -297,6 +297,280 @@ pub async fn symbols(State(state): State<ControlApiState>) -> Json<crate::Symbol
     Json(state.snapshot().await.symbols)
 }
 
+pub async fn disabled(State(state): State<ControlApiState>) -> Json<LegacyDashboardReadView> {
+    legacy_spot_field(state, "disabled").await
+}
+
+pub async fn dry_run_plans(State(state): State<ControlApiState>) -> Json<LegacyDashboardReadView> {
+    legacy_spot_field(state, "live_dry_run_orders").await
+}
+
+pub async fn live_preflight(State(state): State<ControlApiState>) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = runtime_control_live_preflight(&snapshot)
+        .or_else(|| legacy_strategy_field(&snapshot, "spot_spot_taker_arbitrage", "live_preflight"))
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+pub async fn live_preflight_checks(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = runtime_control_live_preflight(&snapshot)
+        .or_else(|| legacy_strategy_field(&snapshot, "spot_spot_taker_arbitrage", "live_preflight"))
+        .and_then(|value| value.get("checks").cloned())
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+pub async fn live_preflight_summary(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let report = runtime_control_live_preflight(&snapshot)
+        .or_else(|| legacy_strategy_field(&snapshot, "spot_spot_taker_arbitrage", "live_preflight"))
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    let summary = json!({
+        "enabled": snapshot.risk.status != crate::RiskStatus::Unknown,
+        "ready": report.get("ready").cloned().unwrap_or(Value::Null),
+        "checks": report
+            .get("checks")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default(),
+        "blockers": report.get("blockers").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+        "per_symbol_readiness": report
+            .get("per_symbol_readiness")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    });
+    legacy_view_from_value(snapshot.generated_at, summary)
+}
+
+fn runtime_control_live_preflight(snapshot: &ControlApiStateSnapshot) -> Option<Value> {
+    snapshot.runtime_control.live_preflight.clone()
+}
+
+pub async fn order_reconciliation_status(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_spot_field(state, "order_reconciliation").await
+}
+
+pub async fn balance_reconciliation(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_spot_field(state, "balance_reconciliation").await
+}
+
+pub async fn spot_arb_dashboard(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_strategy_detail_view(state, "spot_spot_taker_arbitrage").await
+}
+
+pub async fn cross_arb_dashboard(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_strategy_detail_view(state, "cross_exchange_arbitrage").await
+}
+
+pub async fn scanner_exchanges(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "exchange_roles").await
+}
+
+pub async fn scanner_symbol_coverage(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "symbol_coverage").await
+}
+
+pub async fn scanner_exchange_pairs(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "exchange_pairs").await
+}
+
+pub async fn scanner_opportunities(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "opportunities").await
+}
+
+pub async fn scanner_pair_statistics(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "pair_statistics").await
+}
+
+pub async fn scanner_symbol_scores(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "symbol_scores").await
+}
+
+pub async fn scanner_recommendations(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_scanner_field(state, "recommendations").await
+}
+
+pub async fn hedge_policy_status(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_cross_field(state, "hedge_policy").await
+}
+
+pub async fn hedge_policy_inventory_risk(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_hedge_policy_field(state, "inventory_risk").await
+}
+
+pub async fn hedge_policy_recommendations(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_hedge_policy_field(state, "recommendations").await
+}
+
+pub async fn hedge_policy_venue_capabilities(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_hedge_policy_field(state, "venue_capabilities").await
+}
+
+pub async fn hedge_policy_market_regime(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_hedge_policy_field(state, "market_regime").await
+}
+
+pub async fn control_symbols(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = snapshot
+        .symbols
+        .spot_control
+        .get("symbols")
+        .cloned()
+        .unwrap_or_else(|| snapshot.symbols.spot_control.clone());
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+pub async fn control_symbol(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = symbol_control_entry(&snapshot.symbols.spot_control, &symbol).unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+pub async fn control_symbol_inventory(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_symbol_array_field(state, symbol, "inventory").await
+}
+
+pub async fn control_symbol_orders(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_symbol_array_field(state, symbol, "orders").await
+}
+
+pub async fn control_symbol_commands(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_symbol_array_field(state, symbol, "commands").await
+}
+
+pub async fn control_symbol_liquidation(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot_field(state, symbol, "liquidation").await
+}
+
+pub async fn control_symbol_runtime_snapshot(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot(state, symbol).await
+}
+
+pub async fn control_symbol_readiness(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot_field(state, symbol, "readiness").await
+}
+
+pub async fn control_symbol_inventory_ownership(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot_field(state, symbol, "inventory_ownership").await
+}
+
+pub async fn control_symbol_direction_readiness(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot_field(state, symbol, "direction_readiness").await
+}
+
+pub async fn control_symbol_liquidation_preview(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot_field(state, symbol, "liquidation_preview").await
+}
+
+pub async fn control_symbol_data_health(
+    State(state): State<ControlApiState>,
+    Path(symbol): Path<String>,
+) -> Json<LegacyDashboardReadView> {
+    latest_symbol_snapshot_field(state, symbol, "data_health").await
+}
+
+pub async fn runtime_publisher_status(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = typed_runtime_publisher(&snapshot)
+        .cloned()
+        .or_else(|| {
+            legacy_strategy_field(&snapshot, "spot_spot_taker_arbitrage", "runtime_publisher")
+        })
+        .unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+pub async fn runtime_publisher_exchanges(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_runtime_publisher_field(state, "exchanges").await
+}
+
+pub async fn runtime_publisher_components(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_runtime_publisher_field(state, "components").await
+}
+
+pub async fn runtime_publisher_errors(
+    State(state): State<ControlApiState>,
+) -> Json<LegacyDashboardReadView> {
+    legacy_runtime_publisher_field(state, "errors").await
+}
+
 pub async fn strategy_logs(
     State(state): State<ControlApiState>,
 ) -> Json<crate::StrategyLogTailView> {
@@ -368,6 +642,240 @@ fn command_accepted_payload(command: &LifecycleCommandRecord, applied_to_runtime
     })
 }
 
+async fn legacy_spot_field(
+    state: ControlApiState,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    legacy_strategy_field_view(state, "spot_spot_taker_arbitrage", field).await
+}
+
+async fn legacy_cross_field(
+    state: ControlApiState,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    legacy_strategy_field_view(state, "cross_exchange_arbitrage", field).await
+}
+
+async fn legacy_strategy_field_view(
+    state: ControlApiState,
+    strategy_kind: &'static str,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = legacy_strategy_field(&snapshot, strategy_kind, field).unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+async fn legacy_strategy_detail_view(
+    state: ControlApiState,
+    strategy_kind: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = legacy_strategy_detail(&snapshot, strategy_kind)
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+async fn legacy_scanner_field(
+    state: ControlApiState,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "scanner")
+        .and_then(|scanner| scanner.get(field).cloned())
+        .or_else(|| match field {
+            "symbol_coverage" => Some(snapshot.symbols.scanner.symbol_coverage.clone()),
+            "recommendations" => Some(snapshot.symbols.scanner.recommendations.clone()),
+            _ => None,
+        })
+        .unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+async fn legacy_hedge_policy_field(
+    state: ControlApiState,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = legacy_strategy_field(&snapshot, "cross_exchange_arbitrage", "hedge_policy")
+        .and_then(|policy| policy.get(field).cloned())
+        .unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+async fn legacy_runtime_publisher_field(
+    state: ControlApiState,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = typed_runtime_publisher(&snapshot)
+        .cloned()
+        .or_else(|| {
+            legacy_strategy_field(&snapshot, "spot_spot_taker_arbitrage", "runtime_publisher")
+        })
+        .and_then(|runtime| runtime.get(field).cloned())
+        .or_else(|| typed_runtime_snapshot_publisher_field(&snapshot, field))
+        .unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+fn typed_runtime_publisher(snapshot: &ControlApiStateSnapshot) -> Option<&Value> {
+    snapshot
+        .symbols
+        .spot_control
+        .get("runtime_publisher")
+        .filter(|value| value.is_object())
+}
+
+fn typed_runtime_snapshot_publisher_field(
+    snapshot: &ControlApiStateSnapshot,
+    field: &str,
+) -> Option<Value> {
+    let runtime_snapshot = snapshot
+        .symbols
+        .spot_control
+        .get("runtime_snapshots")
+        .and_then(Value::as_array)?
+        .last()?;
+    match field {
+        "exchanges" => runtime_snapshot.get("exchange_health").cloned(),
+        "components" => runtime_snapshot.get("component_statuses").cloned(),
+        "errors" => runtime_snapshot.get("critical_errors").cloned(),
+        "route_health" => runtime_snapshot.get("route_health").cloned(),
+        _ => None,
+    }
+}
+
+async fn latest_symbol_snapshot(
+    state: ControlApiState,
+    symbol: String,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = latest_symbol_snapshot_value(&snapshot.symbols.spot_control, &symbol)
+        .unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+async fn latest_symbol_snapshot_field(
+    state: ControlApiState,
+    symbol: String,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let data = latest_symbol_snapshot_value(&snapshot.symbols.spot_control, &symbol)
+        .and_then(|snapshot| snapshot.get(field).cloned())
+        .unwrap_or(Value::Null);
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+async fn legacy_symbol_array_field(
+    state: ControlApiState,
+    symbol: String,
+    field: &'static str,
+) -> Json<LegacyDashboardReadView> {
+    let snapshot = state.snapshot().await;
+    let normalized = normalize_symbol(&symbol);
+    let data = snapshot
+        .symbols
+        .spot_control
+        .get(field)
+        .and_then(Value::as_array)
+        .map(|items| {
+            Value::Array(
+                items
+                    .iter()
+                    .filter(|item| value_matches_symbol(item, &normalized))
+                    .cloned()
+                    .collect(),
+            )
+        })
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    legacy_view_from_value(snapshot.generated_at, data)
+}
+
+fn legacy_view_from_value(
+    generated_at: chrono::DateTime<Utc>,
+    data: Value,
+) -> Json<LegacyDashboardReadView> {
+    Json(LegacyDashboardReadView {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        generated_at,
+        data: read_models::secret_free_legacy_value(&data),
+    })
+}
+
+fn legacy_strategy_field(
+    snapshot: &ControlApiStateSnapshot,
+    strategy_kind: &str,
+    field: &str,
+) -> Option<Value> {
+    legacy_strategy_detail(snapshot, strategy_kind)?
+        .get(field)
+        .cloned()
+}
+
+fn legacy_strategy_detail<'a>(
+    snapshot: &'a ControlApiStateSnapshot,
+    strategy_kind: &str,
+) -> Option<&'a Value> {
+    snapshot
+        .strategy_snapshots
+        .iter()
+        .find(|snapshot| {
+            matches!(
+                snapshot.source,
+                StrategySnapshotSource::TypedRuntimeSnapshot
+                    | StrategySnapshotSource::LegacyDashboard
+            ) && snapshot.strategy_kind == strategy_kind
+        })
+        .map(|snapshot| &snapshot.detail)
+}
+
+fn symbol_control_entry(value: &Value, symbol: &str) -> Option<Value> {
+    let normalized = normalize_symbol(symbol);
+    value
+        .get("symbols")
+        .and_then(Value::as_array)
+        .and_then(|symbols| {
+            symbols
+                .iter()
+                .find(|item| value_matches_symbol(item, &normalized))
+                .cloned()
+        })
+}
+
+fn latest_symbol_snapshot_value(value: &Value, symbol: &str) -> Option<Value> {
+    let normalized = normalize_symbol(symbol);
+    value
+        .get("runtime_snapshots")
+        .and_then(Value::as_array)
+        .and_then(|snapshots| {
+            snapshots
+                .iter()
+                .rev()
+                .find(|item| value_matches_symbol(item, &normalized))
+                .cloned()
+        })
+}
+
+fn value_matches_symbol(value: &Value, normalized: &str) -> bool {
+    ["symbol", "internal_symbol", "canonical_symbol"]
+        .into_iter()
+        .filter_map(|field| value.get(field).and_then(Value::as_str))
+        .map(normalize_symbol)
+        .any(|item| item == normalized)
+}
+
+fn normalize_symbol(symbol: impl AsRef<str>) -> String {
+    symbol
+        .as_ref()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
 fn strategy_snapshot_from_process(
     strategy: rustcta_supervisor::StrategyProcess,
 ) -> StrategySnapshotEnvelope {
@@ -385,6 +893,7 @@ fn strategy_snapshot_from_process(
             "started_at": strategy.started_at,
             "last_heartbeat_at": strategy.last_heartbeat_at,
             "last_snapshot_at": strategy.last_snapshot_at,
+            "runtime_snapshot": strategy.runtime_snapshot,
             "restart_count": strategy.restart_count,
             "last_exit_code": strategy.last_exit_code,
             "last_error": strategy.last_error,

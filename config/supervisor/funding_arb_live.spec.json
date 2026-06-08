@@ -8,12 +8,15 @@
   "command": "cargo",
   "args": [
     "run",
+    "-p",
+    "rustcta-strategy-funding-arbitrage",
     "--bin",
-    "funding_arb_live",
+    "funding-arbitrage-runtime",
     "--",
     "--config",
     "config/funding_rate_arbitrage_live_usdt.yml",
-    "--confirm-live-order"
+    "--strategy-id",
+    "funding_arb_live"
   ],
   "working_dir": ".",
   "log_path": "logs/supervisor/funding_arb_live.log",

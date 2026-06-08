@@ -18,6 +18,7 @@ Official docs reviewed on 2026-06-08:
 - REST auth: https://docs.bitfinex.com/docs/rest-auth
 - REST configs: https://docs.bitfinex.com/reference/rest-public-conf
 - REST book: https://docs.bitfinex.com/reference/rest-public-book
+- WS book: https://docs.bitfinex.com/reference/ws-public-books.md
 - Orders: https://docs.bitfinex.com/reference/rest-auth-submit-order, https://docs.bitfinex.com/reference/rest-auth-cancel-order, https://docs.bitfinex.com/reference/rest-auth-cancel-orders-multiple
 - Wallets/positions: https://docs.bitfinex.com/reference/rest-auth-wallets, https://docs.bitfinex.com/reference/rest-auth-positions
 - Derivatives boundary: https://docs.bitfinex.com/docs/derivatives
@@ -55,11 +56,13 @@ bfx-signature: HMAC-SHA384_HEX("/api" + path + nonce + compact_json_body, api_se
 content-type: application/json
 ```
 
-Private WebSocket auth signs `AUTH{nonce}` with HMAC-SHA384 and sends `event=auth`, `apiKey`, `authNonce`, `authPayload`, and `authSig`.
+Private WebSocket auth signs `AUTH{nonce}` with HMAC-SHA384 and sends `event=auth`, `apiKey`, `authNonce`, `authPayload`, `authSig`.
 
 ## WebSocket Policy
 
 Public sockets are spec/parser ready. The adapter emits subscribe/unsubscribe payloads and treats Bitfinex `hb` messages as heartbeat. Order-book resync uses REST snapshots after reconnect or sequence gaps.
+
+Official public book details still need structured mapping: `book` supports `prec=P0..P4`, `freq=F0` realtime or `F1` 2s, `len=1/25/100/250`, optional `OB_CHECKSUM`, optional `SEQ_ALL`, and optional bulk updates. This is a `public_ws_struct` task, not a missing official WS capability.
 
 Private sockets authenticate once per connection. Channel 0 account events can carry orders, trades, wallets and positions. The runtime policy is REST reconciliation after reconnect before trusting private stream state.
 

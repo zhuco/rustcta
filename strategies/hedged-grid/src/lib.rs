@@ -3,9 +3,11 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_strategy_sdk::{
-    AccountPermission, RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration,
-    StrategyConfigSchema, StrategyContext, StrategyEvent, StrategyInstanceId, StrategyRuntime,
-    StrategySnapshot, StrategySnapshotSchema, StrategySpec, StrategyStatus,
+    AccountPermission, ExecutionCancelCommand, ExecutionOrderCommand, HealthSeverity,
+    MarketDataChannel, MarketDataSubscription, MarketType, OrderType, RequiredAccountPermission,
+    RiskCapability, RiskCapabilityDeclaration, StrategyCommandSchema, StrategyConfigSchema,
+    StrategyContext, StrategyEvent, StrategyHealthIssue, StrategyInstanceId, StrategyRuntime,
+    StrategySnapshot, StrategySnapshotSchema, StrategySpec, StrategyStatus, TimeInForce,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -21,7 +23,7 @@ pub use core::{
 
 pub const STRATEGY_KIND: &str = "hedged_grid";
 pub const DISPLAY_NAME: &str = "Hedged Grid";
-pub const MIGRATED_FROM: &str = "src/strategies/hedged_grid";
+pub const MIGRATED_FROM: &str = "legacy-strategy:hedged_grid";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HedgedGridStrategyInfo {
@@ -55,8 +57,40 @@ pub struct HedgedGridConfig {
 pub struct HedgedGridSnapshotPayload {
     pub migrated_from: String,
     pub handled_events: u64,
+    pub market_data_events: u64,
+    pub execution_events: u64,
+    pub account_events: u64,
+    pub operator_commands: u64,
+    pub timer_events: u64,
     pub started_at: Option<DateTime<Utc>>,
     pub last_event_at: Option<DateTime<Utc>>,
+    pub last_market_data_at: Option<DateTime<Utc>>,
+    pub last_execution_at: Option<DateTime<Utc>>,
+    pub last_account_sync_at: Option<DateTime<Utc>>,
+    pub configured_symbol: Option<String>,
+    pub market_data_subscriptions: Vec<MarketDataSubscription>,
+    pub last_timer_at: Option<DateTime<Utc>>,
+    pub last_event_digest: Option<RuntimeEventDigest>,
+    pub task_signals: Vec<RuntimeTaskSignal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeEventDigest {
+    pub event_kind: String,
+    pub symbol: Option<String>,
+    pub account_id: Option<String>,
+    pub client_order_id: Option<String>,
+    pub command_kind: Option<String>,
+    pub timer_id: Option<String>,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeTaskSignal {
+    pub task_kind: String,
+    pub requested_at: DateTime<Utc>,
+    #[serde(default)]
+    pub payload: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +102,19 @@ pub struct HedgedGridRuntime {
     started_at: Option<DateTime<Utc>>,
     last_event_at: Option<DateTime<Utc>>,
     handled_events: u64,
+    market_data_events: u64,
+    execution_events: u64,
+    account_events: u64,
+    operator_commands: u64,
+    timer_events: u64,
+    last_market_data_at: Option<DateTime<Utc>>,
+    last_execution_at: Option<DateTime<Utc>>,
+    last_account_sync_at: Option<DateTime<Utc>>,
+    config: Option<HedgedGridConfig>,
+    market_data_subscriptions: Vec<MarketDataSubscription>,
+    last_timer_at: Option<DateTime<Utc>>,
+    last_event_digest: Option<RuntimeEventDigest>,
+    task_signals: Vec<RuntimeTaskSignal>,
 }
 
 impl HedgedGridRuntime {
@@ -80,6 +127,19 @@ impl HedgedGridRuntime {
             started_at: None,
             last_event_at: None,
             handled_events: 0,
+            market_data_events: 0,
+            execution_events: 0,
+            account_events: 0,
+            operator_commands: 0,
+            timer_events: 0,
+            last_market_data_at: None,
+            last_execution_at: None,
+            last_account_sync_at: None,
+            config: None,
+            market_data_subscriptions: Vec::new(),
+            last_timer_at: None,
+            last_event_digest: None,
+            task_signals: Vec::new(),
         }
     }
 
@@ -87,8 +147,21 @@ impl HedgedGridRuntime {
         HedgedGridSnapshotPayload {
             migrated_from: MIGRATED_FROM.to_string(),
             handled_events: self.handled_events,
+            market_data_events: self.market_data_events,
+            execution_events: self.execution_events,
+            account_events: self.account_events,
+            operator_commands: self.operator_commands,
+            timer_events: self.timer_events,
             started_at: self.started_at,
             last_event_at: self.last_event_at,
+            last_market_data_at: self.last_market_data_at,
+            last_execution_at: self.last_execution_at,
+            last_account_sync_at: self.last_account_sync_at,
+            configured_symbol: self.config.as_ref().map(|config| config.symbol.clone()),
+            market_data_subscriptions: self.market_data_subscriptions.clone(),
+            last_timer_at: self.last_timer_at,
+            last_event_digest: self.last_event_digest.clone(),
+            task_signals: self.task_signals.clone(),
         }
     }
 }
@@ -106,11 +179,24 @@ impl StrategyRuntime for HedgedGridRuntime {
     }
 
     async fn start(&mut self, ctx: StrategyContext) -> anyhow::Result<()> {
+        let config: HedgedGridConfig = serde_json::from_value(ctx.config().clone())?;
         self.instance_id = ctx.instance_id().clone();
         self.strategy_id = ctx.strategy_id().to_string();
         self.run_id = ctx.run_id().to_string();
         self.started_at = Some(ctx.started_at());
         self.status = StrategyStatus::Running;
+        self.market_data_subscriptions = hedged_grid_market_data_subscriptions(&config);
+        self.config = Some(config);
+        self.last_event_at = Some(ctx.started_at());
+        self.handled_events = 0;
+        self.market_data_events = 0;
+        self.execution_events = 0;
+        self.account_events = 0;
+        self.operator_commands = 0;
+        self.timer_events = 0;
+        self.last_timer_at = None;
+        self.last_event_digest = None;
+        self.task_signals.clear();
         Ok(())
     }
 
@@ -122,23 +208,64 @@ impl StrategyRuntime for HedgedGridRuntime {
     async fn handle_event(&mut self, event: StrategyEvent) -> anyhow::Result<()> {
         self.handled_events += 1;
         self.last_event_at = Some(event_timestamp(&event));
-        if matches!(event, StrategyEvent::Stopping(_)) {
-            self.status = StrategyStatus::Stopping;
+        self.last_event_digest = Some(runtime_event_digest(&event));
+        for signal in runtime_task_signals(&event) {
+            self.task_signals.push(signal);
+        }
+        if self.task_signals.len() > 16 {
+            let excess = self.task_signals.len() - 16;
+            self.task_signals.drain(0..excess);
+        }
+        match &event {
+            StrategyEvent::Started(_) => self.status = StrategyStatus::Running,
+            StrategyEvent::Stopping(_) => self.status = StrategyStatus::Stopping,
+            StrategyEvent::Execution(event) => {
+                self.execution_events += 1;
+                self.last_execution_at = Some(event.occurred_at);
+            }
+            StrategyEvent::MarketData(event) => {
+                self.market_data_events += 1;
+                self.last_market_data_at = Some(event.received_at);
+            }
+            StrategyEvent::Account(event) => {
+                self.account_events += 1;
+                self.last_account_sync_at = Some(event.received_at);
+            }
+            StrategyEvent::OperatorCommand(command) => {
+                self.operator_commands += 1;
+                match command.command_kind.as_str() {
+                    "pause" => self.status = StrategyStatus::Degraded,
+                    "resume" => self.status = StrategyStatus::Running,
+                    "stop" => self.status = StrategyStatus::Stopping,
+                    _ => {}
+                }
+            }
+            StrategyEvent::Timer(event) => {
+                self.timer_events += 1;
+                self.last_timer_at = Some(event.fired_at);
+            }
         }
         Ok(())
     }
 
     async fn snapshot(&self) -> anyhow::Result<StrategySnapshot> {
+        let captured_at = Utc::now();
         Ok(StrategySnapshot {
             schema_version: 1,
             instance_id: self.instance_id.clone(),
             strategy_kind: STRATEGY_KIND.to_string(),
             strategy_id: self.strategy_id.clone(),
             run_id: self.run_id.clone(),
-            captured_at: Utc::now(),
+            captured_at,
             status: self.status.clone(),
             payload: serde_json::to_value(self.snapshot_payload())?,
-            health: Vec::new(),
+            health: runtime_health_issues(
+                captured_at,
+                &self.status,
+                self.started_at,
+                self.last_market_data_at,
+                self.last_account_sync_at,
+            ),
         })
     }
 }
@@ -155,7 +282,7 @@ pub fn strategy_spec() -> StrategySpec {
         ),
         config_schema: config_schema(),
         snapshot_schema: snapshot_schema(),
-        supported_commands: Vec::new(),
+        supported_commands: runtime_command_schemas(),
         risk_capabilities: vec![
             risk_capability(
                 RiskCapability::PlaceOrders,
@@ -205,8 +332,129 @@ pub fn strategy_spec() -> StrategySpec {
             ),
             (
                 "remaining_legacy_modules".to_string(),
-                json!(["controller", "multi", "runtime_execution"]),
+                json!(["controller", "multi", "exchange_backed_runtime"]),
             ),
+            (
+                "migrated_runtime_contracts".to_string(),
+                json!([
+                    "sdk_context_config_loading",
+                    "market_data_subscription_contract",
+                    "execution_event_sync",
+                    "account_event_sync",
+                    "operator_command_orchestration",
+                    "sanitized_runtime_snapshot"
+                ]),
+            ),
+            (
+                "market_data_channels".to_string(),
+                json!([
+                    MarketDataChannel::OrderBookTop,
+                    MarketDataChannel::Ticker,
+                    MarketDataChannel::MarkPrice
+                ]),
+            ),
+        ]),
+    }
+}
+
+pub fn hedged_grid_market_data_subscriptions(
+    config: &HedgedGridConfig,
+) -> Vec<MarketDataSubscription> {
+    if config.symbol.trim().is_empty() {
+        return Vec::new();
+    }
+
+    vec![
+        MarketDataSubscription {
+            exchange_id: config.spot_exchange.clone(),
+            symbol: config.symbol.trim().to_string(),
+            market_type: MarketType::Spot,
+            channels: vec![MarketDataChannel::OrderBookTop, MarketDataChannel::Ticker],
+        },
+        MarketDataSubscription {
+            exchange_id: config.hedge_exchange.clone(),
+            symbol: config.symbol.trim().to_string(),
+            market_type: MarketType::Perpetual,
+            channels: vec![
+                MarketDataChannel::OrderBookTop,
+                MarketDataChannel::MarkPrice,
+            ],
+        },
+    ]
+}
+
+pub fn hedged_grid_order_draft_to_execution_command(
+    ctx: &StrategyContext,
+    exchange_id: &str,
+    symbol: &str,
+    risk_profile_id: &str,
+    draft: &OrderDraft,
+    requested_at: DateTime<Utc>,
+) -> ExecutionOrderCommand {
+    ExecutionOrderCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        client_order_id: draft.id.clone(),
+        idempotency_key: execution_idempotency_key(ctx, &draft.id),
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: exchange_id.to_string(),
+        symbol: symbol.to_string(),
+        side: draft.intent.side(),
+        order_type: if draft.post_only {
+            OrderType::PostOnly
+        } else {
+            OrderType::Limit
+        },
+        quantity: draft.qty.to_string(),
+        price: Some(draft.price.to_string()),
+        time_in_force: Some(if draft.post_only {
+            TimeInForce::PostOnly
+        } else {
+            TimeInForce::GoodTilCanceled
+        }),
+        reduce_only: draft.intent.is_close(),
+        metadata: BTreeMap::from([
+            ("strategy_kind".to_string(), json!(STRATEGY_KIND)),
+            ("source_plan".to_string(), json!("hedged_grid_order_draft")),
+            ("intent".to_string(), json!(format!("{:?}", draft.intent))),
+            (
+                "position_side".to_string(),
+                json!(draft.intent.position_side().as_str()),
+            ),
+            ("post_only".to_string(), json!(draft.post_only)),
+        ]),
+    }
+}
+
+pub fn hedged_grid_cancel_action_to_execution_command(
+    ctx: &StrategyContext,
+    exchange_id: &str,
+    symbol: &str,
+    risk_profile_id: &str,
+    order_id: &str,
+    reason: &str,
+    requested_at: DateTime<Utc>,
+) -> ExecutionCancelCommand {
+    ExecutionCancelCommand {
+        schema_version: 1,
+        tenant_id: ctx.tenant_id().to_string(),
+        account_id: ctx.account_id().to_string(),
+        strategy_id: ctx.strategy_id().to_string(),
+        run_id: ctx.run_id().to_string(),
+        client_order_id: Some(order_id.to_string()),
+        execution_order_id: None,
+        idempotency_key: execution_idempotency_key(ctx, order_id),
+        risk_profile_id: risk_profile_id.to_string(),
+        requested_at,
+        exchange_id: exchange_id.to_string(),
+        symbol: symbol.to_string(),
+        metadata: BTreeMap::from([
+            ("strategy_kind".to_string(), json!(STRATEGY_KIND)),
+            ("cancel_reason".to_string(), json!(reason)),
         ]),
     }
 }
@@ -254,10 +502,211 @@ fn common_snapshot_schema() -> Value {
         "properties": {
             "migrated_from": { "type": "string" },
             "handled_events": { "type": "integer", "minimum": 0 },
+            "market_data_events": { "type": "integer", "minimum": 0 },
+            "execution_events": { "type": "integer", "minimum": 0 },
+            "account_events": { "type": "integer", "minimum": 0 },
+            "operator_commands": { "type": "integer", "minimum": 0 },
+            "timer_events": { "type": "integer", "minimum": 0 },
             "started_at": { "type": ["string", "null"], "format": "date-time" },
-            "last_event_at": { "type": ["string", "null"], "format": "date-time" }
+            "last_event_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_market_data_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_execution_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_account_sync_at": { "type": ["string", "null"], "format": "date-time" },
+            "configured_symbol": { "type": ["string", "null"] },
+            "market_data_subscriptions": { "type": "array" },
+            "last_timer_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_event_digest": { "type": ["object", "null"] },
+            "task_signals": { "type": "array" }
         }
     })
+}
+
+pub fn runtime_event_digest(event: &StrategyEvent) -> RuntimeEventDigest {
+    match event {
+        StrategyEvent::Started(event) => RuntimeEventDigest {
+            event_kind: "started".to_string(),
+            symbol: None,
+            account_id: None,
+            client_order_id: None,
+            command_kind: None,
+            timer_id: None,
+            observed_at: event.occurred_at,
+        },
+        StrategyEvent::Stopping(event) => RuntimeEventDigest {
+            event_kind: "stopping".to_string(),
+            symbol: None,
+            account_id: None,
+            client_order_id: None,
+            command_kind: None,
+            timer_id: None,
+            observed_at: event.occurred_at,
+        },
+        StrategyEvent::Execution(event) => RuntimeEventDigest {
+            event_kind: "execution".to_string(),
+            symbol: event
+                .payload
+                .get("symbol")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            account_id: None,
+            client_order_id: event.client_order_id.clone(),
+            command_kind: None,
+            timer_id: None,
+            observed_at: event.occurred_at,
+        },
+        StrategyEvent::MarketData(event) => RuntimeEventDigest {
+            event_kind: "market_data".to_string(),
+            symbol: Some(event.symbol.clone()),
+            account_id: None,
+            client_order_id: None,
+            command_kind: None,
+            timer_id: None,
+            observed_at: event.received_at,
+        },
+        StrategyEvent::Account(event) => RuntimeEventDigest {
+            event_kind: "account".to_string(),
+            symbol: event
+                .payload
+                .get("symbol")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            account_id: Some(event.account_id.clone()),
+            client_order_id: None,
+            command_kind: None,
+            timer_id: None,
+            observed_at: event.received_at,
+        },
+        StrategyEvent::OperatorCommand(command) => RuntimeEventDigest {
+            event_kind: "operator_command".to_string(),
+            symbol: command
+                .payload
+                .get("symbol")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            account_id: None,
+            client_order_id: None,
+            command_kind: Some(command.command_kind.clone()),
+            timer_id: None,
+            observed_at: command.requested_at,
+        },
+        StrategyEvent::Timer(event) => RuntimeEventDigest {
+            event_kind: "timer".to_string(),
+            symbol: event
+                .payload
+                .get("symbol")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            account_id: None,
+            client_order_id: None,
+            command_kind: None,
+            timer_id: Some(event.timer_id.clone()),
+            observed_at: event.fired_at,
+        },
+    }
+}
+
+pub fn runtime_task_signals(event: &StrategyEvent) -> Vec<RuntimeTaskSignal> {
+    match event {
+        StrategyEvent::Timer(event) => vec![RuntimeTaskSignal {
+            task_kind: match event.timer_id.as_str() {
+                "market" | "market_tick" | "rebalance" => "rebalance",
+                "account" | "account_sync" | "sync_positions" => "sync_account_state",
+                "status" | "status_report" => "publish_status",
+                other => other,
+            }
+            .to_string(),
+            requested_at: event.fired_at,
+            payload: event.payload.clone(),
+        }],
+        StrategyEvent::OperatorCommand(command)
+            if matches!(command.command_kind.as_str(), "rebalance" | "resume") =>
+        {
+            vec![RuntimeTaskSignal {
+                task_kind: command.command_kind.clone(),
+                requested_at: command.requested_at,
+                payload: command.payload.clone(),
+            }]
+        }
+        _ => Vec::new(),
+    }
+}
+
+pub fn runtime_health_issues(
+    now: DateTime<Utc>,
+    status: &StrategyStatus,
+    started_at: Option<DateTime<Utc>>,
+    last_market_data_at: Option<DateTime<Utc>>,
+    last_account_sync_at: Option<DateTime<Utc>>,
+) -> Vec<StrategyHealthIssue> {
+    if !matches!(status, StrategyStatus::Running | StrategyStatus::Degraded) {
+        return Vec::new();
+    }
+    let mut issues = Vec::new();
+    push_staleness_issue(
+        &mut issues,
+        now,
+        started_at,
+        last_market_data_at,
+        "market_data_stale",
+        "No recent market data event observed",
+        300,
+    );
+    push_staleness_issue(
+        &mut issues,
+        now,
+        started_at,
+        last_account_sync_at,
+        "account_sync_stale",
+        "No recent account sync event observed",
+        900,
+    );
+    issues
+}
+
+fn runtime_command_schemas() -> Vec<StrategyCommandSchema> {
+    ["pause", "resume", "stop", "rebalance"]
+        .into_iter()
+        .map(|command_kind| StrategyCommandSchema {
+            command_kind: command_kind.to_string(),
+            description: Some(format!("Hedged grid runtime {command_kind} command")),
+            payload_schema: json!({
+                "type": "object",
+                "additionalProperties": true
+            }),
+        })
+        .collect()
+}
+
+fn push_staleness_issue(
+    issues: &mut Vec<StrategyHealthIssue>,
+    now: DateTime<Utc>,
+    started_at: Option<DateTime<Utc>>,
+    last_seen_at: Option<DateTime<Utc>>,
+    issue_kind: &str,
+    message: &str,
+    threshold_secs: i64,
+) {
+    let Some(reference) = last_seen_at.or(started_at) else {
+        return;
+    };
+    let age_secs = now.signed_duration_since(reference).num_seconds().max(0);
+    if age_secs <= threshold_secs {
+        return;
+    }
+    issues.push(StrategyHealthIssue {
+        severity: HealthSeverity::Warning,
+        message: message.to_string(),
+        observed_at: now,
+        details: Some(json!({
+            "issue_kind": issue_kind,
+            "age_secs": age_secs,
+            "threshold_secs": threshold_secs,
+        })),
+    });
+}
+
+fn execution_idempotency_key(ctx: &StrategyContext, client_order_id: &str) -> String {
+    format!("{}:{}:{}", ctx.strategy_id(), ctx.run_id(), client_order_id)
 }
 
 fn event_timestamp(event: &StrategyEvent) -> DateTime<Utc> {
@@ -297,9 +746,11 @@ fn account_permissions(permissions: &[AccountPermission]) -> Vec<RequiredAccount
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use rustcta_strategy_sdk::{
-        ExecutionCancelAck, ExecutionCancelCommand, ExecutionIntent, ExecutionIntentAck,
-        ExecutionOrderAck, ExecutionOrderCommand, SdkResult, StrategyExecutionClient,
+        AccountEvent, ExecutionCancelAck, ExecutionCancelCommand, ExecutionEvent, ExecutionIntent,
+        ExecutionIntentAck, ExecutionOrderAck, ExecutionOrderCommand, MarketDataEvent, OrderSide,
+        OrderType, SdkResult, StrategyCommand, StrategyExecutionClient, TimeInForce, TimerEvent,
     };
     use std::sync::Arc;
 
@@ -359,9 +810,14 @@ mod tests {
         assert!(spec.config_schema.json_schema["required"]
             .as_array()
             .is_some_and(|required| !required.is_empty()));
+        assert!(spec
+            .supported_commands
+            .iter()
+            .any(|command| command.command_kind == "rebalance"));
         assert_eq!(spec.snapshot_schema.schema_version, 1);
         assert_eq!(spec.snapshot_schema.json_schema["type"], json!("object"));
         assert!(spec.snapshot_schema.json_schema["properties"]["handled_events"].is_object());
+        assert!(spec.snapshot_schema.json_schema["properties"]["market_data_events"].is_object());
         assert_secret_free(&serde_json::to_value(spec).expect("spec should serialize"));
     }
 
@@ -378,7 +834,11 @@ mod tests {
             json!({
                 "api_key": "must-not-leak",
                 "secret": "must-not-leak",
-                "symbol": "BTC/USDT"
+                "symbol": "BTC/USDT",
+                "spot_exchange": "paper-spot",
+                "hedge_exchange": "paper-perp",
+                "grid_spacing_bps": 10.0,
+                "max_inventory_quote": "1000"
             }),
             execution,
         );
@@ -392,6 +852,222 @@ mod tests {
         assert_secret_free(&serde_json::to_value(snapshot).expect("snapshot should serialize"));
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_contract_should_subscribe_and_sync_events() {
+        let mut runtime = HedgedGridRuntime::new();
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "strategy-1",
+            "run-1",
+            json!({
+                "symbol": "BTC/USDT",
+                "spot_exchange": "paper-spot",
+                "hedge_exchange": "paper-perp",
+                "grid_spacing_bps": 10.0,
+                "max_inventory_quote": "1000"
+            }),
+            execution,
+        );
+
+        runtime.start(ctx).await.expect("runtime should start");
+        assert_eq!(runtime.market_data_subscriptions.len(), 2);
+        assert_eq!(
+            runtime.market_data_subscriptions[0].market_type,
+            MarketType::Spot
+        );
+        assert_eq!(
+            runtime.market_data_subscriptions[1].market_type,
+            MarketType::Perpetual
+        );
+
+        let observed_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap();
+        runtime
+            .handle_event(StrategyEvent::MarketData(MarketDataEvent {
+                schema_version: 1,
+                exchange_id: "paper-spot".to_string(),
+                symbol: "BTC/USDT".to_string(),
+                received_at: observed_at,
+                payload: json!({"best_bid": "9999", "best_ask": "10001"}),
+            }))
+            .await
+            .expect("market event should apply");
+        runtime
+            .handle_event(StrategyEvent::Execution(ExecutionEvent {
+                schema_version: 1,
+                event_id: "exec-1".to_string(),
+                client_order_id: Some("hg-btc-1".to_string()),
+                occurred_at: observed_at,
+                payload: json!({"status": "filled"}),
+            }))
+            .await
+            .expect("execution event should apply");
+        runtime
+            .handle_event(StrategyEvent::Account(AccountEvent {
+                schema_version: 1,
+                account_id: "account-1".to_string(),
+                received_at: observed_at,
+                payload: json!({"positions": []}),
+            }))
+            .await
+            .expect("account event should apply");
+        runtime
+            .handle_event(StrategyEvent::OperatorCommand(StrategyCommand {
+                schema_version: 1,
+                command_id: "cmd-1".to_string(),
+                instance_id: StrategyInstanceId::new("instance-1"),
+                command_kind: "pause".to_string(),
+                requested_at: observed_at,
+                payload: Value::Null,
+                requested_by: Some("test".to_string()),
+            }))
+            .await
+            .expect("command should apply");
+
+        let snapshot = runtime.snapshot().await.expect("snapshot should build");
+        assert_eq!(snapshot.status, StrategyStatus::Degraded);
+        assert_eq!(snapshot.payload["market_data_events"], json!(1));
+        assert_eq!(snapshot.payload["execution_events"], json!(1));
+        assert_eq!(snapshot.payload["account_events"], json!(1));
+        assert_eq!(snapshot.payload["operator_commands"], json!(1));
+        assert_eq!(snapshot.payload["configured_symbol"], json!("BTC/USDT"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_should_digest_timer_tasks_and_report_stale_health() {
+        let mut runtime = HedgedGridRuntime::new();
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "hedged-grid",
+            "run-1",
+            json!({
+                "symbol": "BTC/USDT",
+                "spot_exchange": "paper-spot",
+                "hedge_exchange": "paper-perp",
+                "grid_spacing_bps": 10.0,
+                "max_inventory_quote": "1000"
+            }),
+            execution,
+        );
+
+        runtime.start(ctx).await.expect("runtime should start");
+        let fired_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 2, 0).unwrap();
+        runtime
+            .handle_event(StrategyEvent::Timer(TimerEvent {
+                schema_version: 1,
+                timer_id: "market_tick".to_string(),
+                fired_at,
+                payload: json!({"symbol": "BTC/USDT"}),
+            }))
+            .await
+            .expect("timer event should apply");
+
+        let snapshot = runtime.snapshot().await.expect("snapshot should build");
+        assert_eq!(snapshot.payload["timer_events"], json!(1));
+        assert_eq!(
+            snapshot.payload["last_event_digest"]["event_kind"],
+            json!("timer")
+        );
+        assert_eq!(
+            snapshot.payload["task_signals"][0]["task_kind"],
+            json!("rebalance")
+        );
+
+        let stale = runtime_health_issues(
+            fired_at + chrono::Duration::seconds(901),
+            &StrategyStatus::Running,
+            Some(fired_at),
+            None,
+            None,
+        );
+        assert_eq!(stale.len(), 2);
+        assert_eq!(stale[0].severity, HealthSeverity::Warning);
+        assert_eq!(
+            stale[0].details.as_ref().unwrap()["issue_kind"],
+            json!("market_data_stale")
+        );
+    }
+
+    #[test]
+    fn engine_actions_should_map_to_sdk_execution_commands() {
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "hedged-grid",
+            "run-1",
+            json!({
+                "symbol": "BTC/USDT",
+                "spot_exchange": "paper-spot",
+                "hedge_exchange": "paper-perp",
+                "grid_spacing_bps": 10.0,
+                "max_inventory_quote": "1000"
+            }),
+            execution,
+        );
+        let requested_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 2, 0).unwrap();
+        let draft = OrderDraft {
+            id: "hg-open-long-1".to_string(),
+            intent: OrderIntent::OpenLongBuy,
+            price: 100.0,
+            qty: 0.5,
+            post_only: true,
+        };
+
+        let order = hedged_grid_order_draft_to_execution_command(
+            &ctx,
+            "paper-spot",
+            "BTC/USDT",
+            "risk-grid",
+            &draft,
+            requested_at,
+        );
+
+        assert_eq!(order.client_order_id, "hg-open-long-1");
+        assert_eq!(order.side, OrderSide::Buy);
+        assert_eq!(order.order_type, OrderType::PostOnly);
+        assert_eq!(order.time_in_force, Some(TimeInForce::PostOnly));
+        assert!(!order.reduce_only);
+        assert_eq!(order.metadata["position_side"], json!("LONG"));
+
+        let close = OrderDraft {
+            id: "hg-close-long-1".to_string(),
+            intent: OrderIntent::CloseLongSell,
+            price: 101.0,
+            qty: 0.5,
+            post_only: false,
+        };
+        let close_order = hedged_grid_order_draft_to_execution_command(
+            &ctx,
+            "paper-perp",
+            "BTC/USDT",
+            "risk-grid",
+            &close,
+            requested_at,
+        );
+        assert_eq!(close_order.side, OrderSide::Sell);
+        assert_eq!(close_order.order_type, OrderType::Limit);
+        assert!(close_order.reduce_only);
+
+        let cancel = hedged_grid_cancel_action_to_execution_command(
+            &ctx,
+            "paper-spot",
+            "BTC/USDT",
+            "risk-grid",
+            "hg-open-long-1",
+            "rebalance",
+            requested_at,
+        );
+        assert_eq!(cancel.client_order_id, Some("hg-open-long-1".to_string()));
+        assert_eq!(cancel.metadata["cancel_reason"], json!("rebalance"));
+    }
+
     #[test]
     fn manifest_should_not_depend_on_exchange_adapters() {
         let manifest = include_str!("../Cargo.toml");
@@ -399,7 +1075,7 @@ mod tests {
         for forbidden in [
             "rustcta-exchange-api",
             "rustcta-exchange-gateway",
-            "src/exchanges",
+            "legacy exchange adapter path",
             "gateio",
             "kucoin",
             "okx",

@@ -21,6 +21,12 @@ Official references:
 
 The official API docs use the same OKX v5 `/api/v5` REST surface and list U.S. domains for U.S. users. The U.S. terms and disclosures frame the U.S. venue as spot digital asset trading plus related buy/sell/convert services, so this adapter keeps non-spot and private trading surfaces closed until a separate credential and product-scope audit is completed.
 
+P6 official product-line verification also found OKX U.S. help material for
+perpetual futures, event contracts, and spot/margin trading. Those surfaces are
+`项目未实现 Perpetual Futures/Event Contracts/Margin boundary` for this adapter
+until regional API eligibility, credential scope, and product availability are
+audited; do not document them as `交易所不支持合约`.
+
 ## Implemented Gateway Surface
 
 - Named gateway registration for `okxus`, `okx_us`, and `okx-us`.

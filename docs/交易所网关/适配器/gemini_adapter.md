@@ -4,6 +4,11 @@ Status date: 2026-06-08.
 
 Gemini is implemented as a Spot-only gateway adapter. REST base URL defaults to `https://api.gemini.com`; public market-data WebSocket defaults to `wss://api.gemini.com/v1/marketdata`; private order-events WebSocket defaults to `wss://api.gemini.com/v1/order/events`.
 
+Derivatives/Perpetuals are 项目未实现, not `交易所不支持合约`: Gemini official
+developer docs expose derivatives REST endpoints for perpetual contracts and
+derivatives-specific account operations. Region/product eligibility must be
+handled separately before implementation.
+
 ## Implemented Surface
 
 - Public REST: symbol details and order book snapshots.
@@ -15,7 +20,7 @@ Gemini is implemented as a Spot-only gateway adapter. REST base URL defaults to 
 
 | Surface | Runtime |
 | --- | --- |
-| Products | Spot only |
+| Products | Spot only; Derivatives/Perpetuals 项目未实现 |
 | Public REST | symbol details, order book snapshot |
 | Private REST | balances, limit order lifecycle, active orders, recent fills |
 | Public WS | market-data URL construction |
@@ -47,7 +52,7 @@ The adapter tags public REST as `rest_ip`, private account reads as `key`, and o
 
 ## Unsupported Boundary
 
-Auction, block trading, travel-rule, withdrawals, deposits, fiat transfers, custody/clearing workflows, staking, and other funding/compliance surfaces are documented Unsupported and are not connected to runtime. Non-Spot products, positions, market orders, quote-market orders, fees, and reduce-only are also Unsupported. The executable boundary fixture is `tests/fixtures/exchanges/gemini/unsupported_boundary.json`.
+Auction, block trading, travel-rule, withdrawals, deposits, fiat transfers, custody/clearing workflows, staking, and other funding/compliance surfaces are documented Unsupported and are not connected to runtime. Derivatives/Perpetuals are 项目未实现 in this spot adapter. Positions, market orders, quote-market orders, fees, and reduce-only are also Unsupported in the current shared spot runtime. The executable boundary fixture is `tests/fixtures/exchanges/gemini/unsupported_boundary.json`.
 
 ## Official References
 
@@ -56,6 +61,7 @@ Auction, block trading, travel-rule, withdrawals, deposits, fiat transfers, cust
 | REST market data | `https://docs.gemini.com/rest/market-data` |
 | REST orders | `https://docs.gemini.com/rest/orders` |
 | REST account | `https://docs.gemini.com/rest/account` |
+| REST derivatives | `https://developer.gemini.com/trading/rest-api/derivatives` |
 | WebSocket order events | `https://docs.gemini.com/websocket/order-events` |
 
 ## Validation

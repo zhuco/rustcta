@@ -14,6 +14,13 @@ Aftermath is a Sui on-chain protocol. This adapter is intentionally scan-only: i
 - Public WebSocket helpers are payload/fixture-only for `/api/perpetuals/ws/updates`.
 - Private reads and writes return `ExchangeApiError::Unsupported`.
 
+## Product Lines
+
+| Product | MarketType | Status |
+| --- | --- | --- |
+| Perpetual | `Perpetual` | Public CCXT markets and order-book REST are mapped as scan-only runtime. |
+| Spot | n/a | 交易所不支持现货。当前 Aftermath adapter 只覆盖 Aftermath Perpetuals。 |
+
 ## Official References
 
 - OpenAPI: `https://aftermath.finance/api/openapi/spec.json`
@@ -38,6 +45,15 @@ Trading operations are not HMAC/API-key requests. They require Sui transaction b
 `endpoint_mapping.yaml` marks `symbol_rules` and `order_book` as native public REST for perpetual markets. `ticker`, `trades`, and `ohlcv` are fixture/parser-only because the current gateway interface does not expose them through this adapter. Balances, positions, fees, order writes, batch writes, query/open orders, recent fills, and private streams are explicitly `unsupported`.
 
 Runtime capabilities follow that mapping: public REST is enabled for scan-only symbol rules and order-book snapshots; private REST, private streams, public stream runtime, trading, batch trading, reduce-only, post-only, and client order id support remain disabled.
+
+## Official WebSocket Order Book Detail
+
+Official Aftermath Perpetuals SDK exposes `/perpetuals/ws/updates` and
+`orderbook` delta subscriptions. The reviewed SDK docs do not publish fixed
+push milliseconds, fixed depth, sequence, or checksum. Mapping should record
+orderbook subscribe/unsubscribe, no fixed ms/depth/sequence, and REST
+`getOrderbook` snapshot fallback. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
 
 ## Validation
 

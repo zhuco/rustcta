@@ -31,6 +31,22 @@ Alpaca is wired as a Broker crypto spot adapter. It targets Alpaca Broker REST f
 - Crypto margin, shorting, and leverage are unsupported.
 - Public market data requires valid Alpaca credentials.
 
+## Official Product-Line Boundary
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Alpaca crypto 文档是 Crypto Spot Trading；官方 Margin and Short Selling 文档明确 crypto margin 不适用。Alpaca Options 属于证券期权，不是本 crypto exchange gateway adapter 的合约产品线。
+
+本 adapter 按 crypto 口径明确写：标准 crypto futures/perpetual/options 为 `交易所不支持合约`。证券 options 若未来进入项目，应走单独证券/经纪接口设计，不并入 `alpaca` crypto spot adapter。
+
+## Official WebSocket Order Book Detail
+
+Alpaca Crypto Data API supports `orderbooks` over
+`wss://stream.data.alpaca.markets/v1beta3/crypto/us`; clients authenticate and
+then subscribe with an `orderbooks` symbol list. Official docs do not provide a
+fixed millisecond interval, fixed depth, sequence, or checksum. Mapping should
+record auth+subscribe, no fixed ms/depth/checksum, and REST latest orderbooks as
+the rebuild source. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 ## Environment
 
 Use `RUSTCTA_GATEWAY_ADAPTERS=alpaca` to load the adapter through `apps/gateway`.

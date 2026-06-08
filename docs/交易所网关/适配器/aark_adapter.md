@@ -36,7 +36,7 @@ Aark-specific API evidence exists.
 | Product | MarketType | Status |
 | --- | --- | --- |
 | Perpetual | `Perpetual` | Public symbol rules from Orderly public info are parsed. |
-| Spot | n/a | Unsupported. Aark task scope is DeFi/perpetual oriented. |
+| Spot | n/a | 交易所不支持现货。Aark 当前 adapter 口径是 DeFi/perpetual profile。 |
 | Testnet | `Perpetual` | Endpoint mapping records Orderly testnet base URL; not enabled for live or dry-run. |
 
 Default REST base URL: `https://api-evm.orderly.org`
@@ -123,6 +123,16 @@ The adapter must not enable the following without a separate validation task:
 - Aark/Orderly regional restrictions and KYC eligibility checks
 - public WebSocket runtime, sequence gap detection and signed REST resync
 - private WebSocket auth, auth renewal and reconciliation fallback
+
+## Official WebSocket Order Book Detail
+
+Official Orderly public WS supports `{symbol}@orderbookupdate` every 200ms for
+this profile, with `ts` and `prevTs` continuity and quantity `0` delete
+semantics. No checksum is documented. Current project support is payload/spec
+only, so the next mapping task must add the Orderly EVM stream URL with
+`{account_id}`, 200ms interval, `prevTs` gap detection, and request/REST order
+book snapshot resync. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 ## Fixtures
 

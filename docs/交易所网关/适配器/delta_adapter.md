@@ -8,6 +8,7 @@ Delta-only files.
 ## Scope
 
 - Market types: `Perpetual`, `Futures`, and `Option`.
+- Spot: 项目未实现 Spot。Delta 官方用户手册列出现货交易，但当前 adapter 只声明 derivatives 产品线。
 - Public REST: products/symbol rules, L2 order-book snapshots, public fee-rate
   extraction from product metadata.
 - Private REST: balances, margined positions, place/cancel/query order, open

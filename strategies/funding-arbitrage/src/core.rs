@@ -195,18 +195,15 @@ impl ExecutionConfig {
 pub struct NotificationConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_wecom_webhook_env")]
-    pub wecom_webhook_env: String,
     #[serde(default)]
-    pub wecom_webhook_url: Option<String>,
+    pub channel_id: Option<String>,
 }
 
 impl Default for NotificationConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            wecom_webhook_env: default_wecom_webhook_env(),
-            wecom_webhook_url: None,
+            channel_id: None,
         }
     }
 }
@@ -674,10 +671,6 @@ fn default_min_funding_rate() -> f64 {
 
 fn default_max_funding_snapshot_age_ms() -> i64 {
     5_000
-}
-
-fn default_wecom_webhook_env() -> String {
-    "FUNDING_ARB_WECOM_WEBHOOK_URL".to_string()
 }
 
 fn default_true() -> bool {

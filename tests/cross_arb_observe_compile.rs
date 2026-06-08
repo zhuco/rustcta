@@ -1,15 +1,20 @@
 #![allow(clippy::all)]
-use std::process::Command;
+use rustcta_tools_ops::{migrations_by_target, LegacyBinRetirement, LegacyBinTarget};
 
 #[test]
-fn cross_arb_observe_should_expose_cli_without_network() {
-    let output = Command::new(env!("CARGO_BIN_EXE_cross_arb_observe"))
-        .arg("--help")
-        .output()
-        .expect("run cross_arb_observe --help");
+fn cross_arb_observe_should_have_root_free_migration_plan() {
+    let migrations = migrations_by_target(LegacyBinTarget::StrategyRuntime);
+    let migration = migrations
+        .into_iter()
+        .find(|migration| migration.source == "cross_arb_observe.rs")
+        .expect("cross_arb_observe should have a migration plan");
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("cross_arb_observe"));
-    assert!(stdout.contains("--config"));
+    assert_eq!(migration.compatibility, LegacyBinRetirement::KeepWrapper);
+    assert!(!migration
+        .new_command
+        .contains("cargo run --bin cross_arb_observe"));
+    assert!(migration
+        .new_command
+        .contains("rustcta-industrial -- cross-arb observe"));
+    assert!(migration.retirement_milestone.contains("observe output"));
 }

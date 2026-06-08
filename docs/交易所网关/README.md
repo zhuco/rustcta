@@ -10,6 +10,21 @@
 | --- | --- |
 | 给一个交易所补完整接口文档 | [接口盘点维度](接口盘点维度.md)，再复制 [交易所接口补全文档模板](交易所接口补全文档模板.md)。WebSocket 行情必须填推流间隔、档位和订阅方式。 |
 | 看某个交易所现在接了哪些能力 | `适配器/<adapter>_adapter.md`，例如 [Binance Spot](适配器/binance_adapter.md)。 |
+| 看当前项目 125 个 adapter 已声明/实现了哪些功能 | [交易所功能盘点矩阵](交易所功能盘点矩阵.md)，机器可读版见 [CSV](交易所功能盘点矩阵.csv)。 |
+| 按 adapter 看当前证据、任务和剩余核验项 | [adapter 工作包索引](adapter工作包索引.md)，机器可读版见 [CSV](adapter工作包索引.csv)。 |
+| 看下一步具体要补哪些 adapter | [交易所网关补全任务清单](交易所网关补全任务清单.md)，机器可读版见 [CSV](交易所网关补全任务清单.csv)。 |
+| 看还剩哪些官方资料没查完 | [剩余官方核验队列](剩余官方核验队列.md)，机器可读版见 [CSV](剩余官方核验队列.csv)。 |
+| 看已经查过官方资料的能力结论 | [官方能力核验台账](官方能力核验台账.md)。 |
+| 看主流交易所是否官方支持现货/合约/期权 | [产品线官方核验 P0 主流交易所](产品线官方核验_P0_主流交易所.md)。 |
+| 看链上永续/Orderly profile 是否有现货 | [产品线官方核验 P1 链上合约交易所](产品线官方核验_P1_链上合约交易所.md)。 |
+| 看衍生品交易所是否已有现货线索 | [产品线官方核验 P2 衍生品交易所](产品线官方核验_P2_衍生品交易所.md)。 |
+| 看 CEX 现货 adapter 是否应补合约 | [产品线官方核验 P3 CEX 合约边界](产品线官方核验_P3_CEX合约边界.md)。 |
+| 看区域现货交易所是否应补合约或保证金 | [产品线官方核验 P4 区域现货交易所](产品线官方核验_P4_区域现货交易所.md)。 |
+| 看区域现货 CEX 第二批是否应补 margin/perps 或写不支持合约 | [产品线官方核验 P5 区域现货 CEX 第二批](产品线官方核验_P5_区域现货_CEX第二批.md)。 |
+| 看剩余区域现货 CEX 是否应补合约或写不支持合约 | [产品线官方核验 P6 剩余区域现货 CEX](产品线官方核验_P6_剩余区域现货_CEX.md)。 |
+| 看下一步应该优先查哪些官方资料 | [官方核验优先级](官方核验优先级.md)。 |
+| 看哪些交易所有 10ms/20ms L1/BBO 或高速订单簿 | [WebSocket 极速盘口能力汇总](WebSocket极速盘口能力汇总.md)。 |
+| 看主流和区域现货 WebSocket 官方结果 | [WebSocket 官方核验 P0 第一批](WebSocket官方核验_P0_第一批.md)，[第二批](WebSocket官方核验_P0_第二批.md)，[P1 第三批](WebSocket官方核验_P1_第三批.md)，[P2 区域现货](WebSocket官方核验_P2_区域现货交易所.md)，[P3 P2 公共 WS 缺口](WebSocket官方核验_P3_P2公共WS缺口交易所.md)，[P4 CEX 盘口细项](WebSocket官方核验_P4_CEX盘口细项.md)，[P5 衍生品/链上盘口细项](WebSocket官方核验_P5_衍生品链上盘口细项.md)，[P6 补充交易所盘口细项](WebSocket官方核验_P6_补充交易所盘口细项.md)。 |
 | 看不懂英文 adapter 文件名 | [适配器索引](适配器索引.md)。 |
 | 看全局完成度和 Binance 对照目标 | [总览/exchange_api_completion_matrix.md](总览/exchange_api_completion_matrix.md)。 |
 | 看网关支持哪些交易所 | [总览/exchange_support_matrix.md](总览/exchange_support_matrix.md)。 |
@@ -24,6 +39,32 @@ docs/交易所网关/
   接口盘点维度.md              每个交易所按什么维度盘点
   交易所接口补全文档模板.md    新交易所文档模板
   适配器索引.md                英文 adapter 文件名的中文索引
+  交易所功能盘点矩阵.md        当前项目声明/实现能力矩阵
+  交易所功能盘点矩阵.csv       机器可读能力矩阵
+  adapter工作包索引.md         每个 adapter 的证据/任务/核验工作包
+  adapter工作包索引.csv        机器可读 adapter 工作包
+  交易所网关补全任务清单.md    下一步 adapter 补全任务
+  交易所网关补全任务清单.csv   机器可读任务清单
+  剩余官方核验队列.md          尚未查完的官方资料队列
+  剩余官方核验队列.csv         机器可读剩余核验队列
+  官方能力核验台账.md          已查官方资料的能力结论
+  产品线官方核验_P0_主流交易所.md  主流交易所产品线官方支持
+  产品线官方核验_P1_链上合约交易所.md  链上永续/Orderly profile 产品线边界
+  产品线官方核验_P2_衍生品交易所.md  衍生品交易所 Spot 边界
+  产品线官方核验_P3_CEX合约边界.md  CEX 现货 adapter 的合约支持边界
+  产品线官方核验_P4_区域现货交易所.md  区域现货交易所的合约/保证金边界
+  产品线官方核验_P5_区域现货_CEX第二批.md  区域现货 CEX 第二批产品线边界
+  产品线官方核验_P6_剩余区域现货_CEX.md  剩余区域现货 CEX 产品线边界
+  官方核验优先级.md            下一步官方文档核验顺序
+  WebSocket极速盘口能力汇总.md  10ms/20ms L1/BBO 和高速订单簿汇总
+  WebSocket官方核验_P0_第一批.md  主流交易所订单簿 WS 官方核验
+  WebSocket官方核验_P0_第二批.md  第二批订单簿 WS 官方核验
+  WebSocket官方核验_P1_第三批.md  已有 WS 证据交易所的低延迟细项
+  WebSocket官方核验_P2_区域现货交易所.md  区域现货交易所订单簿 WS 细项
+  WebSocket官方核验_P3_P2公共WS缺口交易所.md  P2 公共 WS 缺口交易所订单簿 WS 细项
+  WebSocket官方核验_P4_CEX盘口细项.md  CEX 订单簿 WS 细项
+  WebSocket官方核验_P5_衍生品链上盘口细项.md  衍生品/链上订单簿 WS 细项
+  WebSocket官方核验_P6_补充交易所盘口细项.md  补充交易所订单簿 WS 细项
   总览/                        全局矩阵、扩展计划、架构说明
   通用机制/                    密钥、订单 id、费率、对账、symbol、WS
   适配器/                      每个交易所一份 adapter 文档
@@ -58,6 +99,18 @@ config/binance_spot_example.yml
 | [exchange_gateway_remaining_venues_one_ai_one_exchange_zh.md](总览/exchange_gateway_remaining_venues_one_ai_one_exchange_zh.md) | 剩余交易所一 AI 一交易所任务拆分。 |
 | [hyperliquid_api.md](总览/hyperliquid_api.md) | Hyperliquid API 和策略集成说明。 |
 
+## 当前盘点结论
+
+自动矩阵当前覆盖 125 个 adapter endpoint mapping。它区分 `运行`、`原生`、`映射`、`离线`、`不支持` 和缺失状态；未声明产品线只代表项目当前没有证据，不直接等于交易所官方不支持。已核验过的官方结论记录在 [官方能力核验台账](官方能力核验台账.md)。
+
+第一批主流产品线核验已经确认：Binance USD-M/Options、OKX Swap/Futures/Options、Bitget Futures、Gate.io Futures/Options、MEXC Contract 是 `项目未实现`，不是交易所不支持；`binancecoinm`/`kucoinfutures`/`krakenfutures` 的现货、`coinbaseexchange` 的合约按 adapter 口径写 `交易所不支持`。
+
+当前可执行补全任务已经整理到 [交易所网关补全任务清单](交易所网关补全任务清单.md)：P0 公共订单簿 WebSocket 13 项，P0 产品线项目未实现 6 项，P1 已有 WS 结构化细项 9 项，P2 产品线项目未实现 35 项，P2 明确交易所不支持 56 项，P2 公共订单簿 WebSocket 5 项，P2 已有 WS 结构化细项 1 项，P2 明确公共 WS 不支持 12 项，P3 区域现货 WS 结构化细项 10 项，P3 CEX WS 结构化细项 12 项，P3 衍生品/链上 WS 结构化细项 12 项，P3 补充交易所 WS 结构化细项 11 项，共 182 项。尚未转成明确任务的官方资料缺口见 [剩余官方核验队列](剩余官方核验队列.md)，当前还有 346 项。
+
+按 adapter 聚合的开工入口见 [adapter 工作包索引](adapter工作包索引.md)，它会把当前实现、明确任务和剩余核验项合并到一行。
+
+跨所套利优先看 WebSocket 行情缺口：公共 WS、订单簿 channel、推流间隔、档位、sequence/checksum、snapshot 重建规则。10ms/20ms L1/BBO 和 50ms batch 属于单独优先级，详见 [WebSocket 极速盘口能力汇总](WebSocket极速盘口能力汇总.md)。只有查过官方文档后，才能把产品线缺口写成 `交易所不支持现货` 或 `交易所不支持合约`。
+
 ## 通用机制
 
 | 文档 | 用途 |
@@ -76,12 +129,16 @@ config/binance_spot_example.yml
 3. 同步更新 `crates/rustcta-exchange-gateway/src/adapters/<adapter>/endpoint_mapping.yaml`。
 4. 公共 WebSocket 行情必须补订阅方式、推流间隔、订单簿档位、sequence/checksum、snapshot 重建规则。
 5. 为每个声明支持的能力补 request spec、parser fixture、signing vector 或 WS fixture。
-6. 跑 endpoint mapping 校验和 adapter 定向测试。
+6. 重新生成 [交易所功能盘点矩阵](交易所功能盘点矩阵.md)。
+7. 跑 endpoint mapping 校验和 adapter 定向测试。
 
 ## 验证命令
 
 ```bash
 python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/binance/endpoint_mapping.yaml
+python3 scripts/generate_exchange_gateway_matrix.py
+python3 scripts/generate_exchange_gateway_audit_queue.py
+python3 scripts/generate_exchange_gateway_adapter_workpacks.py
 cargo fmt --check --package rustcta-exchange-gateway
 cargo check -p rustcta-exchange-gateway --lib --message-format short
 cargo test -p rustcta-exchange-gateway binance --lib --message-format short

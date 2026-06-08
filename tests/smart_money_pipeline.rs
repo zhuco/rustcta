@@ -1,7 +1,7 @@
 #![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
-use rustcta::smart_money::*;
+use rustcta_smart_money::*;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;

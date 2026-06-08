@@ -19,16 +19,14 @@ the best starting point when multiple AI agents are working in parallel.
   structure.
 - `industrial_cta_platform_architecture_assessment.md` - target industrial
   architecture and long-term migration direction.
-- `industrial_directory_migration_plan.md` - app/tool/strategy/runtime ownership
-  map for legacy `src/bin/*.rs` entrypoints.
-- `industrial_migration_final_gates.md` - CI gates, compatibility retirement
-  matrix, and local paper end-to-end checklist.
+- `industrial_directory_migration_plan.md` - historical app/tool/strategy/runtime
+  ownership map for retired root binary entrypoints.
+- `industrial_migration_final_gates.md` - CI gates, final root-source retirement
+  checks, and local paper end-to-end checklist.
 - `control_web_directory_migration_plan.md` - control API and Dioxus workspace
   migration boundaries.
-- `backtest_app_migration_plan.md` - `apps/backtest` and `rustcta-backtest`
-  migration plan.
-- `tools_ops_migration_plan.md` - `tools/ops` command taxonomy and legacy binary
-  migration matrix.
+- `tools_ops_migration_plan.md` - `tools/ops` command taxonomy and historical
+  migration notes.
 
 ## Current Runtime Entrypoints
 
@@ -38,27 +36,23 @@ Industrial workspace apps:
 cargo run -p rustcta-gateway --bin rustcta-gateway
 cargo run -p rustcta-control-api-app --bin rustcta-control-api
 cargo run -p rustcta-supervisor-app --bin rustcta-supervisor -- --serve --bind 127.0.0.1:18181
-cargo run -p rustcta-backtest-app --bin rustcta-backtest -- --help
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- doctor
-cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration legacy-bin-plan --target tool-ops
+cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor validate-spec --path config/supervisor/trend_report.spec.json
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- ledger validate --path logs/events.jsonl
-cargo run -p rustcta-tools-ops -- legacy-bin-plan
+cargo run -p rustcta-tools-ops -- verify-retired-src
 ```
 
-Legacy compatibility runtime:
+Retired root-source checks:
 
 ```bash
-cargo run -- --strategy spot_spot_taker_arbitrage --config config/spot_spot_taker_arbitrage.yml
-cargo run --bin <legacy-bin> -- --help
+cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
+cargo run -p rustcta-tools-ops -- verify-retired-src
 ```
 
-Legacy root binaries must remain classified while migration continues:
-
-```bash
-cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-legacy-bins --src-bin-dir src/bin
-cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
-```
+The root package, root `src/` tree, and legacy root binaries are retired. Use
+workspace apps, supervisor specs, strategy crates, and `tools/ops` commands for
+runtime entrypoints.
 
 ## Architecture And Safety
 
@@ -88,6 +82,48 @@ WebSocket market-data rules now live under `交易所网关/`.
 - `交易所网关/接口盘点维度.md` - capability dimensions for filling exchange
   docs, including product-line support and WebSocket depth/speed requirements.
 - `交易所网关/交易所接口补全文档模板.md` - per-exchange interface template.
+- `交易所网关/adapter工作包索引.md` - per-adapter work package index
+  combining current implementation, confirmed tasks, and remaining checks.
+- `交易所网关/交易所网关补全任务清单.md` - prioritized implementation
+  backlog derived from the matrix and official verification notes.
+- `交易所网关/产品线官方核验_P1_链上合约交易所.md` - product-line
+  verification for on-chain perpetual venues, Orderly profiles, and stopped
+  venues.
+- `交易所网关/产品线官方核验_P2_衍生品交易所.md` - product-line
+  verification for derivatives venues where Spot may be unsupported or merely
+  unimplemented in the project.
+- `交易所网关/产品线官方核验_P3_CEX合约边界.md` - product-line
+  verification for centralized exchanges where derivatives may be supported,
+  unsupported, or split into a separate adapter.
+- `交易所网关/产品线官方核验_P4_区域现货交易所.md` - product-line
+  verification for regional spot exchanges, margin/leveraged boundaries, and
+  standard contract unsupported markers.
+- `交易所网关/产品线官方核验_P5_区域现货_CEX第二批.md` - product-line
+  verification for the next regional spot CEX batch, including margin/perps
+  project gaps and standard contract unsupported markers.
+- `交易所网关/产品线官方核验_P6_剩余区域现货_CEX.md` - product-line
+  verification for the remaining regional spot CEX batch, clearing the current
+  product-line official-check queue into project gaps or unsupported markers.
+- `交易所网关/WebSocket极速盘口能力汇总.md` - official low-latency order-book
+  summary for 10ms/20ms L1/BBO, 50ms batch feeds, and dated rollout notes.
+- `交易所网关/WebSocket官方核验_P2_区域现货交易所.md` - official
+  WebSocket order-book details for regional spot exchanges, including push
+  interval, depth, subscription style, and sequence/rebuild risks.
+- `交易所网关/WebSocket官方核验_P3_P2公共WS缺口交易所.md` - official
+  WebSocket verification for P2 public-WS gaps, including supported feeds,
+  unsupported public-WS markers, push interval, depth, and rebuild risks.
+- `交易所网关/WebSocket官方核验_P4_CEX盘口细项.md` - official WebSocket
+  order-book details for CEX adapters with existing native/spec/payload
+  evidence, including 10ms/20ms candidates and sequence/checksum risks.
+- `交易所网关/WebSocket官方核验_P5_衍生品链上盘口细项.md` - official
+  WebSocket order-book details for derivatives, on-chain perpetual, and
+  Orderly-profile adapters, including 50ms/100ms/200ms candidates and rebuild
+  risks.
+- `交易所网关/WebSocket官方核验_P6_补充交易所盘口细项.md` - official
+  WebSocket order-book details for supplemental CEX, broker, and hybrid
+  profiles, including unsupported public-WS markers and sequence/rebuild risks.
+- `交易所网关/剩余官方核验队列.md` - generated queue of official docs still
+  needing verification before more adapter tasks can be declared.
 - `交易所网关/适配器索引.md` - Chinese index for adapter file names.
 - `交易所网关/适配器/` - one adapter document per exchange.
 

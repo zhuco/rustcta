@@ -5,6 +5,7 @@ Status: Task 8 offline-verifiable adapter for Paradex perp/options DEX scope.
 ## Scope
 
 - Products: perpetuals and options.
+- Spot: 项目未实现 Spot。Paradex 官方交易页列出 Spot Trading，当前 adapter 只接 perpetual/options scope。
 - REST base URL: `https://api.prod.paradex.trade/v1`.
 - WebSocket URL: `wss://ws.api.prod.paradex.trade/v1`.
 - Public scope: markets, order book, public WebSocket subscription payloads.
@@ -42,6 +43,16 @@ The runtime adapter advertises public REST and public WS specs. Private reads ar
 Options metadata is adapter-specific in `tests/fixtures/exchanges/paradex/markets.json`; no shared trait was expanded.
 
 WebSocket fixtures cover subscribe, unsubscribe, heartbeat ping/pong, private auth, and private order/position parser samples. Private stream disconnects require REST reconciliation over positions, open orders, and fills before live promotion.
+
+Official public order book WS uses
+`order_book.{market_symbol}.{feed_type}@15@{refresh_rate}` on
+`wss://ws.api.prod.paradex.trade/v1`. The channel is fixed at 15 levels,
+supports feed types `snapshot`, `deltas`, and `interactive`, and allows
+`refresh_rate` 50ms or 100ms. Messages include `seq_no` and update arrays; no
+checksum was found. Current project support is native but mapping still needs
+50/100ms, 15 levels, feed_type, `seq_no`, and resubscribe/rebuild fields. Source
+batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 Unsupported or deferred:
 

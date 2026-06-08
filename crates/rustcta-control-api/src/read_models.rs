@@ -4,9 +4,24 @@ use serde_json::Value;
 use crate::{
     ControlApiStateSnapshot, FeeSummaryView, FeeVenueSummary, JsonRowsView, LogEventView, LogLevel,
     LogStreamView, OpportunitiesView, RiskEventView, RiskSeverity, RiskStatus, RiskSummaryView,
-    StrategySnapshotEnvelope, StrategySnapshotSource, SymbolScannerView, SymbolsView,
-    CONTROL_API_SCHEMA_VERSION,
+    RuntimeControlReadView, StrategySnapshotEnvelope, StrategySnapshotSource, SymbolScannerView,
+    SymbolsView, CONTROL_API_SCHEMA_VERSION,
 };
+
+pub fn apply_runtime_or_legacy_snapshot(
+    snapshot: ControlApiStateSnapshot,
+    value: &Value,
+) -> ControlApiStateSnapshot {
+    if let Some(runtime_snapshot) = control_api_snapshot_from_value(value) {
+        return merge_control_api_snapshot(snapshot, runtime_snapshot);
+    }
+    if let Some(runtime_snapshot) =
+        spot_control_runtime_snapshot_from_value(snapshot.clone(), value)
+    {
+        return runtime_snapshot;
+    }
+    apply_legacy_dashboard_snapshot(snapshot, value)
+}
 
 pub fn apply_legacy_dashboard_snapshot(
     mut snapshot: ControlApiStateSnapshot,
@@ -22,8 +37,299 @@ pub fn apply_legacy_dashboard_snapshot(
     snapshot.recent_opportunities = json_rows_from_legacy_snapshot(legacy, "opportunities");
     snapshot.opportunities = opportunities_from_legacy_snapshot(legacy);
     snapshot.symbols = symbols_from_legacy_snapshot(legacy);
+    snapshot.runtime_control = runtime_control_from_legacy_snapshot(legacy);
     snapshot.strategy_snapshots = strategy_snapshots_from_legacy_snapshot(legacy);
     snapshot
+}
+
+fn control_api_snapshot_from_value(value: &Value) -> Option<ControlApiStateSnapshot> {
+    serde_json::from_value::<ControlApiStateSnapshot>(value.clone())
+        .ok()
+        .filter(|snapshot| snapshot.schema_version == CONTROL_API_SCHEMA_VERSION)
+}
+
+fn merge_control_api_snapshot(
+    base: ControlApiStateSnapshot,
+    mut runtime: ControlApiStateSnapshot,
+) -> ControlApiStateSnapshot {
+    let mut strategies = base.strategies;
+    for strategy in runtime.strategies {
+        if let Some(existing) = strategies
+            .iter_mut()
+            .find(|existing| existing.strategy_id == strategy.strategy_id)
+        {
+            *existing = strategy;
+        } else {
+            strategies.push(strategy);
+        }
+    }
+    runtime.strategies = strategies;
+
+    let mut agents = base.agents;
+    for agent in runtime.agents {
+        if let Some(existing) = agents
+            .iter_mut()
+            .find(|existing| existing.agent_id == agent.agent_id)
+        {
+            *existing = agent;
+        } else {
+            agents.push(agent);
+        }
+    }
+    runtime.agents = agents;
+    runtime
+}
+
+fn spot_control_runtime_snapshot_from_value(
+    mut snapshot: ControlApiStateSnapshot,
+    value: &Value,
+) -> Option<ControlApiStateSnapshot> {
+    let object = value.as_object()?;
+    let snapshot_id = object.get("snapshot_id").and_then(Value::as_str)?;
+    let symbol = object.get("symbol").and_then(Value::as_str)?;
+    if !object.contains_key("component_statuses") {
+        return None;
+    }
+
+    let generated_at = object
+        .get("generated_at")
+        .and_then(Value::as_str)
+        .and_then(parse_timestamp)
+        .unwrap_or(snapshot.generated_at);
+    let runtime_snapshot = secret_free_value(value);
+    let runtime_publisher = runtime_publisher_from_spot_control_snapshot(&runtime_snapshot);
+    let symbol_rules = runtime_snapshot
+        .get("symbol_rules")
+        .map(symbol_rule_rows)
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let books = runtime_snapshot
+        .get("books")
+        .map(map_or_array_values)
+        .unwrap_or_default();
+    let recent_trades = runtime_snapshot
+        .get("recent_trades")
+        .or_else(|| runtime_snapshot.get("trades"))
+        .map(map_or_array_values)
+        .unwrap_or_default();
+    let funding_rates = runtime_snapshot
+        .get("funding_rates")
+        .or_else(|| runtime_snapshot.get("funding"))
+        .map(map_or_array_values)
+        .unwrap_or_default();
+    let exchanges = runtime_snapshot
+        .get("exchange_health")
+        .map(array_values)
+        .unwrap_or_else(|| {
+            runtime_snapshot
+                .get("selected_exchanges")
+                .and_then(Value::as_array)
+                .map(|exchanges| {
+                    exchanges
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|exchange| {
+                            serde_json::json!({
+                                "exchange": exchange,
+                                "status": "selected",
+                                "source": "typed_runtime_snapshot"
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+    let inventory = runtime_snapshot
+        .get("inventory_ownership")
+        .map(array_values)
+        .unwrap_or_default();
+
+    snapshot.generated_at = generated_at;
+    snapshot.books = JsonRowsView {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        rows: books,
+    };
+    snapshot.recent_trades = JsonRowsView {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        rows: recent_trades.clone(),
+    };
+    snapshot.exchanges = JsonRowsView {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        rows: exchanges,
+    };
+    snapshot.inventory = JsonRowsView {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        rows: inventory,
+    };
+    snapshot.symbols.symbol_rules = symbol_rules;
+    snapshot.symbols.spot_control = serde_json::json!({
+        "source": "typed_runtime_snapshot",
+        "snapshot_id": snapshot_id,
+        "symbols": [{
+            "symbol": symbol,
+            "state": typed_symbol_state(&runtime_snapshot),
+            "snapshot_id": snapshot_id,
+            "generated_at": generated_at,
+        }],
+        "route_health": runtime_snapshot
+            .get("route_health")
+            .map(map_or_array_values)
+            .unwrap_or_default(),
+        "funding_rates": funding_rates,
+        "recent_trades": recent_trades,
+        "runtime_snapshots": [runtime_snapshot],
+        "runtime_publisher": runtime_publisher,
+    });
+    snapshot.strategy_snapshots.push(StrategySnapshotEnvelope {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        strategy_id: "spot-arb-local".to_string(),
+        strategy_kind: "spot_spot_taker_arbitrage".to_string(),
+        run_id: None,
+        status: None,
+        generated_at,
+        source: StrategySnapshotSource::TypedRuntimeSnapshot,
+        detail: secret_free_object([
+            ("spot_control", Some(snapshot.symbols.spot_control.clone())),
+            (
+                "runtime_publisher",
+                snapshot
+                    .symbols
+                    .spot_control
+                    .get("runtime_publisher")
+                    .cloned(),
+            ),
+        ]),
+    });
+    Some(snapshot)
+}
+
+fn runtime_publisher_from_spot_control_snapshot(snapshot: &Value) -> Value {
+    if let Some(publisher) = snapshot.get("runtime_publisher") {
+        return secret_free_value(publisher);
+    }
+    let critical_errors = array_values(snapshot.get("critical_errors").unwrap_or(&Value::Null));
+    let component_statuses =
+        array_values(snapshot.get("component_statuses").unwrap_or(&Value::Null));
+    let exchange_health = array_values(snapshot.get("exchange_health").unwrap_or(&Value::Null));
+    let route_health = array_values(snapshot.get("route_health").unwrap_or(&Value::Null));
+    let component_errors = component_statuses
+        .iter()
+        .filter(|component| component_status_is_error(component))
+        .map(|component| {
+            serde_json::json!({
+                "component": component.get("component").cloned().unwrap_or(Value::Null),
+                "message": component
+                    .get("error")
+                    .or_else(|| component.get("error_optional"))
+                    .or_else(|| component.get("message"))
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("component unhealthy".to_string())),
+            })
+        });
+    let critical_error_rows = critical_errors.iter().map(|error| {
+        serde_json::json!({
+            "message": error,
+            "severity": "critical",
+        })
+    });
+    let errors = component_errors
+        .chain(critical_error_rows)
+        .collect::<Vec<_>>();
+    let status = if !errors.is_empty() {
+        "error"
+    } else if component_statuses
+        .iter()
+        .any(|component| component_status_is_warning(component))
+    {
+        "degraded"
+    } else {
+        "ok"
+    };
+
+    serde_json::json!({
+        "status": status,
+        "running": true,
+        "source": "typed_runtime_snapshot",
+        "snapshot_id": snapshot.get("snapshot_id").cloned().unwrap_or(Value::Null),
+        "symbol": snapshot.get("symbol").cloned().unwrap_or(Value::Null),
+        "last_snapshot_at": snapshot.get("generated_at").cloned().unwrap_or(Value::Null),
+        "snapshots_generated": 1,
+        "snapshots_persisted": 1,
+        "exchanges": exchange_health,
+        "components": component_statuses,
+        "route_health": route_health,
+        "errors": errors,
+    })
+}
+
+fn component_status_is_error(component: &Value) -> bool {
+    component
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|status| {
+            matches!(
+                status.to_ascii_lowercase().as_str(),
+                "stale" | "failed" | "error" | "missing" | "critical"
+            )
+        })
+        .unwrap_or(false)
+        || component
+            .get("healthy")
+            .and_then(Value::as_bool)
+            .is_some_and(|healthy| !healthy)
+        || component
+            .get("error")
+            .or_else(|| component.get("error_optional"))
+            .is_some_and(|error| !error.is_null())
+}
+
+fn component_status_is_warning(component: &Value) -> bool {
+    component
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|status| {
+            matches!(
+                status.to_ascii_lowercase().as_str(),
+                "warning" | "warn" | "degraded"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn typed_symbol_state(snapshot: &Value) -> &'static str {
+    if snapshot
+        .get("critical_errors")
+        .and_then(Value::as_array)
+        .is_some_and(|errors| !errors.is_empty())
+    {
+        "blocked"
+    } else if snapshot
+        .get("warnings")
+        .and_then(Value::as_array)
+        .is_some_and(|warnings| !warnings.is_empty())
+    {
+        "warning"
+    } else {
+        "enabled"
+    }
+}
+
+fn symbol_rule_rows(value: &Value) -> Value {
+    Value::Array(map_or_array_values(value))
+}
+
+fn map_or_array_values(value: &Value) -> Vec<Value> {
+    match value {
+        Value::Array(values) => values.iter().map(secret_free_value).collect(),
+        Value::Object(values) => values.values().map(secret_free_value).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn array_values(value: &Value) -> Vec<Value> {
+    value
+        .as_array()
+        .map(|values| values.iter().map(secret_free_value).collect())
+        .unwrap_or_default()
 }
 
 pub fn json_rows_from_legacy_snapshot(legacy: &Value, field: &str) -> JsonRowsView {
@@ -179,6 +485,20 @@ pub fn symbols_from_legacy_snapshot(legacy: &Value) -> SymbolsView {
     }
 }
 
+pub fn runtime_control_from_legacy_snapshot(legacy: &Value) -> RuntimeControlReadView {
+    RuntimeControlReadView {
+        schema_version: CONTROL_API_SCHEMA_VERSION,
+        live_preflight_config: legacy
+            .pointer("/live_preflight/config_summary")
+            .map(secret_free_value),
+        live_preflight: legacy.get("live_preflight").map(secret_free_value),
+        small_live_gate_config: legacy
+            .pointer("/small_live_gate/config_summary")
+            .map(secret_free_value),
+        small_live_gate: legacy.get("small_live_gate").map(secret_free_value),
+    }
+}
+
 pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySnapshotEnvelope> {
     let generated_at = legacy
         .get("generated_at")
@@ -275,6 +595,10 @@ pub fn strategy_snapshots_from_legacy_snapshot(legacy: &Value) -> Vec<StrategySn
     }
 
     snapshots
+}
+
+pub fn secret_free_legacy_value(value: &Value) -> Value {
+    secret_free_value(value)
 }
 
 fn legacy_array_values(legacy: &Value, field: &str) -> Vec<Value> {
@@ -408,12 +732,20 @@ fn secret_free_object<const N: usize>(fields: [(&str, Option<Value>); N]) -> Val
 
 fn is_sensitive_legacy_field(field: &str) -> bool {
     let lower = field.to_ascii_lowercase();
+    let normalized: String = lower
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect();
     let key_parts = ["api", "key"];
     let secret_parts = ["api", "secret"];
     let raw_key_field = key_parts.join("_");
     let raw_secret_field = secret_parts.join("_");
     let pass_field = ["pass", "phrase"].join("");
     let auth_field = ["author", "ization"].join("");
+    let access_token_field = ["access", "token"].join("");
+    let refresh_token_field = ["refresh", "token"].join("");
+    let access_key_field = ["access", "key"].join("");
+    let raw_payload_field = ["raw", "payload"].join("");
 
     lower == raw_key_field
         || lower == raw_secret_field
@@ -423,4 +755,14 @@ fn is_sensitive_legacy_field(field: &str) -> bool {
         || lower == "token"
         || lower == "access_token"
         || lower == "refresh_token"
+        || lower == "raw_payload"
+        || lower == "raw"
+        || normalized == "apikey"
+        || normalized == "apisecret"
+        || normalized == pass_field
+        || normalized == auth_field
+        || normalized == access_token_field
+        || normalized == refresh_token_field
+        || normalized == access_key_field
+        || normalized == raw_payload_field
 }

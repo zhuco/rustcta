@@ -1,7 +1,7 @@
 # Symbol Management
 
 RustCTA keeps the existing market symbol utilities, and adds a unified exchange symbol registry in
-`src/exchanges/symbol_registry.rs` for Spot and Perpetual order validation.
+`retired exchange tree/symbol_registry.rs` for Spot and Perpetual order validation.
 
 `SymbolKey` is keyed by:
 

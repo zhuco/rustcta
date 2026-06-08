@@ -67,6 +67,15 @@ Unsupported:
 - Private WebSocket live auth.
 - Batch place/cancel. Native cancel-all is spec-only.
 
+## Official WebSocket Order Book Detail
+
+Arkham Exchange official material confirms a RESTful HTTP API and a Websocket
+API with WebSocket request limits, but the publicly accessible pages reviewed in
+this batch did not expose stable order-book channel, interval, depth,
+sequence/checksum, or subscribe payload details. Keep public WS as spec-only and
+require the full Exchange API reference before runtime promotion. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 ## Validation
 
 ```bash

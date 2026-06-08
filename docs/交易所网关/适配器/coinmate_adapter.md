@@ -31,11 +31,14 @@ Task A-16 adds a conservative Coinmate gateway adapter for European spot markets
 
 ## Unsupported Boundary
 
-- Futures, perpetuals, margin, leverage, positions, funding, mark price, open interest, and risk tiers are unsupported.
+- Futures, perpetuals, options, margin, leverage, positions, funding, mark price, open interest, and risk tiers are `交易所不支持合约` under the current official API/product scope.
 - Withdrawals, transfers, bank-wire withdrawal, deposit addresses, and fiat movement are outside the trading gateway.
 - Stop-loss and hidden order parameters are unsupported because the official docs say those fields were removed/disabled.
 - Native batch place and list batch cancel are unsupported; `cancelAllOpenOrders` is treated as native cancel-all only.
 - WebSocket order book has no documented sequence/checksum contract, so REST order-book snapshot is the reconciliation fallback.
+- Official public WebSocket exposes `order_book-{PAIR}` through the Coinmate pushpin demo, but no fixed push interval or depth parameter was found in the reviewed docs.
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。
 
 ## Verification
 

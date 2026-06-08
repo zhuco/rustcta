@@ -4,8 +4,9 @@
 
 use chrono::{DateTime, Utc};
 use rustcta_event_ledger::{
-    AssetBalanceRecord, BalanceSnapshotRecord, EventIdentity, EventKind, FillLedgerRecord,
-    LedgerEvent, LedgerPayload, LedgerWriter, OrderLifecycleRecord,
+    AssetBalanceRecord, AuditActor, AuditActorType, AuditOutcome, AuditRecord,
+    BalanceSnapshotRecord, EventIdentity, EventKind, FillLedgerRecord, LedgerEvent, LedgerPayload,
+    LedgerWriter, OrderLifecycleRecord,
 };
 use rustcta_exchange_api::{
     CancelAllOrdersRequest, CancelOrderRequest, PlaceOrderRequest, RequestContext, SymbolScope,
@@ -17,11 +18,13 @@ use rustcta_exchange_gateway::{
     GATEWAY_PROTOCOL_SCHEMA_VERSION,
 };
 use rustcta_execution_api::{
-    CancelAck, CancelAllAck, CancelAllCommand, CancelCommand, ExecutionApiError,
-    ExecutionDecisionOutcome, ExecutionMutationKind, FeeModelDecision, FillEvent,
-    IdempotencyDecision, LiveDryRunDecision, MutationIdentity, OrderAck, OrderCommand, OrderState,
-    ReconciliationEvent, RejectionDecision, ReservationDecision, RiskDecision, RiskDecisionEvent,
-    EXECUTION_API_SCHEMA_VERSION,
+    BundleSubmissionPath, BundleSubmitAck, BundleSubmitCommand, CancelAck, CancelAllAck,
+    CancelAllCommand, CancelCommand, ExecutionApiError, ExecutionDecisionOutcome,
+    ExecutionFeeAssetMode, ExecutionFeeRole, ExecutionFeeSource, ExecutionMutationKind,
+    FeeEstimate, FeeModelDecision, FeeRateSnapshot, FillEvent, IdempotencyDecision,
+    LiveDryRunDecision, MutationIdentity, NormalizedUserStreamEvent, OrderAck, OrderCommand,
+    OrderReconciliationSummary, OrderState, ReconciliationEvent, RejectionDecision,
+    ReservationDecision, RiskDecision, RiskDecisionEvent, EXECUTION_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, ExchangeBalance, OrderSide, OrderStatus, PositionSide, RunId, TenantId,
@@ -668,6 +671,60 @@ impl<G> ExecutionRouter<G> {
             .await?;
         Ok(())
     }
+
+    pub async fn record_order_reconciliation(
+        &self,
+        event: OrderReconciliationSummary,
+    ) -> Result<(), ExecutionRouterError> {
+        event.validate()?;
+        let Some(ledger) = &self.ledger else {
+            return Ok(());
+        };
+        let mut identity = EventIdentity::new(
+            event.tenant_id.clone(),
+            "rustcta-execution-router",
+            event.reconciled_at,
+        )
+        .with_account(event.account_id.clone());
+        if let (Some(strategy_id), Some(run_id)) = (event.strategy_id.clone(), event.run_id.clone())
+        {
+            identity = identity.with_strategy_run(strategy_id, run_id);
+        }
+        if let Some(client_order_id) = &event.client_order_id {
+            identity = identity.with_command(client_order_id.clone());
+        }
+        ledger
+            .append(LedgerEvent::order_reconciliation(identity, event))
+            .await?;
+        Ok(())
+    }
+
+    pub async fn record_user_stream_event(
+        &self,
+        event: NormalizedUserStreamEvent,
+    ) -> Result<(), ExecutionRouterError> {
+        event.validate()?;
+        let Some(ledger) = &self.ledger else {
+            return Ok(());
+        };
+        let mut identity = EventIdentity::new(
+            event.tenant_id.clone(),
+            "rustcta-execution-router",
+            event.received_at,
+        )
+        .with_account(event.account_id.clone());
+        if let (Some(strategy_id), Some(run_id)) = (event.strategy_id.clone(), event.run_id.clone())
+        {
+            identity = identity.with_strategy_run(strategy_id, run_id);
+        }
+        if let Some(event_id) = &event.event_id {
+            identity = identity.with_correlation_id(event_id.clone());
+        }
+        ledger
+            .append(LedgerEvent::user_stream_event(identity, event))
+            .await?;
+        Ok(())
+    }
 }
 
 impl<G> ExecutionRouter<G>
@@ -680,18 +737,21 @@ where
     ) -> Result<RoutedExecutionAck, ExecutionRouterError> {
         command.identity.validate()?;
         rustcta_event_ledger::reject_secret_fields(&command)?;
+        self.append_routed_command_event(&command).await?;
         if matches!(
             self.config.mode,
             RouterMode::DryRun | RouterMode::LiveDryRun
         ) {
-            return Ok(RoutedExecutionAck {
+            let ack = RoutedExecutionAck {
                 identity: command.identity,
                 accepted: false,
                 dry_run: true,
                 payload: command.payload,
                 message: Some("execution router dry-run: gateway mutation not called".to_string()),
                 acknowledged_at: Utc::now(),
-            });
+            };
+            self.append_routed_ack_event(&ack).await?;
+            return Ok(ack);
         }
 
         let response: GatewayResponse = self
@@ -706,14 +766,67 @@ where
             })
             .await?;
 
-        Ok(RoutedExecutionAck {
+        let ack = RoutedExecutionAck {
             identity: command.identity,
             accepted: response.accepted,
             dry_run: false,
             payload: response.payload,
             message: response.error,
             acknowledged_at: response.responded_at,
-        })
+        };
+        self.append_routed_ack_event(&ack).await?;
+        Ok(ack)
+    }
+
+    async fn append_routed_command_event(
+        &self,
+        command: &RoutedExecutionCommand,
+    ) -> Result<(), ExecutionRouterError> {
+        let Some(ledger) = &self.ledger else {
+            return Ok(());
+        };
+        let mut record = AuditRecord::new(
+            event_identity_for_routed(&command.identity, command.requested_at),
+            AuditActor::new(AuditActorType::ExecutionRouter, "rustcta-execution-router"),
+            format!("execution.{}", command.operation),
+            AuditOutcome::Accepted,
+        );
+        record.message = Some("routed execution mutation requested".to_string());
+        record.metadata = serde_json::json!({
+            "operation": command.operation,
+            "payload": command.payload,
+            "requested_at": command.requested_at
+        });
+        ledger.append(LedgerEvent::operator_command(record)).await?;
+        Ok(())
+    }
+
+    async fn append_routed_ack_event(
+        &self,
+        ack: &RoutedExecutionAck,
+    ) -> Result<(), ExecutionRouterError> {
+        let Some(ledger) = &self.ledger else {
+            return Ok(());
+        };
+        let mut record = AuditRecord::new(
+            event_identity_for_routed(&ack.identity, ack.acknowledged_at),
+            AuditActor::new(AuditActorType::ExecutionRouter, "rustcta-execution-router"),
+            "execution.routed_ack",
+            if ack.accepted {
+                AuditOutcome::Succeeded
+            } else {
+                AuditOutcome::Rejected
+            },
+        );
+        record.message = ack.message.clone();
+        record.metadata = serde_json::json!({
+            "accepted": ack.accepted,
+            "dry_run": ack.dry_run,
+            "payload": ack.payload,
+            "acknowledged_at": ack.acknowledged_at
+        });
+        ledger.append(LedgerEvent::audit(record)).await?;
+        Ok(())
     }
 }
 
@@ -721,6 +834,68 @@ impl<G> ExecutionRouter<G>
 where
     G: GatewayClient,
 {
+    pub async fn submit_order_bundle(
+        &self,
+        command: BundleSubmitCommand,
+    ) -> Result<BundleSubmitAck, ExecutionRouterError> {
+        command.validate()?;
+        rustcta_event_ledger::reject_secret_fields(&command)?;
+
+        let submission_path = if matches!(
+            self.config.mode,
+            RouterMode::DryRun | RouterMode::LiveDryRun
+        ) {
+            BundleSubmissionPath::DryRun
+        } else {
+            BundleSubmissionPath::GatewaySequential
+        };
+
+        if let Some(existing_command_id) = self
+            .record_idempotency_decision(
+                &command.identity,
+                &command.bundle_id,
+                ExecutionMutationKind::SubmitBundle,
+            )
+            .await?
+        {
+            let message =
+                format!("duplicate idempotency_key already used by command {existing_command_id}");
+            self.append_rejection_event(
+                &command.identity,
+                &command.bundle_id,
+                ExecutionMutationKind::Idempotency,
+                message.clone(),
+            )
+            .await?;
+            let order_acks = command
+                .legs
+                .iter()
+                .map(|leg| OrderAck::rejected(&leg.command, message.clone(), Utc::now()))
+                .collect();
+            let ack =
+                BundleSubmitAck::from_order_acks(&command, submission_path, order_acks, Utc::now());
+            self.append_bundle_ack_event(&command, &ack).await?;
+            return Ok(ack);
+        }
+
+        let mut order_acks = Vec::with_capacity(command.legs.len());
+        for leg in &command.legs {
+            match self.place_order(leg.command.clone()).await {
+                Ok(ack) => order_acks.push(ack),
+                Err(error) => order_acks.push(OrderAck::rejected(
+                    &leg.command,
+                    error.to_string(),
+                    Utc::now(),
+                )),
+            }
+        }
+
+        let ack =
+            BundleSubmitAck::from_order_acks(&command, submission_path, order_acks, Utc::now());
+        self.append_bundle_ack_event(&command, &ack).await?;
+        Ok(ack)
+    }
+
     pub async fn place_order(
         &self,
         command: OrderCommand,
@@ -1221,6 +1396,14 @@ where
         let Some(ledger) = &self.ledger else {
             return Ok(());
         };
+        let decided_at = Utc::now();
+        let role = if command.post_only {
+            ExecutionFeeRole::Maker
+        } else {
+            ExecutionFeeRole::Taker
+        };
+        let rate = default_fee_rate_snapshot(command, decided_at);
+        let estimate = FeeEstimate::from_rate(&rate, role, order_notional(command), decided_at)?;
         let decision = FeeModelDecision {
             schema_version: EXECUTION_API_SCHEMA_VERSION,
             identity: command.identity.clone(),
@@ -1228,11 +1411,11 @@ where
             exchange_id: command.exchange_id.clone(),
             market_type: command.market_type,
             canonical_symbol: Some(command.canonical_symbol.clone()),
-            maker_fee_rate: None,
-            taker_fee_rate: None,
-            estimated_fee_asset: None,
-            estimated_fee_amount: None,
-            decided_at: Utc::now(),
+            maker_fee_rate: Some(rate.maker_fee_rate),
+            taker_fee_rate: Some(rate.taker_fee_rate),
+            estimated_fee_asset: estimate.fee_asset,
+            estimated_fee_amount: Some(estimate.estimated_fee_amount),
+            decided_at,
         };
         decision.validate()?;
         ledger
@@ -1300,6 +1483,23 @@ where
             .append(LedgerEvent::idempotency_decision(
                 event_identity_for_identity(identity, command_id),
                 decision,
+            ))
+            .await?;
+        Ok(())
+    }
+
+    async fn append_bundle_ack_event(
+        &self,
+        command: &BundleSubmitCommand,
+        ack: &BundleSubmitAck,
+    ) -> Result<(), ExecutionRouterError> {
+        let Some(ledger) = &self.ledger else {
+            return Ok(());
+        };
+        ledger
+            .append(LedgerEvent::bundle(
+                event_identity_for_bundle(command),
+                ack.clone(),
             ))
             .await?;
         Ok(())
@@ -1824,6 +2024,43 @@ fn event_identity_for_identity(identity: &MutationIdentity, command_id: &str) ->
     .with_idempotency_key(identity.idempotency_key.clone())
 }
 
+fn event_identity_for_bundle(command: &BundleSubmitCommand) -> EventIdentity {
+    let mut identity = EventIdentity::new(
+        command.identity.tenant_id.clone(),
+        "rustcta-execution-router",
+        command.requested_at,
+    )
+    .with_account(command.identity.account_id.clone())
+    .with_strategy_run(
+        command.identity.strategy_id.clone(),
+        command.identity.run_id.clone(),
+    )
+    .with_command(command.bundle_id.clone())
+    .with_idempotency_key(command.identity.idempotency_key.clone());
+    if let Some(correlation_id) = &command.correlation_id {
+        identity = identity.with_correlation_id(correlation_id.clone());
+    }
+    identity
+}
+
+fn event_identity_for_routed(
+    identity: &ExecutionIdentity,
+    occurred_at: DateTime<Utc>,
+) -> EventIdentity {
+    EventIdentity::new(
+        TenantId::unchecked(identity.tenant_id.clone()),
+        "rustcta-execution-router",
+        occurred_at,
+    )
+    .with_account(AccountId::unchecked(identity.account_id.clone()))
+    .with_strategy_run(
+        rustcta_types::StrategyId::unchecked(identity.strategy_id.clone()),
+        RunId::unchecked(identity.run_id.clone()),
+    )
+    .with_command(identity.command_id.clone())
+    .with_idempotency_key(identity.idempotency_key.clone())
+}
+
 fn event_identity_for_fill(event: &FillEvent) -> EventIdentity {
     let mut identity = EventIdentity::new(
         event.tenant_id.clone(),
@@ -1933,6 +2170,31 @@ fn order_notional(command: &OrderCommand) -> f64 {
         .unwrap_or(command.quantity)
 }
 
+fn default_fee_rate_snapshot(
+    command: &OrderCommand,
+    observed_at: DateTime<Utc>,
+) -> FeeRateSnapshot {
+    let (maker_fee_rate, taker_fee_rate) = match command.market_type {
+        rustcta_types::MarketType::Spot => (0.0010, 0.0010),
+        rustcta_types::MarketType::Perpetual | rustcta_types::MarketType::Futures => {
+            (0.0002, 0.0005)
+        }
+        rustcta_types::MarketType::Margin | rustcta_types::MarketType::Option => (0.0010, 0.0010),
+    };
+    FeeRateSnapshot {
+        schema_version: EXECUTION_API_SCHEMA_VERSION,
+        exchange_id: command.exchange_id.clone(),
+        market_type: command.market_type,
+        canonical_symbol: Some(command.canonical_symbol.clone()),
+        maker_fee_rate,
+        taker_fee_rate,
+        fee_asset: Some(command.canonical_symbol.quote_asset().to_string()),
+        fee_asset_mode: ExecutionFeeAssetMode::Quote,
+        source: ExecutionFeeSource::Fallback,
+        observed_at,
+    }
+}
+
 fn risk_decision_id(command_id: &str, decided_at: DateTime<Utc>) -> String {
     format!(
         "{command_id}:{}",
@@ -2030,12 +2292,16 @@ fn execution_order_state(status: OrderStatus) -> OrderState {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use rustcta_event_ledger::{InMemoryLedger, LedgerReader};
+    use rustcta_event_ledger::{InMemoryLedger, LedgerPayload, LedgerReader};
     use rustcta_exchange_gateway::{
         CredentialBoundary, GatewayIdentity, GatewayMode, GatewayStatus, InProcessGatewayClient,
         MockExchangeGateway,
     };
-    use rustcta_execution_api::{CancellationIds, MutationIdentity};
+    use rustcta_execution_api::{
+        BundleLegKind, BundleOrderLeg, CancellationIds, MutationIdentity,
+        NormalizedUserStreamEvent, NormalizedUserStreamEventKind, OrderReconciliationOutcome,
+        OrderReconciliationSummary, ReconciliationSeverity, ReconciliationTrigger,
+    };
     use rustcta_types::{
         AccountId, AssetBalance, CanonicalSymbol, ExchangeId, ExchangeSymbol, LiquidityRole,
         MarketType, OrderSide, OrderType, PositionSide, RunId, SchemaVersion, StrategyId, TenantId,
@@ -2094,6 +2360,47 @@ mod tests {
 
         assert!(!ack.accepted);
         assert!(ack.dry_run);
+    }
+
+    #[tokio::test]
+    async fn routed_legacy_mutation_should_append_command_and_ack_to_ledger() {
+        let ledger = Arc::new(InMemoryLedger::new());
+        let router = ExecutionRouter::with_ledger(
+            ExecutionRouterConfig::dry_run(),
+            MockGateway,
+            ledger.clone(),
+        );
+
+        let ack = router
+            .route(RoutedExecutionCommand {
+                identity: ExecutionIdentity {
+                    tenant_id: "tenant".to_string(),
+                    account_id: "account".to_string(),
+                    strategy_id: "strategy".to_string(),
+                    run_id: "run".to_string(),
+                    command_id: "cmd".to_string(),
+                    idempotency_key: "idem".to_string(),
+                    risk_profile_id: "risk".to_string(),
+                },
+                operation: "place_order".to_string(),
+                payload: serde_json::json!({
+                    "client_order_id": "client-1",
+                    "symbol": "BTCUSDT"
+                }),
+                requested_at: Utc::now(),
+            })
+            .await
+            .expect("dry-run ack");
+
+        assert!(!ack.accepted);
+        let events = ledger.replay(None).await.expect("replay events");
+        assert_eq!(
+            events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+            vec![EventKind::OperatorCommandEvent, EventKind::AuditEvent]
+        );
+        assert!(events
+            .iter()
+            .all(|event| event.identity.command_id.as_deref() == Some("cmd")));
     }
 
     #[tokio::test]
@@ -2160,6 +2467,99 @@ mod tests {
             .expect("cancel-all ack");
         assert!(cancel_all_ack.accepted);
         assert_eq!(cancel_all_ack.cancelled_orders, 1);
+    }
+
+    #[tokio::test]
+    async fn dry_run_bundle_should_route_legs_and_append_bundle_event_to_ledger() {
+        let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+            "mock-gateway",
+            [exchange_id()],
+        ));
+        let client = InProcessGatewayClient::new(gateway);
+        let ledger = Arc::new(InMemoryLedger::new());
+        let router =
+            ExecutionRouter::with_ledger(ExecutionRouterConfig::dry_run(), client, ledger.clone());
+        let bundle = bundle_command("bundle-1", "idem-bundle-1");
+
+        let ack = router
+            .submit_order_bundle(bundle)
+            .await
+            .expect("bundle ack");
+
+        assert_eq!(ack.submission_path, BundleSubmissionPath::DryRun);
+        assert_eq!(ack.order_acks.len(), 2);
+        assert!(ack.requires_reconcile);
+        let events = ledger.replay(None).await.expect("replay events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == EventKind::OrderCommandEvent)
+                .count(),
+            2
+        );
+        assert!(events
+            .iter()
+            .any(|event| event.kind == EventKind::BundleEvent));
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            LedgerPayload::IdempotencyDecision(decision)
+                if decision.mutation_kind == ExecutionMutationKind::SubmitBundle
+                    && decision.command_id == "bundle-1"
+        )));
+    }
+
+    #[tokio::test]
+    async fn bundle_idempotency_enforcement_should_reject_duplicate_before_leg_mutation() {
+        let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+            "mock-gateway",
+            [exchange_id()],
+        ));
+        let client = InProcessGatewayClient::new(gateway);
+        let ledger = Arc::new(InMemoryLedger::new());
+        let router = ExecutionRouter::with_ledger(
+            ExecutionRouterConfig {
+                mode: RouterMode::DryRun,
+                enforce_idempotency: true,
+            },
+            client,
+            ledger.clone(),
+        );
+
+        let first = bundle_command("bundle-1", "idem-bundle-1");
+        let second = first.clone();
+
+        let first_ack = router
+            .submit_order_bundle(first)
+            .await
+            .expect("first bundle ack");
+        let second_ack = router
+            .submit_order_bundle(second)
+            .await
+            .expect("second bundle ack");
+
+        assert_eq!(first_ack.order_acks.len(), 2);
+        assert!(first_ack.requires_reconcile);
+        assert!(second_ack.order_acks.iter().all(|ack| !ack.accepted));
+        assert!(second_ack
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("requires reconciliation"));
+
+        let events = ledger.replay(None).await.expect("replay events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == EventKind::OrderCommandEvent)
+                .count(),
+            2
+        );
+        assert!(events.iter().any(|event| matches!(
+            &event.payload,
+            LedgerPayload::Rejection(decision)
+                if decision.mutation_kind == ExecutionMutationKind::Idempotency
+                    && decision.command_id == "bundle-1"
+        )));
     }
 
     #[tokio::test]
@@ -2230,6 +2630,17 @@ mod tests {
         assert!(events
             .iter()
             .all(|event| event.identity.command_id.is_some()));
+        let fee_event = events
+            .iter()
+            .find(|event| event.kind == EventKind::FeeModelDecisionEvent)
+            .expect("fee model event");
+        assert!(matches!(
+            &fee_event.payload,
+            LedgerPayload::FeeModelDecision(decision)
+                if decision.maker_fee_rate.is_some()
+                    && decision.taker_fee_rate.is_some()
+                    && decision.estimated_fee_amount.is_some()
+        ));
     }
 
     #[tokio::test]
@@ -2336,6 +2747,95 @@ mod tests {
                 EventKind::ReconciliationEvent,
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn router_should_record_order_reconciliation_summary() {
+        let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+            "mock-gateway",
+            [exchange_id()],
+        ));
+        let client = InProcessGatewayClient::new(gateway);
+        let ledger = Arc::new(InMemoryLedger::new());
+        let router =
+            ExecutionRouter::with_ledger(ExecutionRouterConfig::live(), client, ledger.clone());
+
+        router
+            .record_order_reconciliation(OrderReconciliationSummary {
+                schema_version: EXECUTION_API_SCHEMA_VERSION,
+                tenant_id: TenantId::new("tenant").expect("tenant id"),
+                account_id: AccountId::new("account").expect("account id"),
+                strategy_id: Some(StrategyId::new("strategy").expect("strategy id")),
+                run_id: Some(RunId::new("run").expect("run id")),
+                exchange_id: exchange_id(),
+                market_type: MarketType::Spot,
+                canonical_symbol: Some(canonical_symbol()),
+                exchange_symbol: Some(exchange_symbol()),
+                client_order_id: Some("cli-typed-1".to_string()),
+                exchange_order_id: Some("paper-1".to_string()),
+                trigger: ReconciliationTrigger::PrivateStreamDisconnected,
+                outcome: OrderReconciliationOutcome::Filled,
+                severity: ReconciliationSeverity::Info,
+                attempts: 1,
+                message: "filled during reconciliation".to_string(),
+                reconciled_at: Utc::now(),
+            })
+            .await
+            .expect("record order reconciliation");
+
+        let events = ledger.replay(None).await.expect("replay events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::ReconciliationEvent);
+        assert!(matches!(
+            &events[0].payload,
+            LedgerPayload::OrderReconciliation(summary)
+                if summary.client_order_id.as_deref() == Some("cli-typed-1")
+        ));
+    }
+
+    #[tokio::test]
+    async fn router_should_record_normalized_user_stream_events() {
+        let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+            "mock-gateway",
+            [exchange_id()],
+        ));
+        let client = InProcessGatewayClient::new(gateway);
+        let ledger = Arc::new(InMemoryLedger::new());
+        let router =
+            ExecutionRouter::with_ledger(ExecutionRouterConfig::live(), client, ledger.clone());
+        let fill = fill_event();
+        let event = NormalizedUserStreamEvent {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            tenant_id: fill.tenant_id.clone(),
+            account_id: fill.account_id.clone(),
+            strategy_id: Some(fill.strategy_id.clone()),
+            run_id: Some(fill.run_id.clone()),
+            exchange_id: fill.exchange_id.clone(),
+            market_type: fill.market_type,
+            canonical_symbol: Some(fill.canonical_symbol.clone()),
+            exchange_symbol: Some(fill.exchange_symbol.clone()),
+            event_id: Some("user-stream-event-1".to_string()),
+            exchange_sequence: Some(7),
+            received_at: fill.received_at,
+            kind: NormalizedUserStreamEventKind::Fill(fill),
+            raw: None,
+        };
+
+        router
+            .record_user_stream_event(event)
+            .await
+            .expect("record user stream event");
+
+        let events = ledger.replay(None).await.expect("replay events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::UserStreamEvent);
+        assert!(matches!(
+            &events[0].payload,
+            LedgerPayload::UserStream(NormalizedUserStreamEvent {
+                event_id: Some(event_id),
+                ..
+            }) if event_id == "user-stream-event-1"
+        ));
     }
 
     #[tokio::test]
@@ -2587,6 +3087,39 @@ mod tests {
             exchange_symbol(),
             CancellationIds::by_client_order_id("cli-typed-1"),
         )
+    }
+
+    fn bundle_command(bundle_id: &str, bundle_idempotency_key: &str) -> BundleSubmitCommand {
+        let mut bundle_identity = identity();
+        bundle_identity.idempotency_key = bundle_idempotency_key.to_string();
+        let mut first = order_command();
+        first.identity.idempotency_key = format!("{bundle_idempotency_key}-leg-1");
+        first.source_intent_id = Some(bundle_id.to_string());
+        let mut second = order_command();
+        second.command_id = format!("{bundle_id}-cmd-order-2");
+        second.client_order_id = format!("{bundle_id}-cli-typed-2");
+        second.identity.idempotency_key = format!("{bundle_idempotency_key}-leg-2");
+        second.source_intent_id = Some(bundle_id.to_string());
+        BundleSubmitCommand {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            identity: bundle_identity,
+            bundle_id: bundle_id.to_string(),
+            opportunity_id: Some(format!("{bundle_id}-opportunity")),
+            legs: vec![
+                BundleOrderLeg {
+                    leg_id: "long".to_string(),
+                    leg_kind: BundleLegKind::Long,
+                    command: first,
+                },
+                BundleOrderLeg {
+                    leg_id: "short".to_string(),
+                    leg_kind: BundleLegKind::Short,
+                    command: second,
+                },
+            ],
+            correlation_id: Some(format!("{bundle_id}-corr")),
+            requested_at: Utc::now(),
+        }
     }
 
     fn identity() -> MutationIdentity {

@@ -3,6 +3,10 @@
 Task 11 scope: `coinex` is Spot-only. The adapter normalizes symbols to compact
 uppercase venue symbols (`BTC/USDT` -> `BTCUSDT`) for REST and WebSocket specs.
 
+Futures is 项目未实现, not `交易所不支持合约`: CoinEx official API v2
+documents separate Spot and Futures REST/WebSocket modules. Current `coinex`
+adapter only maps Spot.
+
 ## Coverage
 
 | Area | Status |
@@ -17,6 +21,10 @@ uppercase venue symbols (`BTC/USDT` -> `BTCUSDT`) for REST and WebSocket specs.
 | Pagination | Open orders and fills declare limit pagination with max 1000 |
 | Reconciliation | Query order after unknown place/cancel; REST snapshot after WS order book gap |
 | Batch | Place and cancel are composed sequential/non-atomic with partial failure, max 10 items |
+
+## Public WebSocket Order Book
+
+Official Spot WS supports `depth.subscribe` on `wss://socket.coinex.com/v2/spot`. The depth feed can be full or incremental, pushes roughly every 200ms when changed, sends full market depth around every 1 minute, supports limit 5/10/20/50, and carries a signed 32-bit CRC32 checksum. Implementation should structure `market_list`, limit, merge interval, `is_full`, and checksum verification before relying on the feed for arbitrage.
 
 ## Safety Boundary
 

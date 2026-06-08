@@ -21,6 +21,7 @@ trading or production stream runtime.
 ## Product Scope
 
 - Declared market types: `MarketType::Perpetual`, `MarketType::Option`.
+- Spot: 交易所不支持现货。OX.FUN 官方主线是 perpetual swaps/options-style scope，未见共享 Spot 订单生命周期。
 - OX.FUN documents WebSocket market metadata, depth diff/snapshot flow, and
   authenticated WebSocket order commands. The current adapter keeps these as
   parser/request-spec fixtures until a live resync task verifies sequencing and

@@ -164,6 +164,44 @@ impl GatewayProtocolRequest {
                 validate_exchange_schema(request.schema_version)?;
                 self.validate_context(&request.context)?;
             }
+            GatewayRequestPayload::GetSymbolAccountConfig(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+            }
+            GatewayRequestPayload::SetLeverage(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+                if request.leverage == 0 {
+                    return Err(GatewayError::Rejected(
+                        "set_leverage requires leverage greater than zero".to_string(),
+                    ));
+                }
+            }
+            GatewayRequestPayload::SetPositionMode(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+            }
+            GatewayRequestPayload::ClosePosition(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+                if request.client_order_id.trim().is_empty() {
+                    return Err(GatewayError::Rejected(
+                        "close_position requires client_order_id".to_string(),
+                    ));
+                }
+            }
+            GatewayRequestPayload::SetCountdownCancelAll(request) => {
+                validate_exchange_schema(request.schema_version)?;
+                self.validate_context(&request.context)?;
+                if let Some(symbol) = &request.symbol {
+                    if symbol.exchange != request.exchange {
+                        return Err(GatewayError::Rejected(
+                            "set_countdown_cancel_all symbol exchange does not match request exchange"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
             GatewayRequestPayload::SubscribeBooks(request) => {
                 if request.schema_version != GATEWAY_PROTOCOL_SCHEMA_VERSION {
                     return Err(schema_rejected(request.schema_version));

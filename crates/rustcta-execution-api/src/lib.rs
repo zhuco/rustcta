@@ -430,10 +430,281 @@ pub struct CancelAllAck {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ExecutionFeeRole {
+    Maker,
+    Taker,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionFeeSource {
+    ExchangeApi,
+    ConfigDefault,
+    SymbolOverride,
+    VipOverride,
+    PlatformTokenDiscount,
+    Fallback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionFeeAssetMode {
+    Quote,
+    Base,
+    PlatformToken,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeeRateSnapshot {
+    pub schema_version: u16,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub maker_fee_rate: f64,
+    pub taker_fee_rate: f64,
+    pub fee_asset: Option<String>,
+    pub fee_asset_mode: ExecutionFeeAssetMode,
+    pub source: ExecutionFeeSource,
+    pub observed_at: DateTime<Utc>,
+}
+
+impl FeeRateSnapshot {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        validate_finite_f64("maker_fee_rate", self.maker_fee_rate)?;
+        validate_finite_f64("taker_fee_rate", self.taker_fee_rate)
+    }
+
+    pub fn rate_for_role(&self, role: ExecutionFeeRole) -> f64 {
+        match role {
+            ExecutionFeeRole::Maker => self.maker_fee_rate,
+            ExecutionFeeRole::Taker => self.taker_fee_rate,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeeEstimate {
+    pub schema_version: u16,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub role: ExecutionFeeRole,
+    pub notional: f64,
+    pub fee_rate: f64,
+    pub fee_asset: Option<String>,
+    pub fee_asset_mode: ExecutionFeeAssetMode,
+    pub estimated_fee_amount: f64,
+    pub source: ExecutionFeeSource,
+    pub estimated_at: DateTime<Utc>,
+}
+
+impl FeeEstimate {
+    pub fn from_rate(
+        rate: &FeeRateSnapshot,
+        role: ExecutionFeeRole,
+        notional: f64,
+        estimated_at: DateTime<Utc>,
+    ) -> Result<Self> {
+        rate.validate()?;
+        validate_positive_or_zero_f64("notional", notional)?;
+        let fee_rate = rate.rate_for_role(role);
+        validate_finite_f64("fee_rate", fee_rate)?;
+        Ok(Self {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            exchange_id: rate.exchange_id.clone(),
+            market_type: rate.market_type,
+            canonical_symbol: rate.canonical_symbol.clone(),
+            role,
+            notional,
+            fee_rate,
+            fee_asset: rate.fee_asset.clone(),
+            fee_asset_mode: rate.fee_asset_mode,
+            estimated_fee_amount: notional.max(0.0) * fee_rate,
+            source: rate.source,
+            estimated_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleLegKind {
+    Long,
+    Short,
+    Maker,
+    Taker,
+    Hedge,
+    CloseLong,
+    CloseShort,
+    EmergencyCloseLong,
+    EmergencyCloseShort,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleSubmissionPath {
+    GatewaySequential,
+    DryRun,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleExecutionStatus {
+    Submitted,
+    Accepted,
+    PartiallyFilled,
+    Filled,
+    RequiresReconcile,
+    OneSidedExposure,
+    Rejected,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BundleOrderLeg {
+    pub leg_id: String,
+    pub leg_kind: BundleLegKind,
+    pub command: OrderCommand,
+}
+
+impl BundleOrderLeg {
+    pub fn validate(&self, bundle_id: &str) -> Result<()> {
+        validate_required_text("leg_id", &self.leg_id)?;
+        self.command.validate()?;
+        if self.command.source_intent_id.as_deref() != Some(bundle_id) {
+            return Err(ExecutionApiError::Validation(format!(
+                "bundle leg {} source_intent_id must match bundle_id",
+                self.leg_id
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BundleSubmitCommand {
+    pub schema_version: u16,
+    #[serde(flatten)]
+    pub identity: MutationIdentity,
+    pub bundle_id: String,
+    pub opportunity_id: Option<String>,
+    pub legs: Vec<BundleOrderLeg>,
+    pub correlation_id: Option<String>,
+    pub requested_at: DateTime<Utc>,
+}
+
+impl HasMutationIdentity for BundleSubmitCommand {
+    fn identity(&self) -> &MutationIdentity {
+        &self.identity
+    }
+}
+
+impl BundleSubmitCommand {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        self.identity.validate()?;
+        validate_required_text("bundle_id", &self.bundle_id)?;
+        if self.legs.len() != 2 {
+            return Err(ExecutionApiError::Validation(
+                "bundle submit requires exactly two legs".to_string(),
+            ));
+        }
+        let mut leg_ids = std::collections::HashSet::new();
+        let mut client_order_ids = std::collections::HashSet::new();
+        for leg in &self.legs {
+            leg.validate(&self.bundle_id)?;
+            if !leg_ids.insert(leg.leg_id.clone()) {
+                return Err(ExecutionApiError::Validation(format!(
+                    "duplicate bundle leg_id {}",
+                    leg.leg_id
+                )));
+            }
+            if !client_order_ids.insert(leg.command.client_order_id.clone()) {
+                return Err(ExecutionApiError::Validation(format!(
+                    "duplicate bundle client_order_id {}",
+                    leg.command.client_order_id
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BundleSubmitAck {
+    pub schema_version: u16,
+    pub tenant_id: TenantId,
+    pub account_id: AccountId,
+    pub strategy_id: StrategyId,
+    pub run_id: RunId,
+    pub bundle_id: String,
+    pub idempotency_key: String,
+    pub submission_path: BundleSubmissionPath,
+    pub status: BundleExecutionStatus,
+    pub order_acks: Vec<OrderAck>,
+    pub requires_reconcile: bool,
+    pub message: Option<String>,
+    pub acknowledged_at: DateTime<Utc>,
+}
+
+impl BundleSubmitAck {
+    pub fn from_order_acks(
+        command: &BundleSubmitCommand,
+        submission_path: BundleSubmissionPath,
+        order_acks: Vec<OrderAck>,
+        acknowledged_at: DateTime<Utc>,
+    ) -> Self {
+        let has_reject = order_acks.iter().any(|ack| !ack.accepted);
+        let has_partial = order_acks
+            .iter()
+            .any(|ack| ack.state == OrderState::PartiallyFilled);
+        let all_filled =
+            !order_acks.is_empty() && order_acks.iter().all(|ack| ack.state == OrderState::Filled);
+        let all_accepted = !order_acks.is_empty() && order_acks.iter().all(|ack| ack.accepted);
+        let status = if has_reject {
+            BundleExecutionStatus::RequiresReconcile
+        } else if has_partial {
+            BundleExecutionStatus::PartiallyFilled
+        } else if all_filled {
+            BundleExecutionStatus::Filled
+        } else if all_accepted {
+            BundleExecutionStatus::Accepted
+        } else {
+            BundleExecutionStatus::Submitted
+        };
+        let requires_reconcile = matches!(
+            status,
+            BundleExecutionStatus::RequiresReconcile
+                | BundleExecutionStatus::PartiallyFilled
+                | BundleExecutionStatus::OneSidedExposure
+        );
+        Self {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            tenant_id: command.identity.tenant_id.clone(),
+            account_id: command.identity.account_id.clone(),
+            strategy_id: command.identity.strategy_id.clone(),
+            run_id: command.identity.run_id.clone(),
+            bundle_id: command.bundle_id.clone(),
+            idempotency_key: command.identity.idempotency_key.clone(),
+            submission_path,
+            status,
+            order_acks,
+            requires_reconcile,
+            message: requires_reconcile
+                .then(|| format!("bundle {} requires reconciliation", command.bundle_id)),
+            acknowledged_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ExecutionMutationKind {
     PlaceOrder,
     CancelOrder,
     CancelAllOrders,
+    SubmitBundle,
     FeeModel,
     LiveDryRun,
     Reservation,
@@ -661,6 +932,14 @@ pub struct OrderStatusEvent {
     pub observed_at: DateTime<Utc>,
 }
 
+impl OrderStatusEvent {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        validate_optional_positive_or_zero_f64("filled_quantity", Some(self.filled_quantity))?;
+        validate_optional_positive_f64("average_fill_price", self.average_fill_price)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FillEvent {
     pub schema_version: u16,
@@ -718,6 +997,74 @@ pub struct ReconciliationEvent {
     pub reconciled_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconciliationTrigger {
+    PrivateStreamLag,
+    PrivateStreamDisconnected,
+    UnknownPrivateOrderEvent,
+    StartupRecovery,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconciliationSeverity {
+    Info,
+    Warn,
+    Error,
+    Critical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderReconciliationOutcome {
+    Filled,
+    PartiallyFilled,
+    Cancelled,
+    Rejected,
+    Expired,
+    Unknown,
+    OrderNotFound,
+    Timeout,
+    RateLimited,
+    InconsistentStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderReconciliationSummary {
+    pub schema_version: u16,
+    pub tenant_id: TenantId,
+    pub account_id: AccountId,
+    pub strategy_id: Option<StrategyId>,
+    pub run_id: Option<RunId>,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub client_order_id: Option<String>,
+    pub exchange_order_id: Option<String>,
+    pub trigger: ReconciliationTrigger,
+    pub outcome: OrderReconciliationOutcome,
+    pub severity: ReconciliationSeverity,
+    pub attempts: u32,
+    pub message: String,
+    pub reconciled_at: DateTime<Utc>,
+}
+
+impl OrderReconciliationSummary {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        validate_required_text("message", &self.message)?;
+        if self.canonical_symbol.is_some() ^ self.exchange_symbol.is_some() {
+            return Err(ExecutionApiError::Validation(
+                "canonical_symbol and exchange_symbol must be supplied together".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl ReconciliationEvent {
     pub fn validate(&self) -> Result<()> {
         validate_schema_version(self.schema_version)?;
@@ -728,6 +1075,67 @@ impl ReconciliationEvent {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NormalizedUserStreamEvent {
+    pub schema_version: u16,
+    pub tenant_id: TenantId,
+    pub account_id: AccountId,
+    pub strategy_id: Option<StrategyId>,
+    pub run_id: Option<RunId>,
+    pub exchange_id: ExchangeId,
+    pub market_type: MarketType,
+    pub canonical_symbol: Option<CanonicalSymbol>,
+    pub exchange_symbol: Option<ExchangeSymbol>,
+    pub event_id: Option<String>,
+    pub exchange_sequence: Option<u64>,
+    pub received_at: DateTime<Utc>,
+    pub kind: NormalizedUserStreamEventKind,
+    #[serde(default)]
+    pub raw: Option<Value>,
+}
+
+impl NormalizedUserStreamEvent {
+    pub fn validate(&self) -> Result<()> {
+        validate_schema_version(self.schema_version)?;
+        if self.canonical_symbol.is_some() ^ self.exchange_symbol.is_some() {
+            return Err(ExecutionApiError::Validation(
+                "canonical_symbol and exchange_symbol must be supplied together".to_string(),
+            ));
+        }
+        match &self.kind {
+            NormalizedUserStreamEventKind::Order(event) => event.validate(),
+            NormalizedUserStreamEventKind::Fill(event) => event.validate(),
+            NormalizedUserStreamEventKind::BalanceSnapshot(_) => Ok(()),
+            NormalizedUserStreamEventKind::Reconciliation(event) => event.validate(),
+            NormalizedUserStreamEventKind::Error { message, .. } => {
+                validate_required_text("message", message)
+            }
+            NormalizedUserStreamEventKind::Heartbeat
+            | NormalizedUserStreamEventKind::StreamDisconnected { .. } => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event_kind", content = "event", rename_all = "snake_case")]
+pub enum NormalizedUserStreamEventKind {
+    Order(OrderStatusEvent),
+    Fill(FillEvent),
+    BalanceSnapshot(ExchangeBalance),
+    Reconciliation(ReconciliationEvent),
+    Error {
+        code: Option<String>,
+        message: String,
+        retry_after_ms: Option<u64>,
+        occurred_at: DateTime<Utc>,
+    },
+    Heartbeat,
+    StreamDisconnected {
+        reason: Option<String>,
+        disconnected_at: DateTime<Utc>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -785,6 +1193,26 @@ pub fn validate_positive_f64(field: &str, value: f64) -> Result<()> {
     } else {
         Err(ExecutionApiError::Validation(format!(
             "{field} must be finite and greater than zero"
+        )))
+    }
+}
+
+pub fn validate_positive_or_zero_f64(field: &str, value: f64) -> Result<()> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(ExecutionApiError::Validation(format!(
+            "{field} must be finite and greater than or equal to zero"
+        )))
+    }
+}
+
+pub fn validate_finite_f64(field: &str, value: f64) -> Result<()> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(ExecutionApiError::Validation(format!(
+            "{field} must be finite"
         )))
     }
 }
@@ -995,6 +1423,153 @@ mod tests {
             decision.validate(),
             Err(ExecutionApiError::Validation(message)) if message.contains("maker_fee_rate")
         ));
+    }
+
+    #[test]
+    fn fee_estimate_should_calculate_from_rate_snapshot() {
+        let rate = FeeRateSnapshot {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            exchange_id: exchange_id(),
+            market_type: MarketType::Spot,
+            canonical_symbol: Some(canonical_symbol()),
+            maker_fee_rate: 0.001,
+            taker_fee_rate: 0.002,
+            fee_asset: Some("USDT".to_string()),
+            fee_asset_mode: ExecutionFeeAssetMode::Quote,
+            source: ExecutionFeeSource::Fallback,
+            observed_at: Utc::now(),
+        };
+
+        let estimate = FeeEstimate::from_rate(&rate, ExecutionFeeRole::Taker, 100.0, Utc::now())
+            .expect("fee estimate");
+
+        assert_eq!(estimate.fee_rate, 0.002);
+        assert_eq!(estimate.estimated_fee_amount, 0.2);
+        assert_eq!(estimate.fee_asset.as_deref(), Some("USDT"));
+    }
+
+    #[test]
+    fn bundle_submit_command_should_validate_two_unique_legs() {
+        let mut first = order_command();
+        first.source_intent_id = Some("bundle-1".to_string());
+        let mut second = order_command();
+        second.command_id = "cmd-2".to_string();
+        second.client_order_id = "client-2".to_string();
+        second.identity.idempotency_key = "idem-2".to_string();
+        second.source_intent_id = Some("bundle-1".to_string());
+        let command = BundleSubmitCommand {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            identity: identity(),
+            bundle_id: "bundle-1".to_string(),
+            opportunity_id: Some("opportunity-1".to_string()),
+            legs: vec![
+                BundleOrderLeg {
+                    leg_id: "long".to_string(),
+                    leg_kind: BundleLegKind::Long,
+                    command: first,
+                },
+                BundleOrderLeg {
+                    leg_id: "short".to_string(),
+                    leg_kind: BundleLegKind::Short,
+                    command: second,
+                },
+            ],
+            correlation_id: None,
+            requested_at: Utc::now(),
+        };
+
+        command.validate().expect("valid bundle");
+        let ack = BundleSubmitAck::from_order_acks(
+            &command,
+            BundleSubmissionPath::DryRun,
+            Vec::new(),
+            Utc::now(),
+        );
+        assert_eq!(ack.bundle_id, "bundle-1");
+        assert_eq!(ack.submission_path, BundleSubmissionPath::DryRun);
+    }
+
+    #[test]
+    fn bundle_submit_command_should_reject_duplicate_client_order_ids() {
+        let mut first = order_command();
+        first.source_intent_id = Some("bundle-1".to_string());
+        let mut second = order_command();
+        second.command_id = "cmd-2".to_string();
+        second.source_intent_id = Some("bundle-1".to_string());
+        let command = BundleSubmitCommand {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            identity: identity(),
+            bundle_id: "bundle-1".to_string(),
+            opportunity_id: None,
+            legs: vec![
+                BundleOrderLeg {
+                    leg_id: "long".to_string(),
+                    leg_kind: BundleLegKind::Long,
+                    command: first,
+                },
+                BundleOrderLeg {
+                    leg_id: "short".to_string(),
+                    leg_kind: BundleLegKind::Short,
+                    command: second,
+                },
+            ],
+            correlation_id: None,
+            requested_at: Utc::now(),
+        };
+
+        assert!(matches!(
+            command.validate(),
+            Err(ExecutionApiError::Validation(message))
+                if message.contains("duplicate bundle client_order_id")
+        ));
+    }
+
+    #[test]
+    fn normalized_user_stream_event_should_validate_nested_fill() {
+        let event = NormalizedUserStreamEvent {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            tenant_id: TenantId::unchecked("tenant-a"),
+            account_id: AccountId::unchecked("account-a"),
+            strategy_id: Some(StrategyId::unchecked("strategy-a")),
+            run_id: Some(RunId::unchecked("run-a")),
+            exchange_id: exchange_id(),
+            market_type: MarketType::Spot,
+            canonical_symbol: Some(canonical_symbol()),
+            exchange_symbol: Some(exchange_symbol()),
+            event_id: Some("event-1".to_string()),
+            exchange_sequence: Some(42),
+            received_at: Utc::now(),
+            kind: NormalizedUserStreamEventKind::Fill(FillEvent {
+                schema_version: EXECUTION_API_SCHEMA_VERSION,
+                tenant_id: TenantId::unchecked("tenant-a"),
+                account_id: AccountId::unchecked("account-a"),
+                strategy_id: StrategyId::unchecked("strategy-a"),
+                run_id: RunId::unchecked("run-a"),
+                exchange_id: exchange_id(),
+                market_type: MarketType::Spot,
+                canonical_symbol: canonical_symbol(),
+                exchange_symbol: exchange_symbol(),
+                client_order_id: Some("client-1".to_string()),
+                exchange_order_id: Some("order-1".to_string()),
+                fill_id: "fill-1".to_string(),
+                trade_id: Some("trade-1".to_string()),
+                side: OrderSide::Buy,
+                liquidity: LiquidityRole::Taker,
+                price: 100.0,
+                quantity: 0.1,
+                fee_asset: Some("USDT".to_string()),
+                fee_amount: Some(0.01),
+                exchange_fill: None,
+                filled_at: Utc::now(),
+                received_at: Utc::now(),
+            }),
+            raw: None,
+        };
+
+        event.validate().expect("valid normalized event");
+        let value = serde_json::to_value(&event).expect("serializable event");
+        assert_eq!(value["event_id"], "event-1");
+        assert_eq!(value["kind"]["event_kind"], "fill");
     }
 
     #[test]

@@ -10,10 +10,15 @@ Official sources reviewed:
 
 The profile records `https://api.derive.xyz`, `https://rpc.lyra.finance`, and Derive Chain id `957` as audit metadata only. No REST, WebSocket, indexer, or wallet-signing surface is promoted as a live exchange-gateway runtime in this task.
 
+Product lines:
+- Perpetual: `MarketType::Perpetual` settlement/profile boundary.
+- Spot: 交易所不支持现货（本 `derive_chain_perps` profile 口径）。Derive 平台其他产品线不由此 profile 承接。
+
 Runtime boundary:
 - Product: `MarketType::Perpetual`
 - Chain: Derive Chain, chain id `957`
-- Public REST/WS: unsupported unverified
+- Public WS: 交易所不支持公共 WS 行情（本 profile 口径）；Derive Exchange 官方 WS runtime 归 `derive` adapter，不在 `derive_chain_perps` 重复实现
+- Public REST: unsupported unverified
 - Private reads: unsupported unverified
 - Orders/cancels/batch: unsupported unverified
 - Account model: Derive Chain wallet profile, not API key/HMAC

@@ -6,10 +6,9 @@ use rustcta_supervisor::{
     LegacyProcessTemplate, ProcessRegistry, StrategyProcessSpec,
 };
 use rustcta_tools_ops::{
-    migrations_by_target, print_lines, run_account_position_render, run_gateio_bitget_spot_symbols,
+    print_lines, run_account_position_render, run_gateio_bitget_spot_symbols,
     smart_money_binance_collector_summary, smart_money_hyperliquid_wallet_ingestion_summary,
-    smart_money_portfolio_service_summary, verify_legacy_bin_migrations, AccountPositionRenderArgs,
-    GateioBitgetSpotSymbolsArgs, LegacyBinTarget, LEGACY_BIN_MIGRATIONS,
+    smart_money_portfolio_service_summary, AccountPositionRenderArgs, GateioBitgetSpotSymbolsArgs,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -50,6 +49,7 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum CrossArbCommand {
     Preflight(CrossArbPreflightArgs),
+    Observe(CrossArbObserveArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -68,6 +68,16 @@ struct CrossArbPreflightArgs {
     full_symbol_checks: bool,
 }
 
+#[derive(Debug, Parser)]
+struct CrossArbObserveArgs {
+    #[arg(long, default_value = "config/cross_exchange_arbitrage_usdt.yml")]
+    config: String,
+    #[arg(long, default_value_t = 5_000)]
+    request_timeout_ms: u64,
+    #[arg(long)]
+    max_symbols: Option<usize>,
+}
+
 #[derive(Debug, Serialize)]
 struct CrossArbPreflightBridgePlan {
     command: &'static str,
@@ -84,15 +94,48 @@ struct CrossArbPreflightBridgePlan {
     boundary: &'static str,
 }
 
+#[derive(Debug, Serialize)]
+struct CrossArbObserveBridgePlan {
+    command: &'static str,
+    legacy_binary: &'static str,
+    legacy_args: Vec<String>,
+    config: String,
+    request_timeout_ms: u64,
+    max_symbols: Option<usize>,
+    network_access: &'static str,
+    live_order_access: &'static str,
+    boundary: &'static str,
+    output_fields_preserved: Vec<&'static str>,
+    summary: CrossArbObserveOfflineSummary,
+}
+
+#[derive(Debug, Serialize)]
+struct CrossArbObserveOfflineSummary {
+    config_path: String,
+    mode: &'static str,
+    configured_mode: String,
+    generated_at: &'static str,
+    symbols: Vec<String>,
+    exchanges_seen: Vec<String>,
+    books_loaded: usize,
+    funding_loaded: usize,
+    opportunities: Vec<serde_json::Value>,
+    errors: Vec<CrossArbObserveOfflineError>,
+}
+
+#[derive(Debug, Serialize)]
+struct CrossArbObserveOfflineError {
+    exchange: &'static str,
+    symbol: Option<String>,
+    kind: &'static str,
+    message: String,
+}
+
 #[derive(Debug, Subcommand)]
 enum MigrationCommand {
-    LegacyBinPlan {
-        #[arg(long)]
-        target: Option<LegacyBinTarget>,
-    },
-    VerifyLegacyBins {
-        #[arg(long, default_value = "src/bin")]
-        src_bin_dir: String,
+    VerifyRetiredSrc {
+        #[arg(long, default_value = "src")]
+        src_dir: String,
     },
 }
 
@@ -269,6 +312,7 @@ async fn main() -> Result<()> {
 fn run_cross_arb(command: CrossArbCommand) -> Result<()> {
     match command {
         CrossArbCommand::Preflight(args) => run_cross_arb_preflight_bridge(args)?,
+        CrossArbCommand::Observe(args) => run_cross_arb_observe_bridge(args)?,
     }
     Ok(())
 }
@@ -318,26 +362,152 @@ fn legacy_cross_arb_preflight_args(args: &CrossArbPreflightArgs) -> Vec<String> 
     forwarded
 }
 
+fn run_cross_arb_observe_bridge(args: CrossArbObserveArgs) -> Result<()> {
+    let plan = cross_arb_observe_bridge_plan(args);
+    println!("{}", serde_json::to_string_pretty(&plan)?);
+    Ok(())
+}
+
+fn cross_arb_observe_bridge_plan(args: CrossArbObserveArgs) -> CrossArbObserveBridgePlan {
+    let legacy_args = legacy_cross_arb_observe_args(&args);
+    let (configured_mode, symbols, errors) = cross_arb_observe_config_preview(&args);
+    CrossArbObserveBridgePlan {
+        command: "cross-arb observe",
+        legacy_binary: "cross_arb_observe",
+        legacy_args,
+        config: args.config.clone(),
+        request_timeout_ms: args.request_timeout_ms,
+        max_symbols: args.max_symbols,
+        network_access: "disabled",
+        live_order_access: "disabled",
+        boundary:
+            "industrial CLI preserves the observe command contract only; supervised strategy runtime owns live market data",
+        output_fields_preserved: vec![
+            "config_path",
+            "mode",
+            "configured_mode",
+            "generated_at",
+            "symbols",
+            "exchanges_seen",
+            "books_loaded",
+            "funding_loaded",
+            "opportunities",
+            "errors",
+        ],
+        summary: CrossArbObserveOfflineSummary {
+            config_path: args.config,
+            mode: "observe",
+            configured_mode,
+            generated_at: "offline_plan",
+            symbols,
+            exchanges_seen: Vec::new(),
+            books_loaded: 0,
+            funding_loaded: 0,
+            opportunities: Vec::new(),
+            errors,
+        },
+    }
+}
+
+fn legacy_cross_arb_observe_args(args: &CrossArbObserveArgs) -> Vec<String> {
+    let mut forwarded = vec![
+        "--config".to_string(),
+        args.config.clone(),
+        "--request-timeout-ms".to_string(),
+        args.request_timeout_ms.to_string(),
+    ];
+    if let Some(max_symbols) = args.max_symbols {
+        forwarded.push("--max-symbols".to_string());
+        forwarded.push(max_symbols.to_string());
+    }
+    forwarded
+}
+
+fn cross_arb_observe_config_preview(
+    args: &CrossArbObserveArgs,
+) -> (String, Vec<String>, Vec<CrossArbObserveOfflineError>) {
+    let mut errors = Vec::new();
+    let raw = match std::fs::read_to_string(&args.config) {
+        Ok(raw) => raw,
+        Err(error) => {
+            errors.push(CrossArbObserveOfflineError {
+                exchange: "config",
+                symbol: None,
+                kind: "read",
+                message: error.to_string(),
+            });
+            return ("unknown".to_string(), Vec::new(), errors);
+        }
+    };
+    let value = match serde_yaml::from_str::<serde_yaml::Value>(&raw) {
+        Ok(value) => value,
+        Err(error) => {
+            errors.push(CrossArbObserveOfflineError {
+                exchange: "config",
+                symbol: None,
+                kind: "parse",
+                message: error.to_string(),
+            });
+            return ("unknown".to_string(), Vec::new(), errors);
+        }
+    };
+
+    let configured_mode = yaml_path_string(&value, &["mode"]).unwrap_or_else(|| "unknown".into());
+    let mut symbols = yaml_path_sequence_strings(&value, &["universe", "symbols"]);
+    if let Some(max_symbols) = args.max_symbols {
+        symbols.truncate(max_symbols);
+    }
+    (configured_mode, symbols, errors)
+}
+
+fn yaml_path_string(value: &serde_yaml::Value, path: &[&str]) -> Option<String> {
+    yaml_path(value, path).and_then(|value| match value {
+        serde_yaml::Value::String(text) => Some(text.clone()),
+        serde_yaml::Value::Bool(value) => Some(value.to_string()),
+        serde_yaml::Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    })
+}
+
+fn yaml_path_sequence_strings(value: &serde_yaml::Value, path: &[&str]) -> Vec<String> {
+    yaml_path(value, path)
+        .and_then(serde_yaml::Value::as_sequence)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(ToString::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn yaml_path<'a>(value: &'a serde_yaml::Value, path: &[&str]) -> Option<&'a serde_yaml::Value> {
+    path.iter().try_fold(value, |current, key| {
+        current
+            .as_mapping()
+            .and_then(|mapping| mapping.get(serde_yaml::Value::String((*key).to_string())))
+    })
+}
+
 fn run_migration(command: MigrationCommand) -> Result<()> {
     match command {
-        MigrationCommand::LegacyBinPlan { target } => {
-            let migrations = target.map_or_else(
-                || LEGACY_BIN_MIGRATIONS.iter().collect::<Vec<_>>(),
-                migrations_by_target,
-            );
-            println!("{}", serde_json::to_string_pretty(&migrations)?);
-        }
-        MigrationCommand::VerifyLegacyBins { src_bin_dir } => {
-            let verification = verify_legacy_bin_migrations(&src_bin_dir)?;
-            println!("{}", serde_json::to_string_pretty(&verification)?);
-            if !verification.is_clean() {
-                bail!(
-                    "legacy bin migration matrix is out of sync: {} unclassified, {} stale",
-                    verification.unclassified_bins.len(),
-                    verification.stale_migrations.len()
-                );
-            }
-        }
+        MigrationCommand::VerifyRetiredSrc { src_dir } => verify_retired_src(&src_dir)?,
+    }
+    Ok(())
+}
+
+fn verify_retired_src(src_dir: &str) -> Result<()> {
+    let exists = Path::new(src_dir).exists();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "src_dir": src_dir,
+            "exists": exists,
+            "retired": !exists,
+        }))?
+    );
+    if exists {
+        bail!("legacy root source directory still exists: {src_dir}");
     }
     Ok(())
 }

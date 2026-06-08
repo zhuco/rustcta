@@ -1,6 +1,6 @@
 # Industrial Migration Final Gates
 
-Status date: 2026-06-07
+Status date: 2026-06-08
 
 This runbook is the Task 10 closeout checklist for the industrial workspace
 migration. It makes the migration measurable without changing runtime behavior
@@ -15,8 +15,8 @@ It must stay focused on regression prevention:
 cargo fmt --check
 cargo test --all-features
 cargo clippy --all-targets --all-features
-cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
-cargo run -q -p rustcta-tools-ops -- legacy-bin-plan
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
+cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
 scripts/check_industrial_boundaries.sh
 cd web-ui/dioxus && cargo build --release
 ```
@@ -25,78 +25,53 @@ The existing `.github/workflows/non-gateway-industrial.yml` remains a faster
 focused gate for the non-gateway migration slice. The boundary script checks
 that both workflows keep their required migration entries.
 
-## Legacy Command Runbook
+## Retired Root Source Runbook
 
-Prefer the new workspace commands in operator docs and scripts. Keep legacy
-binary names available until the retirement milestone in the inventory is met.
+Prefer workspace commands in operator docs and scripts. The root package, root
+`src/` tree, and root binary compatibility surface are retired.
 
-Current closure audit result: the migration is not ready for deletion-style
-final closure. The legacy binary inventory is classified and boundary checks
-pass, but many entries are still intentionally retained as `keep_wrapper`,
-`warn`, or `remove_later`. Passing inventory checks means the old entrypoints
-are accounted for; it does not mean they are safe to delete.
+Current closure audit result: final root-source deletion is complete when
+`src/` is absent, the root manifest is a virtual workspace manifest, no package
+depends on the removed root package, and the retired-source verifiers report
+`retired=true`.
 
 The machine-readable source of truth is:
 
 ```bash
-cargo run -q -p rustcta-tools-ops -- legacy-bin-plan
-cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration legacy-bin-plan
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
+cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
 ```
 
-Important replacements:
+Important active commands:
 
-| Legacy name | New command | Current decision |
-| --- | --- | --- |
-| `control_api` | `cargo run -p rustcta-control-api-app --bin rustcta-control-api` | keep wrapper |
-| `cross_arb_preflight` | `cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- cross-arb preflight` | alias |
-| `gateio_bitget_spot_symbols` | `cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot` | alias |
-| `trend_report` | `cargo run -p rustcta-tools-ops -- reporter trend` | alias |
-| `ws_proxy_probe` | `cargo run -p rustcta-tools-ops -- ws-proxy-probe` | alias |
-| `smart_money_binance_collector` | `cargo run -p rustcta-tools-ops -- smart-money binance-collector` | alias |
-| `smart_money_hyperliquid_wallet_ingestion` | `cargo run -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion` | alias |
-| `smart_money_portfolio_service` | `cargo run -p rustcta-tools-ops -- smart-money portfolio-service` | alias |
-| `backtest` | `cargo run -p rustcta-backtest-app --bin rustcta-backtest` | remove later |
-| `short_ladder_mtf_grid` | `cargo run -p rustcta-backtest-app --bin rustcta-backtest -- short-ladder-mtf-grid` | remove later |
+| Surface | Command |
+| --- | --- |
+| Control API | `cargo run -p rustcta-control-api-app --bin rustcta-control-api` |
+| Cross-arb preflight | `cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- cross-arb preflight` |
+| Symbol lookup | `cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot` |
+| Trend report | `cargo run -p rustcta-tools-ops -- reporter trend` |
+| WebSocket proxy probe | `cargo run -p rustcta-tools-ops -- ws-proxy-probe` |
+| Smart-money collector | `cargo run -p rustcta-tools-ops -- smart-money binance-collector` |
+| Smart-money wallet ingestion | `cargo run -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion` |
+| Smart-money portfolio service | `cargo run -p rustcta-tools-ops -- smart-money portfolio-service` |
 
-Live-order canaries, private audits, order administration, legacy long-running
-strategy runtimes, and the legacy control API stay in compatibility paths until
-their safety and parity tests exist. They must not be silently removed.
+Live-order canaries, private audits, order administration, and strategy runtime
+launches must stay on their current workspace-owned surfaces. Do not reintroduce
+root-package wrappers for those paths.
 
-Do not delete these compatibility groups during final cleanup:
+Final cleanup invariants:
 
-- `src/bin/control_api.rs`: still owns the large legacy local-console surface,
-  raw local exchange API key env-store write/delete behavior, static UI
-  compatibility, legacy command aliases, and snapshot-backed dashboard routes.
-- live canary/admin/audit binaries: still own confirmation flags, private
-  account access, or live mutation safety gates.
-- strategy runtime binaries such as `cross_arb_live`, `funding_arb_live`, and
-  observe commands: supervisor specs and current runbooks still launch legacy
-  processes while strategy runtime orchestration remains rooted in
-  `src/strategies/*`.
-- root backtest compatibility binaries: keep until docs/scripts stop invoking
-  `cargo run --bin backtest` and `cargo run --bin short_ladder_mtf_grid`.
-- Dioxus legacy endpoint fallbacks: keep while the panel still references
-  legacy routes such as `/api/exchange-api-keys`, `/api/spot-arb/dashboard`,
-  `/api/cross-arb/dashboard`, `/api/control/symbols`,
-  `/api/strategy-config`, and `/api/cross-arb/settings`.
-
-Deletion is allowed only after `legacy-bin-plan` marks the specific entry as
-`alias` or `remove_later`, the replacement command has contract tests, and
-operator docs/scripts no longer depend on the old name.
-
-## Compatibility Retirement Matrix
-
-Every direct `src/bin/*.rs` file must have one inventory row with:
-
-- `target`: intended workspace owner.
-- `compatibility`: one of `keep_wrapper`, `warn`, `alias`, `remove_later`.
-- `new_command`: current or planned replacement command.
-- `retirement_milestone`: condition required before changing the old name.
+- Root `src/` remains absent.
+- Root `Cargo.toml` remains a virtual workspace manifest.
+- Workspace crates, apps, strategies, and tools do not depend on the removed
+  root package.
+- Docs, scripts, and workflows use workspace package commands instead of
+  root-package commands.
 
 Validation:
 
 ```bash
-cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
 cargo test -p rustcta-tools-ops --all-features
 scripts/check_industrial_boundaries.sh
 ```
@@ -141,7 +116,7 @@ and read-only surfaces; do not add raw exchange credential write/delete behavior
 6. Start the generic control API:
 
    ```bash
-   cargo run -p rustcta-control-api-app --bin rustcta-control-api -- --bind 127.0.0.1:18081
+   RUSTCTA_CONTROL_API_BIND=127.0.0.1:18081 cargo run -p rustcta-control-api-app --bin rustcta-control-api
    ```
 
 7. Build the web UI:

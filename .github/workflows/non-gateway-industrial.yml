@@ -31,7 +31,6 @@ jobs:
       - name: Format migrated non-gateway files
         run: |
           rustfmt --edition 2021 --check \
-            apps/backtest/src/main.rs \
             apps/cli/src/main.rs \
             apps/cli/tests/cli_contract_smoke.rs \
             apps/control-api/src/lib.rs \
@@ -46,15 +45,6 @@ jobs:
             crates/rustcta-control-api/src/state.rs \
             crates/rustcta-event-ledger/src/lib.rs \
             crates/rustcta-supervisor/src/lib.rs \
-            src/backtest/runtime/mod.rs \
-            src/backtest/runtime/short_ladder_mtf_grid.rs \
-            src/bin/backtest.rs \
-            src/bin/short_ladder_mtf_grid.rs \
-            src/bin/smart_money_binance_collector.rs \
-            src/bin/smart_money_hyperliquid_wallet_ingestion.rs \
-            src/bin/smart_money_portfolio_service.rs \
-            src/bin/ws_proxy_probe.rs \
-            tests/backtest_cli.rs \
             tools/ops/src/lib.rs \
             tools/ops/src/main.rs \
             tools/ops/tests/cli_smoke.rs \
@@ -111,25 +101,13 @@ jobs:
           cargo check -p rustcta-industrial-cli
           cargo test -p rustcta-industrial-cli
 
-      - name: Verify legacy bin matrix
-        run: cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+      - name: Verify retired root source
+        run: cargo run -q -p rustcta-tools-ops -- verify-retired-src
 
-      - name: Check backtest app and compatibility bins
+      - name: Ops command help smoke
         run: |
-          cargo check -p rustcta-backtest-app --bin rustcta-backtest
-          cargo check --bin backtest
-          cargo check --bin short_ladder_mtf_grid
-          cargo check --bin ws_proxy_probe
-          cargo test --test backtest_cli
-
-      - name: Backtest command help smoke
-        run: |
-          cargo run -q -p rustcta-backtest-app --bin rustcta-backtest -- --help
-          cargo run -q -p rustcta-backtest-app --bin rustcta-backtest -- short-ladder-mtf-grid --help
-          cargo run -q --bin short_ladder_mtf_grid -- --help
           cargo run -q -p rustcta-tools-ops -- ws-proxy-probe --help
           cargo run -q -p rustcta-tools-ops -- probe ws-proxy --help
-          cargo run -q --bin ws_proxy_probe -- --help
 
       - name: Industrial CLI safe smoke
         run: |

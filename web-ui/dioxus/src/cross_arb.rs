@@ -230,8 +230,7 @@ pub(crate) fn CrossArbPanel(
             "min_open_maker_taker_net_edge": min_net_edge_value,
             "lock_profit_dual_taker_pct": close_profit_value,
             "max_close_spread_pct": close_spread_value,
-            "execution_profile": execution_profile(),
-            "restart": true
+            "execution_profile": execution_profile()
         });
         wasm_bindgen_futures::spawn_local(async move {
             match save_cross_arb_settings(&token_value, &body).await {

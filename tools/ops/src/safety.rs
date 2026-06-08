@@ -132,6 +132,39 @@ pub struct CrossArbOrderAdminSafetyArgs {
     pub position_side: Option<AdminPositionSide>,
 }
 
+#[derive(Debug, Clone, ClapArgs)]
+pub struct FundingArbObserveSafetyArgs {
+    #[arg(long, default_value = "config/funding_rate_arbitrage_usdt.yml")]
+    pub config: PathBuf,
+    #[arg(long, default_value_t = false)]
+    pub no_notify: bool,
+    #[arg(long, default_value_t = 15_000)]
+    pub request_timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, ClapArgs)]
+pub struct CrossArbWsOpportunityProbeSafetyArgs {
+    #[arg(
+        long,
+        default_value = "config/cross_exchange_arbitrage_three_venues_hcr_10u_405symbols.live-small.yml"
+    )]
+    pub config: PathBuf,
+    #[arg(long, default_value_t = 220)]
+    pub max_symbols: usize,
+    #[arg(long, default_value_t = 120)]
+    pub seconds: u64,
+    #[arg(long, default_value_t = 0.004)]
+    pub min_raw_spread: f64,
+    #[arg(long, default_value_t = 0.05)]
+    pub max_raw_spread: f64,
+    #[arg(long, default_value_t = -1.0)]
+    pub min_net_edge: f64,
+    #[arg(long, default_value_t = 80)]
+    pub ws_batch_size: usize,
+    #[arg(long, default_value_t = false)]
+    pub all_updates: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanarySide {
@@ -607,6 +640,110 @@ pub fn cross_arb_order_admin_safety_plan(args: CrossArbOrderAdminSafetyArgs) -> 
     })
 }
 
+pub fn funding_arb_observe_safety_plan(args: FundingArbObserveSafetyArgs) -> Result<String> {
+    if args.request_timeout_ms == 0 {
+        bail!("--request-timeout-ms must be > 0");
+    }
+
+    render_plan(SafetyPlan {
+        legacy_binary: "funding_arb_observe",
+        new_command: "rustcta-tools-ops probe funding-arb-observe",
+        gate_mode: SafetyGateMode::DryRunPlanOnly,
+        config: args.config.display().to_string(),
+        config_dry_run: None,
+        execute_requested: false,
+        live_order_confirmed: None,
+        mutation_confirmed: Some(false),
+        planned_side_effects: vec![],
+        safety_checks: vec![
+            "tools/ops renders an observe plan only".to_string(),
+            "legacy observe mode requires trading execution to stay disabled".to_string(),
+            "private trading adapters are not bootstrapped by tools/ops".to_string(),
+            "startup notification delivery is not performed by this plan command".to_string(),
+        ],
+        output_fields_preserved: vec![
+            "opportunities",
+            "exchange",
+            "symbol",
+            "funding_rate",
+            "next_funding_time",
+            "net_edge",
+            "notifications_enabled",
+        ],
+        request: json!({
+            "config": args.config,
+            "no_notify": args.no_notify,
+            "request_timeout_ms": args.request_timeout_ms,
+            "network_access": "disabled",
+            "live_order_access": "disabled",
+        }),
+    })
+}
+
+pub fn cross_arb_ws_opportunity_probe_safety_plan(
+    args: CrossArbWsOpportunityProbeSafetyArgs,
+) -> Result<String> {
+    if args.max_symbols == 0 {
+        bail!("--max-symbols must be > 0");
+    }
+    if args.seconds == 0 {
+        bail!("--seconds must be > 0");
+    }
+    if args.ws_batch_size == 0 {
+        bail!("--ws-batch-size must be > 0");
+    }
+    if !args.min_raw_spread.is_finite() || !args.max_raw_spread.is_finite() {
+        bail!("raw spread bounds must be finite");
+    }
+    if args.min_raw_spread > args.max_raw_spread {
+        bail!("--min-raw-spread must be <= --max-raw-spread");
+    }
+    if !args.min_net_edge.is_finite() {
+        bail!("--min-net-edge must be finite");
+    }
+
+    render_plan(SafetyPlan {
+        legacy_binary: "cross_arb_ws_opportunity_probe",
+        new_command: "rustcta-tools-ops probe cross-arb-ws-opportunity",
+        gate_mode: SafetyGateMode::DryRunPlanOnly,
+        config: args.config.display().to_string(),
+        config_dry_run: None,
+        execute_requested: false,
+        live_order_confirmed: None,
+        mutation_confirmed: Some(false),
+        planned_side_effects: vec![],
+        safety_checks: vec![
+            "tools/ops renders a websocket opportunity probe plan only".to_string(),
+            "no websocket connections are opened by this plan command".to_string(),
+            "no private adapters or order paths are bootstrapped".to_string(),
+            "legacy probe remains observe-only and must not place orders".to_string(),
+        ],
+        output_fields_preserved: vec![
+            "ws_connected",
+            "ws_error",
+            "ws_book",
+            "opportunity",
+            "progress",
+            "exchange",
+            "symbol",
+            "raw_spread",
+            "net_edge",
+        ],
+        request: json!({
+            "config": args.config,
+            "max_symbols": args.max_symbols,
+            "seconds": args.seconds,
+            "min_raw_spread": args.min_raw_spread,
+            "max_raw_spread": args.max_raw_spread,
+            "min_net_edge": args.min_net_edge,
+            "ws_batch_size": args.ws_batch_size,
+            "all_updates": args.all_updates,
+            "network_access": "disabled",
+            "live_order_access": "disabled",
+        }),
+    })
+}
+
 fn load_cross_arb_config_safety_view(path: &PathBuf) -> Result<CrossArbConfigSafetyView> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
@@ -712,36 +849,12 @@ fn render_plan(plan: SafetyPlan) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    fn temp_config(dry_run: bool, enabled: &[&str]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "rustcta-tools-ops-safety-{}-{}",
-            std::process::id(),
-            enabled.join("_")
-        ));
-        fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join("cross_arb.yml");
-        let enabled = enabled
-            .iter()
-            .map(|exchange| format!("    - {exchange}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(
-            &path,
-            format!(
-                "execution:\n  dry_run: {dry_run}\nuniverse:\n  enabled_exchanges:\n{enabled}\n"
-            ),
-        )
-        .expect("write temp config");
-        path
-    }
 
     #[test]
     fn exchange_canary_plan_preserves_dry_run_gate() {
-        let config = temp_config(true, &["bitget"]);
         let report = exchange_order_canary_safety_plan(ExchangeOrderCanarySafetyArgs {
-            config,
+            config: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"),
             exchange: "bitget".to_string(),
             symbol: "DOGE/USDT".to_string(),
             side: CanarySide::Long,

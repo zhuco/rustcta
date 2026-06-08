@@ -83,6 +83,8 @@ These are adapter-side planning limits, not exchange header accounting. Producti
 
 CoinDCX streams are Socket.IO style. The adapter exposes subscription/session helpers and parser coverage, but does not pretend the endpoint is a plain JSON WebSocket.
 
+Official public depth examples use Socket.IO `join` with channel names such as `B-BTC_USDT@orderbook@20`; the current project mapping also records spot and futures `@orderbook@50` channels. The reviewed official docs did not expose a fixed millisecond interval, sequence, or checksum for public depth updates, so public stream runtime must rebuild from REST order book snapshots after reconnect or stale-message detection.
+
 Futures batch place and multi-id batch cancel are not exposed because the official API surface only confirmed single order create/cancel plus cancel-all. Futures client order id, standard reduce-only flag, reliable futures post-only, and Binance-style OCO/OTO order lists are explicitly unsupported.
 
 The fee endpoint was not confirmed in the official CoinDCX public docs reviewed for this adapter, so fee snapshots are marked with a placeholder source and should not be used for production fee accounting without account-specific reconciliation.

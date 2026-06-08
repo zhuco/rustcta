@@ -6,10 +6,11 @@ use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use rustcta_exchange_api::{
     BalancesRequest, BatchCancelOrdersRequest, BatchPlaceOrdersRequest, CancelAllOrdersRequest,
-    CancelOrderRequest, FeesRequest, OpenOrdersRequest, OrderBookRequest, OrderSide, OrderType,
-    PlaceOrderRequest, PositionsRequest, PrivateStreamKind, PrivateStreamSubscription,
-    PublicStreamKind, PublicStreamSubscription, QueryOrderRequest, RecentFillsRequest,
-    RequestContext, SymbolScope, TimeInForce, EXCHANGE_API_SCHEMA_VERSION,
+    CancelOrderRequest, CountdownCancelAllRequest, ExchangeApiError, FeesRequest,
+    OpenOrdersRequest, OrderBookRequest, OrderSide, OrderType, PlaceOrderRequest, PositionsRequest,
+    PrivateStreamKind, PrivateStreamSubscription, PublicStreamKind, PublicStreamSubscription,
+    QueryOrderRequest, RecentFillsRequest, RequestContext, SymbolScope, TimeInForce,
+    EXCHANGE_API_SCHEMA_VERSION,
 };
 use rustcta_types::{
     AccountId, AssetBalance, CanonicalSymbol, ExchangeBalance, ExchangeId, ExchangeSymbol,
@@ -86,6 +87,7 @@ fn place_order_request(request_id: &str) -> GatewayProtocolRequest {
     }
 }
 
+mod admin_audit;
 mod batch;
 mod client;
 mod http;
@@ -112,4 +114,44 @@ fn gateway_operation_should_parse_advanced_spot_order_operations() {
         GatewayOperation::PlaceQuoteMarketOrder.as_str(),
         "place_quote_market_order"
     );
+    assert_eq!(
+        GatewayOperation::from_str("symbol_account_config").unwrap(),
+        GatewayOperation::GetSymbolAccountConfig
+    );
+    assert_eq!(
+        GatewayOperation::from_str("countdown_cancel_all").unwrap(),
+        GatewayOperation::SetCountdownCancelAll
+    );
+    assert_eq!(GatewayOperation::ClosePosition.as_str(), "close_position");
+}
+
+#[test]
+fn gateway_protocol_should_validate_account_control_payloads() {
+    let request = GatewayProtocolRequest {
+        schema_version: GATEWAY_PROTOCOL_SCHEMA_VERSION,
+        request_id: "set-leverage".to_string(),
+        tenant_id: tenant_id(),
+        account_id: Some(account_id()),
+        operation: GatewayOperation::SetLeverage,
+        payload: GatewayRequestPayload::SetLeverage(rustcta_exchange_api::SetLeverageRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-leverage"),
+            symbol: symbol_scope(),
+            leverage: 5,
+        }),
+        requested_at: Utc::now(),
+    };
+
+    request.validate().expect("set leverage payload");
+
+    let rejected = GatewayProtocolRequest {
+        payload: GatewayRequestPayload::SetLeverage(rustcta_exchange_api::SetLeverageRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("set-leverage"),
+            symbol: symbol_scope(),
+            leverage: 0,
+        }),
+        ..request
+    };
+    assert!(rejected.validate().is_err());
 }

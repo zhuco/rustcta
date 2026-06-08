@@ -26,8 +26,11 @@ only:
 - `GET /order-book/{instrument_code}` is parsed into order-book snapshots.
 - Non-`SPOT` instruments are filtered out even when present in the public
   instruments response.
-- Futures, perpetuals, withdrawals, WebSocket trading writes, dead-man-switch,
-  and amend/move order are explicit `Unsupported` boundaries.
+- Futures/perpetual instruments, margin, positions, and futures order paths are
+  official One Trading surfaces but are `项目未实现 Futures/Perpetual` in this
+  spot adapter; do not document them as `交易所不支持合约`.
+- Withdrawals, WebSocket trading writes, dead-man-switch, and amend/move order
+  are explicit runtime `Unsupported` boundaries.
 
 ## URLs
 

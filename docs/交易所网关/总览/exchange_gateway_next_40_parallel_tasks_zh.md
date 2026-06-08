@@ -75,7 +75,7 @@ adapter 至少达到“离线可验”的状态：
 - 不做真实下单、真实撤单、提现、转账、划转、API key 写入或生产私有流长期运行。
 - 不把 CCXT 源码当作最终权威；CCXT 只用于能力发现，最终以官方 API 文档和本地
   fixture 为准。
-- 不改策略层、执行层、控制面板、旧 `src/exchanges/*` 运行路径，除非任务明确是把
+- 不改策略层、执行层、控制面板、旧 `retired exchange tree/*` 运行路径，除非任务明确是把
   已有旧路径迁移到 gateway 且改动范围已列出。
 - 不一次性扩展共享 trait。确实需要新增共享模型或方法时，先提交协调说明，由单独
   公共任务合并后其他 AI 再跟进。
@@ -187,7 +187,7 @@ cargo run --bin <anything-that-connects-live>
 
 边界：
 
-- 仓库旧 `src/exchanges/private_perp` 中已有 Bybit 私有永续经验，只能作为迁移参考，不直接扩大旧路径。
+- 仓库旧 `retired exchange tree/private_perp` 中已有 Bybit 私有永续经验，只能作为迁移参考，不直接扩大旧路径。
 - `binancecoinm` 的 `MarketType` 可使用 `Futures`/`Perpetual`，文档里必须标注 coin-margined/inverse settle asset 和 contract size。
 
 分配 prompt：

@@ -39,7 +39,7 @@ runtime behavior is still being extracted in staged slices.
 - Removed local runtime scratch state from the working tree: `run/` and
   `help/*.log*`.
 - Removed empty legacy directories left after migration cleanup:
-  `src/exchanges/adapters/` and `src/spot_control/`.
+  `retired exchange tree/adapters/` and `src/spot_control/`.
 - Kept the intentional source and documentation removals that are already
   represented as tracked deletes in this refactor.
 

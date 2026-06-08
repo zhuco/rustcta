@@ -22,14 +22,9 @@ Rules:
 - Apps should not define core domain models.
 - Apps should not depend on strategy crates directly.
 - Only `apps/gateway` should depend on `rustcta-exchange-gateway`.
-- Apps must not import legacy `rustcta::exchanges`, `crate::exchanges`, or
+- Apps must not import legacy `legacy root crate path exchanges`, `crate::exchanges`, or
   concrete adapter modules.
 - Apps must not reach into `src/` legacy modules. Use workspace crates.
-- Temporary exception: `apps/backtest` may depend on the legacy root `rustcta`
-  package only to call `rustcta::backtest::runtime` while backtest code still
-  lives under `src/backtest/*`. Do not use this exception for exchange modules,
-  strategies, gateway internals, or any other app. Retire it when
-  `crates/rustcta-backtest` is extracted.
 
 Ownership:
 
@@ -42,10 +37,6 @@ Ownership:
   static UI serving, without raw secret exposure.
 - `apps/cli`: operator/developer CLI composition only. Put reusable behavior in
   platform crates before wiring it here.
-- `apps/backtest`: offline backtest/research command entrypoint. It may keep a
-  narrow compatibility bridge to `rustcta::backtest::runtime` until the
-  backtest library is extracted, but it must not add exchange API behavior.
-
 Parallel work guidance:
 
 - Keep app tasks narrow: one binary, its manifest, and the public crate API it

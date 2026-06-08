@@ -110,6 +110,15 @@ fn typed_payload_from_legacy_operation(
         GatewayOperation::GetRecentFills => {
             GatewayRequestPayload::GetRecentFills(decode_payload(payload)?)
         }
+        GatewayOperation::GetSymbolAccountConfig
+        | GatewayOperation::SetLeverage
+        | GatewayOperation::SetPositionMode
+        | GatewayOperation::ClosePosition
+        | GatewayOperation::SetCountdownCancelAll => {
+            return Err(GatewayError::UnsupportedOperation {
+                operation: operation.as_str().to_string(),
+            });
+        }
         GatewayOperation::SubscribeBooks => {
             GatewayRequestPayload::SubscribeBooks(decode_payload(payload)?)
         }

@@ -21,7 +21,7 @@ Official API sources:
 Product line:
 
 - `MarketType::Spot` only in runtime.
-- HitBTC v3 documents spot, margin and wallet endpoints; this task enables only spot public REST at runtime. Margin, futures-like derivatives, wallet transfers and withdrawals stay explicit `Unsupported` boundaries until the product semantics are mapped and tested independently.
+- HitBTC v3 documents spot, margin, futures and wallet endpoints. Futures/Margin derivatives are 项目未实现 in this spot runtime, not `交易所不支持合约`. Wallet transfers and withdrawals stay outside trading runtime scope.
 
 Authentication:
 

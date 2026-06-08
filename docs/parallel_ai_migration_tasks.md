@@ -23,7 +23,7 @@ Every AI must follow these rules before editing code:
 2. Read the relevant plan documents listed in its task.
 3. Keep changes inside the task's allowed file scope.
 4. Do not revert or overwrite changes made by other agents.
-5. Preserve legacy binary names and route compatibility unless the task
+5. Preserve retired binary names and route compatibility unless the task
    explicitly says otherwise.
 6. Do not promote raw exchange credential write/delete behavior into the new
    public control API.
@@ -56,13 +56,13 @@ AI must say clearly whether full validation passed or was not run.
 | 6 | Industrial CLI and boundary checks | `apps/cli`, scripts/docs | Tasks 4, 5, 10 |
 | 7 | Execution router and ledger mutation coverage | `crates/rustcta-execution-*`, `rustcta-event-ledger` | Tasks 1, 5, 8 |
 | 8 | Supervisor runtime heartbeat/snapshot/recovery | `crates/rustcta-supervisor`, `apps/supervisor` | Tasks 1, 2, 7 |
-| 9 | Strategy crate SDK migration | `strategies/*`, `src/strategies/*` compat | Tasks 7, 8 |
+| 9 | Strategy crate SDK migration | `strategies/*`, `retired strategy tree/*` compat | Tasks 7, 8 |
 | 10 | CI, compatibility retirement audit, docs | scripts/docs/root manifests | All tasks |
 
 ## Task 1: Control API Secret-Free Read Route Extraction
 
 Goal: move the next batch of legacy dashboard read models/routes from
-`src/bin/control_api.rs` into `crates/rustcta-control-api` without moving local
+`retired root bin directory/control_api.rs` into `crates/rustcta-control-api` without moving local
 side effects or raw credential writes.
 
 Allowed scope:
@@ -218,7 +218,7 @@ the legacy root crate and without private account mutation.
 Allowed scope:
 
 - `tools/ops/**`
-- thin compatibility wrappers in `src/bin/*.rs`
+- thin compatibility wrappers in `retired root bin directory/*.rs`
 - `crates/rustcta-reporting/**` for root-free reporting helpers
 - docs/tools ops migration notes
 
@@ -227,7 +227,7 @@ Target candidates:
 - `hyperliquid_self_test` if it can be made root-free and non-mutating
 - additional render-only reporter commands
 - help/summary parity for already migrated smart-money/probe/symbol commands
-- wrapper consistency through `src/bin/common/legacy_tools_ops_shim.rs`
+- wrapper consistency through `retired root bin directory/common/legacy_tools_ops_shim.rs`
 
 Do not migrate:
 
@@ -241,8 +241,8 @@ Acceptance:
 ```bash
 cargo test -p rustcta-tools-ops --all-features
 cargo clippy -p rustcta-tools-ops --all-targets --all-features
-cargo run -p rustcta-tools-ops -- legacy-bin-plan
-cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+cargo run -p rustcta-tools-ops -- verify-retired-src
+cargo run -p rustcta-tools-ops -- verify-retired-src
 cargo fmt --check
 ```
 
@@ -266,7 +266,7 @@ Allowed scope:
 
 - `tools/ops/**`
 - helper crates that do not depend on root `rustcta`
-- thin root wrappers in `src/bin/*.rs`
+- thin root wrappers in `retired root bin directory/*.rs`
 - docs for safety gates and command compatibility
 
 Target commands:
@@ -296,8 +296,8 @@ Acceptance:
 
 ```bash
 cargo test -p rustcta-tools-ops --all-features
-cargo run -p rustcta-tools-ops -- legacy-bin-plan
-cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+cargo run -p rustcta-tools-ops -- verify-retired-src
+cargo run -p rustcta-tools-ops -- verify-retired-src
 cargo fmt --check
 ```
 
@@ -330,7 +330,7 @@ Target work:
 - command tree documentation and Clap help tests
 - smoke tests for `migration`, `ledger`, `supervisor`, `ops`
 - bridge command for existing `cross-arb preflight` without live network paths
-- boundary check that fails on unclassified new `src/bin/*.rs`
+- boundary check that fails on unclassified new `retired root bin directory/*.rs`
 - boundary check that app crates do not import gateway-private modules
 
 Do not migrate:
@@ -459,13 +459,13 @@ mutations. Add tests and run the Task 8 acceptance commands.
 
 Goal: continue moving adapter-free strategy core/runtime slices into
 independent `strategies/*` crates using `rustcta-strategy-sdk`, while keeping
-legacy `src/strategies/*` compatibility paths green.
+legacy `retired strategy tree/*` compatibility paths green.
 
 Allowed scope:
 
 - `strategies/*/**`
 - `crates/rustcta-strategy-sdk/**`
-- `src/strategies/*` compatibility adapters only when needed
+- `retired strategy tree/*` compatibility adapters only when needed
 - strategy-specific tests
 
 Target work:
@@ -497,7 +497,7 @@ Prompt to assign:
 ```text
 You are AI-9. Complete Task 9 from docs/parallel_ai_migration_tasks.md.
 Continue adapter-free strategy crate migration using rustcta-strategy-sdk.
-Choose a bounded strategy slice, keep legacy src/strategies compatibility
+Choose a bounded strategy slice, keep legacy retired strategy tree compatibility
 paths compiling, and avoid concrete exchange/live execution behavior changes.
 Run the Task 9 acceptance commands.
 ```
@@ -604,8 +604,8 @@ Required audit commands:
 
 ```bash
 git status --short
-cargo run -q -p rustcta-tools-ops -- legacy-bin-plan
-cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
 scripts/check_industrial_boundaries.sh
 RUSTCTA_STRICT_STRATEGY_MIGRATION=1 scripts/check_industrial_boundaries.sh
 rg -n "exchange-api-keys|/api/control/symbols|/api/spot-arb/dashboard|/api/cross-arb/dashboard|/api/strategy-config|/api/cross-arb/settings" web-ui/dioxus/src crates/rustcta-control-api/src apps/control-api/src
@@ -613,7 +613,7 @@ rg -n "exchange-api-keys|/api/control/symbols|/api/spot-arb/dashboard|/api/cross
 
 Closure is allowed only if all of these are true:
 
-- `legacy-bin-plan` marks the old entrypoint as `alias` or `remove_later`, not
+- `verify-retired-src` marks the old entrypoint as `alias` or `remove_later`, not
   `keep_wrapper` or `warn`.
 - the replacement command exists and has help/contract tests.
 - operator docs and scripts no longer require the old command name.
@@ -631,12 +631,12 @@ Safe cleanup examples:
 - update docs to point to new workspace commands first;
 - mark legacy command status as `alias`, `warn`, `keep_wrapper`, or
   `remove_later` with a concrete milestone;
-- add or tighten boundary checks so future unclassified `src/bin/*.rs` files
+- add or tighten boundary checks so future unclassified `retired root bin directory/*.rs` files
   fail CI.
 
 Do not do in Task 11:
 
-- delete `src/bin/control_api.rs` while it still owns raw local credential
+- delete `retired root bin directory/control_api.rs` while it still owns raw local credential
   env-store write/delete behavior, static UI compatibility, command queue
   aliases, or legacy read routes;
 - delete live canary/admin/audit binaries while they still own confirmation
@@ -645,7 +645,7 @@ Do not do in Task 11:
 - remove Dioxus legacy endpoint fallback while the new generic route contract is
   incomplete;
 - remove root-heavy backtest compatibility entries before scripts/runbooks have
-  switched to `rustcta-backtest`.
+  switched to `retired-backtest`.
 
 Acceptance:
 
@@ -662,7 +662,7 @@ Prompt to assign:
 ```text
 You are AI-11. Complete Task 11 from docs/parallel_ai_migration_tasks.md.
 First audit whether Tasks 1-10 are actually closure-ready. Do not delete legacy
-entrypoints that legacy-bin-plan marks keep_wrapper or warn. Only remove files
+entrypoints that verify-retired-src marks keep_wrapper or warn. Only remove files
 that are proven unreferenced and outside compatibility paths. Update final docs,
 entrypoint runbooks, and boundary checks. Run the Task 11 acceptance commands
 and clearly list any blockers that prevent final deletion.

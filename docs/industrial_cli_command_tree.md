@@ -13,8 +13,8 @@ account mutation paths.
 rustcta-industrial
   doctor
   migration
-    legacy-bin-plan [--target <target>]
-    verify-legacy-bins [--src-bin-dir src/bin]
+    verify-retired-src [--target <target>]
+    verify-retired-src [--src-bin-dir retired root bin directory]
   ledger
     validate --path <jsonl> [--from-sequence <n>]
     summary --path <jsonl> [--from-sequence <n>]
@@ -38,9 +38,9 @@ rustcta-industrial
 
 ## Boundary Rules
 
-- `migration legacy-bin-plan` and `migration verify-legacy-bins` reuse the
-  `rustcta-tools-ops` legacy binary matrix. `migration verify-legacy-bins`
-  fails when a new `src/bin/*.rs` file is not classified or when the matrix has
+- `migration verify-retired-src` and `migration verify-retired-src` reuse the
+  `rustcta-tools-ops` retired binary matrix. `migration verify-retired-src`
+  fails when a new `retired root bin directory/*.rs` file is not classified or when the matrix has
   stale entries.
 - `ledger validate` and `ledger summary` replay local JSONL ledgers only. They
   do not write ledger records and do not open exchange connections.
@@ -66,9 +66,9 @@ rustcta-industrial
   `supervisor`, `ops`, and `cross-arb preflight`.
 - The offline preflight smoke must assert `network_access=disabled` and
   `live_order_access=disabled`.
-- The script runs both `rustcta-tools-ops verify-legacy-bins` and
-  `rustcta-industrial migration verify-legacy-bins`, so unclassified new
-  `src/bin/*.rs` files fail the boundary check.
+- The script runs both `rustcta-tools-ops verify-retired-src` and
+  `rustcta-industrial migration verify-retired-src`, so unclassified new
+  `retired root bin directory/*.rs` files fail the boundary check.
 - App crates outside `apps/gateway` must not depend on
   `rustcta-exchange-gateway`, and no app crate may import gateway-private
   adapter paths such as `rustcta_exchange_gateway::adapters`.

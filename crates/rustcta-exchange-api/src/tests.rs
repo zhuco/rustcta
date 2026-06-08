@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -243,6 +245,311 @@ async fn exchange_client_trait_object_should_dispatch_requests() {
         Some("cli-1".to_string())
     );
     assert!(client.capabilities().supports_query_order);
+}
+
+#[tokio::test]
+async fn readonly_exchange_client_should_block_mutations_and_forward_reads() {
+    let now = DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let recorder = Arc::new(ReadOnlyMutationRecorder::default());
+    let client = ReadOnlyExchangeClient::new(
+        MockExchangeClient {
+            exchange: exchange_id(),
+            now,
+        },
+        recorder.clone(),
+    );
+
+    let balances = ExchangeClient::get_balances(
+        &client,
+        BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            exchange: exchange_id(),
+            market_type: Some(market_type()),
+            assets: Vec::new(),
+        },
+    )
+    .await
+    .expect("readonly balance request");
+    assert_eq!(balances.schema_version, EXCHANGE_API_SCHEMA_VERSION);
+
+    let result = ExchangeClient::place_order(
+        &client,
+        PlaceOrderRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+            client_order_id: Some("cli-readonly".to_string()),
+            side: order_side(),
+            position_side: None,
+            order_type: order_type(),
+            time_in_force: Some(time_in_force()),
+            quantity: "0.01000000".to_string(),
+            price: Some("50000.00".to_string()),
+            quote_quantity: None,
+            reduce_only: false,
+            post_only: true,
+        },
+    )
+    .await;
+
+    match result {
+        Err(ExchangeApiError::Exchange(error)) => {
+            assert_eq!(error.class, rustcta_types::ExchangeErrorClass::Permission);
+            assert_eq!(error.code.as_deref(), Some("readonly_guard"));
+            assert!(error.message.contains("place_order"));
+        }
+        other => panic!("expected readonly permission error, got {other:?}"),
+    }
+    assert_eq!(recorder.count("place_order"), 1);
+    assert_eq!(recorder.total_mutations(), 1);
+}
+
+#[tokio::test]
+async fn adapter_free_provider_should_delegate_to_exchange_client_without_concrete_adapter() {
+    let now = DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let client = MockExchangeClient {
+        exchange: exchange_id(),
+        now,
+    };
+    let provider: &dyn AdapterFreeExchangeProvider = &client;
+
+    let open_orders = provider
+        .get_open_orders(OpenOrdersRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            exchange: exchange_id(),
+            market_type: Some(market_type()),
+            symbol: Some(symbol(now)),
+            page: None,
+        })
+        .await
+        .expect("adapter-free open orders");
+    assert_eq!(open_orders.orders.len(), 1);
+
+    let mut close_order = PlaceOrderRequest {
+        schema_version: EXCHANGE_API_SCHEMA_VERSION,
+        context: context(now),
+        symbol: symbol(now),
+        client_order_id: Some("close-1".to_string()),
+        side: OrderSide::Sell,
+        position_side: None,
+        order_type: order_type(),
+        time_in_force: Some(time_in_force()),
+        quantity: "0.01000000".to_string(),
+        price: Some("50000.00".to_string()),
+        quote_quantity: None,
+        reduce_only: false,
+        post_only: true,
+    };
+    let rejected = provider
+        .close_position_order(close_order.clone())
+        .await
+        .expect_err("close provider requires reduce-only");
+    assert!(matches!(rejected, ExchangeApiError::InvalidRequest { .. }));
+
+    close_order.reduce_only = true;
+    let accepted = provider
+        .close_position_order(close_order)
+        .await
+        .expect("reduce-only close delegates to place_order");
+    assert_eq!(accepted.order.client_order_id.as_deref(), Some("cli-1"));
+}
+
+struct UnsupportedAccountControlProvider {
+    exchange: ExchangeId,
+}
+
+#[async_trait]
+impl PerpAccountControlProvider for UnsupportedAccountControlProvider {
+    fn exchange(&self) -> ExchangeId {
+        self.exchange.clone()
+    }
+}
+
+struct MockAccountControlProvider {
+    exchange: ExchangeId,
+    now: DateTime<Utc>,
+}
+
+#[async_trait]
+impl PerpAccountControlProvider for MockAccountControlProvider {
+    fn exchange(&self) -> ExchangeId {
+        self.exchange.clone()
+    }
+
+    fn account_control_capabilities(&self) -> AccountControlCapabilities {
+        AccountControlCapabilities {
+            exchange: self.exchange.clone(),
+            supports_symbol_account_config: true,
+            supports_leverage: true,
+            supports_position_mode_change: true,
+            supports_close_position: true,
+            supports_countdown_cancel_all: false,
+        }
+    }
+
+    async fn get_symbol_account_config(
+        &self,
+        request: SymbolAccountConfigRequest,
+    ) -> ExchangeApiResult<SymbolAccountConfigResponse> {
+        Ok(SymbolAccountConfigResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: ResponseMetadata::new(self.exchange.clone(), self.now),
+            config: SymbolAccountConfig {
+                symbol: request.symbol,
+                position_mode: Some(PositionMode::Hedge),
+                margin_mode: Some(MarginMode::Cross),
+                leverage: Some(5),
+                max_leverage: Some(20),
+                updated_at: self.now,
+            },
+        })
+    }
+
+    async fn close_position(
+        &self,
+        request: ClosePositionRequest,
+    ) -> ExchangeApiResult<ClosePositionResponse> {
+        Ok(ClosePositionResponse {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            metadata: ResponseMetadata::new(self.exchange.clone(), self.now),
+            client_order_id: request.client_order_id,
+            exchange_order_id: Some("close-ex-1".to_string()),
+            accepted: true,
+            status: Some(order_status()),
+            message: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn account_control_provider_should_default_to_unsupported_without_concrete_adapter() {
+    let now = DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let provider = UnsupportedAccountControlProvider {
+        exchange: exchange_id(),
+    };
+
+    let capabilities = provider.account_control_capabilities();
+    assert!(!capabilities.supports_leverage);
+    assert!(!capabilities.supports_close_position);
+
+    let result = provider
+        .get_symbol_account_config(SymbolAccountConfigRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+        })
+        .await;
+    assert!(matches!(
+        result,
+        Err(ExchangeApiError::Unsupported {
+            operation: "get_symbol_account_config"
+        })
+    ));
+}
+
+#[tokio::test]
+async fn account_control_provider_should_carry_legacy_trading_adapter_controls() {
+    let now = DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let provider = MockAccountControlProvider {
+        exchange: exchange_id(),
+        now,
+    };
+
+    let config = provider
+        .get_symbol_account_config(SymbolAccountConfigRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+        })
+        .await
+        .expect("symbol account config");
+    assert_eq!(config.config.position_mode, Some(PositionMode::Hedge));
+    assert_eq!(config.config.margin_mode, Some(MarginMode::Cross));
+    assert_eq!(config.config.leverage, Some(5));
+
+    let close = provider
+        .close_position(ClosePositionRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+            position_side: PositionSide::Long,
+            quantity: "0.01000000".to_string(),
+            price: None,
+            order_type: OrderType::Market,
+            time_in_force: TimeInForce::IOC,
+            client_order_id: "close-cli-1".to_string(),
+            max_slippage_pct: Some("0.0100".to_string()),
+        })
+        .await
+        .expect("close position");
+    assert!(close.accepted);
+    assert_eq!(close.client_order_id, "close-cli-1");
+}
+
+#[tokio::test]
+async fn readonly_exchange_client_should_guard_account_control_mutations() {
+    let now = DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let recorder = Arc::new(ReadOnlyMutationRecorder::default());
+    let client = ReadOnlyExchangeClient::new(
+        MockAccountControlProvider {
+            exchange: exchange_id(),
+            now,
+        },
+        recorder.clone(),
+    );
+
+    let config = PerpAccountControlProvider::get_symbol_account_config(
+        &client,
+        SymbolAccountConfigRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+        },
+    )
+    .await
+    .expect("readonly account config read should pass through");
+    assert_eq!(config.config.position_mode, Some(PositionMode::Hedge));
+    assert_eq!(recorder.total_mutations(), 0);
+
+    let result = PerpAccountControlProvider::close_position(
+        &client,
+        ClosePositionRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context(now),
+            symbol: symbol(now),
+            position_side: PositionSide::Long,
+            quantity: "0.01000000".to_string(),
+            price: None,
+            order_type: OrderType::Market,
+            time_in_force: TimeInForce::IOC,
+            client_order_id: "readonly-close-1".to_string(),
+            max_slippage_pct: None,
+        },
+    )
+    .await;
+
+    match result {
+        Err(ExchangeApiError::Exchange(error)) => {
+            assert_eq!(error.class, rustcta_types::ExchangeErrorClass::Permission);
+            assert_eq!(error.code.as_deref(), Some("readonly_guard"));
+            assert!(error.message.contains("close_position"));
+        }
+        other => panic!("expected readonly account-control guard error, got {other:?}"),
+    }
+    assert_eq!(recorder.count("close_position"), 1);
+    assert_eq!(recorder.total_mutations(), 1);
 }
 
 #[test]

@@ -82,6 +82,14 @@ Secrets are only used inside the transport signing path and are not written into
 - Auth renewal: listen-key keepalive, renew before expiry, reconnect and resubscribe on renewal failure.
 - Reconciliation after reconnect/auth renewal: resubscribe and resnapshot order books; refresh balances, positions, orders, and fills through REST.
 
+Official Spot depth subscription uses `market_${symbol}_simple_depth_step0` on
+`wss://ws.bitrue.com/market/ws`; payloads are gzip-compressed and the server
+sends ping every 15 seconds. The reviewed official Spot docs do not publish a
+fixed orderbook push interval, fixed depth level count, sequence, or checksum.
+Mapping should add the exact channel, gzip handling, ping 15s, no fixed
+ms/depth/checksum, and REST depth snapshot fallback. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 ## Fixtures
 
 Fixtures live under `tests/fixtures/exchanges/bitrue/` and cover:

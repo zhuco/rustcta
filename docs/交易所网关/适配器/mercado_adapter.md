@@ -12,6 +12,10 @@ Task 16 adds a conservative Mercado Bitcoin gateway adapter for Brazil and Latin
 
 ## Boundaries
 
+- Official P6 product-line verification found Mercado Bitcoin API v4 covers spot
+  symbols, order book, accounts, balances, orders, fees, and wallet. The
+  `positions` wording maps to open orders, not derivative positions; standard
+  futures/perpetual/options are `交易所不支持合约`.
 - Fiat ledger is read-audit-only.
 - Withdrawals, bank payments, transfers, and internal movements are unsupported.
 - Private streams are not promoted; private state should reconcile through REST request specs.

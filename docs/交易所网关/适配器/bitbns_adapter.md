@@ -14,14 +14,18 @@ Task A-07 scope from `docs/交易所网关/总览/exchange_gateway_remaining_ven
 | Public REST paths | `https://github.com/bitbns-official/node-bitbns-api/blob/master/index.js` | Source maps public methods to `https://bitbns.com` paths. |
 | Private signing | same SDK source | Base64 JSON payload signed with HMAC-SHA512 headers. |
 | KYC/region | Bitbns FAQ / how-it-works / terms pages | Trading requires KYC; terms allow compliance holds and exclude sanctioned jurisdictions. |
+| Product-line follow-up | `https://bitbns.com/trade/`, `https://bitbns.com/trade-mechanism/` | Official site lists spot trading and Margin Trading/API Trading links. |
 
 ## Product Lines
 
 | Product | MarketType | Current adapter status |
 | --- | --- | --- |
 | INR/USDT spot | `Spot` | G1 public REST scan-only: symbol rules and order book snapshot. |
-| Margin, swap, FIP, payment, withdrawal | n/a | Unsupported; not part of exchange trading runtime. |
-| Futures/perpetual | n/a | Not enabled in this A-07 spot task. |
+| Margin Trading | n/a | `项目未实现`; official SDK/site document margin trading API surface, but adapter does not connect it. |
+| FIP, payment, withdrawal | n/a | Outside exchange trading runtime. |
+| Futures/perpetual/options | n/a | `交易所不支持合约` under the current official API/product scope; no stable standard contracts API verified. |
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Margin Trading 不能写成交易所不支持，应写 `项目未实现 Margin Trading`；标准 futures/perpetual/options 写 `交易所不支持合约`。
 
 Default public REST base URL: `https://bitbns.com`
 
@@ -60,6 +64,14 @@ Official SDK Socket.IO helpers show:
 
 This adapter only ships payload/parser fixtures and heartbeat policy notes. Runtime public/private streams remain `Unsupported("bitbns.public_streams_spec_only")` and `Unsupported("bitbns.private_streams_disabled")`.
 
+Official WebSocket detail remains weak: the old official Python repo is
+deprecated and explicitly says that repo does not cover WebSockets, while SDK
+examples only expose `getOrderBookSocket` without stable endpoint, interval,
+depth, sequence, or checksum documentation. Keep this adapter spec-only; use
+REST orderbook snapshot for rebuild and do not promote live Socket.IO runtime
+until a current stable official specification is obtained. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 ## Unsupported Boundaries
 
 - Private balances, fees, open orders, query order and fills are disabled.
@@ -67,6 +79,7 @@ This adapter only ships payload/parser fixtures and heartbeat policy notes. Runt
 - Public Socket.IO runtime is spec-only, not advertised as a stable stream.
 - Private Socket.IO token stream is disabled.
 - FIP, swap, deposits, withdrawals, bank rails, payment gateway and transfer APIs are outside the trading adapter.
+- Standard futures/perpetual/options are `交易所不支持合约` as of the current official docs.
 
 ## Limits And Region Notes
 

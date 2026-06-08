@@ -24,6 +24,18 @@ mapped to bitbank's Spot order endpoint. `client_order_id`, IOC/FOK, reduce-only
 quote-quantity market order, in-place amend, and cancel-all are intentionally
 unsupported.
 
+Product-line boundary: bitbank official REST API also documents Margin
+status/positions. The current project has `项目未实现 Margin`; standard
+futures/perpetual/options are `交易所不支持合约` under the current official API
+scope.
+
+Official public WebSocket order book details: `depth_diff_{pair}` and
+`depth_whole_{pair}` are Socket.IO `join-room` channels. Official docs do not
+state a fixed millisecond interval. `depth_whole` is capped at 200 asks and 200
+bids in normal mode, while `depth_diff.s` and `depth_whole.sequenceId` are
+monotonic but not always consecutive. Runtime mapping still needs structured
+channel/depth/interval/rebuild fields.
+
 Private WebSocket capability is declared only when REST credentials are present.
 Production routing should reconcile private stream gaps with `query_order`,
 `get_open_orders`, and `get_recent_fills`.

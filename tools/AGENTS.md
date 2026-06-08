@@ -5,7 +5,7 @@ long-running platform services.
 
 Rules:
 
-- Prefer moving ad-hoc or operational `src/bin/*.rs` programs here before
+- Prefer moving ad-hoc or operational `retired root bin directory/*.rs` programs here before
   moving production services.
 - Tools may call platform crates and compatibility APIs, but they must not own
   strategy runtime loops, gateway servers, supervisor services, or web servers.

@@ -37,58 +37,25 @@ fn stdout(output: &std::process::Output) -> String {
 }
 
 #[test]
-fn legacy_bin_plan_should_include_tools_migrations() {
-    let output = run_tools_ops(&["legacy-bin-plan", "--target", "tools"]);
-    assert_success(&output, "legacy-bin-plan --target tools");
+fn default_command_should_verify_retired_src() {
+    let output = run_tools_ops(&[]);
+    assert_success(&output, "default verify-retired-src");
 
-    let migrations: Vec<Value> =
-        serde_json::from_slice(&output.stdout).expect("legacy-bin-plan should emit json");
-    let sources = migrations
-        .iter()
-        .map(|migration| {
-            migration["source"]
-                .as_str()
-                .expect("migration source should be a string")
-        })
-        .collect::<Vec<_>>();
-
-    assert!(sources.contains(&"trend_report.rs"));
-    assert!(sources.contains(&"account_position_reporter.rs"));
-    assert!(sources.contains(&"ws_proxy_probe.rs"));
-    assert!(sources.contains(&"gateio_bitget_spot_symbols.rs"));
-    assert!(sources.contains(&"smart_money_binance_collector.rs"));
-    assert!(sources.contains(&"smart_money_hyperliquid_wallet_ingestion.rs"));
-    assert!(sources.contains(&"smart_money_portfolio_service.rs"));
-    assert!(migrations
-        .iter()
-        .all(|migration| migration["target"] == "tool_ops"));
-    assert!(migrations
-        .iter()
-        .any(|migration| migration["compatibility"] == "alias"));
-    assert!(migrations.iter().any(|migration| migration["new_command"]
-        .as_str()
-        .is_some_and(|command| command.contains("rustcta-tools-ops"))));
-    assert!(migrations
-        .iter()
-        .all(|migration| migration["retirement_milestone"]
-            .as_str()
-            .is_some_and(|milestone| !milestone.is_empty())));
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("default command should emit json");
+    assert_eq!(report["retired"], true);
 }
 
 #[test]
-fn verify_legacy_bins_should_stay_clean() {
-    let output = run_tools_ops(&["verify-legacy-bins", "--src-bin-dir", "src/bin"]);
-    assert_success(&output, "verify-legacy-bins --src-bin-dir src/bin");
+fn verify_retired_src_should_stay_clean() {
+    let output = run_tools_ops(&["verify-retired-src"]);
+    assert_success(&output, "verify-retired-src");
 
     let report: Value =
-        serde_json::from_slice(&output.stdout).expect("verify-legacy-bins should emit json");
-    assert_eq!(report["unclassified_bins"], serde_json::json!([]));
-    assert_eq!(report["stale_migrations"], serde_json::json!([]));
-    assert!(report["classified_bins"]
-        .as_array()
-        .expect("classified_bins should be an array")
-        .iter()
-        .any(|source| source == "ws_proxy_probe.rs"));
+        serde_json::from_slice(&output.stdout).expect("verify-retired-src should emit json");
+    assert_eq!(report["src_dir"], "src");
+    assert_eq!(report["exists"], false);
+    assert_eq!(report["retired"], true);
 }
 
 #[test]
@@ -125,6 +92,18 @@ fn migrated_command_help_should_not_drift() {
         (
             &["probe", "ws-proxy", "--help"][..],
             "Usage: rustcta-tools-ops probe ws-proxy",
+        ),
+        (
+            &["probe", "hyperliquid-self-test", "--help"][..],
+            "Usage: rustcta-tools-ops probe hyperliquid-self-test",
+        ),
+        (
+            &["probe", "funding-arb-observe", "--help"][..],
+            "Usage: rustcta-tools-ops probe funding-arb-observe",
+        ),
+        (
+            &["probe", "cross-arb-ws-opportunity", "--help"][..],
+            "Usage: rustcta-tools-ops probe cross-arb-ws-opportunity",
         ),
         (
             &["canary", "exchange-order", "--help"][..],
@@ -194,6 +173,47 @@ fn live_canary_safety_plan_should_remain_non_mutating() {
 }
 
 #[test]
+fn hyperliquid_self_test_plan_should_remain_secret_free() {
+    let output = run_tools_ops(&["probe", "hyperliquid-self-test"]);
+    assert_success(&output, "probe hyperliquid-self-test");
+
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("hyperliquid plan should emit json");
+    assert_eq!(report["legacy_binary"], "hyperliquid_self_test");
+    assert_eq!(report["gate_mode"], "secret_free_plan_only");
+    assert_eq!(report["execute_requested"], false);
+    assert_eq!(report["live_order_confirmed"], false);
+    assert_eq!(report["request"]["symbol"], "ETH/USDC");
+    assert_eq!(report["planned_side_effects"], serde_json::json!([]));
+    assert!(report["safety_checks"]
+        .as_array()
+        .expect("safety checks")
+        .iter()
+        .any(|check| check == "tools/ops does not read Hyperliquid wallet or private key values"));
+}
+
+#[test]
+fn observe_probe_plans_should_remain_non_mutating() {
+    let output = run_tools_ops(&["probe", "funding-arb-observe"]);
+    assert_success(&output, "probe funding-arb-observe");
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("funding observe plan should emit json");
+    assert_eq!(report["legacy_binary"], "funding_arb_observe");
+    assert_eq!(report["gate_mode"], "dry_run_plan_only");
+    assert_eq!(report["planned_side_effects"], serde_json::json!([]));
+    assert_eq!(report["request"]["live_order_access"], "disabled");
+
+    let output = run_tools_ops(&["probe", "cross-arb-ws-opportunity"]);
+    assert_success(&output, "probe cross-arb-ws-opportunity");
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("ws opportunity plan should emit json");
+    assert_eq!(report["legacy_binary"], "cross_arb_ws_opportunity_probe");
+    assert_eq!(report["gate_mode"], "dry_run_plan_only");
+    assert_eq!(report["planned_side_effects"], serde_json::json!([]));
+    assert_eq!(report["request"]["network_access"], "disabled");
+}
+
+#[test]
 fn safety_gate_failures_should_not_require_live_config_or_network() {
     let output = run_tools_ops(&[
         "canary",
@@ -210,6 +230,22 @@ fn safety_gate_failures_should_not_require_live_config_or_network() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--execute requires --confirm-live-order"));
+
+    let output = run_tools_ops(&[
+        "probe",
+        "hyperliquid-self-test",
+        "--run-orders",
+        "--symbol",
+        "ETH/USDC",
+    ]);
+    assert!(
+        !output.status.success(),
+        "unconfirmed hyperliquid order path should fail\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--run-orders requires --execute --confirm-live-order"));
 
     let output = run_tools_ops(&[
         "admin",
@@ -272,44 +308,6 @@ fn smart_money_summary_commands_should_stay_dry_run_and_network_free() {
             stdout.contains(expected),
             "{} should contain {expected:?}\nstdout:\n{stdout}",
             args.join(" ")
-        );
-    }
-}
-
-#[test]
-fn legacy_tool_wrappers_should_forward_to_expected_tools_ops_subcommands() {
-    for (source, expected_subcommand) in [
-        (
-            "src/bin/smart_money_binance_collector.rs",
-            "[\"smart-money\", \"binance-collector\"]",
-        ),
-        (
-            "src/bin/smart_money_hyperliquid_wallet_ingestion.rs",
-            "[\"smart-money\", \"hyperliquid-wallet-ingestion\"]",
-        ),
-        (
-            "src/bin/smart_money_portfolio_service.rs",
-            "[\"smart-money\", \"portfolio-service\"]",
-        ),
-        ("src/bin/ws_proxy_probe.rs", "[\"ws-proxy-probe\"]"),
-        (
-            "src/bin/gateio_bitget_spot_symbols.rs",
-            "[\"symbols\", \"gateio-bitget-spot\"]",
-        ),
-        ("src/bin/trend_report.rs", "[\"reporter\", \"trend\"]"),
-    ] {
-        let source_path = workspace_root().join(source);
-        let source = std::fs::read_to_string(&source_path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", source_path.display()));
-        assert!(
-            source.contains("legacy_tools_ops_shim::run_tools_ops"),
-            "{} should use the shared tools/ops shim",
-            source_path.display()
-        );
-        assert!(
-            source.contains(expected_subcommand),
-            "{} should forward to {expected_subcommand}",
-            source_path.display()
         );
     }
 }

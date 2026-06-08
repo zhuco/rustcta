@@ -14,6 +14,7 @@ registered in the exchange gateway.
 | Private WS | Spec-only subscription payloads; live activation requires one-time token handling |
 | Payment/payout | Explicitly unsupported in this adapter |
 | Withdraw/transfer | Explicitly unsupported |
+| Standard contracts | `交易所不支持合约`; current official Exchange docs cover spot orderbook/orders/WS, not futures/perpetual/options |
 
 ## Endpoint Notes
 
@@ -28,6 +29,8 @@ registered in the exchange gateway.
   `CryptomusGatewayConfig`.
 - Live market-order writes are gated as unsupported; only limit order request
   specs and explicit private REST paths are covered.
+
+官方产品线核验见 [产品线官方核验 P6 剩余区域现货 CEX](../产品线官方核验_P6_剩余区域现货_CEX.md)。Cryptomus payment、payout、conversions 不并入交易所合约产品线。
 
 Official documentation used for this task:
 

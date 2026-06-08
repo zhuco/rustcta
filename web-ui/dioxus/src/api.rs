@@ -3,13 +3,14 @@ use serde_json::json;
 use serde_json::Value;
 
 use crate::types::{DashboardData, WorkspaceFetchData};
-use crate::utils::{as_array, bool_at, path_segment, record_balance_history, text_at};
+use crate::utils::{as_array, bool_at, path_segment, record_balance_history};
 
-const API_CONTROL_PREFIX: &str = "/api/control";
+const API_LOCAL_AGENT_COMMANDS: &str = "/api/local-agent/commands";
 const API_INVENTORY: &str = "/api/inventory";
 const API_BALANCE_HISTORY: &str = "/api/balance-history";
 const API_WORKSPACE: &str = "/api/workspace";
 const API_STRATEGIES: &str = "/api/strategies";
+const API_STRATEGY_SNAPSHOTS: &str = "/api/strategy-snapshots";
 const API_PROCESSES: &str = "/api/processes";
 const API_AGENTS: &str = "/api/agents";
 const API_GATEWAY_STATUS: &str = "/api/gateway/status";
@@ -34,13 +35,7 @@ const API_SCANNER_RECOMMENDATIONS: &str = "/api/scanner/recommendations";
 const API_HEDGE_POLICY_STATUS: &str = "/api/hedge-policy/status";
 const API_CONTROL_SYMBOLS: &str = "/api/control/symbols";
 const API_CONTROL_AUDIT: &str = "/api/control/audit";
-const API_SPOT_ARB_DASHBOARD: &str = "/api/spot-arb/dashboard";
-const API_CROSS_ARB_DASHBOARD: &str = "/api/cross-arb/dashboard";
-const API_EXCHANGE_API_KEYS: &str = "/api/exchange-api-keys";
 const API_STRATEGY_LOGS: &str = "/api/strategy-logs";
-const API_STRATEGY_CONFIG: &str = "/api/strategy-config";
-const API_CROSS_ARB_SETTINGS: &str = "/api/cross-arb/settings";
-const API_FUNDING_ARB_SETTINGS: &str = "/api/funding-arb/settings";
 const API_CROSS_ARB_INSTRUMENTS: &str = "/api/cross-arb/instruments";
 const API_CROSS_ARB_MARKET_SNAPSHOTS: &str = "/api/cross-arb/market-snapshots";
 
@@ -81,45 +76,28 @@ pub(crate) struct CrossArbMarketSnapshotFetch {
     pub(crate) coverage_ok: bool,
 }
 
-pub(crate) struct StrategyConfigDraft {
-    pub(crate) path: String,
-    pub(crate) content: String,
-}
-
-fn control_command_endpoint(command: &str) -> String {
-    format!("{API_CONTROL_PREFIX}/{}", path_segment(command))
-}
-
-fn exchange_control_endpoint(exchange: &str, command: &str) -> String {
-    format!(
-        "{API_CONTROL_PREFIX}/exchanges/{}/{}",
-        path_segment(exchange),
-        path_segment(command)
-    )
-}
-
-fn symbol_control_endpoint(symbol: &str, command: &str) -> String {
-    format!(
-        "{API_CONTROL_PREFIX}/symbols/{}/{}",
-        path_segment(symbol),
-        path_segment(command)
-    )
-}
-
 fn strategy_command_endpoint(strategy_id: &str) -> String {
     format!("{API_STRATEGIES}/{}/command", path_segment(strategy_id))
-}
-
-fn strategy_config_endpoint(strategy_id: &str) -> String {
-    format!("{API_STRATEGIES}/{}/config", path_segment(strategy_id))
 }
 
 pub(crate) async fn create_strategy(token: &str, body: &Value) -> Result<Value, String> {
     api_post_json(API_STRATEGIES, token, body).await
 }
 
+pub(crate) async fn post_local_agent_command(
+    token: &str,
+    command: &str,
+    payload: Value,
+) -> Result<Value, String> {
+    let body = json!({
+        "command": command,
+        "payload": payload,
+    });
+    api_post_json(API_LOCAL_AGENT_COMMANDS, token, &body).await
+}
+
 pub(crate) async fn post_control_command(token: &str, command: &str) -> Result<Value, String> {
-    api_post(&control_command_endpoint(command), token).await
+    post_local_agent_command(token, command, json!({ "scope": "global" })).await
 }
 
 pub(crate) async fn send_strategy_command(
@@ -130,34 +108,20 @@ pub(crate) async fn send_strategy_command(
     api_post_json(&strategy_command_endpoint(strategy_id), token, body).await
 }
 
-pub(crate) async fn fetch_strategy_config_for_strategy(
-    token: &str,
-    strategy_id: &str,
-    lang: crate::types::Language,
-) -> Result<StrategyConfigDraft, String> {
-    let value = api_get(&strategy_config_endpoint(strategy_id), token).await?;
-    Ok(StrategyConfigDraft {
-        path: text_at(&value, "path", lang),
-        content: text_at(&value, "content", lang),
-    })
-}
-
-pub(crate) async fn save_strategy_config_for_strategy(
-    token: &str,
-    strategy_id: &str,
-    content: String,
-    restart: bool,
-) -> Result<Value, String> {
-    let body = json!({ "content": content, "restart": restart });
-    api_post_json(&strategy_config_endpoint(strategy_id), token, &body).await
-}
-
 pub(crate) async fn post_exchange_control(
     token: &str,
     exchange: &str,
     command: &str,
 ) -> Result<Value, String> {
-    api_post(&exchange_control_endpoint(exchange, command), token).await
+    post_local_agent_command(
+        token,
+        command,
+        json!({
+            "scope": "exchange",
+            "exchange": exchange,
+        }),
+    )
+    .await
 }
 
 pub(crate) async fn post_symbol_control(
@@ -165,7 +129,15 @@ pub(crate) async fn post_symbol_control(
     symbol: &str,
     command: &str,
 ) -> Result<Value, String> {
-    api_post(&symbol_control_endpoint(symbol, command), token).await
+    post_local_agent_command(
+        token,
+        command,
+        json!({
+            "scope": "symbol",
+            "symbol": symbol,
+        }),
+    )
+    .await
 }
 
 pub(crate) async fn fetch_strategy_live_data(
@@ -174,23 +146,27 @@ pub(crate) async fn fetch_strategy_live_data(
 ) -> StrategyLiveFetch {
     let mut updated = 0usize;
     let mut errors = Vec::new();
+    let strategy_snapshots = match api_get(API_STRATEGY_SNAPSHOTS, token).await {
+        Ok(value) => {
+            updated += 1;
+            value
+        }
+        Err(error) => {
+            errors.push(error);
+            Value::Null
+        }
+    };
     StrategyLiveFetch {
-        spot_arb: fetch_or_previous(
-            API_SPOT_ARB_DASHBOARD,
-            token,
+        spot_arb: strategy_snapshot_detail(
+            &strategy_snapshots,
+            "spot_spot_taker_arbitrage",
             previous.spot_arb,
-            &mut updated,
-            &mut errors,
-        )
-        .await,
-        cross_arb: fetch_or_previous(
-            API_CROSS_ARB_DASHBOARD,
-            token,
+        ),
+        cross_arb: strategy_snapshot_detail(
+            &strategy_snapshots,
+            "cross_exchange_arbitrage",
             previous.cross_arb,
-            &mut updated,
-            &mut errors,
-        )
-        .await,
+        ),
         strategy_logs: fetch_or_previous(
             API_STRATEGY_LOGS,
             token,
@@ -284,14 +260,16 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
         }
     };
     let credentials_status = workspace_data.credentials_status.clone();
-    let api_keys = fetch_credential_schema_fallback(
-        token,
-        previous.api_keys,
-        credentials_status.clone(),
-        &mut updated,
-        &mut errors,
-    )
-    .await;
+    let strategy_snapshots = match api_get(API_STRATEGY_SNAPSHOTS, token).await {
+        Ok(value) => {
+            updated += 1;
+            value
+        }
+        Err(error) => {
+            errors.push(error);
+            Value::Null
+        }
+    };
     DashboardFetch {
         data: DashboardData {
             workspace: workspace_data.workspace,
@@ -299,7 +277,7 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
             processes: workspace_data.processes,
             agents: workspace_data.agents,
             gateway_status: workspace_data.gateway_status,
-            credentials_status,
+            credentials_status: credentials_status.clone(),
             status: fetch_or_previous(
                 API_STATUS,
                 token,
@@ -413,23 +391,17 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
                 &mut errors,
             )
             .await,
-            spot_arb: fetch_or_previous(
-                API_SPOT_ARB_DASHBOARD,
-                token,
+            spot_arb: strategy_snapshot_detail(
+                &strategy_snapshots,
+                "spot_spot_taker_arbitrage",
                 previous.spot_arb,
-                &mut updated,
-                &mut errors,
-            )
-            .await,
-            cross_arb: fetch_or_previous(
-                API_CROSS_ARB_DASHBOARD,
-                token,
+            ),
+            cross_arb: strategy_snapshot_detail(
+                &strategy_snapshots,
+                "cross_exchange_arbitrage",
                 previous.cross_arb,
-                &mut updated,
-                &mut errors,
-            )
-            .await,
-            api_keys,
+            ),
+            api_keys: credentials_status.clone(),
             strategy_logs: fetch_or_previous(
                 API_STRATEGY_LOGS,
                 token,
@@ -446,37 +418,7 @@ pub(crate) async fn fetch_dashboard(token: &str, previous: DashboardData) -> Das
 }
 
 pub(crate) async fn fetch_credential_status(token: &str) -> Result<Value, String> {
-    match api_get(API_CREDENTIALS_STATUS, token).await {
-        Ok(value) => Ok(value),
-        Err(status_error) => match api_get(API_EXCHANGE_API_KEYS, token).await {
-            Ok(value) => Ok(value),
-            Err(legacy_error) => Err(format!("{status_error}; legacy fallback: {legacy_error}")),
-        },
-    }
-}
-
-pub(crate) async fn save_exchange_api_keys(token: &str, body: &Value) -> Result<Value, String> {
-    api_post_json(API_EXCHANGE_API_KEYS, token, body).await
-}
-
-pub(crate) async fn fetch_strategy_config_draft(
-    token: &str,
-    lang: crate::types::Language,
-) -> Result<StrategyConfigDraft, String> {
-    let value = api_get(API_STRATEGY_CONFIG, token).await?;
-    Ok(StrategyConfigDraft {
-        path: text_at(&value, "path", lang),
-        content: text_at(&value, "content", lang),
-    })
-}
-
-pub(crate) async fn save_strategy_config_draft(
-    token: &str,
-    content: String,
-    restart: bool,
-) -> Result<Value, String> {
-    let body = json!({ "content": content, "restart": restart });
-    api_post_json(API_STRATEGY_CONFIG, token, &body).await
+    api_get(API_CREDENTIALS_STATUS, token).await
 }
 
 pub(crate) async fn refresh_spot_symbol_control(
@@ -536,19 +478,31 @@ pub(crate) async fn refresh_spot_exchange_control(
 }
 
 pub(crate) async fn fetch_cross_arb_settings(token: &str) -> Result<Value, String> {
-    api_get(API_CROSS_ARB_SETTINGS, token).await
+    let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
+    Ok(
+        strategy_snapshot_detail(&snapshots, "cross_exchange_arbitrage", Value::Null)
+            .get("settings")
+            .cloned()
+            .unwrap_or(Value::Null),
+    )
 }
 
 pub(crate) async fn save_cross_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
-    api_post_json(API_CROSS_ARB_SETTINGS, token, body).await
+    post_local_agent_command(token, "update_cross_arb_settings", body.clone()).await
 }
 
 pub(crate) async fn fetch_funding_arb_settings(token: &str) -> Result<Value, String> {
-    api_get(API_FUNDING_ARB_SETTINGS, token).await
+    let snapshots = api_get_raw(API_STRATEGY_SNAPSHOTS, token).await?;
+    Ok(
+        strategy_snapshot_detail(&snapshots, "funding_arbitrage", Value::Null)
+            .get("settings")
+            .cloned()
+            .unwrap_or(Value::Null),
+    )
 }
 
 pub(crate) async fn save_funding_arb_settings(token: &str, body: &Value) -> Result<Value, String> {
-    api_post_json(API_FUNDING_ARB_SETTINGS, token, body).await
+    post_local_agent_command(token, "update_funding_arb_settings", body.clone()).await
 }
 
 pub(crate) async fn fetch_cross_arb_instrument_data(
@@ -591,27 +545,21 @@ async fn fetch_or_previous(
     }
 }
 
-async fn fetch_credential_schema_fallback(
-    token: &str,
-    previous: Value,
-    status_value: Value,
-    updated: &mut usize,
-    errors: &mut Vec<String>,
-) -> Value {
-    match api_get(API_EXCHANGE_API_KEYS, token).await {
-        Ok(value) => {
-            *updated += 1;
-            value
-        }
-        Err(error) => {
-            if status_value.is_null() {
-                errors.push(error);
-                previous
-            } else {
-                status_value
-            }
-        }
-    }
+fn strategy_snapshot_detail(snapshots: &Value, strategy_kind: &str, previous: Value) -> Value {
+    snapshots
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| {
+                    item.get("strategy_kind")
+                        .and_then(Value::as_str)
+                        .map(|value| value == strategy_kind)
+                        .unwrap_or(false)
+                })
+                .and_then(|item| item.get("detail").cloned())
+        })
+        .unwrap_or(previous)
 }
 
 async fn fetch_runtime_publisher_status(
@@ -663,6 +611,10 @@ async fn fetch_runtime_publisher_status(
 }
 
 async fn api_get(path: &str, token: &str) -> Result<Value, String> {
+    api_get_raw(path, token).await.map(control_api_payload)
+}
+
+async fn api_get_raw(path: &str, token: &str) -> Result<Value, String> {
     let bearer = format!("Bearer {token}");
     let response = Request::get(path)
         .header("Authorization", &bearer)
@@ -678,20 +630,14 @@ async fn api_get(path: &str, token: &str) -> Result<Value, String> {
         .map_err(|error| format!("解析 {path} 响应失败：{error}"))
 }
 
-async fn api_post(path: &str, token: &str) -> Result<Value, String> {
-    let bearer = format!("Bearer {token}");
-    let response = Request::post(path)
-        .header("Authorization", &bearer)
-        .send()
-        .await
-        .map_err(|error| format!("提交 {path} 失败：{error}"))?;
-    if !response.ok() {
-        return Err(api_error_message(path, response).await);
+fn control_api_payload(value: Value) -> Value {
+    if let Some(data) = value.get("data") {
+        return data.clone();
     }
-    response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("解析 {path} 提交响应失败：{error}"))
+    if let Some(rows) = value.get("rows") {
+        return rows.clone();
+    }
+    value
 }
 
 async fn api_post_json(path: &str, token: &str, body: &Value) -> Result<Value, String> {

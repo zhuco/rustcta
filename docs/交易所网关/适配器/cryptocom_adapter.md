@@ -19,6 +19,10 @@ perpetual markets.
   subscription specs and parsers, private `public/auth`, heartbeat response,
   runtime state, and text-message-to-standard-event session helpers.
 
+## Public WebSocket Order Book
+
+Official Exchange WS `book.{instrument_name}.{depth}` supports explicit depth 10 or 50. For arbitrage, use delta mode `SNAPSHOT_AND_UPDATE` with `book_update_frequency=10` or `100` ms; snapshot-only mode is 500ms and the old depth-less `book.{instrument_name}` form is deprecated. Book updates carry `u` and `pu`; if `pu` does not match the previous `u`, resubscribe to receive a fresh snapshot before trusting local book state.
+
 ## Endpoint Mapping
 
 | Standard capability | Crypto.com Exchange v1 endpoint or channel |

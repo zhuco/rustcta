@@ -51,6 +51,15 @@ private read paths.
 | Fixtures | `tests/fixtures/exchanges/bitopro/` |
 | Config | `config/bitopro_gateway_example.yml`, disabled by default |
 
+## Official Public WS Order Book Details
+
+Official public order book stream uses
+`wss://stream.bitopro.com:443/ws/v1/pub/order-books/{PAIR}:{limit}`. It pushes
+the full order book every second when updated. Default limit is 5; valid limits
+are 1, 5, 10, 20, 30, and 50. Messages include `eventID` and timestamp, but the
+reviewed official docs do not expose a sequence/checksum suitable for delta book
+continuity.
+
 ## Rate Limits
 
 BitoPro documents general public and auth limits of 600 requests per minute.
@@ -61,9 +70,13 @@ cancel-all 2/s/IP and UID.
 
 ## Unsupported Boundary
 
-The adapter does not expose perpetuals, futures, margin, leverage, positions,
-funding, mark price, open interest, risk tiers, wallet deposits, withdrawals,
-transfers, order amend, order lists, or dead-man/cancel-all-after.
+Current official Open API scope does not show standard futures, perpetuals, or
+options. This adapter therefore writes standard contract trading as
+`交易所不支持合约`.
+
+The adapter does not expose margin, leverage, positions, funding, mark price,
+open interest, risk tiers, wallet deposits, withdrawals, transfers, order amend,
+order lists, or dead-man/cancel-all-after.
 
 Private writes are deliberately limited to offline request-spec/signing
 verification. They must not be promoted to live trading without a separate

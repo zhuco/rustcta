@@ -213,6 +213,31 @@ impl LocalGateway for MockExchangeGateway {
             GatewayRequestPayload::GetRecentFills(request) => {
                 GatewayResponsePayload::RecentFills(self.handle_get_recent_fills(request))
             }
+            GatewayRequestPayload::GetSymbolAccountConfig(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.get_symbol_account_config".to_string(),
+                });
+            }
+            GatewayRequestPayload::SetLeverage(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.set_leverage".to_string(),
+                });
+            }
+            GatewayRequestPayload::SetPositionMode(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.set_position_mode".to_string(),
+                });
+            }
+            GatewayRequestPayload::ClosePosition(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.close_position".to_string(),
+                });
+            }
+            GatewayRequestPayload::SetCountdownCancelAll(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: "mock.set_countdown_cancel_all".to_string(),
+                });
+            }
             GatewayRequestPayload::SubscribeBooks(request) => {
                 GatewayResponsePayload::BooksSubscribed(self.handle_subscribe_books(request)?)
             }

@@ -33,11 +33,11 @@ lock、REST readback 和 repair 释放路径。收口验证命令见“九、验
 
 ### 第一阶段允许范围
 
-- `src/strategies/cross_exchange_arbitrage/**`
-- `src/bin/cross_arb_live.rs`
+- `retired strategy tree/cross_exchange_arbitrage/**`
+- `retired root bin directory/cross_arb_live.rs`
 - `src/execution/**` 中与 bundle 并发提交、one-sided exposure、订单确认相关的小范围改动
 - `src/market/cache.rs` 或 WebSocket 更新接入点的轻量扩展
-- `src/exchanges/market_adapters/**` 中公共永续盘口 WebSocket 订阅 channel / speed profile 的小范围改动
+- `retired exchange tree/market_adapters/**` 中公共永续盘口 WebSocket 订阅 channel / speed profile 的小范围改动
 - `config/cross_exchange_arbitrage_*.yml` 双 taker 配置样例
 - focused tests
 
@@ -489,11 +489,11 @@ sizing:
 
 | 任务 | 主题 | 主要范围 | 必须协调 |
 | --- | --- | --- | --- |
-| 1 | 双 Taker Only Admission 与配置门 | `src/strategies/cross_exchange_arbitrage/config.rs`, `src/bin/cross_arb_live.rs`, `config/` | 2, 3, 5 |
-| 2 | 最快 L1/Depth Public WS Profile | `src/exchanges/market_adapters/**`, `src/market/**`, `config/` | 3, 4 |
-| 3 | WebSocket 事件驱动 symbol 级评估 | `src/bin/cross_arb_live.rs`, `src/strategies/cross_exchange_arbitrage/tasks.rs`, `src/market/cache.rs` | 1, 2, 4, 5 |
-| 4 | 双向双 Taker Opportunity 与 L1/Depth 校验 | `src/strategies/cross_exchange_arbitrage/opportunity.rs`, `simulation.rs`, `sizing.rs` | 2, 3, 5 |
-| 5 | 原子风控 Reservation 与单腿恢复 | `src/strategies/cross_exchange_arbitrage/risk.rs`, `execution.rs`, `position.rs`, `src/execution/**` | 1, 3, 4 |
+| 1 | 双 Taker Only Admission 与配置门 | `retired strategy tree/cross_exchange_arbitrage/config.rs`, `retired root bin directory/cross_arb_live.rs`, `config/` | 2, 3, 5 |
+| 2 | 最快 L1/Depth Public WS Profile | `retired exchange tree/market_adapters/**`, `src/market/**`, `config/` | 3, 4 |
+| 3 | WebSocket 事件驱动 symbol 级评估 | `retired root bin directory/cross_arb_live.rs`, `retired strategy tree/cross_exchange_arbitrage/tasks.rs`, `src/market/cache.rs` | 1, 2, 4, 5 |
+| 4 | 双向双 Taker Opportunity 与 L1/Depth 校验 | `retired strategy tree/cross_exchange_arbitrage/opportunity.rs`, `simulation.rs`, `sizing.rs` | 2, 3, 5 |
+| 5 | 原子风控 Reservation 与单腿恢复 | `retired strategy tree/cross_exchange_arbitrage/risk.rs`, `execution.rs`, `position.rs`, `src/execution/**` | 1, 3, 4 |
 
 ### 共享接口约定
 
@@ -557,8 +557,8 @@ updated_at
 
 允许范围：
 
-- `src/strategies/cross_exchange_arbitrage/config.rs`
-- `src/bin/cross_arb_live.rs`
+- `retired strategy tree/cross_exchange_arbitrage/config.rs`
+- `retired root bin directory/cross_arb_live.rs`
 - `config/cross_exchange_arbitrage_*.yml`
 - focused tests
 
@@ -600,7 +600,7 @@ cargo fmt --check
 - `src/market/adapter.rs`
 - `src/market/event.rs`
 - `src/market/cache.rs`
-- `src/exchanges/market_adapters/**`
+- `retired exchange tree/market_adapters/**`
 - `config/cross_exchange_arbitrage_*.yml`
 - focused tests
 
@@ -642,9 +642,9 @@ cargo fmt --check
 
 允许范围：
 
-- `src/bin/cross_arb_live.rs`
-- `src/strategies/cross_exchange_arbitrage/tasks.rs`
-- `src/strategies/cross_exchange_arbitrage/runtime.rs`
+- `retired root bin directory/cross_arb_live.rs`
+- `retired strategy tree/cross_exchange_arbitrage/tasks.rs`
+- `retired strategy tree/cross_exchange_arbitrage/runtime.rs`
 - `src/market/cache.rs`
 - focused tests
 
@@ -683,10 +683,10 @@ cargo fmt --check
 
 允许范围：
 
-- `src/strategies/cross_exchange_arbitrage/opportunity.rs`
-- `src/strategies/cross_exchange_arbitrage/simulation.rs`
-- `src/strategies/cross_exchange_arbitrage/sizing.rs`
-- `src/strategies/cross_exchange_arbitrage/types.rs`
+- `retired strategy tree/cross_exchange_arbitrage/opportunity.rs`
+- `retired strategy tree/cross_exchange_arbitrage/simulation.rs`
+- `retired strategy tree/cross_exchange_arbitrage/sizing.rs`
+- `retired strategy tree/cross_exchange_arbitrage/types.rs`
 - focused tests
 
 工作：
@@ -725,10 +725,10 @@ cargo fmt --check
 
 允许范围：
 
-- `src/strategies/cross_exchange_arbitrage/risk.rs`
-- `src/strategies/cross_exchange_arbitrage/execution.rs`
-- `src/strategies/cross_exchange_arbitrage/position.rs`
-- `src/strategies/cross_exchange_arbitrage/tasks.rs`
+- `retired strategy tree/cross_exchange_arbitrage/risk.rs`
+- `retired strategy tree/cross_exchange_arbitrage/execution.rs`
+- `retired strategy tree/cross_exchange_arbitrage/position.rs`
+- `retired strategy tree/cross_exchange_arbitrage/tasks.rs`
 - `src/execution/**`
 - focused tests
 

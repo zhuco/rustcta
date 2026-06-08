@@ -7,6 +7,9 @@ Task: A-36.
 
 `woofipro` maps WOOFi Pro perpetual futures through the Orderly API boundary. WOOFi Pro is an onchain perpetual futures venue that uses Orderly account identity and Ed25519 request headers; it is not the same API surface as WOO X (`woo`) and does not reuse the WOO X CEX adapter.
 
+Spot: 交易所不支持现货（`woofipro` profile 口径）。WOOFi Swap belongs to
+another WOOFi product surface and is not a shared Spot order-book lifecycle.
+
 Implemented runtime support:
 
 - `get_symbol_rules` for perpetual markets through `GET /v1/public/info`.
@@ -27,6 +30,14 @@ Unsupported runtime support:
 - Order-list OCO/OTO semantics; the gateway request model does not map cleanly to a verified WOOFi Pro/Orderly order-list endpoint.
 - Account fee rate lookup for ordinary users; builder/admin fee routes are not exposed as normal exchange account capability.
 - WOOFi Swap, Earn, Stake, wallet registration, deposits, withdrawals, social login and WOO X APIs.
+
+Official WebSocket order book detail: WOOFi Pro uses the Orderly profile for
+public order book updates. `{symbol}@orderbookupdate` is documented at 200ms,
+uses `ts`/`prevTs` continuity, and has no documented checksum. Current project
+support is spec/payload only for WS runtime, so the next task is to structure
+the Orderly endpoint/account-id path, 200ms interval, request orderbook
+snapshot fallback, and `prevTs` gap handling. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 ## Endpoints
 

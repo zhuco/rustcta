@@ -5,6 +5,11 @@ futures, and perpetual contracts. The unified gateway surface covers public REST
 symbol rules/order books and private REST balances, positions, order lifecycle,
 open orders, fills, and private WebSocket order/position events.
 
+Spot is 项目未实现 Spot, not `交易所不支持现货`: Deribit official API
+instrument metadata includes `kind = "spot"` and support docs list Spot
+Instruments, while this adapter currently declares only options, futures, and
+perpetual contracts.
+
 Options-specific data is intentionally adapter-specific:
 
 - option chain: `DeribitOptionContract`

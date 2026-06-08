@@ -32,7 +32,19 @@ preserving the venue symbol for requests.
 Before live use, operators must enable only markets that are available for the
 account region. This task does not infer availability from a global pair list.
 
+## Official Public WS Order Book Details
+
+Luno market stream connects to `wss://ws.luno.com/api/1/stream/:pair` and starts
+by sending API key credentials, so it is not an anonymous public market stream.
+The server sends the current order book, then sends updates as quickly as
+possible. Official docs do not give a fixed millisecond interval or depth
+parameter. Updates carry strict sequence numbers; any out-of-sequence update
+requires closing the connection and reconnecting to reinitialise state.
+
 ## Unsupported Funding And Payment Surfaces
+
+Standard futures, perpetuals, options, and margin trading are
+`交易所不支持合约` under the current official API scope.
 
 The adapter does not implement beneficiaries, fiat withdrawals, fiat deposits,
 bank payment rails, crypto address creation or send/transfer endpoints. Those

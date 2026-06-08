@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_execution_api::{
-    FeeModelDecision, IdempotencyDecision, LiveDryRunDecision, ReconciliationEvent,
-    RejectionDecision, ReservationDecision,
+    BundleSubmitAck, ExecutionApiError, FeeModelDecision, IdempotencyDecision, LiveDryRunDecision,
+    NormalizedUserStreamEvent, OrderReconciliationSummary, ReconciliationEvent, RejectionDecision,
+    ReservationDecision,
 };
 use rustcta_types::{
     AccountId, CanonicalSymbol, ExchangeId, LiquidityRole, MarketType, OrderSide, OrderStatus,
@@ -30,6 +31,8 @@ pub type Result<T> = std::result::Result<T, LedgerError>;
 pub enum LedgerError {
     #[error("event contains forbidden secret-like field {field_path}")]
     SecretField { field_path: String },
+    #[error("ledger payload validation failed: {message}")]
+    Validation { message: String },
     #[error("ledger sequence overflow")]
     SequenceOverflow,
     #[error("ledger decode error at line {line}: {message}")]
@@ -48,6 +51,7 @@ pub enum EventKind {
     OrderAckEvent,
     CancelCommandEvent,
     CancelAckEvent,
+    BundleEvent,
     FillEvent,
     BalanceSnapshotEvent,
     PositionSnapshotEvent,
@@ -56,6 +60,7 @@ pub enum EventKind {
     ReservationDecisionEvent,
     IdempotencyDecisionEvent,
     LiveDryRunDecisionEvent,
+    UserStreamEvent,
     ReconciliationEvent,
     RejectionEvent,
     OperatorCommandEvent,
@@ -213,11 +218,34 @@ impl LedgerEvent {
         )
     }
 
+    pub fn bundle(identity: EventIdentity, ack: BundleSubmitAck) -> Self {
+        Self::new(EventKind::BundleEvent, identity, LedgerPayload::Bundle(ack))
+    }
+
+    pub fn user_stream_event(identity: EventIdentity, event: NormalizedUserStreamEvent) -> Self {
+        Self::new(
+            EventKind::UserStreamEvent,
+            identity,
+            LedgerPayload::UserStream(event),
+        )
+    }
+
     pub fn reconciliation(identity: EventIdentity, event: ReconciliationEvent) -> Self {
         Self::new(
             EventKind::ReconciliationEvent,
             identity,
             LedgerPayload::Reconciliation(event),
+        )
+    }
+
+    pub fn order_reconciliation(
+        identity: EventIdentity,
+        event: OrderReconciliationSummary,
+    ) -> Self {
+        Self::new(
+            EventKind::ReconciliationEvent,
+            identity,
+            LedgerPayload::OrderReconciliation(event),
         )
     }
 
@@ -230,20 +258,108 @@ impl LedgerEvent {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "payload_type", content = "payload", rename_all = "snake_case")]
 pub enum LedgerPayload {
     OrderLifecycle(OrderLifecycleRecord),
+    Bundle(BundleSubmitAck),
     Fill(FillLedgerRecord),
     BalanceSnapshot(BalanceSnapshotRecord),
     FeeModelDecision(FeeModelDecision),
     ReservationDecision(ReservationDecision),
     IdempotencyDecision(IdempotencyDecision),
     LiveDryRunDecision(LiveDryRunDecision),
+    UserStream(NormalizedUserStreamEvent),
     Reconciliation(ReconciliationEvent),
+    OrderReconciliation(OrderReconciliationSummary),
     Rejection(RejectionDecision),
     Audit(AuditRecord),
     Raw(Value),
+}
+
+impl LedgerPayload {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            LedgerPayload::FeeModelDecision(decision) => validate_execution_payload(decision),
+            LedgerPayload::ReservationDecision(decision) => validate_execution_payload(decision),
+            LedgerPayload::IdempotencyDecision(decision) => validate_execution_payload(decision),
+            LedgerPayload::LiveDryRunDecision(decision) => validate_execution_payload(decision),
+            LedgerPayload::UserStream(event) => validate_execution_payload(event),
+            LedgerPayload::Reconciliation(event) => validate_execution_payload(event),
+            LedgerPayload::OrderReconciliation(summary) => validate_execution_payload(summary),
+            LedgerPayload::Rejection(decision) => validate_execution_payload(decision),
+            LedgerPayload::OrderLifecycle(_)
+            | LedgerPayload::Bundle(_)
+            | LedgerPayload::Fill(_)
+            | LedgerPayload::BalanceSnapshot(_)
+            | LedgerPayload::Audit(_)
+            | LedgerPayload::Raw(_) => Ok(()),
+        }
+    }
+}
+
+trait ValidatesExecutionPayload {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError>;
+}
+
+impl ValidatesExecutionPayload for FeeModelDecision {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for ReservationDecision {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for IdempotencyDecision {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for LiveDryRunDecision {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for NormalizedUserStreamEvent {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for ReconciliationEvent {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for OrderReconciliationSummary {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+impl ValidatesExecutionPayload for RejectionDecision {
+    fn validate_execution_payload(&self) -> std::result::Result<(), ExecutionApiError> {
+        self.validate()
+    }
+}
+
+fn validate_execution_payload<T>(payload: &T) -> Result<()>
+where
+    T: ValidatesExecutionPayload,
+{
+    payload
+        .validate_execution_payload()
+        .map_err(|error| LedgerError::Validation {
+            message: error.to_string(),
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -550,6 +666,7 @@ impl InMemoryLedger {
 impl LedgerWriter for InMemoryLedger {
     async fn append(&self, mut event: LedgerEvent) -> Result<LedgerEvent> {
         reject_secret_fields(&event)?;
+        event.payload.validate()?;
 
         let mut events = self.lock_events()?;
         let next_sequence = events
@@ -671,6 +788,7 @@ impl JsonlLedger {
 impl LedgerWriter for JsonlLedger {
     async fn append(&self, mut event: LedgerEvent) -> Result<LedgerEvent> {
         reject_secret_fields(&event)?;
+        event.payload.validate()?;
 
         let _guard = self.lock_file()?;
         self.ensure_parent_dir()?;
@@ -792,8 +910,11 @@ fn find_secret_field(value: &Value, path: &str) -> Option<String> {
 mod tests {
     use super::*;
     use rustcta_execution_api::{
-        ExecutionMutationKind, RejectionDecision, EXECUTION_API_SCHEMA_VERSION,
+        BundleExecutionStatus, BundleSubmissionPath, BundleSubmitAck, ExecutionMutationKind,
+        OrderReconciliationOutcome, OrderReconciliationSummary, ReconciliationSeverity,
+        ReconciliationTrigger, RejectionDecision, EXECUTION_API_SCHEMA_VERSION,
     };
+    use rustcta_types::ExchangeSymbol;
 
     fn identity() -> EventIdentity {
         EventIdentity::new(
@@ -912,6 +1033,70 @@ mod tests {
         assert!(matches!(error, LedgerError::SecretField { .. }));
         assert_eq!(ledger.len().expect("ledger len"), 0);
         assert!(ledger.is_empty().expect("ledger is empty"));
+    }
+
+    #[tokio::test]
+    async fn append_and_replay_should_preserve_bundle_and_order_reconciliation_events() {
+        let ledger = InMemoryLedger::new();
+
+        let bundle = ledger
+            .append(LedgerEvent::bundle(
+                identity().with_command("bundle-1"),
+                BundleSubmitAck {
+                    schema_version: EXECUTION_API_SCHEMA_VERSION,
+                    tenant_id: TenantId::new("tenant-a").expect("tenant id"),
+                    account_id: AccountId::new("account-a").expect("account id"),
+                    strategy_id: StrategyId::new("strategy-a").expect("strategy id"),
+                    run_id: RunId::new("run-a").expect("run id"),
+                    bundle_id: "bundle-1".to_string(),
+                    idempotency_key: "idem-bundle-1".to_string(),
+                    submission_path: BundleSubmissionPath::DryRun,
+                    status: BundleExecutionStatus::RequiresReconcile,
+                    order_acks: Vec::new(),
+                    requires_reconcile: true,
+                    message: Some("bundle requires reconciliation".to_string()),
+                    acknowledged_at: Utc::now(),
+                },
+            ))
+            .await
+            .expect("append bundle");
+        let reconciliation = ledger
+            .append(LedgerEvent::order_reconciliation(
+                identity().with_command("client-1"),
+                OrderReconciliationSummary {
+                    schema_version: EXECUTION_API_SCHEMA_VERSION,
+                    tenant_id: TenantId::new("tenant-a").expect("tenant id"),
+                    account_id: AccountId::new("account-a").expect("account id"),
+                    strategy_id: Some(StrategyId::new("strategy-a").expect("strategy id")),
+                    run_id: Some(RunId::new("run-a").expect("run id")),
+                    exchange_id: exchange_id(),
+                    market_type: MarketType::Spot,
+                    canonical_symbol: Some(symbol()),
+                    exchange_symbol: Some(
+                        ExchangeSymbol::new(exchange_id(), MarketType::Spot, "BTCUSDT")
+                            .expect("exchange symbol"),
+                    ),
+                    client_order_id: Some("client-1".to_string()),
+                    exchange_order_id: None,
+                    trigger: ReconciliationTrigger::StartupRecovery,
+                    outcome: OrderReconciliationOutcome::OrderNotFound,
+                    severity: ReconciliationSeverity::Error,
+                    attempts: 2,
+                    message: "order not found".to_string(),
+                    reconciled_at: Utc::now(),
+                },
+            ))
+            .await
+            .expect("append order reconciliation");
+
+        assert_eq!(bundle.kind, EventKind::BundleEvent);
+        assert_eq!(reconciliation.kind, EventKind::ReconciliationEvent);
+        let events = ledger.replay(None).await.expect("replay");
+        assert!(matches!(&events[0].payload, LedgerPayload::Bundle(_)));
+        assert!(matches!(
+            &events[1].payload,
+            LedgerPayload::OrderReconciliation(_)
+        ));
     }
 
     #[tokio::test]
@@ -1109,6 +1294,47 @@ mod tests {
             .expect_err("secret must reject");
 
         assert!(matches!(error, LedgerError::SecretField { .. }));
+        assert!(!path.exists());
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn jsonl_ledger_should_reject_invalid_typed_payload_before_write() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-jsonl-ledger-invalid-typed-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let path = temp_dir.join("events.jsonl");
+        let ledger = JsonlLedger::new(&path);
+        let summary = OrderReconciliationSummary {
+            schema_version: EXECUTION_API_SCHEMA_VERSION,
+            tenant_id: TenantId::new("tenant-a").expect("tenant id"),
+            account_id: AccountId::new("account-a").expect("account id"),
+            strategy_id: Some(StrategyId::new("strategy-a").expect("strategy id")),
+            run_id: Some(RunId::new("run-a").expect("run id")),
+            exchange_id: exchange_id(),
+            market_type: MarketType::Spot,
+            canonical_symbol: Some(symbol()),
+            exchange_symbol: None,
+            client_order_id: Some("client-1".to_string()),
+            exchange_order_id: None,
+            trigger: ReconciliationTrigger::StartupRecovery,
+            outcome: OrderReconciliationOutcome::OrderNotFound,
+            severity: ReconciliationSeverity::Error,
+            attempts: 2,
+            message: "order not found".to_string(),
+            reconciled_at: Utc::now(),
+        };
+
+        let error = ledger
+            .append(LedgerEvent::order_reconciliation(
+                identity().with_command("client-1"),
+                summary,
+            ))
+            .await
+            .expect_err("invalid typed payload must reject");
+
+        assert!(matches!(error, LedgerError::Validation { .. }));
         assert!(!path.exists());
         std::fs::remove_dir_all(temp_dir).ok();
     }

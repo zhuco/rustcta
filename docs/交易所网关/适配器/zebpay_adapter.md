@@ -7,7 +7,9 @@ Status date: 2026-06-08
 scan-only `MarketType::Spot` adapter: public REST market metadata and order book
 snapshots are implemented, while private REST, trading, and WebSocket runtime
 remain unsupported until API onboarding, KYC, permission scopes, and bearer-token
-lifecycle are verified.
+lifecycle are verified. P6 official product-line verification confirms ZebPay
+also documents Futures/Perpetual API surfaces; those are `项目未实现
+Futures/Perpetual`, not `交易所不支持合约`.
 
 ## Official Sources
 
@@ -20,12 +22,12 @@ lifecycle are verified.
 ## Product Scope
 
 - Adapter id: `zebpay`
-- Product: spot only
+- Product: spot implemented; Futures/Perpetual `项目未实现`
 - Default REST base URL: `https://www.zebapi.com`
 - Default group query: `singapore`
 - Exchange symbol format: `BASE-QUOTE`, for example `BTC-INR`
-- Unsupported: futures/perpetuals, live private REST, live trading, public WS,
-  private WS, withdrawals, transfers, and token refresh runtime
+- Unsupported: futures/perpetual runtime in this spot adapter, live private REST, live trading, public WS,
+  private WS, withdrawals, transfers, and token refresh runtime. 当前官方 docs 覆盖 Spot/Futures REST market/book/orderBook，未见公共订单簿 WS stream，写 `交易所不支持公共 WS 行情`。
 
 ## Authentication
 

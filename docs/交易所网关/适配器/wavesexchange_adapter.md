@@ -33,6 +33,9 @@ Status date: 2026-06-08
 
 - Balances require Waves address/node balance mapping and are not represented as gateway account balances yet.
 - Positions are not applicable to spot.
+- P6 official product-line verification found WX matcher is a Waves spot asset
+  pair matcher without standard futures/perpetual/options semantics; standard
+  contracts are `交易所不支持合约`.
 - Fee rates are matcher asset rates, not an account-scoped maker/taker fee contract.
 - Place/cancel order flows require signed Waves order payloads or public-key cancellation signatures, not API-key HMAC signing.
 - Batch place/cancel, amend, order lists, cancel-all, open orders, recent fills, private streams, withdrawals, transfers, and admin matcher endpoints are unsupported.

@@ -1,6 +1,6 @@
 # Client Order ID Policy
 
-RustCTA now centralizes client order ID generation in `src/exchanges/client_order_id.rs`.
+RustCTA now centralizes client order ID generation in `retired exchange tree/client_order_id.rs`.
 
 The shared generator is the default path for new unified order flows. If a caller supplies a
 `client_order_id`, adapters should validate it with `validate_client_order_id()` before sending it

@@ -16,64 +16,15 @@ if [[ "$MODE" == "local_minimal" ]]; then
   }
   trap cleanup EXIT
 
-  cat > "$tmp_dir/dashboard_snapshot.json" <<'JSON'
-{
-  "live_trading_enabled": true,
-  "live_preflight_enabled": true,
-  "kill_switch": {"active": false},
-  "spot_symbol_rules": [
-    {
-      "symbol": "BTC/USDT",
-      "base_asset": "BTC",
-      "quote_asset": "USDT",
-      "min_qty": "0.001"
-    }
-  ],
-  "spot_control": {
-    "enabled_symbols": ["BTC/USDT"],
-    "disabled_symbols": []
-  },
-  "five_exchange_scanner": {
-    "symbol_coverage": [
-      {
-        "symbol": "BTC/USDT",
-        "exchange_count": 2
-      }
-    ],
-    "recommendations": [
-      {
-        "symbol": "BTC/USDT",
-        "action": "keep"
-      }
-    ]
-  },
-  "risk_events": [
-    {
-      "timestamp": "2026-06-07T12:00:00Z",
-      "event_type": "RiskState",
-      "symbol": "BTC/USDT",
-      "exchange": "binance",
-      "severity": "warning",
-      "reason": "smoke",
-      "details": "control api smoke"
-    }
-  ],
-  "fees": [
-    {
-      "exchange": "binance",
-      "market_type": "spot",
-      "maker_fee_rate": 0.0001,
-      "taker_fee_rate": 0.0002,
-      "fee_paid_usdt": 0.5,
-      "rebate_usdt": 0.0
-    }
-  ]
-}
-JSON
   cat > "$tmp_dir/strategy.log" <<'LOG'
 2026-06-07T12:00:00Z INFO strategy booted
 2026-06-07T12:00:01Z WARN smoke event
 LOG
+  mkdir -p "$tmp_dir/dist"
+  cat > "$tmp_dir/dist/index.html" <<'HTML'
+<!doctype html>
+<html><head><title>RustCTA Control</title></head><body>RustCTA Control</body></html>
+HTML
   cat > "$tmp_dir/registry.json" <<JSON
 {
   "schema_version": 1,
@@ -112,12 +63,12 @@ PY
   RUSTCTA_CONTROL_API_AGENT_ID=ci-agent \
   RUSTCTA_CONTROL_API_TENANT_ID=ci-tenant \
   RUSTCTA_CONTROL_API_AGENT_CAPABILITIES=control-api,supervisor-reader \
-  RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH="$tmp_dir/dashboard_snapshot.json" \
   RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH="$tmp_dir/registry.json" \
   RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH="$tmp_dir/audit.jsonl" \
   RUSTCTA_CONTROL_API_STRATEGY_LOG_PATH="$tmp_dir/strategy.log" \
   RUSTCTA_CONTROL_API_STRATEGY_LOG_TAIL_LINES=200 \
   RUSTCTA_CONTROL_API_STRATEGY_LOG_TAIL_BYTES=65536 \
+  RUSTCTA_CONTROL_API_STATIC_DIR="$tmp_dir/dist" \
   cargo run -q -p rustcta-control-api-app --bin rustcta-control-api >"$server_log" 2>&1 &
   server_pid="$!"
 
@@ -143,6 +94,14 @@ def get_json(path):
             if marker in upper:
                 raise SystemExit(f"GET {path} response contains forbidden marker {marker}")
         return json.loads(body) if body else None
+
+def get_text(path):
+    req = urllib.request.Request(base_url + path, method="GET")
+    with urllib.request.urlopen(req, timeout=5) as response:
+        body = response.read().decode("utf-8", errors="replace")
+        if response.status != 200:
+            raise SystemExit(f"GET {path} returned HTTP {response.status}: {body[:200]}")
+        return body
 
 deadline = time.time() + 90
 last_error = None
@@ -179,25 +138,13 @@ process = get_json("/api/processes/ci-cross-arb")
 if process.get("strategy_id") != "ci-cross-arb" or process.get("status") != "Running":
     raise SystemExit(f"/api/processes/:id did not return running process: {process}")
 
-symbols = get_json("/api/symbols")
-rules = symbols.get("symbol_rules", [])
-scanner = symbols.get("scanner", {})
-if not rules or rules[0].get("symbol") != "BTC/USDT":
-    raise SystemExit(f"/api/symbols did not read legacy spot_symbol_rules: {symbols}")
-if symbols.get("spot_control", {}).get("enabled_symbols") != ["BTC/USDT"]:
-    raise SystemExit(f"/api/symbols did not read legacy spot_control: {symbols}")
-if scanner.get("symbol_coverage", [{}])[0].get("exchange_count") != 2:
-    raise SystemExit(f"/api/symbols did not read scanner symbol_coverage: {symbols}")
-if scanner.get("recommendations", [{}])[0].get("action") != "keep":
-    raise SystemExit(f"/api/symbols did not read scanner recommendations: {symbols}")
-
-risk = get_json("/api/risk")
-if risk.get("open_risk_event_count") != 1:
-    raise SystemExit(f"/api/risk did not read legacy snapshot: {risk}")
-
 logs = get_json("/api/strategy-logs")
 if logs.get("configured") is not True or not logs.get("events"):
     raise SystemExit(f"/api/strategy-logs did not read configured strategy log: {logs}")
+
+index = get_text("/")
+if "<html" not in index.lower() or "RustCTA Control" not in index:
+    raise SystemExit(f"/ did not return configured static index: {index[:120]}")
 
 print(json.dumps({
     "ok": True,
@@ -207,8 +154,6 @@ print(json.dumps({
         "/api/strategies",
         "/api/processes",
         "/api/processes/ci-cross-arb",
-        "/api/symbols",
-        "/api/risk",
         "/api/strategy-logs"
     ],
     "strategy_id": strategies[0]["strategy_id"]

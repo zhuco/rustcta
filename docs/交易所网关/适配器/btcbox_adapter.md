@@ -15,10 +15,11 @@ request-spec only.
 | Private REST | Documented form POST API, disabled at runtime in this adapter phase |
 | Signing | HMAC-SHA256 over URL-encoded form params, keyed by `md5(private_key)` |
 | Rate limits | Private documented per endpoint; public has no fixed cap, so adapter mapping uses a conservative bucket |
-| WebSocket | Unsupported; no official stable WS API verified |
+| WebSocket | 交易所不支持公共 WS 行情；当前官方 API 资料是 HTTP Public/Private API |
 | Service state | BTCBOX service suspension code `901` is treated as exchange unavailable |
 | Testnet | No stable public testnet endpoint verified |
 | Region/KYC | Japanese venue; private API use is assumed to require BTCBOX account approval/KYC and is not enabled by this adapter |
+| Standard contracts | `交易所不支持合约`; current official API docs list spot JPY ticker/depth/orders/trade endpoints only |
 
 ## Official Sources
 
@@ -59,8 +60,11 @@ Unsupported:
 - private REST runtime reads/writes
 - balances, fees, open orders, query order, fills
 - place/cancel/cancel-all/batch/order-list runtime operations
-- public/private streams
+- public/private streams：交易所不支持公共 WS 行情；REST `depth` is the polling fallback
 - fiat deposits, withdrawals, bank transfers, wallet operations, and ledgers
+- standard futures/perpetual/options: `交易所不支持合约`
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。
 
 ## Validation
 

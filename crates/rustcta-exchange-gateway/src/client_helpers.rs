@@ -1,9 +1,11 @@
 use chrono::Utc;
 use rustcta_exchange_api::{
     AmendOrderResponse, BalancesResponse, BatchCancelOrdersResponse, BatchPlaceOrdersResponse,
-    CancelAllOrdersResponse, CancelOrderResponse, FeesResponse, OpenOrdersResponse,
-    OrderBookResponse, OrderListResponse, PlaceOrderResponse, PositionsResponse,
-    QueryOrderResponse, RecentFillsResponse, SymbolRulesResponse,
+    CancelAllOrdersResponse, CancelOrderResponse, ClosePositionResponse,
+    CountdownCancelAllResponse, FeesResponse, OpenOrdersResponse, OrderBookResponse,
+    OrderListResponse, PlaceOrderResponse, PositionsResponse, QueryOrderResponse,
+    RecentFillsResponse, SetLeverageResponse, SetPositionModeResponse, SymbolAccountConfigResponse,
+    SymbolRulesResponse,
 };
 use rustcta_types::{AccountId, TenantId};
 
@@ -146,6 +148,46 @@ impl GatewayProtocolResponse {
         self.require_accepted()?;
         match self.payload {
             GatewayResponsePayload::RecentFills(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_symbol_account_config(self) -> Result<SymbolAccountConfigResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::SymbolAccountConfig(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_set_leverage(self) -> Result<SetLeverageResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::SetLeverage(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_set_position_mode(self) -> Result<SetPositionModeResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::SetPositionMode(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_close_position(self) -> Result<ClosePositionResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::ClosePosition(response) => Ok(response),
+            other => Err(unexpected_payload(self.operation, other)),
+        }
+    }
+
+    pub fn into_countdown_cancel_all(self) -> Result<CountdownCancelAllResponse, GatewayError> {
+        self.require_accepted()?;
+        match self.payload {
+            GatewayResponsePayload::CountdownCancelAll(response) => Ok(response),
             other => Err(unexpected_payload(self.operation, other)),
         }
     }

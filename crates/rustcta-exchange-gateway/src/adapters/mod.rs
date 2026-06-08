@@ -3249,6 +3249,15 @@ impl LocalGateway for AdapterBackedGateway {
                         .map_err(exchange_api_error_to_gateway)?,
                 )
             }
+            GatewayRequestPayload::GetSymbolAccountConfig(_)
+            | GatewayRequestPayload::SetLeverage(_)
+            | GatewayRequestPayload::SetPositionMode(_)
+            | GatewayRequestPayload::ClosePosition(_)
+            | GatewayRequestPayload::SetCountdownCancelAll(_) => {
+                return Err(GatewayError::UnsupportedOperation {
+                    operation: operation.as_str().to_string(),
+                });
+            }
             GatewayRequestPayload::SubscribeBooks(request) => {
                 if request.subscriptions.is_empty() {
                     return Err(GatewayError::Rejected(
@@ -3281,6 +3290,12 @@ impl LocalGateway for AdapterBackedGateway {
                 })
             }
             GatewayRequestPayload::SubscribePrivate(request) => {
+                if request.subscriptions.is_empty() {
+                    return Err(GatewayError::Rejected(
+                        "subscribe_private requires at least one subscription".to_string(),
+                    ));
+                }
+
                 let mut subscriptions = Vec::with_capacity(request.subscriptions.len());
                 for subscription in request.subscriptions {
                     let adapter = self.adapter_for(&subscription.exchange)?;

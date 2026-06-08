@@ -26,6 +26,7 @@ access.
 ## Product Scope
 
 - Declared market type: `MarketType::Perpetual`.
+- Spot: 交易所不支持现货。Pacifica 官方 contract specifications 是 perpetual contracts。
 - Default REST URL: `https://api.pacifica.fi`
 - Testnet REST URL: `https://test-api.pacifica.fi`
 - Mainnet WS URL: `wss://ws.pacifica.fi/ws`

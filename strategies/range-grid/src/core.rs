@@ -189,7 +189,8 @@ pub struct NotificationConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WeComConfig {
-    pub webhook_url: String,
+    #[serde(default)]
+    pub channel_id: Option<String>,
     #[serde(default)]
     pub mentioned_list: Vec<String>,
     #[serde(default)]

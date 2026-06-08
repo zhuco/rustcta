@@ -320,17 +320,54 @@ impl StrategyProcessSpec {
     }
 
     pub fn validate(&self) -> Result<(), SupervisorError> {
+        if self.schema_version != SUPERVISOR_SCHEMA_VERSION {
+            return Err(SupervisorError::InvalidProcessSpec {
+                strategy_id: self.strategy_id.clone(),
+                message: format!(
+                    "spec schema_version {} does not match expected {}",
+                    self.schema_version, SUPERVISOR_SCHEMA_VERSION
+                ),
+            });
+        }
         for (field, value) in [
             ("strategy_id", &self.strategy_id),
             ("strategy_kind", &self.strategy_kind),
             ("run_id", &self.run_id),
             ("tenant_id", &self.tenant_id),
+            ("config_path", &self.config_path),
             ("command", &self.command),
         ] {
             if value.trim().is_empty() {
                 return Err(SupervisorError::MissingLifecycleField { field });
             }
         }
+        if self.args.iter().any(|arg| arg.trim().is_empty()) {
+            return Err(SupervisorError::InvalidProcessSpec {
+                strategy_id: self.strategy_id.clone(),
+                message: "args must not contain empty values".to_string(),
+            });
+        }
+        if self
+            .working_dir
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(SupervisorError::InvalidProcessSpec {
+                strategy_id: self.strategy_id.clone(),
+                message: "working_dir must not be blank when configured".to_string(),
+            });
+        }
+        if self
+            .log_path
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(SupervisorError::InvalidProcessSpec {
+                strategy_id: self.strategy_id.clone(),
+                message: "log_path must not be blank when configured".to_string(),
+            });
+        }
+        validate_root_free_command(self)?;
         self.recovery_policy.validate()?;
         Ok(())
     }
@@ -357,15 +394,21 @@ pub enum LegacyProcessTemplate {
     SpotSpotLiveDryRun,
     TrendReport,
     AccountPositionReporter,
+    ExchangeOrderCanary,
+    BitgetPerpOrderCanary,
+    BitgetSpotOrderCanary,
 }
 
 impl LegacyProcessTemplate {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 8] = [
         Self::CrossArbLive,
         Self::FundingArbLive,
         Self::SpotSpotLiveDryRun,
         Self::TrendReport,
         Self::AccountPositionReporter,
+        Self::ExchangeOrderCanary,
+        Self::BitgetPerpOrderCanary,
+        Self::BitgetSpotOrderCanary,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -375,6 +418,9 @@ impl LegacyProcessTemplate {
             Self::SpotSpotLiveDryRun => "spot_spot_live_dry_run",
             Self::TrendReport => "trend_report",
             Self::AccountPositionReporter => "account_position_reporter",
+            Self::ExchangeOrderCanary => "exchange_order_canary",
+            Self::BitgetPerpOrderCanary => "bitget_perp_order_canary",
+            Self::BitgetSpotOrderCanary => "bitget_spot_order_canary",
         }
     }
 
@@ -382,9 +428,12 @@ impl LegacyProcessTemplate {
         match self {
             Self::CrossArbLive => "cross_exchange_arbitrage",
             Self::FundingArbLive => "funding_arbitrage",
-            Self::SpotSpotLiveDryRun => "spot_spot_taker_arbitrage",
+            Self::SpotSpotLiveDryRun => "spot_spot_arbitrage",
             Self::TrendReport => "trend_report",
             Self::AccountPositionReporter => "account_position_report",
+            Self::ExchangeOrderCanary => "exchange_order_canary",
+            Self::BitgetPerpOrderCanary => "bitget_perp_order_canary",
+            Self::BitgetSpotOrderCanary => "bitget_spot_order_canary",
         }
     }
 
@@ -395,6 +444,15 @@ impl LegacyProcessTemplate {
             Self::SpotSpotLiveDryRun => "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml",
             Self::TrendReport => "config/trend_report.yml",
             Self::AccountPositionReporter => "config/account_position_reporter.yml",
+            Self::ExchangeOrderCanary => {
+                "config/cross_exchange_arbitrage_three_venues_50u.live-small.yml"
+            }
+            Self::BitgetPerpOrderCanary => {
+                "config/cross_exchange_arbitrage_bitget_50u.live-small.yml"
+            }
+            Self::BitgetSpotOrderCanary => {
+                "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml"
+            }
         }
     }
 
@@ -406,44 +464,90 @@ impl LegacyProcessTemplate {
         match self {
             Self::CrossArbLive => vec![
                 "run".to_string(),
+                "-p".to_string(),
+                "rustcta-strategy-cross-exchange-arbitrage".to_string(),
                 "--bin".to_string(),
-                "cross_arb_live".to_string(),
+                "cross-exchange-arbitrage-runtime".to_string(),
                 "--".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
+                "--strategy-id".to_string(),
+                self.as_str().to_string(),
             ],
             Self::FundingArbLive => vec![
                 "run".to_string(),
+                "-p".to_string(),
+                "rustcta-strategy-funding-arbitrage".to_string(),
                 "--bin".to_string(),
-                "funding_arb_live".to_string(),
+                "funding-arbitrage-runtime".to_string(),
                 "--".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
-                "--confirm-live-order".to_string(),
+                "--strategy-id".to_string(),
+                self.as_str().to_string(),
             ],
             Self::SpotSpotLiveDryRun => vec![
                 "run".to_string(),
+                "-p".to_string(),
+                "rustcta-strategy-spot-spot-arbitrage".to_string(),
                 "--bin".to_string(),
-                "rustcta".to_string(),
+                "spot-spot-arbitrage-runtime".to_string(),
                 "--".to_string(),
-                "--strategy".to_string(),
-                "spot_spot_taker_arbitrage".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
+                "--strategy-id".to_string(),
+                self.as_str().to_string(),
             ],
             Self::TrendReport => vec![
                 "run".to_string(),
-                "--bin".to_string(),
-                "trend_report".to_string(),
+                "-p".to_string(),
+                "rustcta-tools-ops".to_string(),
                 "--".to_string(),
+                "reporter".to_string(),
+                "trend".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
             ],
             Self::AccountPositionReporter => vec![
                 "run".to_string(),
-                "--bin".to_string(),
-                "account_position_reporter".to_string(),
+                "-p".to_string(),
+                "rustcta-tools-ops".to_string(),
                 "--".to_string(),
+                "reporter".to_string(),
+                "account-position".to_string(),
+                "render".to_string(),
+                "--config".to_string(),
+                config_path.to_string(),
+                "--input".to_string(),
+                "config/supervisor/account_position_reporter.input.example.json".to_string(),
+            ],
+            Self::ExchangeOrderCanary => vec![
+                "run".to_string(),
+                "-p".to_string(),
+                "rustcta-tools-ops".to_string(),
+                "--".to_string(),
+                "canary".to_string(),
+                "exchange-order".to_string(),
+                "--config".to_string(),
+                config_path.to_string(),
+            ],
+            Self::BitgetPerpOrderCanary => vec![
+                "run".to_string(),
+                "-p".to_string(),
+                "rustcta-tools-ops".to_string(),
+                "--".to_string(),
+                "canary".to_string(),
+                "bitget-perp-order".to_string(),
+                "--config".to_string(),
+                config_path.to_string(),
+            ],
+            Self::BitgetSpotOrderCanary => vec![
+                "run".to_string(),
+                "-p".to_string(),
+                "rustcta-tools-ops".to_string(),
+                "--".to_string(),
+                "canary".to_string(),
+                "bitget-spot-order".to_string(),
                 "--config".to_string(),
                 config_path.to_string(),
             ],
@@ -472,6 +576,9 @@ impl std::str::FromStr for LegacyProcessTemplate {
             "account_position_reporter" | "account_position" | "account_position_report" => {
                 Ok(Self::AccountPositionReporter)
             }
+            "exchange_order_canary" | "exchange_canary" => Ok(Self::ExchangeOrderCanary),
+            "bitget_perp_order_canary" | "bitget_order_canary" => Ok(Self::BitgetPerpOrderCanary),
+            "bitget_spot_order_canary" | "bitget_spot_canary" => Ok(Self::BitgetSpotOrderCanary),
             _ => Err(format!("unknown legacy process template: {value}")),
         }
     }
@@ -655,6 +762,11 @@ pub enum SupervisorError {
     },
     #[error("invalid recovery policy: {message}")]
     InvalidRecoveryPolicy { message: String },
+    #[error("invalid process spec for {strategy_id}: {message}")]
+    InvalidProcessSpec {
+        strategy_id: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -982,6 +1094,31 @@ fn validate_registry_process(process: &StrategyProcess) -> Vec<String> {
     errors
 }
 
+fn validate_root_free_command(spec: &StrategyProcessSpec) -> Result<(), SupervisorError> {
+    let legacy_bins = [
+        "rustcta",
+        "cross_arb_live",
+        "funding_arb_live",
+        "account_position_reporter",
+        "trend_report",
+        "exchange_order_canary",
+        "bitget_order_canary",
+        "bitget_perp_order_canary",
+        "bitget_spot_order_canary",
+    ];
+    if spec
+        .args
+        .windows(2)
+        .any(|window| window[0] == "--bin" && legacy_bins.contains(&window[1].as_str()))
+    {
+        return Err(SupervisorError::InvalidProcessSpec {
+            strategy_id: spec.strategy_id.clone(),
+            message: "supervisor specs must launch root-free workspace package bins".to_string(),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct JsonFileProcessRegistryStore {
     path: PathBuf,
@@ -1116,6 +1253,14 @@ impl LocalProcessSupervisor {
             command.current_dir(working_dir);
         }
         if let Some(log_path) = &spec.log_path {
+            if let Some(parent) = Path::new(log_path).parent() {
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    SupervisorError::ProcessOperation {
+                        strategy_id: spec.strategy_id.clone(),
+                        message: error.to_string(),
+                    }
+                })?;
+            }
             let log_file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -1567,6 +1712,22 @@ mod tests {
             "account-position".parse::<LegacyProcessTemplate>().unwrap(),
             LegacyProcessTemplate::AccountPositionReporter
         );
+        assert_eq!(
+            "exchange-canary".parse::<LegacyProcessTemplate>().unwrap(),
+            LegacyProcessTemplate::ExchangeOrderCanary
+        );
+        assert_eq!(
+            "bitget-order-canary"
+                .parse::<LegacyProcessTemplate>()
+                .unwrap(),
+            LegacyProcessTemplate::BitgetPerpOrderCanary
+        );
+        assert_eq!(
+            "bitget-spot-canary"
+                .parse::<LegacyProcessTemplate>()
+                .unwrap(),
+            LegacyProcessTemplate::BitgetSpotOrderCanary
+        );
     }
 
     #[test]
@@ -1586,11 +1747,15 @@ mod tests {
             spec.args,
             vec![
                 "run",
+                "-p",
+                "rustcta-strategy-cross-exchange-arbitrage",
                 "--bin",
-                "cross_arb_live",
+                "cross-exchange-arbitrage-runtime",
                 "--",
                 "--config",
                 "config/cross_exchange_arbitrage_usdt.yml",
+                "--strategy-id",
+                "cross_arb_live",
             ]
         );
         assert_eq!(spec.working_dir.as_deref(), Some("."));
@@ -1600,6 +1765,32 @@ mod tests {
         );
         assert_eq!(spec.restart_backoff_ms, 5_000);
         spec.validate().expect("legacy process spec validates");
+    }
+
+    #[test]
+    fn process_spec_should_reject_legacy_root_bins() {
+        let spec = StrategyProcessSpec::new(
+            "legacy-root",
+            "spot_spot_arbitrage",
+            "run",
+            "tenant",
+            "config/spot.yml",
+            "cargo",
+        )
+        .with_args([
+            "run",
+            "--bin",
+            "rustcta",
+            "--",
+            "--config",
+            "config/spot.yml",
+        ]);
+
+        let error = spec
+            .validate()
+            .expect_err("legacy root bin should be rejected");
+
+        assert!(matches!(error, SupervisorError::InvalidProcessSpec { .. }));
     }
 
     #[test]
@@ -1624,9 +1815,11 @@ mod tests {
             spec.args,
             vec![
                 "run",
-                "--bin",
-                "trend_report",
+                "-p",
+                "rustcta-tools-ops",
                 "--",
+                "reporter",
+                "trend",
                 "--config",
                 "config/custom_trend.yml",
             ]
@@ -1661,6 +1854,18 @@ mod tests {
             (
                 LegacyProcessTemplate::AccountPositionReporter,
                 "../../config/supervisor/account_position_reporter.spec.json",
+            ),
+            (
+                LegacyProcessTemplate::ExchangeOrderCanary,
+                "../../config/supervisor/exchange_order_canary.spec.json",
+            ),
+            (
+                LegacyProcessTemplate::BitgetPerpOrderCanary,
+                "../../config/supervisor/bitget_perp_order_canary.spec.json",
+            ),
+            (
+                LegacyProcessTemplate::BitgetSpotOrderCanary,
+                "../../config/supervisor/bitget_spot_order_canary.spec.json",
             ),
         ] {
             let raw = std::fs::read_to_string(path)

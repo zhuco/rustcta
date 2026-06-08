@@ -7,11 +7,12 @@ use rustcta_supervisor::{
     build_legacy_process_spec, JsonFileProcessRegistryStore, LegacyProcessSpecOptions,
     LegacyProcessTemplate, LocalProcessSupervisor, ProcessRegistry, RuntimeHeartbeat,
     RuntimeHeartbeatStatus, RuntimeSnapshotStatus, StrategyProcess, StrategyProcessSpec,
-    SupervisorRecoveryStatus, SupervisorSnapshot,
+    SupervisorError, SupervisorRecoveryStatus, SupervisorSnapshot,
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 const LOCAL_LIFECYCLE_TOKEN_HEADER: &str = "x-rustcta-supervisor-token";
 
@@ -143,6 +144,7 @@ fn load_spec(path: &str) -> Result<StrategyProcessSpec> {
 struct SupervisorApiState {
     registry_store: Arc<JsonFileProcessRegistryStore>,
     local_lifecycle_token: Option<Arc<String>>,
+    supervisor: Arc<Mutex<LocalProcessSupervisor>>,
 }
 
 fn supervisor_router(
@@ -150,9 +152,12 @@ fn supervisor_router(
     local_lifecycle_token: Option<String>,
 ) -> Router {
     let local_lifecycle_enabled = local_lifecycle_token.is_some();
+    let supervisor =
+        LocalProcessSupervisor::from_registry(registry_store.load().unwrap_or_default());
     let state = SupervisorApiState {
         registry_store: Arc::new(registry_store),
         local_lifecycle_token: local_lifecycle_token.map(Arc::new),
+        supervisor: Arc::new(Mutex::new(supervisor)),
     };
     let router = Router::new()
         .route("/api/health", get(supervisor_health))
@@ -163,10 +168,20 @@ fn supervisor_router(
         .route("/api/processes", get(supervisor_processes))
         .route("/api/processes/:id", get(supervisor_process_detail));
     let router = if local_lifecycle_enabled {
-        router.route(
-            "/api/local/lifecycle/heartbeat",
-            post(supervisor_ingest_heartbeat),
-        )
+        router
+            .route(
+                "/api/local/lifecycle/heartbeat",
+                post(supervisor_ingest_heartbeat),
+            )
+            .route("/api/local/lifecycle/start", post(supervisor_start_process))
+            .route(
+                "/api/local/lifecycle/:id/stop",
+                post(supervisor_stop_process),
+            )
+            .route(
+                "/api/local/lifecycle/:id/restart",
+                post(supervisor_restart_process),
+            )
     } else {
         router
     };
@@ -186,26 +201,24 @@ async fn supervisor_health(State(state): State<SupervisorApiState>) -> Json<serd
 async fn supervisor_snapshot(
     State(state): State<SupervisorApiState>,
 ) -> Result<Json<SupervisorSnapshot>, StatusCode> {
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(registry.snapshot()))
+    let supervisor = state.supervisor.lock().await;
+    Ok(Json(supervisor.snapshot()))
 }
 
 async fn supervisor_processes(
     State(state): State<SupervisorApiState>,
 ) -> Result<Json<Vec<StrategyProcess>>, StatusCode> {
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(registry.list()))
+    let supervisor = state.supervisor.lock().await;
+    Ok(Json(supervisor.registry().list()))
 }
 
 async fn supervisor_process_detail(
     State(state): State<SupervisorApiState>,
     Path(id): Path<String>,
 ) -> Result<Json<StrategyProcess>, StatusCode> {
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    registry
+    let supervisor = state.supervisor.lock().await;
+    supervisor
+        .registry()
         .get(&id)
         .cloned()
         .map(Json)
@@ -215,25 +228,26 @@ async fn supervisor_process_detail(
 async fn supervisor_heartbeats(
     State(state): State<SupervisorApiState>,
 ) -> Result<Json<Vec<RuntimeHeartbeatStatus>>, StatusCode> {
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(registry.heartbeat_statuses(chrono::Utc::now())))
+    let supervisor = state.supervisor.lock().await;
+    Ok(Json(
+        supervisor.registry().heartbeat_statuses(chrono::Utc::now()),
+    ))
 }
 
 async fn supervisor_runtime_snapshots(
     State(state): State<SupervisorApiState>,
 ) -> Result<Json<Vec<RuntimeSnapshotStatus>>, StatusCode> {
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(registry.snapshot_statuses(chrono::Utc::now())))
+    let supervisor = state.supervisor.lock().await;
+    Ok(Json(
+        supervisor.registry().snapshot_statuses(chrono::Utc::now()),
+    ))
 }
 
 async fn supervisor_recovery(
     State(state): State<SupervisorApiState>,
 ) -> Result<Json<SupervisorRecoveryStatus>, StatusCode> {
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(registry.recovery_status(chrono::Utc::now())))
+    let supervisor = state.supervisor.lock().await;
+    Ok(Json(supervisor.recovery_status(chrono::Utc::now())))
 }
 
 async fn supervisor_ingest_heartbeat(
@@ -242,15 +256,77 @@ async fn supervisor_ingest_heartbeat(
     Json(heartbeat): Json<RuntimeHeartbeat>,
 ) -> Result<Json<StrategyProcess>, StatusCode> {
     require_local_lifecycle_token(&state, &headers)?;
-    let registry = load_registry(Some(state.registry_store.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut supervisor = LocalProcessSupervisor::from_registry(registry);
+    let mut supervisor = state.supervisor.lock().await;
     let process = supervisor
         .ingest_runtime_heartbeat(heartbeat)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(supervisor_error_status)?;
     save_registry(Some(state.registry_store.as_ref()), supervisor.registry())
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(process))
+}
+
+async fn supervisor_start_process(
+    State(state): State<SupervisorApiState>,
+    headers: HeaderMap,
+    Json(spec): Json<StrategyProcessSpec>,
+) -> Result<Json<StrategyProcess>, StatusCode> {
+    require_local_lifecycle_token(&state, &headers)?;
+    let mut supervisor = state.supervisor.lock().await;
+    let process = supervisor
+        .start(spec)
+        .await
+        .map_err(supervisor_error_status)?;
+    save_registry(Some(state.registry_store.as_ref()), supervisor.registry())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(process))
+}
+
+async fn supervisor_stop_process(
+    State(state): State<SupervisorApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<StrategyProcess>, StatusCode> {
+    require_local_lifecycle_token(&state, &headers)?;
+    let mut supervisor = state.supervisor.lock().await;
+    let process = supervisor
+        .stop(&id)
+        .await
+        .map_err(supervisor_error_status)?;
+    save_registry(Some(state.registry_store.as_ref()), supervisor.registry())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(process))
+}
+
+async fn supervisor_restart_process(
+    State(state): State<SupervisorApiState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<StrategyProcess>, StatusCode> {
+    require_local_lifecycle_token(&state, &headers)?;
+    let mut supervisor = state.supervisor.lock().await;
+    let process = supervisor
+        .restart(&id)
+        .await
+        .map_err(supervisor_error_status)?;
+    save_registry(Some(state.registry_store.as_ref()), supervisor.registry())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(process))
+}
+
+fn supervisor_error_status(error: SupervisorError) -> StatusCode {
+    match error {
+        SupervisorError::AlreadyExists { .. } | SupervisorError::AlreadyRunning { .. } => {
+            StatusCode::CONFLICT
+        }
+        SupervisorError::NotFound { .. } => StatusCode::NOT_FOUND,
+        SupervisorError::InvalidProcessSpec { .. }
+        | SupervisorError::InvalidRecoveryPolicy { .. }
+        | SupervisorError::InvalidRuntimeUpdate { .. }
+        | SupervisorError::MissingLifecycleField { .. } => StatusCode::BAD_REQUEST,
+        SupervisorError::SpawnFailed { .. }
+        | SupervisorError::ProcessOperation { .. }
+        | SupervisorError::RegistryStorage { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 fn require_local_lifecycle_token(
@@ -435,6 +511,79 @@ mod tests {
             .expect("heartbeat process should exist");
         assert_eq!(process.process_id, Some(99));
         assert_eq!(process.last_snapshot_at, process.last_heartbeat_at);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn supervisor_router_should_start_and_stop_local_process_with_token() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-supervisor-app-start-stop-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let registry_path = temp_dir.join("registry.json");
+        let log_path = temp_dir.join("process.log");
+        let store = JsonFileProcessRegistryStore::new(&registry_path);
+        let spec = StrategyProcessSpec::new(
+            "local-start-stop",
+            "mock",
+            "run",
+            "tenant",
+            "config.yml",
+            "/bin/sleep",
+        )
+        .with_args(["30"])
+        .with_log_path(log_path.to_string_lossy().to_string());
+
+        let router = supervisor_router(store, Some("token-1".to_string()));
+        let start_body = serde_json::to_vec(&spec).expect("serialize spec");
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local/lifecycle/start")
+                    .header("content-type", "application/json")
+                    .header(LOCAL_LIFECYCLE_TOKEN_HEADER, "token-1")
+                    .body(Body::from(start_body))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("start request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let loaded = JsonFileProcessRegistryStore::new(&registry_path)
+            .load()
+            .expect("load started registry");
+        assert_eq!(
+            loaded
+                .get("local-start-stop")
+                .map(|process| process.status.clone()),
+            Some(rustcta_supervisor::ProcessStatus::Running)
+        );
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local/lifecycle/local-start-stop/stop")
+                    .header(LOCAL_LIFECYCLE_TOKEN_HEADER, "token-1")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("stop request should complete");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let loaded = JsonFileProcessRegistryStore::new(&registry_path)
+            .load()
+            .expect("load stopped registry");
+        assert_eq!(
+            loaded
+                .get("local-start-stop")
+                .map(|process| process.status.clone()),
+            Some(rustcta_supervisor::ProcessStatus::Stopped)
+        );
 
         std::fs::remove_dir_all(temp_dir).ok();
     }

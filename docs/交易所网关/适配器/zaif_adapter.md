@@ -30,7 +30,10 @@ withdrawal, or ledger write operations.
 The adapter supports Spot public REST only at runtime. Private balances, open
 orders, fills, place order, and cancel order return explicit `Unsupported`
 boundaries even when credentials are present because A-38 only validates
-offline request construction. Futures, leverage, margin, fiat funding,
+offline request construction. P6 official verification found Zaif margin/credit
+trading is currently stopped and no current standard futures/perpetual/options
+API is available, so standard contracts are `交易所不支持合约`; if credit trading
+resumes it must be rechecked before writing `项目未实现`. Fiat funding,
 withdrawal, transfer, client order IDs, amend, cancel-all, and batch operations
 are not exposed.
 

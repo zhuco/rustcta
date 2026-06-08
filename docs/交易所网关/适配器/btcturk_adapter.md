@@ -16,7 +16,7 @@ keeps TRY fiat-market behavior explicit.
 
 | Area | Status |
 | --- | --- |
-| Product line | Spot only |
+| Product line | Spot only; standard futures/perpetual/options are `交易所不支持合约` under the current official API scope |
 | Public REST | `GET /api/v2/server/exchangeinfo`, `GET /api/v2/orderbook` parser and transport |
 | Private REST | Order, cancel, balance, open-order and fill endpoints are request-spec/fixture only |
 | WebSocket | Public subscribe payload helper and private auth payload helper |
@@ -47,6 +47,8 @@ Public REST is implemented for symbol rules and order book snapshots. Private
 order/fill surfaces are deliberately not promoted to live runtime methods in
 this task; they return explicit `Unsupported` errors and are represented by
 offline request-spec fixtures.
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。当前 BtcTurk 官方 API 资料未见标准 futures/perpetual/options，单交易所文档写 `交易所不支持合约`。
 
 ## Validation
 

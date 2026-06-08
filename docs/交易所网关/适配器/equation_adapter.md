@@ -10,10 +10,15 @@ Official sources reviewed:
 
 The official examples reference `https://api-v3-arbitrum.equation.trade`, `https://graph-arbitrum.equation.trade/subgraphs/name/equation-v3-arbitrum`, and Arbitrum contract calls through an EVM wallet. Those surfaces are not treated as stable exchange-gateway runtime APIs in this task.
 
+Product lines:
+- Perpetual: `MarketType::Perpetual` audit-only adapter.
+- Spot: 交易所不支持现货；Equation 官方定位为 perpetual protocol / Perpetual DEX。
+
 Runtime boundary:
 - Product: `MarketType::Perpetual`
 - Chain: Arbitrum One, chain id `42161`
-- Public REST/WS: unsupported unverified
+- Public WS: 交易所不支持公共 WS 行情（当前 audit-only adapter 口径）；官方资料未给稳定 exchange-gateway 公共订单簿 WS
+- Public REST: unsupported unverified
 - Private reads: unsupported unverified
 - Orders/cancels/batch: unsupported unverified
 - Account model: EVM wallet, not API key/HMAC

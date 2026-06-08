@@ -10,6 +10,10 @@ Product line: dYdX v4 perpetual markets. The gateway implements
 `MarketType::Perpetual` public Indexer REST/WS plus private readback when a
 wallet address and subaccount number are configured.
 
+Spot is 项目未实现 Spot, not `交易所不支持现货`: dYdX announced Solana
+spot trading on 2025-12-11, but this adapter still targets v4 perpetual Indexer
+markets only.
+
 Official references:
 
 - dYdX docs: https://docs.dydx.xyz/
@@ -36,6 +40,15 @@ Base URLs:
 | Fills | `GET /v4/fills` | Native private Indexer read |
 | Public WS | `v4_orderbook`, `v4_trades`, `v4_markets`, `v4_candles` | Subscription payloads |
 | Private WS | `v4_subaccounts` | Subscription payloads and REST reconciliation fallback |
+
+Official `v4_orderbook` subscription returns an initial response equivalent to
+the REST orderbook content, then price-level updates. Messages carry
+`message_id`, `version`, and `clobPairId`, but the official WS docs do not
+declare a checksum or fixed push interval. The local book must reconnect and
+resubscribe for a fresh initial snapshot after gaps or disconnects. Current
+project support is native but mapping still needs interval/depth/rebuild fields.
+Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 ## Wallet / Subaccount / Signing Boundary
 

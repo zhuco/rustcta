@@ -9,6 +9,7 @@ Status: Task 11 spot-only adapter for Bitstamp V2. The adapter covers symbol rul
 - REST: `https://www.bitstamp.net`
 - Public WebSocket: `wss://ws.bitstamp.net`
 - Market types: `Spot`
+- Derivatives/Contracts: 项目未实现。Bitstamp official API changelog contains derivatives public/private endpoints, funding-rate endpoints and derivatives trade-history support, so this must not be written as `交易所不支持合约`.
 - Symbols: Bitstamp market symbols are lowercase pairs such as `btcusd`.
 - Signing: Bitstamp V2 HMAC-SHA256 headers over method, host, path, query, content type, nonce, timestamp, version and form body.
 
@@ -31,9 +32,13 @@ Machine-readable mapping:
 | Public WS | `order_book_`, `diff_order_book_`, `live_trades_` channels | Payload helpers |
 | Private WS | `POST /api/v2/websockets_token/` then `private-my_orders` or `private-user` | Session spec helper |
 
+## Public WebSocket Order Book
+
+Official WebSocket v2 is the public real-time feed at `wss://ws.bitstamp.net`. The project already records `order_book_{market}` and `diff_order_book_{market}` payload helpers, but the reviewed official material did not expose a fixed millisecond interval, fixed depth parameter, or stable checksum contract. Treat REST `order_book` snapshots and Bitstamp order-data gap recovery endpoints as the resync path before using this feed for arbitrage.
+
 ## Unsupported Boundaries
 
-- Derivatives, margin positions and contract metadata are not exposed.
+- Derivatives, margin positions and contract metadata are 项目未实现 in this spot adapter.
 - Sell quote-sized market orders, native order lists and batch place are `Unsupported`.
 - Private WebSocket positions are `Unsupported` because Bitstamp spot has no shared position model.
 

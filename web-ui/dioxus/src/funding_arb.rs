@@ -202,8 +202,7 @@ pub(crate) fn FundingArbPanel(
                     { "exchange": "binance", "enabled": binance_enabled(), "account_id": binance_account(), "env_prefix": binance_env(), "demo_trading": false, "private_ws_enabled": false, "position_mode": "hedge" },
                     { "exchange": "bitget", "enabled": bitget_enabled(), "account_id": bitget_account(), "env_prefix": bitget_env(), "demo_trading": false, "private_ws_enabled": false, "position_mode": "hedge" },
                     { "exchange": "gate", "enabled": gate_enabled(), "account_id": gate_account(), "env_prefix": gate_env(), "demo_trading": false, "private_ws_enabled": false, "position_mode": "hedge" }
-                ],
-                "restart": true
+                ]
             });
             wasm_bindgen_futures::spawn_local(async move {
                 match save_funding_arb_settings(&token_value, &body).await {

@@ -14,7 +14,7 @@ transactions are not enabled.
 | Product | MarketType | Status |
 | --- | --- | --- |
 | Perpetual | `Perpetual` | Declared product scope; REST/WS endpoints are mapped as spec/parser-only. |
-| Spot | n/a | Unsupported in this Task 9 adapter even though some official endpoints expose spot filters. |
+| Spot | n/a | 项目未实现 Spot。官方文档出现 spot market/stat 结构，当前 `lighter` adapter 未接 spot，不能写成交易所不支持。 |
 | Options | n/a | Unsupported. |
 
 Default URLs:
@@ -43,7 +43,10 @@ Integrity rules:
   reconciliation source after parser promotion.
 
 This task ships parser/session fixtures only; it does not claim production
-runtime behavior.
+runtime behavior. Mapping still needs to promote the 50ms interval, nonce
+continuity, gap resubscribe rule and no-checksum boundary into structured fields.
+Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 ## Authentication
 

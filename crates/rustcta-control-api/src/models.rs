@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rustcta_supervisor::{
-    ProcessStatus, StrategyProcess, StrategyProcessSpec, SUPERVISOR_SCHEMA_VERSION,
+    ProcessStatus, RuntimeSnapshotMetadata, StrategyProcess, StrategyProcessSpec,
+    SUPERVISOR_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +34,8 @@ pub struct ControlApiStateSnapshot {
     pub opportunities: OpportunitiesView,
     #[serde(default)]
     pub symbols: SymbolsView,
+    #[serde(default)]
+    pub runtime_control: RuntimeControlReadView,
     #[serde(default)]
     pub strategy_snapshots: Vec<StrategySnapshotEnvelope>,
 }
@@ -108,6 +111,13 @@ pub struct ControlApiConfigSummary {
     pub credentials_status_only: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LegacyDashboardReadView {
+    pub schema_version: u16,
+    pub generated_at: DateTime<Utc>,
+    pub data: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StrategyProcessView {
     pub schema_version: u16,
@@ -121,6 +131,8 @@ pub struct StrategyProcessView {
     pub started_at: Option<DateTime<Utc>>,
     pub last_heartbeat_at: Option<DateTime<Utc>>,
     pub last_snapshot_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub runtime_snapshot: Option<RuntimeSnapshotMetadata>,
     pub restart_count: u32,
     pub last_exit_code: Option<i32>,
     pub last_error: Option<String>,
@@ -143,6 +155,7 @@ pub struct StrategySnapshotEnvelope {
 #[serde(rename_all = "snake_case")]
 pub enum StrategySnapshotSource {
     Supervisor,
+    TypedRuntimeSnapshot,
     LegacyDashboard,
 }
 
@@ -279,6 +292,7 @@ impl From<StrategyProcess> for StrategyProcessView {
             started_at: process.started_at,
             last_heartbeat_at: process.last_heartbeat_at,
             last_snapshot_at: process.last_snapshot_at,
+            runtime_snapshot: process.runtime_snapshot,
             restart_count: process.restart_count,
             last_exit_code: process.last_exit_code,
             last_error: process.last_error,
@@ -496,6 +510,27 @@ impl Default for SymbolScannerView {
         Self {
             symbol_coverage: serde_json::Value::Array(Vec::new()),
             recommendations: serde_json::Value::Array(Vec::new()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeControlReadView {
+    pub schema_version: u16,
+    pub live_preflight_config: Option<serde_json::Value>,
+    pub live_preflight: Option<serde_json::Value>,
+    pub small_live_gate_config: Option<serde_json::Value>,
+    pub small_live_gate: Option<serde_json::Value>,
+}
+
+impl Default for RuntimeControlReadView {
+    fn default() -> Self {
+        Self {
+            schema_version: CONTROL_API_SCHEMA_VERSION,
+            live_preflight_config: None,
+            live_preflight: None,
+            small_live_gate_config: None,
+            small_live_gate: None,
         }
     }
 }

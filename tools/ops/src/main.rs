@@ -3,14 +3,16 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 use rustcta_tools_ops::{
     bitget_perp_order_canary_safety_plan, bitget_spot_order_canary_safety_plan,
     cross_arb_account_audit_safety_plan, cross_arb_fee_audit_safety_plan,
-    cross_arb_order_admin_safety_plan, exchange_order_canary_safety_plan, migrations_by_target,
-    print_lines, run_account_position_render, run_gateio_bitget_spot_symbols, run_trend_report,
-    smart_money_binance_collector_summary, smart_money_hyperliquid_wallet_ingestion_summary,
-    smart_money_portfolio_service_summary, verify_legacy_bin_migrations, AccountPositionRenderArgs,
-    BitgetPerpOrderCanarySafetyArgs, BitgetSpotOrderCanarySafetyArgs,
+    cross_arb_order_admin_safety_plan, cross_arb_ws_opportunity_probe_safety_plan,
+    exchange_order_canary_safety_plan, funding_arb_observe_safety_plan,
+    hyperliquid_self_test_safety_plan, print_lines, run_account_position_render,
+    run_gateio_bitget_spot_symbols, run_trend_report, smart_money_binance_collector_summary,
+    smart_money_hyperliquid_wallet_ingestion_summary, smart_money_portfolio_service_summary,
+    AccountPositionRenderArgs, BitgetPerpOrderCanarySafetyArgs, BitgetSpotOrderCanarySafetyArgs,
     CrossArbAccountAuditSafetyArgs, CrossArbFeeAuditSafetyArgs, CrossArbOrderAdminSafetyArgs,
-    ExchangeOrderCanarySafetyArgs, GateioBitgetSpotSymbolsArgs, LegacyBinTarget, TrendReportArgs,
-    WsProxyProbeArgs, LEGACY_BIN_MIGRATIONS,
+    CrossArbWsOpportunityProbeSafetyArgs, ExchangeOrderCanarySafetyArgs,
+    FundingArbObserveSafetyArgs, GateioBitgetSpotSymbolsArgs, HyperliquidSelfTestPlanArgs,
+    TrendReportArgs, WsProxyProbeArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -22,13 +24,9 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    LegacyBinPlan {
-        #[arg(long)]
-        target: Option<LegacyBinTarget>,
-    },
-    VerifyLegacyBins {
-        #[arg(long, default_value = "src/bin")]
-        src_bin_dir: String,
+    VerifyRetiredSrc {
+        #[arg(long, default_value = "src")]
+        src_dir: String,
     },
     SmartMoney {
         #[command(subcommand)]
@@ -85,6 +83,9 @@ enum ReporterCommand {
 #[derive(Debug, Subcommand)]
 enum ProbeCommand {
     WsProxy(WsProxyProbeArgs),
+    HyperliquidSelfTest(HyperliquidSelfTestPlanArgs),
+    FundingArbObserve(FundingArbObserveSafetyArgs),
+    CrossArbWsOpportunity(CrossArbWsOpportunityProbeSafetyArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -122,12 +123,10 @@ struct ConfigArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    match args
-        .command
-        .unwrap_or(Command::LegacyBinPlan { target: None })
-    {
-        Command::LegacyBinPlan { target } => print_legacy_bin_plan(target)?,
-        Command::VerifyLegacyBins { src_bin_dir } => verify_legacy_bins(&src_bin_dir)?,
+    match args.command.unwrap_or(Command::VerifyRetiredSrc {
+        src_dir: "src".to_string(),
+    }) {
+        Command::VerifyRetiredSrc { src_dir } => verify_retired_src(&src_dir)?,
         Command::SmartMoney { command } => run_smart_money(command)?,
         Command::Symbols { command } => run_symbols(command).await?,
         Command::Reporter { command } => run_reporter(command).await?,
@@ -179,6 +178,15 @@ async fn run_reporter(command: ReporterCommand) -> Result<()> {
 async fn run_probe(command: ProbeCommand) -> Result<()> {
     match command {
         ProbeCommand::WsProxy(args) => run_ws_proxy_probe(args).await?,
+        ProbeCommand::HyperliquidSelfTest(args) => {
+            println!("{}", hyperliquid_self_test_safety_plan(args)?);
+        }
+        ProbeCommand::FundingArbObserve(args) => {
+            println!("{}", funding_arb_observe_safety_plan(args)?);
+        }
+        ProbeCommand::CrossArbWsOpportunity(args) => {
+            println!("{}", cross_arb_ws_opportunity_probe_safety_plan(args)?);
+        }
     }
     Ok(())
 }
@@ -216,27 +224,18 @@ async fn run_ws_proxy_probe(args: WsProxyProbeArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_legacy_bin_plan(target: Option<LegacyBinTarget>) -> Result<()> {
-    let migrations = target.map_or_else(
-        || LEGACY_BIN_MIGRATIONS.iter().collect::<Vec<_>>(),
-        migrations_by_target,
+fn verify_retired_src(src_dir: &str) -> Result<()> {
+    let exists = std::path::Path::new(src_dir).exists();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "src_dir": src_dir,
+            "exists": exists,
+            "retired": !exists,
+        }))?
     );
-    println!("{}", serde_json::to_string_pretty(&migrations)?);
-    for target in LegacyBinTarget::ALL {
-        eprintln!("{target:?}: {}", migrations_by_target(target).len());
-    }
-    Ok(())
-}
-
-fn verify_legacy_bins(src_bin_dir: &str) -> Result<()> {
-    let verification = verify_legacy_bin_migrations(src_bin_dir)?;
-    println!("{}", serde_json::to_string_pretty(&verification)?);
-    if !verification.is_clean() {
-        bail!(
-            "legacy bin migration matrix is out of sync: {} unclassified, {} stale",
-            verification.unclassified_bins.len(),
-            verification.stale_migrations.len()
-        );
+    if exists {
+        bail!("legacy root source directory still exists: {src_dir}");
     }
     Ok(())
 }

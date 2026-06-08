@@ -113,6 +113,15 @@ Do not implement against website-only paths or undocumented browser traffic.
 - Rate-limit/pagination/reconciliation/batch: mapping records unsupported buckets, unsupported pagination and no reconciliation fallback. This adapter is not scan-only or trade-enabled.
 - Live boundary: no BitKan capability may be promoted until official REST/WS endpoints, signing, heartbeat and read-only reconciliation are verified; keep the adapter behind the exchange kill-switch until that evidence exists.
 
+## Official WebSocket Order Book Detail
+
+Current official/public materials do not expose a stable BitKan exchange API
+reference for public order-book WebSocket subscription, interval, depth,
+sequence/checksum, or snapshot rebuild. For this gateway profile, write
+`交易所不支持公共 WS 行情` and do not promote the unverified helper to runtime.
+Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 ## Validation
 
 - `python3 scripts/validate_exchange_endpoint_mapping.py crates/rustcta-exchange-gateway/src/adapters/bitkan/endpoint_mapping.yaml`

@@ -40,3 +40,8 @@ Offline signing vectors live under
 The adapter does not expose live private trading, futures/perpetuals, margin,
 withdrawals, fiat rails, Binance global routing, or NextMe live routing.
 Private order/account routes are represented as request-spec fixtures only.
+
+P6 official product-line verification found this as a Tokocrypto spot/Binance-
+family surface; `exchangeInfo` has `spotTradingEnable=1` and
+`marginTradingEnable=0`, and no standard futures/perpetual/options API was
+verified. Standard contracts are `交易所不支持合约`.

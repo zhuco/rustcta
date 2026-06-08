@@ -9,10 +9,15 @@ Official sources reviewed:
 
 The reviewed sources describe Cod3x as an AI perps trading terminal/routing layer with downstream venue profiles such as Hyperliquid, GMX V2, and Lighter. They do not establish a stable Cod3x-native exchange API with versioned market metadata, order book, account, order, signing, WebSocket, error-code, idempotency, or reconciliation contracts. Downstream venue APIs must remain their own adapters; this task does not copy or alias them into `cod3x`.
 
+Product lines:
+- Perpetual: `MarketType::Perpetual` profile candidate only; no live Cod3x-native runtime.
+- Spot: 交易所不支持现货；未核验到 Cod3x-native 现货 exchange API。
+
 Runtime boundary:
 - Product: `MarketType::Perpetual`
 - Venue profiles audited: Hyperliquid, GMX V2, Lighter
-- Public REST/WS: unsupported unverified
+- Public WS: 交易所不支持公共 WS 行情（Cod3x-native profile 口径）；下游 venue WebSocket 走各自 adapter
+- Public REST: unsupported unverified
 - Private reads: unsupported unverified
 - Orders/cancels/batch: unsupported unverified
 - Account model: downstream venue account/wallet, not a Cod3x API-key/HMAC contract

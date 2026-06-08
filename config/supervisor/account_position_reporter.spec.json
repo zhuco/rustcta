@@ -8,11 +8,16 @@
   "command": "cargo",
   "args": [
     "run",
-    "--bin",
-    "account_position_reporter",
+    "-p",
+    "rustcta-tools-ops",
     "--",
+    "reporter",
+    "account-position",
+    "render",
     "--config",
-    "config/account_position_reporter.yml"
+    "config/account_position_reporter.yml",
+    "--input",
+    "config/supervisor/account_position_reporter.input.example.json"
   ],
   "working_dir": ".",
   "log_path": "logs/supervisor/account_position_reporter.log",

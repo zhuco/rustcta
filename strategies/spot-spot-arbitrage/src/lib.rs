@@ -3,15 +3,32 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use rustcta_strategy_sdk::{
-    AccountPermission, RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration,
+    AccountPermission, MarketDataSubscription as SdkMarketDataSubscription,
+    RequiredAccountPermission, RiskCapability, RiskCapabilityDeclaration, StrategyCommandSchema,
     StrategyConfigSchema, StrategyContext, StrategyEvent, StrategyInstanceId, StrategyRuntime,
     StrategySnapshot, StrategySnapshotSchema, StrategySpec, StrategyStatus,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub mod config;
 pub mod core;
+pub mod execution;
+pub mod fees;
+pub mod inventory;
+pub mod lifecycle;
+pub mod market_data;
+pub mod paper;
+pub mod replay_report;
+pub mod runtime_contract;
 
+pub use config::{
+    InventoryRebalanceConfig, KillSwitchConfig, KuCoinSpotRuntimeConfig, LiveDryRunConfig,
+    LivePreflightConfig, MarketDataMode, MarketType, OrderReconciliationConfig, RecorderConfig,
+    ReplayConfig, RestPollingMarketDataConfig, SmallLiveGateConfig, SpotSpotTakerArbitrageConfig,
+    VenueCostConfig, VenueFeeOverride, VenueRuntimeConfig, VenueSelectionConfig,
+    VenueSelectionEstimate, WebsocketMarketDataConfig,
+};
 pub use core::{
     calculate_spread, configured_spot_pair, depth_notional,
     spot_rejection_counts_toward_consecutive, BookSource, CachedBook, DirectedVenuePair,
@@ -20,10 +37,40 @@ pub use core::{
     SpotBookEvent, SpotBookEventKind, SpotFeeSource, SpotOrderBookLevel, SpotRiskLimits,
     SpotRiskState, SpotVenue, SpreadEstimate, SummaryReport, TradePnlCategory, TradeSummaryRecord,
 };
+pub use execution::{
+    build_dual_taker_arbitrage_live_order_plan, build_validated_live_order_command,
+    spot_live_execution_exchange_allowed, spot_live_execution_symbol_allowed,
+    spot_live_execution_symbols, validate_live_order_safety, LiveOrderSafetyDecision,
+    SpotExecutionMode, SpotLiveOrderPlan, SpotPairedLiveOrderPlan,
+};
+pub use fees::{
+    fee_model_from_strategy_config, EstimatedPairFees, SpotFeeLookup, SpotFeeModel,
+    SpotFeeOverride, SpotFeeOverrides, SpotFeeRate,
+};
+pub use inventory::{parse_spot_venue, InventoryReservation, PaperAssetState, PaperInventory};
+pub use lifecycle::{
+    allocation_weights, build_entry_allocations, configured_spot_venues, duration_from_seconds,
+    normalize_symbol, ArbitragePairRuntime, ArbitragePairStatus, EntryAllocation, OneSidedExposure,
+    OneSidedExposureKind, SpreadDurationTracker,
+};
+pub use market_data::{market_data_subscriptions, replay_input_path};
+pub use paper::{
+    consume_levels, parse_paper_exchange, simulate_taker_buy, simulate_taker_pair,
+    simulate_taker_sell, SimulatedLeg, SimulatedPairExecution,
+};
+pub use replay_report::{
+    OpportunityDuration, OpportunityDurationTracker, ReplayReport, ReplayReportBuilder,
+};
+pub use runtime_contract::{
+    SpotBookRuntimeSnapshot, SpotFeeSnapshot, SpotInventoryBalanceSnapshot, SpotInventorySnapshot,
+    SpotOpportunityPairSnapshot, SpotOpportunityRuntimeSnapshot, SpotOrderPlanSnapshot,
+    SpotRuntimeContractSnapshot, SpotRuntimeContractState, SpotRuntimeMarketDataSnapshot,
+    SpotRuntimeReadinessSnapshot,
+};
 
 pub const STRATEGY_KIND: &str = "spot_spot_arbitrage";
 pub const DISPLAY_NAME: &str = "Spot Spot Arbitrage";
-pub const MIGRATED_FROM: &str = "src/strategies/spot_spot_taker_arbitrage";
+pub const MIGRATED_FROM: &str = "legacy-strategy:spot_spot_taker_arbitrage";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpotSpotArbitrageStrategyInfo {
@@ -52,12 +99,28 @@ pub struct SpotSpotArbitrageConfig {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpotSpotArbitrageSnapshotPayload {
     pub migrated_from: String,
     pub handled_events: u64,
+    pub market_data_events: u64,
+    pub execution_events: u64,
+    pub account_events: u64,
+    pub operator_commands: u64,
+    pub timer_events: u64,
     pub started_at: Option<DateTime<Utc>>,
     pub last_event_at: Option<DateTime<Utc>>,
+    pub last_market_data_at: Option<DateTime<Utc>>,
+    pub last_execution_at: Option<DateTime<Utc>>,
+    pub last_account_sync_at: Option<DateTime<Utc>>,
+    pub configured_exchanges: Vec<String>,
+    pub configured_symbols: Vec<String>,
+    pub trading_mode: Option<String>,
+    pub dry_run: Option<bool>,
+    pub live_trading_enabled: Option<bool>,
+    pub market_data_mode: Option<String>,
+    pub market_data_subscriptions: Vec<SdkMarketDataSubscription>,
+    pub runtime_contract: SpotRuntimeContractSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +132,17 @@ pub struct SpotSpotArbitrageRuntime {
     started_at: Option<DateTime<Utc>>,
     last_event_at: Option<DateTime<Utc>>,
     handled_events: u64,
+    market_data_events: u64,
+    execution_events: u64,
+    account_events: u64,
+    operator_commands: u64,
+    timer_events: u64,
+    last_market_data_at: Option<DateTime<Utc>>,
+    last_execution_at: Option<DateTime<Utc>>,
+    last_account_sync_at: Option<DateTime<Utc>>,
+    config: Option<SpotSpotTakerArbitrageConfig>,
+    market_data_subscriptions: Vec<SdkMarketDataSubscription>,
+    runtime_contract: SpotRuntimeContractState,
 }
 
 impl SpotSpotArbitrageRuntime {
@@ -81,6 +155,17 @@ impl SpotSpotArbitrageRuntime {
             started_at: None,
             last_event_at: None,
             handled_events: 0,
+            market_data_events: 0,
+            execution_events: 0,
+            account_events: 0,
+            operator_commands: 0,
+            timer_events: 0,
+            last_market_data_at: None,
+            last_execution_at: None,
+            last_account_sync_at: None,
+            config: None,
+            market_data_subscriptions: Vec::new(),
+            runtime_contract: SpotRuntimeContractState::default(),
         }
     }
 
@@ -88,8 +173,41 @@ impl SpotSpotArbitrageRuntime {
         SpotSpotArbitrageSnapshotPayload {
             migrated_from: MIGRATED_FROM.to_string(),
             handled_events: self.handled_events,
+            market_data_events: self.market_data_events,
+            execution_events: self.execution_events,
+            account_events: self.account_events,
+            operator_commands: self.operator_commands,
+            timer_events: self.timer_events,
             started_at: self.started_at,
             last_event_at: self.last_event_at,
+            last_market_data_at: self.last_market_data_at,
+            last_execution_at: self.last_execution_at,
+            last_account_sync_at: self.last_account_sync_at,
+            configured_exchanges: self
+                .config
+                .as_ref()
+                .map(|config| config.exchanges.clone())
+                .unwrap_or_default(),
+            configured_symbols: self
+                .config
+                .as_ref()
+                .map(|config| config.symbols.clone())
+                .unwrap_or_default(),
+            trading_mode: self
+                .config
+                .as_ref()
+                .map(|config| config.trading_mode.clone()),
+            dry_run: self.config.as_ref().map(|config| config.dry_run),
+            live_trading_enabled: self
+                .config
+                .as_ref()
+                .map(|config| config.live_trading_enabled),
+            market_data_mode: self
+                .config
+                .as_ref()
+                .map(|config| format!("{:?}", config.market_data_mode)),
+            market_data_subscriptions: self.market_data_subscriptions.clone(),
+            runtime_contract: self.runtime_contract.snapshot(),
         }
     }
 }
@@ -107,11 +225,26 @@ impl StrategyRuntime for SpotSpotArbitrageRuntime {
     }
 
     async fn start(&mut self, ctx: StrategyContext) -> anyhow::Result<()> {
+        let config: SpotSpotTakerArbitrageConfig = serde_json::from_value(ctx.config().clone())?;
+        config.validate_safe_mode()?;
         self.instance_id = ctx.instance_id().clone();
         self.strategy_id = ctx.strategy_id().to_string();
         self.run_id = ctx.run_id().to_string();
         self.started_at = Some(ctx.started_at());
         self.status = StrategyStatus::Running;
+        self.last_event_at = Some(ctx.started_at());
+        self.handled_events = 0;
+        self.market_data_events = 0;
+        self.execution_events = 0;
+        self.account_events = 0;
+        self.operator_commands = 0;
+        self.timer_events = 0;
+        self.last_market_data_at = None;
+        self.last_execution_at = None;
+        self.last_account_sync_at = None;
+        self.market_data_subscriptions = market_data_subscriptions(&config);
+        self.runtime_contract.start(&config);
+        self.config = Some(config);
         Ok(())
     }
 
@@ -123,8 +256,34 @@ impl StrategyRuntime for SpotSpotArbitrageRuntime {
     async fn handle_event(&mut self, event: StrategyEvent) -> anyhow::Result<()> {
         self.handled_events += 1;
         self.last_event_at = Some(event_timestamp(&event));
-        if matches!(event, StrategyEvent::Stopping(_)) {
-            self.status = StrategyStatus::Stopping;
+        match &event {
+            StrategyEvent::Started(_) => self.status = StrategyStatus::Running,
+            StrategyEvent::Stopping(_) => self.status = StrategyStatus::Stopping,
+            StrategyEvent::Execution(event) => {
+                self.execution_events += 1;
+                self.last_execution_at = Some(event.occurred_at);
+                self.runtime_contract.apply_execution(event);
+            }
+            StrategyEvent::MarketData(event) => {
+                self.market_data_events += 1;
+                self.last_market_data_at = Some(event.received_at);
+                self.runtime_contract.apply_market_data(event);
+            }
+            StrategyEvent::Account(event) => {
+                self.account_events += 1;
+                self.last_account_sync_at = Some(event.received_at);
+                self.runtime_contract.apply_account(event);
+            }
+            StrategyEvent::OperatorCommand(command) => {
+                self.operator_commands += 1;
+                match command.command_kind.as_str() {
+                    "pause" => self.status = StrategyStatus::Degraded,
+                    "resume" => self.status = StrategyStatus::Running,
+                    "stop" => self.status = StrategyStatus::Stopping,
+                    _ => {}
+                }
+            }
+            StrategyEvent::Timer(_) => self.timer_events += 1,
         }
         Ok(())
     }
@@ -156,7 +315,7 @@ pub fn strategy_spec() -> StrategySpec {
         ),
         config_schema: config_schema(),
         snapshot_schema: snapshot_schema(),
-        supported_commands: Vec::new(),
+        supported_commands: runtime_command_schemas(),
         risk_capabilities: vec![
             risk_capability(RiskCapability::PlaceOrders, "Places paired spot orders"),
             risk_capability(RiskCapability::CancelOrders, "Cancels stale paired orders"),
@@ -179,21 +338,26 @@ pub fn strategy_spec() -> StrategySpec {
                 "migrated_core_modules".to_string(),
                 json!([
                     "core_types",
+                    "config_loading",
                     "spread_engine",
                     "summary_report",
                     "book_helpers",
-                    "risk_state"
+                    "risk_state",
+                    "paper_inventory",
+                    "paper_execution_legs",
+                    "lifecycle_state",
+                    "replay_report",
+                    "fee_integration",
+                    "live_safety_gating",
+                    "market_data_subscription_plan"
                 ]),
             ),
             (
                 "remaining_legacy_modules".to_string(),
                 json!([
-                    "config",
-                    "lifecycle",
-                    "inventory",
                     "risk_integration",
-                    "execution",
-                    "market_data_runtime"
+                    "exchange_execution_adapter",
+                    "websocket_runtime"
                 ]),
             ),
         ]),
@@ -205,9 +369,24 @@ pub fn config_schema() -> StrategyConfigSchema {
         schema_version: 1,
         json_schema: json!({
             "type": "object",
-            "additionalProperties": false,
-            "required": ["exchanges", "symbols", "min_edge_bps", "max_notional_quote"],
+            "additionalProperties": true,
+            "required": [
+                "exchanges",
+                "symbols",
+                "max_notional_per_trade",
+                "min_notional_per_trade",
+                "max_notional_per_symbol",
+                "max_total_notional",
+                "min_net_spread_bps",
+                "min_depth_notional"
+            ],
             "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "trading_mode": {
+                    "type": "string",
+                    "enum": ["paper", "live_dry_run", "live"],
+                    "default": "paper"
+                },
                 "exchanges": {
                     "type": "array",
                     "minItems": 2,
@@ -218,12 +397,30 @@ pub fn config_schema() -> StrategyConfigSchema {
                     "minItems": 1,
                     "items": { "type": "string", "minLength": 1 }
                 },
-                "min_edge_bps": { "type": "number", "minimum": 0.0 },
-                "max_notional_quote": {
+                "quote_asset": { "type": "string", "default": "USDT" },
+                "max_notional_per_trade": { "type": "number", "exclusiveMinimum": 0.0 },
+                "min_notional_per_trade": { "type": "number", "exclusiveMinimum": 0.0 },
+                "max_notional_per_symbol": { "type": "number", "exclusiveMinimum": 0.0 },
+                "max_total_notional": { "type": "number", "exclusiveMinimum": 0.0 },
+                "min_net_spread_bps": { "type": "number" },
+                "min_depth_notional": { "type": "number", "exclusiveMinimum": 0.0 },
+                "dry_run": { "type": "boolean", "default": true },
+                "live_trading_enabled": { "type": "boolean", "default": false },
+                "market_data_mode": {
                     "type": "string",
-                    "pattern": "^[0-9]+(\\.[0-9]+)?$"
+                    "enum": ["rest_polling", "websocket_cache", "replay"],
+                    "default": "rest_polling"
                 },
-                "dry_run": { "type": "boolean", "default": true }
+                "websocket": { "type": "object" },
+                "rest_polling": { "type": "object" },
+                "replay": { "type": "object" },
+                "live_preflight": { "type": "object" },
+                "live_dry_run": { "type": "object" },
+                "order_reconciliation": { "type": "object" },
+                "kill_switch": { "type": "object" },
+                "small_live_gate": { "type": "object" },
+                "inventory_rebalance": { "type": "object" },
+                "venue_selection": { "type": "object" }
             }
         }),
     }
@@ -244,10 +441,60 @@ fn common_snapshot_schema() -> Value {
         "properties": {
             "migrated_from": { "type": "string" },
             "handled_events": { "type": "integer", "minimum": 0 },
+            "market_data_events": { "type": "integer", "minimum": 0 },
+            "execution_events": { "type": "integer", "minimum": 0 },
+            "account_events": { "type": "integer", "minimum": 0 },
+            "operator_commands": { "type": "integer", "minimum": 0 },
+            "timer_events": { "type": "integer", "minimum": 0 },
             "started_at": { "type": ["string", "null"], "format": "date-time" },
-            "last_event_at": { "type": ["string", "null"], "format": "date-time" }
+            "last_event_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_market_data_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_execution_at": { "type": ["string", "null"], "format": "date-time" },
+            "last_account_sync_at": { "type": ["string", "null"], "format": "date-time" },
+            "configured_exchanges": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "configured_symbols": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "trading_mode": { "type": ["string", "null"] },
+            "dry_run": { "type": ["boolean", "null"] },
+            "live_trading_enabled": { "type": ["boolean", "null"] },
+            "market_data_mode": { "type": ["string", "null"] },
+            "market_data_subscriptions": { "type": "array" },
+            "runtime_contract": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": ["readiness", "market_data", "inventory", "fees", "order_plans"],
+                "properties": {
+                    "readiness": { "type": "object" },
+                    "market_data": { "type": "object" },
+                    "opportunity": { "type": ["object", "null"] },
+                    "order_plans": { "type": "array" },
+                    "inventory": { "type": "object" },
+                    "fees": { "type": "object" }
+                }
+            }
         }
     })
+}
+
+fn runtime_command_schemas() -> Vec<StrategyCommandSchema> {
+    ["pause", "resume", "stop", "rebalance", "reload_config"]
+        .into_iter()
+        .map(|command_kind| StrategyCommandSchema {
+            command_kind: command_kind.to_string(),
+            description: Some(format!(
+                "Spot-spot arbitrage runtime {command_kind} command"
+            )),
+            payload_schema: json!({
+                "type": "object",
+                "additionalProperties": true
+            }),
+        })
+        .collect()
 }
 
 fn event_timestamp(event: &StrategyEvent) -> DateTime<Utc> {
@@ -287,9 +534,11 @@ fn account_permissions(permissions: &[AccountPermission]) -> Vec<RequiredAccount
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use rustcta_strategy_sdk::{
-        ExecutionCancelAck, ExecutionCancelCommand, ExecutionIntent, ExecutionIntentAck,
-        ExecutionOrderAck, ExecutionOrderCommand, SdkResult, StrategyExecutionClient,
+        AccountEvent, ExecutionCancelAck, ExecutionCancelCommand, ExecutionEvent, ExecutionIntent,
+        ExecutionIntentAck, ExecutionOrderAck, ExecutionOrderCommand, MarketDataChannel,
+        MarketDataEvent, SdkResult, StrategyCommand, StrategyExecutionClient,
     };
     use std::sync::Arc;
 
@@ -349,9 +598,15 @@ mod tests {
         assert!(spec.config_schema.json_schema["required"]
             .as_array()
             .is_some_and(|required| !required.is_empty()));
+        assert!(spec
+            .supported_commands
+            .iter()
+            .any(|command| command.command_kind == "rebalance"));
         assert_eq!(spec.snapshot_schema.schema_version, 1);
         assert_eq!(spec.snapshot_schema.json_schema["type"], json!("object"));
         assert!(spec.snapshot_schema.json_schema["properties"]["handled_events"].is_object());
+        assert!(spec.snapshot_schema.json_schema["properties"]["market_data_events"].is_object());
+        assert!(spec.snapshot_schema.json_schema["properties"]["runtime_contract"].is_object());
         assert_secret_free(&serde_json::to_value(spec).expect("spec should serialize"));
     }
 
@@ -366,9 +621,26 @@ mod tests {
             "strategy-1",
             "run-1",
             json!({
-                "api_key": "must-not-leak",
-                "secret": "must-not-leak",
-                "symbols": ["BTC/USDT"]
+                "trading_mode": "paper",
+                "exchanges": ["gateio", "bitget"],
+                "symbols": ["BTCUSDT"],
+                "max_notional_per_trade": 10.0,
+                "min_notional_per_trade": 1.0,
+                "max_notional_per_symbol": 100.0,
+                "max_total_notional": 100.0,
+                "min_net_spread_bps": 0.0,
+                "min_depth_notional": 1.0,
+                "market_data_mode": "websocket_cache",
+                "websocket": {
+                    "enabled": true,
+                    "symbols": ["BTC/USDT"],
+                    "exchanges": ["gate.io", "bitget"],
+                    "depth": 20
+                },
+                "monitoring": {
+                    "api_key": "must-not-leak",
+                    "secret": "must-not-leak"
+                }
             }),
             execution,
         );
@@ -382,6 +654,187 @@ mod tests {
         assert_secret_free(&serde_json::to_value(snapshot).expect("snapshot should serialize"));
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn runtime_contract_should_subscribe_and_sync_events() {
+        let mut runtime = SpotSpotArbitrageRuntime::new();
+        let execution: Arc<dyn StrategyExecutionClient> = Arc::new(NoopExecutionClient);
+        let ctx = StrategyContext::new(
+            StrategyInstanceId::new("instance-1"),
+            "tenant-1",
+            "account-1",
+            "strategy-1",
+            "run-1",
+            json!({
+                "trading_mode": "paper",
+                "exchanges": ["gateio", "bitget"],
+                "symbols": ["BTCUSDT"],
+                "max_notional_per_trade": 10.0,
+                "min_notional_per_trade": 1.0,
+                "max_notional_per_symbol": 100.0,
+                "max_total_notional": 100.0,
+                "min_net_spread_bps": 0.0,
+                "min_depth_notional": 1.0,
+                "market_data_mode": "websocket_cache",
+                "websocket": {
+                    "enabled": true,
+                    "exchanges": ["gate.io", "bitget"],
+                    "symbols": ["BTC/USDT"],
+                    "depth": 20
+                }
+            }),
+            execution,
+        );
+
+        runtime.start(ctx).await.expect("runtime should start");
+        assert_eq!(runtime.market_data_subscriptions.len(), 2);
+        assert_eq!(runtime.market_data_subscriptions[0].exchange_id, "gateio");
+        assert_eq!(
+            runtime.market_data_subscriptions[0].channels,
+            vec![MarketDataChannel::OrderBookDepth]
+        );
+
+        let observed_at = Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap();
+        runtime
+            .handle_event(StrategyEvent::MarketData(MarketDataEvent {
+                schema_version: 1,
+                exchange_id: "gateio".to_string(),
+                symbol: "BTCUSDT".to_string(),
+                received_at: observed_at,
+                payload: json!({"best_bid": "99.0", "best_ask": "100.0"}),
+            }))
+            .await
+            .expect("market event should apply");
+        runtime
+            .handle_event(StrategyEvent::MarketData(MarketDataEvent {
+                schema_version: 1,
+                exchange_id: "bitget".to_string(),
+                symbol: "BTCUSDT".to_string(),
+                received_at: observed_at,
+                payload: json!({"best_bid": "101.0", "best_ask": "102.0"}),
+            }))
+            .await
+            .expect("market event should apply");
+        runtime
+            .handle_event(StrategyEvent::Execution(ExecutionEvent {
+                schema_version: 1,
+                event_id: "exec-1".to_string(),
+                client_order_id: Some("spot-spot-1".to_string()),
+                occurred_at: observed_at,
+                payload: json!({
+                    "order_plans": [{
+                        "exchange": "gate.io",
+                        "symbol": "BTC/USDT",
+                        "side": "buy",
+                        "quantity": "0.1",
+                        "notional": 10.0,
+                        "intent": "dual_taker_arbitrage",
+                        "client_order_id": "spot-spot-1",
+                        "idempotency_key": "strategy-1:run-1:spot-spot-1",
+                        "live_submission_allowed": false
+                    }]
+                }),
+            }))
+            .await
+            .expect("execution event should apply");
+        runtime
+            .handle_event(StrategyEvent::Account(AccountEvent {
+                schema_version: 1,
+                account_id: "account-1".to_string(),
+                received_at: observed_at,
+                payload: json!({
+                    "balances": [{
+                        "exchange_id": "gate.io",
+                        "asset": "usdt",
+                        "total": 100.0,
+                        "available": 90.0,
+                        "locked": 10.0
+                    }]
+                }),
+            }))
+            .await
+            .expect("account event should apply");
+        runtime
+            .handle_event(StrategyEvent::OperatorCommand(StrategyCommand {
+                schema_version: 1,
+                command_id: "cmd-1".to_string(),
+                instance_id: StrategyInstanceId::new("instance-1"),
+                command_kind: "pause".to_string(),
+                requested_at: observed_at,
+                payload: Value::Null,
+                requested_by: Some("test".to_string()),
+            }))
+            .await
+            .expect("command should apply");
+
+        let snapshot = runtime.snapshot().await.expect("snapshot should build");
+        assert_eq!(snapshot.status, StrategyStatus::Degraded);
+        assert_eq!(snapshot.payload["market_data_events"], json!(2));
+        assert_eq!(snapshot.payload["execution_events"], json!(1));
+        assert_eq!(snapshot.payload["account_events"], json!(1));
+        assert_eq!(snapshot.payload["operator_commands"], json!(1));
+        assert_eq!(snapshot.payload["configured_symbols"][0], json!("BTCUSDT"));
+        assert_eq!(snapshot.payload["trading_mode"], json!("paper"));
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["market_data"]["subscriptions"]
+                .as_array()
+                .expect("subscriptions should be an array")
+                .len(),
+            2
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][0]
+                ["buy_exchange"],
+            json!("bitget")
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][0]["accepted"],
+            json!(false)
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][1]
+                ["buy_exchange"],
+            json!("gateio")
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][1]["accepted"],
+            json!(true)
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][1]["buy_price"],
+            json!(100.0)
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][1]["sell_price"],
+            json!(101.0)
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][1]
+                ["estimated_net_spread_bps"],
+            json!(80.0)
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["opportunity"]["candidate_pairs"][1]
+                ["executable_notional"],
+            json!(10.0)
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["order_plans"][0]["intent"],
+            json!("dual_taker_arbitrage")
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["inventory"]["balances"][0]["exchange"],
+            json!("gateio")
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["fees"]["venue_rates"][0]["exchange"],
+            json!("bitget")
+        );
+        assert_eq!(
+            snapshot.payload["runtime_contract"]["readiness"]["market_data_ready"],
+            json!(true)
+        );
+    }
+
     #[test]
     fn manifest_should_not_depend_on_exchange_adapters() {
         let manifest = include_str!("../Cargo.toml");
@@ -389,7 +842,7 @@ mod tests {
         for forbidden in [
             "rustcta-exchange-api",
             "rustcta-exchange-gateway",
-            "src/exchanges",
+            "legacy exchange adapter path",
             "gateio",
             "kucoin",
             "okx",

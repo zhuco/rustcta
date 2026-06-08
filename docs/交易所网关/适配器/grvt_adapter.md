@@ -16,7 +16,7 @@ EIP-712 signer coverage is promoted.
 | --- | --- | --- |
 | Perpetual | `Perpetual` | Declared product scope; public REST/WS endpoints are mapped as spec/parser-only. |
 | Options | `Option` | Declared product scope for audit; option chain/greeks/order semantics are adapter-specific and not mapped into the shared trading trait. |
-| Spot | n/a | Unsupported. GRVT spot order lifecycle is not exposed as a standard shared Spot surface. |
+| Spot | n/a | 交易所不支持现货（当前 adapter/官方主线口径；如官方 spot 交易面上线需重核）。 |
 
 Default mainnet URLs:
 
@@ -66,7 +66,7 @@ reconnect/resubscribe. This task does not claim production low-latency runtime.
 
 The following are explicitly not enabled:
 
-- Spot trading.
+- 现货交易：交易所不支持现货（当前 adapter/官方主线口径；如官方 spot 交易面上线需重核）。
 - Options chain/greeks/trading through shared Spot/Perp fields.
 - Private write REST and bulk orders until EIP-712/external signer fixtures
   prove request construction.

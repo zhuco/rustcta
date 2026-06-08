@@ -67,3 +67,14 @@ Use REST reconciliation fallback for unsupported Spot private stream state until
 - WS policy: futures public/private WS are spec/parser ready with 15s client ping and reconnect/resubscribe requirements; Spot private WS remains unsupported.
 - Rate-limit/pagination/reconciliation/batch: endpoint mapping declares buckets and limit pagination; open-orders/detail/history REST is the reconciliation fallback. Batch is native but partial/non-atomic and constrained to one market type.
 - Live boundary: do not rely on WS-only private state before read-only account/order/fill validation and live-dry-run reconciliation.
+
+## Official WebSocket Order Book Detail
+
+Official futures public WS supports `depth_books`, `depth_book1`,
+`depth_book5`, and `depth_book15`: full/changed book, 1 level, 5 levels, and 15
+levels. The reviewed docs do not provide a fixed millisecond push interval,
+sequence field, or checksum. Spot WS is request-response under
+`wss://openapi.bitunix.com:443/ws-api/v1`. Mapping should add futures depth
+channels, 1/5/15 levels, 15s ping policy, no sequence/checksum, and REST depth
+fallback. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).

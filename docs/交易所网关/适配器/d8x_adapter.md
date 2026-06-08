@@ -11,6 +11,13 @@ REST market metadata and order book snapshots from D8X's CoinGecko-compatible
 market-data API. Wallet account reads, contract writes, order execution,
 liquidations, liquidity provision and private streams remain `Unsupported`.
 
+## Product Lines
+
+| Product | MarketType | Status |
+| --- | --- | --- |
+| Perpetual | `Perpetual` | Current adapter scope; public market-data REST is mapped. |
+| Spot | n/a | 交易所不支持现货。D8X 官方产品线是 perpetual futures engine。 |
+
 ## Official Sources
 
 | Topic | Source | Adapter decision |

@@ -33,11 +33,12 @@ Supported:
 - REST and WS signing with `ACCESS-*` headers/login fields using BloFin's
   HMAC-SHA256 hex-then-Base64 signature.
 
-Explicitly unsupported:
+Explicitly unsupported / not implemented:
 
-- Spot trading. The verified BloFin OpenAPI exposes funding/balance style asset
-  endpoints but not a stable Spot order lifecycle endpoint matching the gateway
-  trading contract.
+- Spot trading is 项目未实现 Spot, not `交易所不支持现货`. BloFin official
+  product/help pages document spot trading, while the verified OpenAPI used by
+  this adapter is still dominated by `SWAP`/perpetual order lifecycle. A
+  separate task must verify whether a stable Spot API order lifecycle is public.
 - Unified `ExchangeClient` trait methods for quote-sized market orders, amend
   order, and OCO/OTO order lists. BloFin-specific TPSL/algo order methods are
   available outside the shared trait.
@@ -107,8 +108,8 @@ The machine-readable mapping is
 ## Capability V2
 
 - Product boundary: linear USDT perpetuals only. `market_types` is
-  `[Perpetual]`; spot, dated futures, inverse contracts, and options are not
-  declared.
+  `[Perpetual]`; Spot is 项目未实现 Spot, and dated futures, inverse
+  contracts, and options are not declared.
 - Public REST: native symbol rules, order book snapshots, tickers/trades,
   funding current/history, candles, mark price, and position tiers.
 - Private REST: native balances, positions, order lifecycle, query/open orders,
@@ -116,9 +117,14 @@ The machine-readable mapping is
 - Public/private WS runtime: subscription specs and parsers are present for
   public books/books5/funding and private orders/account/positions. Persistent
   socket supervision remains outside the adapter.
-- Order book strictness: REST and WS are treated as snapshot-only/best-effort
-  book events. No strict sequence or checksum guarantee is declared; reconnect
-  must reload `GET /api/v1/market/books`.
+- Official WS order book detail: `books` sends an initial 200-depth snapshot
+  and 100ms incremental updates; `books5` sends 5-depth snapshots every 100ms
+  when changed. `books` includes `prevSeqId`/`seqId`, so `prevSeqId` must match
+  the previous `seqId`; no checksum was found. Mapping still needs these
+  interval/depth/sequence fields. Source batch:
+  [WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+- Order book strictness: REST and WS must be rebuilt from
+  `GET /api/v1/market/books` on disconnect or sequence mismatch.
 - Funding/open interest: funding current/history is supported. Open interest is
   explicitly unsupported because the verified OpenAPI used by this adapter has
   no stable endpoint.

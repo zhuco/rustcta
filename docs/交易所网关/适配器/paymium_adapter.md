@@ -14,11 +14,20 @@ Paymium's public API documents ticker, trades and market depth without authentic
 ## Unsupported Boundaries
 
 - Non BTC/EUR pairs
-- Margin, futures, perpetuals, leverage, positions and funding
+- Margin, futures, perpetuals, options, leverage, positions and funding are
+  `交易所不支持合约` under the current official Paymium API scope.
 - Native batch place/cancel, cancel-all, amend/replace and order lists
 - Post-only/client order id semantics
 - Withdrawals, deposit address creation, email transfers, payment requests and merchant APIs
-- Socket.io public/user runtime
+- Socket.io public/user runtime: 官方支持 public socket.io `stream` with `bids`/`asks` price-level changes, but current project is `项目未实现公共 WS 行情`.
+
+## Official Public Socket Boundary
+
+官方 WS 细项核验见 [WebSocket 官方核验 P3 P2 公共 WS 缺口交易所](../WebSocket官方核验_P3_P2公共WS缺口交易所.md)。Paymium public socket uses socket.io v1.3 at
+`https://paymium.com/public` with path `/ws/socket.io`. The `stream` event can
+include changed `bids` and `asks`; amount `0` removes a price level. Official
+docs do not provide fixed push interval, fixed depth, sequence, or checksum, so
+the implementation needs REST depth initialization and full resync on reconnect.
 
 ## Validation
 

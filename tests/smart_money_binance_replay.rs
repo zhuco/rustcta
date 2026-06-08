@@ -1,7 +1,7 @@
 #![allow(clippy::all)]
 use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
-use rustcta::smart_money::*;
+use rustcta_smart_money::*;
 
 fn dec(value: i64, scale: u32) -> Decimal {
     Decimal::new(value, scale)

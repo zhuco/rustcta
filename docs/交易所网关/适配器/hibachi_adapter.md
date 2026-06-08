@@ -12,6 +12,13 @@ Task: A-22 / AI-R22 from `docs/交易所网关/总览/exchange_gateway_remaining
 - Offline-only surface: private write request specs and exchange-managed HMAC signing vector.
 - Explicitly closed: real place/cancel/amend/batch/cancel-all, private REST read runtime, private WebSocket runtime, withdrawals/transfers, trustless/non-custodial signing runtime.
 
+## Product Lines
+
+| Product | MarketType | Status |
+| --- | --- | --- |
+| Perpetual | `Perpetual` | Current adapter scope; public metadata, order book snapshot and fee readback are mapped. |
+| Spot | n/a | 交易所不支持现货。官方文档里的 spot/index price 是指数价格，不是现货订单生命周期。 |
+
 ## Official Sources
 
 | Area | Source |

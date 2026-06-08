@@ -18,8 +18,8 @@ dry-run smart-money commands, public/report rendering commands, and the first
 public connectivity probe:
 
 ```text
-rustcta-tools-ops legacy-bin-plan
-rustcta-tools-ops verify-legacy-bins
+rustcta-tools-ops verify-retired-src
+rustcta-tools-ops verify-retired-src
 rustcta-tools-ops smart-money binance-collector
 rustcta-tools-ops smart-money hyperliquid-wallet-ingestion
 rustcta-tools-ops smart-money portfolio-service
@@ -30,7 +30,7 @@ rustcta-tools-ops reporter trend
 rustcta-tools-ops reporter account-position render
 ```
 
-`tools/ops/src/lib.rs` already classifies many legacy `src/bin/*.rs` files as
+`tools/ops/src/lib.rs` already classifies many legacy `retired root bin directory/*.rs` files as
 `ToolOps`. The first implementation batch should turn that ownership metadata
 into real operator commands without changing exchange adapters, REST signing,
 websocket behavior, order placement semantics, or Cargo package ownership.
@@ -42,7 +42,7 @@ binary names should stay available during migration as wrappers or aliases.
 
 ```text
 rustcta-tools-ops
-  legacy-bin-plan
+  verify-retired-src
   smart-money
     binance-collector
     hyperliquid-wallet-ingestion
@@ -95,11 +95,11 @@ That direct edge creates a Cargo cycle:
 rustcta -> rustcta-tools-ops -> rustcta
 ```
 
-Therefore a legacy binary can move into `tools/ops` only if its implementation
-does not import `rustcta::*`, or after the required behavior has first been
+Therefore a retired binary can move into `tools/ops` only if its implementation
+does not import `legacy root crate path *`, or after the required behavior has first been
 extracted into a separate non-root crate. `trend_report` now follows that route
 through `crates/rustcta-reporting`. The root-dependent
-`account_position_reporter` still stays as a legacy binary, but its reusable
+`account_position_reporter` still stays as a retired binary, but its reusable
 configuration, exposure aggregation, balance helpers, Markdown report
 formatting, account snapshot provider trait, ticker-pricing logic, and WeCom
 markdown webhook helper now live in `crates/rustcta-reporting`.
@@ -125,7 +125,7 @@ configuration/read-model/markdown pieces now live in
 - WeCom markdown webhook payload construction plus response validation/sending
   through `send_account_position_markdown_webhook`.
 
-The legacy binary now maps `rustcta::core::types::{Balance, Position}` into
+The retired binary now maps `legacy root crate path core::types::{Balance, Position}` into
 those root-free input models behind a `LegacyExchangeAccountPositionProvider`
 adapter. It still owns `AccountManager` bootstrap, root `Exchange` acquisition,
 logger setup, HTTP client construction, and the reporting loop. Do not move it
@@ -134,12 +134,12 @@ provider or kept outside the tools crate boundary.
 
 ## First Batch Order
 
-### 1. `src/bin/smart_money_binance_collector.rs`
+### 1. `retired root bin directory/smart_money_binance_collector.rs` (removed)
 
 Target command: `rustcta-tools-ops smart-money binance-collector`.
 
-Status: migrated. The root binary is now a compatibility wrapper around
-`rustcta_tools_ops::smart_money_binance_collector_summary`.
+Status: migrated. The root binary wrapper has been removed; use
+`rustcta-tools-ops smart-money binance-collector`.
 
 Why low risk:
 
@@ -152,20 +152,18 @@ Acceptance commands for the implementation slice:
 
 ```bash
 cargo run -p rustcta-tools-ops -- smart-money binance-collector --help
-cargo run --bin smart_money_binance_collector -- --help
 cargo run -p rustcta-tools-ops -- smart-money binance-collector --config config/smart_money.yml
-cargo run --bin smart_money_binance_collector -- --config config/smart_money.yml
 ```
 
-Expected acceptance: new and legacy commands both exit successfully and print
-the same dry-run summary fields.
+Expected acceptance: the tools command exits successfully and prints the
+dry-run summary fields.
 
-### 2. `src/bin/smart_money_hyperliquid_wallet_ingestion.rs`
+### 2. `retired root bin directory/smart_money_hyperliquid_wallet_ingestion.rs` (removed)
 
 Target command: `rustcta-tools-ops smart-money hyperliquid-wallet-ingestion`.
 
-Status: migrated. The root binary is now a compatibility wrapper around
-`rustcta_tools_ops::smart_money_hyperliquid_wallet_ingestion_summary`.
+Status: migrated. The root binary wrapper has been removed; use
+`rustcta-tools-ops smart-money hyperliquid-wallet-ingestion`.
 
 Why low risk:
 
@@ -179,20 +177,18 @@ Acceptance commands:
 
 ```bash
 cargo run -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion --help
-cargo run --bin smart_money_hyperliquid_wallet_ingestion -- --help
 cargo run -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion --config config/smart_money.yml
-cargo run --bin smart_money_hyperliquid_wallet_ingestion -- --config config/smart_money.yml
 ```
 
-Expected acceptance: new and legacy commands both exit successfully and print
-the same dry-run summary fields.
+Expected acceptance: the tools command exits successfully and prints the
+dry-run summary fields.
 
-### 3. `src/bin/smart_money_portfolio_service.rs`
+### 3. `retired root bin directory/smart_money_portfolio_service.rs` (removed)
 
 Target command: `rustcta-tools-ops smart-money portfolio-service`.
 
-Status: migrated. The root binary is now a compatibility wrapper around
-`rustcta_tools_ops::smart_money_portfolio_service_summary`.
+Status: migrated. The root binary wrapper has been removed; use
+`rustcta-tools-ops smart-money portfolio-service`.
 
 Why low risk:
 
@@ -205,22 +201,20 @@ Acceptance commands:
 
 ```bash
 cargo run -p rustcta-tools-ops -- smart-money portfolio-service --help
-cargo run --bin smart_money_portfolio_service -- --help
 cargo run -p rustcta-tools-ops -- smart-money portfolio-service --config config/smart_money.yml
-cargo run --bin smart_money_portfolio_service -- --config config/smart_money.yml
 ```
 
-Expected acceptance: new and legacy commands both exit successfully and print
-the same dry-run summary fields.
+Expected acceptance: the tools command exits successfully and prints the
+dry-run summary fields.
 
-### 4. `src/bin/ws_proxy_probe.rs`
+### 4. `retired root bin directory/ws_proxy_probe.rs` (removed)
 
 Target command: `rustcta-tools-ops probe ws-proxy`.
 
 Status: migrated. The grouped command and the historical top-level
 `rustcta-tools-ops ws-proxy-probe` alias both call
-`rustcta_tools_ops::run_ws_proxy_probe`; the root binary remains a
-compatibility wrapper around the same implementation.
+`rustcta_tools_ops::run_ws_proxy_probe`; the root binary wrapper has been
+removed.
 
 Why low risk:
 
@@ -235,22 +229,19 @@ Acceptance commands:
 ```bash
 cargo run -p rustcta-tools-ops -- ws-proxy-probe --help
 cargo run -p rustcta-tools-ops -- probe ws-proxy --help
-cargo run --bin ws_proxy_probe -- --help
 cargo run -p rustcta-tools-ops -- ws-proxy-probe --exchange binance-spot --frames 1 --timeout-ms 12000
 cargo run -p rustcta-tools-ops -- probe ws-proxy --exchange binance-spot --frames 1 --timeout-ms 12000
-cargo run --bin ws_proxy_probe -- --exchange binance-spot --frames 1 --timeout-ms 12000
 ```
 
-Expected acceptance: help output is available from grouped, top-level alias,
-and root wrapper paths; the one-case probe either succeeds from all paths or
-fails with equivalent connectivity errors.
+Expected acceptance: help output is available from grouped and top-level alias
+paths; the one-case probe either succeeds or fails with a connectivity error.
 
-### 5. `src/bin/gateio_bitget_spot_symbols.rs`
+### 5. `retired root bin directory/gateio_bitget_spot_symbols.rs` (removed)
 
 Target command: `rustcta-tools-ops symbols gateio-bitget-spot`.
 
-Status: migrated. The root binary is now a compatibility wrapper around
-`rustcta_tools_ops::run_gateio_bitget_spot_symbols`.
+Status: migrated. The root binary wrapper has been removed; use
+`rustcta-tools-ops symbols gateio-bitget-spot`.
 
 Why low risk:
 
@@ -264,32 +255,26 @@ Acceptance commands:
 
 ```bash
 cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot --help
-cargo run --bin gateio_bitget_spot_symbols -- --limit 5
 cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot --limit 5
 cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot --limit 5 --yaml
 ```
 
-Expected acceptance: legacy and new `--limit 5` output use the same symbol
-format; `--yaml` still prints one `  - SYMBOL` line per symbol. The legacy
-binary currently uses manual argument parsing, so do not require legacy
-`--help` compatibility unless the implementation intentionally adds it without
-breaking existing flags.
+Expected acceptance: `--limit 5` output uses the expected symbol format;
+`--yaml` still prints one `  - SYMBOL` line per symbol.
 
-### 6. `src/bin/trend_report.rs`
+### 6. `retired root bin directory/trend_report.rs` (removed)
 
 Target command: `rustcta-tools-ops reporter trend`.
 
 Status: migrated after helper extraction. The trend reporter implementation now
 lives in the non-root `crates/rustcta-reporting` crate, `rustcta-tools-ops
-reporter trend` owns the operator command, and the legacy
-`src/bin/trend_report.rs` binary is a thin compatibility shim that forwards to
-that tools command.
+reporter trend` owns the operator command, and the supervisor spec launches
+that tools command directly.
 
 Additional migration guardrails:
 
-- Keep `rustcta-reporting` free of `rustcta::*` dependencies.
-- Keep `src/bin/trend_report.rs` as a compatibility shim while runbooks still
-  reference the old binary name.
+- Keep `rustcta-reporting` free of `legacy root crate path *` dependencies.
+- Keep runbooks and supervisor specs pointed at `rustcta-tools-ops reporter trend`.
 - Keep routine validation limited to the legacy `--help` path unless a test
   webhook/config is intentionally provided, because the command can enter the
   infinite reporting loop and send notifications.
@@ -299,12 +284,10 @@ Acceptance commands:
 ```bash
 cargo check -p rustcta-reporting
 cargo check -p rustcta-tools-ops
-cargo check --bin trend_report
 cargo run -p rustcta-tools-ops -- reporter trend --help
-cargo run --bin trend_report -- --help
 ```
 
-### 6a. `src/bin/account_position_reporter.rs`
+### 6a. `retired root bin directory/account_position_reporter.rs`
 
 Target command: `rustcta-tools-ops reporter account-position`.
 
@@ -313,7 +296,7 @@ Status: partially migrated. The render-only command
 <json>` is now owned by `tools/ops`; it reads a local
 `AccountPositionReportInput` JSON snapshot, builds the report with
 `rustcta-reporting`, and prints Markdown. The live reporter still remains a
-legacy binary because it directly imports `rustcta::*` for `Exchange`,
+retired binary because it directly imports `legacy root crate path *` for `Exchange`,
 `AccountManager`, market types, logger setup, and HTTP client construction.
 The pure formatting/report-model slice and the root-free live read/provider
 trait have moved into `crates/rustcta-reporting` so that future work can migrate
@@ -334,7 +317,7 @@ Extracted root-free helpers:
 Remaining blockers before tools ownership:
 
 - Replace the legacy `LegacyExchangeAccountPositionProvider` adapter with a
-  provider implementation that does not require `dyn rustcta::Exchange`, or keep
+  provider implementation that does not require `dyn legacy root crate path Exchange`, or keep
   that adapter outside `tools/ops`.
 - Keep WeCom delivery out of the render-only tools command; the shared helper
   is available, but sending still has external side effects.
@@ -349,16 +332,16 @@ cargo check --bin account_position_reporter
 scripts/check_industrial_boundaries.sh
 ```
 
-### 7. `src/bin/hyperliquid_self_test.rs`
+### 7. `retired root bin directory/hyperliquid_self_test.rs`
 
 Target command: `rustcta-tools-ops probe hyperliquid-self-test`.
 
 Status: deferred from the low-risk Task 4 implementation slice. The legacy
-binary still directly imports `rustcta::exchanges::hyperliquid::HyperliquidExchange`
-plus root `rustcta::core` types. Moving that implementation into `tools/ops`
+binary still directly imports `legacy root crate path exchanges::hyperliquid::HyperliquidExchange`
+plus root `legacy root crate path core` types. Moving that implementation into `tools/ops`
 would require the forbidden dependency edge `rustcta-tools-ops -> rustcta`.
 It also performs private credential reads and private account reads before the
-order-safe `HYPERLIQUID_RUN_ORDERS=false` gate. Keep it as a legacy binary
+order-safe `HYPERLIQUID_RUN_ORDERS=false` gate. Keep it as a retired binary
 until a non-root Hyperliquid account/probe adapter is extracted or the command
 is split into a public/read-only root-free probe.
 
@@ -381,7 +364,7 @@ Expected acceptance after the non-root adapter work exists: both paths keep
 `HYPERLIQUID_RUN_ORDERS=false` as the default/order-safe mode. The credentialed
 command may fail in an environment without keys, but it should fail at the same
 setup boundary from both paths and must not place or cancel orders unless
-`HYPERLIQUID_RUN_ORDERS=true`. The legacy binary currently has no CLI parser,
+`HYPERLIQUID_RUN_ORDERS=true`. The retired binary currently has no CLI parser,
 so do not pass `--help` to the legacy path because it would still enter the
 environment/credential flow.
 
@@ -396,7 +379,7 @@ dry-run/public first batch. Plan them as a second guarded slice:
 
 Compatibility requirements:
 
-- Keep legacy binary names available until runbooks and scripts have moved.
+- Keep retired binary names available until runbooks and scripts have moved.
 - Preserve every existing flag name, default value, output JSON field, and
   error message that acts as an operator safety gate.
 - Keep `--execute` and `--confirm-live-order` as separate required gates.
@@ -447,28 +430,28 @@ split plans are accepted:
 | Entry | Reason to defer |
 | --- | --- |
 | `src/main.rs` | Legacy strategy launcher; should move only with supervisor/process specs. |
-| `src/bin/control_api.rs` | Large legacy HTTP runtime with routes, static UI, command queue, snapshots, and restart behavior. |
-| `src/bin/cross_arb_live.rs` | Long-running live strategy process with exchange registry, execution, private sync, and local WS module. |
-| `src/bin/cross_arb_server/ws.rs` | Local support module for `cross_arb_live`, not a standalone ops tool. |
-| `src/bin/funding_arb_live.rs` | Live order strategy runtime; requires supervisor/process-spec planning. |
-| `src/bin/backtest.rs` | Explicit root `Cargo.toml` bin; belongs to the backtest app plan, not tools/ops. |
-| `src/bin/short_ladder_mtf_grid.rs` | Research/backtest/strategy scope, not ops diagnostics. |
-| `src/bin/cross_arb_preflight.rs` | Safer as `apps/cli` command because it is a live-readiness gate rather than an ad-hoc tool. |
-| `src/bin/cross_arb_observe.rs` | Read-only public observation runtime, but strategy-observe semantics fit CLI/strategy ownership better than first tools batch. |
-| `src/bin/funding_arb_observe.rs` | Read-only observation plus notification behavior; coordinate with CLI and funding strategy ownership. |
-| `src/bin/cross_arb_account_audit.rs` | Private account read across venues; move after credential/output compatibility checklist. |
-| `src/bin/cross_arb_fee_audit.rs` | Private fill reads and rebate assumptions; move with audit command compatibility. |
-| `src/bin/cross_arb_order_admin.rs` | Can query, cancel, or close positions; requires strict admin safety compatibility. |
-| `src/bin/account_position_reporter.rs` | Long-running reporter with private account/exchange reads and Webhook side effects. Pure config, exposure aggregation, balance helpers, and Markdown formatting are now in `rustcta-reporting`; extract or wrap the live account read boundary before moving the command. |
+| `retired root bin directory/control_api.rs` | Large legacy HTTP runtime with routes, static UI, command queue, snapshots, and restart behavior. |
+| `retired root bin directory/cross_arb_live.rs` | Long-running live strategy process with exchange registry, execution, private sync, and local WS module. |
+| `retired root bin directory/cross_arb_server/ws.rs` | Local support module for `cross_arb_live`, not a standalone ops tool. |
+| `retired root bin directory/funding_arb_live.rs` | Live order strategy runtime; requires supervisor/process-spec planning. |
+| `retired root bin directory/backtest.rs` | Explicit root `Cargo.toml` bin; belongs to the backtest app plan, not tools/ops. |
+| `retired root bin directory/retired_short_ladder_grid.rs` | Research/backtest/strategy scope, not ops diagnostics. |
+| `retired root bin directory/cross_arb_preflight.rs` | Safer as `apps/cli` command because it is a live-readiness gate rather than an ad-hoc tool. |
+| `retired root bin directory/cross_arb_observe.rs` | Read-only public observation runtime, but strategy-observe semantics fit CLI/strategy ownership better than first tools batch. |
+| `retired root bin directory/funding_arb_observe.rs` | Read-only observation plus notification behavior; coordinate with CLI and funding strategy ownership. |
+| `retired root bin directory/cross_arb_account_audit.rs` | Private account read across venues; move after credential/output compatibility checklist. |
+| `retired root bin directory/cross_arb_fee_audit.rs` | Private fill reads and rebate assumptions; move with audit command compatibility. |
+| `retired root bin directory/cross_arb_order_admin.rs` | Can query, cancel, or close positions; requires strict admin safety compatibility. |
+| `retired root bin directory/account_position_reporter.rs` | Long-running reporter with private account/exchange reads and Webhook side effects. Pure config, exposure aggregation, balance helpers, and Markdown formatting are now in `rustcta-reporting`; extract or wrap the live account read boundary before moving the command. |
 
 ## Implementation Shape For Each Slice
 
 Use small, reversible slices:
 
-1. Extract the legacy binary's `Args` and `main` body into a callable command
+1. Extract the retired binary's `Args` and `main` body into a callable command
    function under `tools/ops`.
 2. Wire the new `rustcta-tools-ops` subcommand to that function.
-3. Replace the legacy `src/bin/<name>.rs` with a thin compatibility wrapper
+3. Replace the legacy `retired root bin directory/<name>.rs` with a thin compatibility wrapper
    only after output/flags are preserved.
 4. Keep the old binary name until a separate deprecation milestone says it can
    be removed.
@@ -483,7 +466,7 @@ For every migrated file:
 ```bash
 cargo check -p rustcta-tools-ops
 cargo test -p rustcta-tools-ops
-cargo run -p rustcta-tools-ops -- legacy-bin-plan
+cargo run -p rustcta-tools-ops -- verify-retired-src
 cargo run -p rustcta-tools-ops -- <new-command> --help
 ```
 
@@ -491,8 +474,8 @@ The checked-in `rustcta-tools-ops` CLI smoke tests cover the bounded local
 acceptance surface for migrated commands:
 
 ```bash
-cargo run -p rustcta-tools-ops -- legacy-bin-plan --target tools
-cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+cargo run -p rustcta-tools-ops -- verify-retired-src --target tools
+cargo run -p rustcta-tools-ops -- verify-retired-src
 cargo run -p rustcta-tools-ops -- reporter trend --help
 cargo run -p rustcta-tools-ops -- reporter account-position render --help
 cargo run -p rustcta-tools-ops -- ws-proxy-probe --help

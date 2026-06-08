@@ -15,7 +15,7 @@ live gateway trading capability.
 
 Important product boundary: the official API introduction states that leverage
 trading is currently unsupported. This adapter therefore declares only
-`MarketType::Spot`; futures/perpetuals are `Unsupported`.
+`MarketType::Spot`; futures/perpetual/options are `交易所不支持合约` under the current official API scope.
 
 ## Products And URLs
 
@@ -40,6 +40,13 @@ requests to the venue symbol.
 Public WS frames are gzip-compressed JSON in production. Heartbeat uses
 server/client ping-pong where the client returns the same timestamp in `pong`.
 
+Official public WS supports `market.<symbol>.depth.<type>` with
+`step0`-`step5` and `market.<symbol>.bbo` for best bid/ask. BBO messages include
+`seqId`; depth docs do not publish checksum or fixed push milliseconds. Mapping
+should add depth/BBO channels, step0-step5, gzip, BBO `seqId`, no fixed ms, and
+REST depth rebuild. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 ## Private REST Boundary
 
 BitTrade uses HMAC-SHA256 signatures over:
@@ -59,7 +66,7 @@ place, cancel, batch-cancel, and query-order endpoints. Runtime methods return
 ## Unsupported
 
 - Leverage, futures, perpetuals, margin mode, position mode, funding, and open
-  interest.
+  interest: `交易所不支持合约` according to the current official API introduction.
 - Live private write/read REST execution in this adapter revision.
 - Retail/sales-office ordering APIs; they are not mapped into exchange spot
   order routing.
@@ -67,6 +74,8 @@ place, cancel, batch-cancel, and query-order endpoints. Runtime methods return
   ledgers.
 - In-place amend and cancel-all. BitTrade exposes cancel and batch-cancel
   request specs, not a verified gateway cancel-all mapping.
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。
 
 ## Validation
 

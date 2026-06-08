@@ -36,11 +36,15 @@ Private WS login uses HMAC-SHA256 over `timestamp + "login"`.
 - Prediction/category-specific products are excluded until product scope is
   split from ordinary spot.
 - Deposits, withdrawals, transfers, and bank payment flows are unsupported.
+- Standard futures/perpetual/options are `交易所不支持合约` under the current official Foxbit Exchange API scope.
+- Rispar collateral loan / margin-call help-center content is not a central exchange contracts position API.
 - Private order placement/cancel/query/open orders/fills remain offline
   request-spec only.
 - Private WS account events are not promoted; private state should reconcile
   through REST specs until read-only validation is completed.
 - No official REST/WS v3 sandbox endpoint was found in the reviewed docs.
+
+官方核验见 [产品线官方核验 P6 剩余区域现货 CEX](../产品线官方核验_P6_剩余区域现货_CEX.md)。
 
 ## Endpoint Mapping
 

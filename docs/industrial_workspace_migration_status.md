@@ -70,7 +70,7 @@ as owned interfaces and edited with explicit coordination.
   - `crates/rustcta-event-ledger`
   - `crates/rustcta-supervisor`
   - `crates/rustcta-control-api`
-  - `crates/rustcta-core-compat`
+  - `crates/retired-core-compat`
 - App crates:
   - `apps/gateway`
   - `apps/supervisor`
@@ -387,7 +387,7 @@ as owned interfaces and edited with explicit coordination.
   matching. This is still a partial core migration; legacy controller runtime,
   exchange IO, websocket handling, external risk-evaluator wiring, order
   lifecycle reconciliation, and runtime orchestration remain in
-  `src/strategies/avellaneda_stoikov` until SDK market-data/execution contracts
+  `retired strategy tree/avellaneda_stoikov` until SDK market-data/execution contracts
   replace those root-runtime paths.
 - `rustcta-strategy-mean-reversion` now contains the first real migrated
   strategy-core slice beyond the thin wrapper: adapter-free Kline/order-side
@@ -395,7 +395,7 @@ as owned interfaces and edited with explicit coordination.
   scoring, liquidity checks, and deterministic order-plan generation. This is
   still a partial core migration; legacy async data acquisition, exchange
   access, order submission, and task orchestration remain in
-  `src/strategies/mean_reversion` until SDK market-data/execution contracts
+  `retired strategy tree/mean_reversion` until SDK market-data/execution contracts
   replace those root-runtime paths.
 - `rustcta-strategy-hedged-grid` now contains the first real migrated
   adapter-free grid core slice beyond the thin wrapper: strategy core config
@@ -416,7 +416,7 @@ as owned interfaces and edited with explicit coordination.
   open notional budget pressure with adapter-free regression tests. This is
   still a partial core migration; the remaining legacy controller, multi-symbol
   runtime, exchange access, and order submission remain in
-  `src/strategies/hedged_grid` until the strategy runtime is moved onto SDK
+  `retired strategy tree/hedged_grid` until the strategy runtime is moved onto SDK
   market-data/execution contracts.
 - `rustcta-strategy-funding-arbitrage` now contains the first real migrated
   adapter-free funding-arbitrage core slice beyond the thin wrapper:
@@ -432,7 +432,7 @@ as owned interfaces and edited with explicit coordination.
   core migration; legacy async market adapter scanning, live scheduler,
   execution adapter wiring, order submission, fill readback, and webhook sending
   remain in
-  `src/strategies/funding_rate_arbitrage` until SDK market-data/execution/app
+  `retired strategy tree/funding_rate_arbitrage` until SDK market-data/execution/app
   contracts replace those root-runtime paths.
 - `rustcta-strategy-spot-spot-arbitrage` now contains the first real migrated
   adapter-free Spot-to-Spot arbitrage core slice beyond the thin wrapper:
@@ -445,9 +445,9 @@ as owned interfaces and edited with explicit coordination.
   inventory ownership, fee model integration, paper/live
   execution, lifecycle, replay, websocket market data, and control-plane
   integration remain in
-  `src/strategies/spot_spot_taker_arbitrage` until SDK market-data/execution
+  `retired strategy tree/spot_spot_taker_arbitrage` until SDK market-data/execution
   contracts replace those root-runtime paths. The legacy
-  `src/strategies/spot_spot_taker_arbitrage/risk.rs` module is now a
+  `retired strategy tree/spot_spot_taker_arbitrage/risk.rs` module is now a
   compatibility adapter around the migrated `SpotRiskState` core instead of a
   duplicate risk-state implementation.
 - `rustcta-strategy-cross-exchange-arbitrage` now contains the first real
@@ -458,7 +458,7 @@ as owned interfaces and edited with explicit coordination.
   migration; legacy config loading, runtime orchestration, tasks, execution
   planner/router wiring, market data, private sync, storage, dashboard, risk,
   position, and replay behavior remain in
-  `src/strategies/cross_exchange_arbitrage` until SDK market-data/execution/app
+  `retired strategy tree/cross_exchange_arbitrage` until SDK market-data/execution/app
   contracts replace those root-runtime paths.
 - `rustcta-strategy-range-grid` now contains the first real migrated
   adapter-free range-grid core slice beyond the legacy module: range-grid
@@ -466,7 +466,7 @@ as owned interfaces and edited with explicit coordination.
   the range/trend classifier, pair runtime state, precision helpers, and
   deterministic grid order planning with min-notional and max-position budget
   handling. It now also absorbs the useful core semantics from the non-exported
-  legacy `src/strategies/oscillation_grid.rs`: fixed-notional arithmetic and
+  legacy `retired strategy tree/oscillation_grid.rs`: fixed-notional arithmetic and
   geometric grid planning, OSC-tagged client intents, local oscillation-grid
   state DTOs, and buy/sell fill transitions that replenish same-side orders
   while preserving the legacy simplified profit accounting. The legacy
@@ -476,7 +476,7 @@ as owned interfaces and edited with explicit coordination.
   cores instead of duplicate range/trend and grid-plan implementations. This is still a partial core migration;
   legacy controller, symbol tasks, notifications, risk
   application, precision service, indicator service, websocket market data, and
-  runtime execution remain in `src/strategies/range_grid` until SDK
+  runtime execution remain in `retired strategy tree/range_grid` until SDK
   market-data/execution/app contracts replace those root-runtime paths.
 - `rustcta-strategy-short-ladder-live` now contains the first real migrated
   adapter-free short-ladder-live core slice beyond the legacy module: live
@@ -489,7 +489,7 @@ as owned interfaces and edited with explicit coordination.
   id construction, and layer-notional reconstruction. This is still a partial
   core migration; legacy market signal building, execution adapter calls,
   websocket exit loops, logging, task orchestration, and runtime state wiring
-  remain in `src/strategies/short_ladder_live` until SDK market-data/execution
+  remain in `retired strategy tree/short_ladder_live` until SDK market-data/execution
   contracts replace those root-runtime paths.
 - `rustcta-strategy-poisson-market-maker` now contains the first real migrated
   adapter-free Poisson queue market-making core slice beyond the legacy module:
@@ -503,7 +503,7 @@ as owned interfaces and edited with explicit coordination.
   still a partial core migration; legacy controller runtime, WebSocket loops,
   account/position sync, real order submission/cancel, external risk evaluator
   wiring, webhook notifications, trade collection, and task orchestration
-  remain in `src/strategies/poisson_market_maker` until SDK market-data,
+  remain in `retired strategy tree/poisson_market_maker` until SDK market-data,
   execution, and app contracts replace those root-runtime paths.
 - `rustcta-strategy-trend` now contains the first real migrated adapter-free
   trend core slice beyond the legacy module: strategy/risk/indicator/signal/
@@ -532,17 +532,17 @@ as owned interfaces and edited with explicit coordination.
   execution engine exchange IO/retry/timeout/cancel/report wiring, order
   tracker, stop manager runtime, position sync, user stream, monitoring async
   loop/log writer/alert integration, webhook/status reports, and
-  account-manager wiring remain in `src/strategies/trend` until SDK market-data,
+  account-manager wiring remain in `retired strategy tree/trend` until SDK market-data,
   execution, and app contracts
   replace those root-runtime paths.
 - `tools/ops` establishes the operator/tooling workspace area and records a
-  tested migration matrix for current legacy `src/bin/*.rs` entrypoints. This
+  tested migration matrix for current legacy `retired root bin directory/*.rs` entrypoints. This
   keeps directory/runtime restructuring moving without expanding exchange API
   surface area in this batch.
 - `apps/backtest` establishes the offline backtest/research app boundary with
-  the `rustcta-backtest` binary. The legacy root `backtest` binary remains as a
+  the `retired-backtest` binary. The legacy root `backtest` binary remains as a
   compatibility path.
-- `crates/rustcta-backtest` now owns the app-facing backtest dependency
+- `crates/retired-backtest` now owns the app-facing backtest dependency
   boundary and the first extracted implementation modules:
   `rustcta_backtest::factors`, `rustcta_backtest::scoring`,
   `rustcta_backtest::schema`, `rustcta_backtest::data`,
@@ -569,52 +569,48 @@ as owned interfaces and edited with explicit coordination.
   without importing root `core` types. The matching engine slice now handles
   offline market/limit order execution, queue priority, book matching, and
   ledger integration in the new crate while strategy runtimes remain legacy.
-  The legacy `src/backtest/data` dataset, exchange metadata, indicator,
+  The legacy `retired backtest tree/data` dataset, exchange metadata, indicator,
   matching ledger, and matching engine modules are preserved through
   compatibility includes, while live capture/network acquisition remains in the
   legacy data tree. The legacy
-  `rustcta::backtest::factors`, `rustcta::backtest::scoring`,
-  `rustcta::backtest::schema`, `rustcta::backtest::indicators`,
-  `rustcta::backtest::replay`, `rustcta::backtest::matching::book`,
-  `rustcta::backtest::matching::ledger`, and
-  `rustcta::backtest::matching::engine` paths are preserved through
+  `legacy root crate path backtest::factors`, `legacy root crate path backtest::scoring`,
+  `legacy root crate path backtest::schema`, `legacy root crate path backtest::indicators`,
+  `legacy root crate path backtest::replay`, `legacy root crate path backtest::matching::book`,
+  `legacy root crate path backtest::matching::ledger`, and
+  `legacy root crate path backtest::matching::engine` paths are preserved through
   compatibility includes, and the legacy
-  `rustcta::backtest::runtime` facade is gated behind the temporary
+  `legacy root crate path backtest::runtime` facade is gated behind the temporary
   `legacy-runtime` feature. Backtest schema now uses legacy-compatible
   `BacktestKline`, `BacktestTrade`, `BacktestFee`, `BacktestOrderSide`, and
   `BacktestMarketType` DTOs from `rustcta-types` rather than depending on root
   `core` types in the new crate.
-- `src/bin/backtest.rs` and `apps/backtest/src/main.rs` now share
-  `rustcta::backtest::runtime::render_command_output`, so old and new backtest
+- `retired root bin directory/backtest.rs` and `apps/backtest/src/main.rs` now share
+  `legacy root crate path backtest::runtime::render_command_output`, so old and new backtest
   entrypoints cannot drift in operator summary text.
-- `src/bin/short_ladder_mtf_grid.rs` is now a thin compatibility wrapper around
-  `rustcta::backtest::runtime::short_ladder_mtf_grid`, and
-  `rustcta-backtest short-ladder-mtf-grid` exposes the same grid command under
+- `retired root bin directory/retired_short_ladder_grid.rs` is now a thin compatibility wrapper around
+  `legacy root crate path backtest::runtime::retired_short_ladder_grid`, and
+  `retired-backtest short-ladder-mtf-grid` exposes the same grid command under
   the backtest app boundary without changing flags, CSV/Markdown output, or the
   final summary line.
 - Fast-migration decision for the current batch: backtest is paused as an
-  expansion target. Keep the extracted `rustcta-backtest` slices compiling and
+  expansion target. Keep the extracted `retired-backtest` slices compiling and
   keep legacy compatibility binaries available, but do not make additional
-  `src/backtest/*` extraction a blocker for the control/API/tools/supervisor
+  `retired backtest tree/*` extraction a blocker for the control/API/tools/supervisor
   migration. Operators can skip running backtest binaries while closing the
   production workspace migration.
 - `rustcta-tools-ops` now owns the first migrated dry-run operator commands:
   `smart-money binance-collector`, `smart-money hyperliquid-wallet-ingestion`,
-  and `smart-money portfolio-service`. The legacy root binaries remain thin
-  wrappers around the same functions.
+  and `smart-money portfolio-service`. The legacy root smart-money wrappers
+  have been removed.
 - `rustcta-tools-ops` now owns the public `ws-proxy-probe` connectivity probe
-  without depending on the legacy root crate. The legacy `src/bin/ws_proxy_probe.rs`
-  binary remains a thin compatibility wrapper around the same tool function.
+  without depending on the legacy root crate. The legacy root wrapper has been
+  removed.
 - `rustcta-tools-ops` now owns the public/read-only
-  `symbols gateio-bitget-spot` discovery command. The legacy
-  `src/bin/gateio_bitget_spot_symbols.rs` binary remains a thin compatibility
-  wrapper around the same implementation.
+  `symbols gateio-bitget-spot` discovery command. The legacy root wrapper has
+  been removed.
 - `crates/rustcta-reporting` now owns the first non-root reporting helper:
   `trend_report`. `rustcta-tools-ops reporter trend` owns the operator command,
-  and the legacy `src/bin/trend_report.rs` wrapper now forwards through the
-  same `legacy_tools_ops_shim` pattern used by the other migrated tools,
-  avoiding duplicate reporter wiring in the root binary while preserving the
-  old command name.
+  and the supervisor spec now launches that tools command directly.
 - `rustcta-tools-ops reporter account-position render` now owns the safe
   account-position render-only slice. It reads a local
   `AccountPositionReportInput` JSON snapshot, uses `rustcta-reporting` to build
@@ -631,14 +627,14 @@ as owned interfaces and edited with explicit coordination.
   loading, balance and position DTOs, exposure aggregation, stablecoin/USDT
   helpers, ticker candidate pricing, `AccountPositionProvider`, and markdown
   rendering. The WeCom markdown payload/response validation and send helper now
-  also live in `rustcta-reporting`, while the legacy binary still adapts
-  `dyn rustcta::Exchange` into the provider boundary and owns `AccountManager`
+  also live in `rustcta-reporting`, while the retired binary still adapts
+  `dyn legacy root crate path Exchange` into the provider boundary and owns `AccountManager`
   bootstrap, logger setup, HTTP client construction, and the reporting loop, so
   it is intentionally not wired into `tools/ops` yet.
-- `rustcta-tools-ops` now exposes `verify-legacy-bins`, which dynamically scans
-  `src/bin/*.rs` and fails if any legacy binary is unclassified or if the
+- `rustcta-tools-ops` now exposes `verify-retired-src`, which dynamically scans
+  `retired root bin directory/*.rs` and fails if any retired binary is unclassified or if the
   migration matrix contains stale entries.
-- `rustcta-tools-ops legacy-bin-plan --target <target>` can print filtered
+- `rustcta-tools-ops verify-retired-src --target <target>` can print filtered
   migration slices for tools, backtest app, CLI, control API, strategy runtime, or
   legacy compatibility work.
 - `rustcta-tools-ops` now exposes the public websocket probe through the grouped
@@ -649,8 +645,8 @@ as owned interfaces and edited with explicit coordination.
   aliases. The smoke tests use the built `rustcta-tools-ops` binary and avoid
   public-network, private-account, canary, admin, or order paths.
 - `apps/cli` now exposes the same migration inventory as the industrial CLI
-  entrypoint: `rustcta-industrial migration legacy-bin-plan --target <target>`
-  and `rustcta-industrial migration verify-legacy-bins --src-bin-dir src/bin`.
+  entrypoint: `rustcta-industrial migration verify-retired-src --target <target>`
+  and `rustcta-industrial migration verify-retired-src`.
   This keeps the operator-facing industrial command root useful without
   depending on the legacy root crate.
 - `apps/cli` now exposes the first legacy one-shot operator command bridge:
@@ -716,7 +712,7 @@ as owned interfaces and edited with explicit coordination.
   retirement matrix, local paper end-to-end checklist, and intentionally
   paused areas.
 - The `rustcta-tools-ops` legacy bin matrix now emits a compatibility
-  retirement decision for every direct `src/bin/*.rs` file: `keep_wrapper`,
+  retirement decision for every direct `retired root bin directory/*.rs` file: `keep_wrapper`,
   `warn`, `alias`, or `remove_later`, plus the replacement command and
   retirement milestone. `scripts/check_industrial_boundaries.sh` fails if this
   matrix schema or the required decision set disappears.
@@ -728,9 +724,9 @@ as owned interfaces and edited with explicit coordination.
   - strategy wrappers cannot depend on `rustcta-exchange-gateway`
   - strategy wrapper source cannot import old concrete exchange internals
   - strategy wrappers, `rustcta-control-api`, and `web-ui` cannot reference
-    old concrete adapter paths such as `rustcta::exchanges::{mexc, coinex,
+    old concrete adapter paths such as `legacy root crate path exchanges::{mexc, coinex,
     gateio, bitget, binance, kucoin, okx, paper}` or
-    `rustcta::exchanges::trading_adapters`
+    `legacy root crate path exchanges::trading_adapters`
   - strategy wrappers, `rustcta-control-api`, and `web-ui` cannot reference
     gateway private adapter paths such as
     `rustcta_exchange_gateway::adapters`
@@ -739,16 +735,16 @@ as owned interfaces and edited with explicit coordination.
     `/api/exchange-api-keys`, `exchange_api_key_store`, and env-store
     read/write helpers cannot be promoted into `apps/control-api` or the
     focused non-gateway workflow; legacy write/delete behavior stays frozen in
-    `src/bin/control_api.rs` until a gateway/agent-owned credential
+    `retired root bin directory/control_api.rs` until a gateway/agent-owned credential
     administration service exists
   - strategy/execution crates do not read `.env` directly
   - tools cannot import concrete exchange adapter internals or become
     long-running service/runtime owners
-  - legacy `src/bin/*.rs` entrypoints must remain classified in the
+  - legacy `retired root bin directory/*.rs` entrypoints must remain classified in the
     `rustcta-tools-ops` migration matrix, including their compatibility
     retirement decision, replacement command, and milestone
   - the only allowed temporary legacy-root dependency under the industrial
-    workspace is `crates/rustcta-backtest -> rustcta::backtest::runtime`, to be
+    workspace is `crates/retired-backtest -> legacy root crate path backtest::runtime`, to be
     retired as backtest implementation modules move into the dedicated crate
 - Legacy test/config drift found during the workspace migration was fixed:
   - cross-exchange arbitrage tests were updated to current live-small config
@@ -766,14 +762,14 @@ Commands already verified:
 ```bash
 cargo test --workspace --all-features
 cargo test -p rustcta-tools-ops
-cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
-cargo run -q -p rustcta-tools-ops -- legacy-bin-plan --target tools
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
+cargo run -q -p rustcta-tools-ops -- verify-retired-src --target tools
 cargo run -q -p rustcta-tools-ops -- ws-proxy-probe --help
 cargo run -q -p rustcta-tools-ops -- probe ws-proxy --help
 cargo check -p rustcta-industrial-cli
 scripts/control_api_smoke_test.sh
-cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-legacy-bins --src-bin-dir src/bin
-cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration legacy-bin-plan --target tool-ops
+cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
+cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
 cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- cross-arb preflight --help
 cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor print-legacy-spec --template trend-report --strategy-id trend-report-cli --run-id run-cli --tenant-id local --config config/trend_report.yml --working-dir . --log-dir logs/supervisor --restart-backoff-ms 3000
 cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor validate-spec --path config/supervisor/trend_report.spec.json
@@ -801,35 +797,28 @@ Current directory-boundary slice validation can still use focused non-gateway
 checks while the rest of the workspace migration continues in parallel:
 
 ```bash
-rustfmt --edition 2021 apps/backtest/src/main.rs src/bin/backtest.rs src/bin/short_ladder_mtf_grid.rs src/backtest/runtime/mod.rs src/backtest/runtime/short_ladder_mtf_grid.rs tools/ops/src/lib.rs tools/ops/src/main.rs tools/ops/src/ws_proxy_probe.rs src/bin/smart_money_binance_collector.rs src/bin/smart_money_hyperliquid_wallet_ingestion.rs src/bin/smart_money_portfolio_service.rs src/bin/ws_proxy_probe.rs tests/backtest_cli.rs
+rustfmt --edition 2021 apps/backtest/src/main.rs retired root bin directory/backtest.rs retired root bin directory/retired_short_ladder_grid.rs crates/retired-backtest/src/runtime.rs crates/retired-backtest/src/retired_short_ladder_grid.rs tools/ops/src/lib.rs tools/ops/src/main.rs tools/ops/src/ws_proxy_probe.rs crates/retired-backtest/tests/backtest_cli.rs
 cargo check -p rustcta-tools-ops
 cargo test -p rustcta-tools-ops
-cargo check -p rustcta-backtest
-cargo check -p rustcta-backtest-app --bin rustcta-backtest
+cargo check -p retired-backtest
+cargo check -p retired-backtest-app --bin retired-backtest
 cargo check --bin backtest
-cargo check --bin short_ladder_mtf_grid
-cargo check --bin ws_proxy_probe
-cargo check --bin gateio_bitget_spot_symbols
-cargo run -q -p rustcta-backtest-app --bin rustcta-backtest -- --help
-cargo run -q -p rustcta-backtest-app --bin rustcta-backtest -- short-ladder-mtf-grid --help
-cargo run -q --bin short_ladder_mtf_grid -- --help
+cargo check --bin retired_short_ladder_grid
+cargo run -q -p retired-backtest-app --bin retired-backtest -- --help
+cargo run -q -p retired-backtest-app --bin retired-backtest -- short-ladder-mtf-grid --help
+cargo run -q --bin retired_short_ladder_grid -- --help
 cargo test --test backtest_cli
 cargo check -p rustcta-control-api
 cargo test -p rustcta-control-api
 cargo check -p rustcta-control-api-app
 RUSTCTA_CONTROL_API_BIND=127.0.0.1:0 RUSTCTA_CONTROL_API_AGENT_ID=local-agent RUSTCTA_CONTROL_API_TENANT_ID=local RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH=<tmp>/dashboard_snapshot.json RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH=<tmp>/audit.jsonl RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH=<tmp>/registry.json RUSTCTA_CONTROL_API_STRATEGY_LOG_PATH=<tmp>/strategy.log RUSTCTA_CONTROL_API_STATIC_DIR=<tmp>/dist timeout 2s cargo run -q -p rustcta-control-api-app --bin rustcta-control-api
-cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
-cargo run -q -p rustcta-tools-ops -- legacy-bin-plan --target tools
+cargo run -q -p rustcta-tools-ops -- verify-retired-src
+cargo run -q -p rustcta-tools-ops -- verify-retired-src --target tools
 cargo run -q -p rustcta-tools-ops -- smart-money binance-collector --config config/smart_money.yml
 cargo run -q -p rustcta-tools-ops -- smart-money hyperliquid-wallet-ingestion --config config/smart_money.yml
 cargo run -q -p rustcta-tools-ops -- smart-money portfolio-service --config config/smart_money.yml
 cargo run -q -p rustcta-tools-ops -- symbols gateio-bitget-spot --help
 cargo run -q -p rustcta-tools-ops -- ws-proxy-probe --help
-cargo run -q --bin smart_money_binance_collector -- --config config/smart_money.yml
-cargo run -q --bin smart_money_hyperliquid_wallet_ingestion -- --config config/smart_money.yml
-cargo run -q --bin smart_money_portfolio_service -- --config config/smart_money.yml
-cargo run -q --bin gateio_bitget_spot_symbols -- --help
-cargo run -q --bin ws_proxy_probe -- --help
 scripts/check_industrial_boundaries.sh
 ```
 
@@ -838,11 +827,11 @@ Latest focused result for this non-gateway slice: passed.
 Latest local validation for the current non-gateway boundary slice:
 
 ```bash
-rustfmt --edition 2021 --check crates/rustcta-backtest/src/offline_runtime.rs crates/rustcta-backtest/src/lib.rs src/backtest/offline_runtime.rs src/backtest/mod.rs src/backtest/runtime/mod.rs
+rustfmt --edition 2021 --check crates/retired-backtest/src/offline_runtime.rs crates/retired-backtest/src/lib.rs retired backtest tree/offline_runtime.rs retired backtest tree/mod.rs retired backtest tree/runtime/mod.rs
 cargo test -p rustcta-control-api
 cargo test -p rustcta-execution-router
-cargo test -p rustcta-backtest
-cargo check -p rustcta-backtest --features legacy-runtime
+cargo test -p retired-backtest
+cargo check -p retired-backtest --features legacy-runtime
 cargo test --test backtest_runtime --test backtest_cli
 cargo test -p rustcta-reporting
 cargo test -p rustcta-tools-ops
@@ -853,7 +842,7 @@ scripts/check_industrial_boundaries.sh
 ```
 
 These checks confirm that `rustcta-control-api` remains status-only for
-credentials, `rustcta-backtest` owns the current root-free backtest slices
+credentials, `retired-backtest` owns the current root-free backtest slices
 including offline replay loading, and the current reporting/tools extraction
 still compiles without a `rustcta-tools-ops -> rustcta` dependency cycle.
 
@@ -889,7 +878,7 @@ Focused verification also passed for the new architecture crates and strategy
 wrappers:
 
 ```bash
-cargo test -p rustcta-types -p rustcta-exchange-api -p rustcta-execution-api -p rustcta-strategy-sdk -p rustcta-exchange-gateway -p rustcta-execution-router -p rustcta-event-ledger -p rustcta-supervisor -p rustcta-control-api -p rustcta-core-compat -p rustcta-strategy-avellaneda-stoikov -p rustcta-strategy-spot-spot-arbitrage -p rustcta-strategy-cross-exchange-arbitrage -p rustcta-strategy-funding-arbitrage -p rustcta-strategy-hedged-grid -p rustcta-strategy-mean-reversion -p rustcta-strategy-poisson-market-maker -p rustcta-strategy-range-grid -p rustcta-strategy-short-ladder-live -p rustcta-strategy-trend
+cargo test -p rustcta-types -p rustcta-exchange-api -p rustcta-execution-api -p rustcta-strategy-sdk -p rustcta-exchange-gateway -p rustcta-execution-router -p rustcta-event-ledger -p rustcta-supervisor -p rustcta-control-api -p retired-core-compat -p rustcta-strategy-avellaneda-stoikov -p rustcta-strategy-spot-spot-arbitrage -p rustcta-strategy-cross-exchange-arbitrage -p rustcta-strategy-funding-arbitrage -p rustcta-strategy-hedged-grid -p rustcta-strategy-mean-reversion -p rustcta-strategy-poisson-market-maker -p rustcta-strategy-range-grid -p rustcta-strategy-short-ladder-live -p rustcta-strategy-trend
 ```
 
 ## Remaining Work
@@ -899,7 +888,7 @@ rest of the target-state architecture, not optional polish.
 
 Required next implementation batches:
 
-- Continue directory/runtime boundary migration by moving legacy `src/bin/*.rs`
+- Continue directory/runtime boundary migration by moving legacy `retired root bin directory/*.rs`
   entrypoints into `apps/`, `tools/`, or independent strategy runtime crates
   according to the `rustcta-tools-ops` migration matrix.
 - Continue `tools/ops` migration only with bounded non-root tools. The
@@ -910,7 +899,7 @@ Required next implementation batches:
   canary/admin commands, and private audit commands until their non-root helper
   crates or safety gates are migrated explicitly.
 - Pause further backtest extraction for the fast migration batch. The current
-  `crates/rustcta-backtest` slices are tested and should stay green, but
+  `crates/retired-backtest` slices are tested and should stay green, but
   remaining root-heavy backtest areas such as live dataset capture, strategy
   runtimes, and networked acquisition paths are no longer blockers for closing
   the production workspace migration.
@@ -949,12 +938,12 @@ Required next implementation batches:
     coverage, monitoring performance metrics/reporting core, execution order
     planning/precision/slippage/client-id coverage, stop-state, partial
     take-profit, risk-layer, and trade-approval coverage. The legacy
-    `src/strategies/oscillation_grid.rs` file is not an exported runtime target;
+    `retired strategy tree/oscillation_grid.rs` file is not an exported runtime target;
     its useful fixed-grid/geometric-grid core has been absorbed into
     `rustcta-strategy-range-grid` instead of creating a separate strategy crate.
     These crates are still partial core migrations; live
     runtime orchestration, execution, market data, storage, and integration
-    paths remain rooted in the legacy `src/strategies/*` modules and must not
+    paths remain rooted in the legacy `retired strategy tree/*` modules and must not
     be treated as fully migrated strategy implementations.
   - `RUSTCTA_STRICT_STRATEGY_MIGRATION=1 scripts/check_industrial_boundaries.sh`
     enables the strict audit gate that fails while wrapper-only strategy crates
@@ -970,7 +959,7 @@ Required next implementation batches:
   `apps/supervisor` has a read-only service mode, and legacy process specs can
   be printed or loaded locally, but recovery policies and runtime snapshot
   collection still need deployment-level decisions.
-- Split the existing large `src/bin/control_api.rs` into
+- Split the existing large `retired root bin directory/control_api.rs` into
   `apps/control-api` process/static-host wiring and
   `rustcta-control-api` route/service/model modules. Current audit:
   `apps/control-api` already owns env-based app wiring, optional static SPA
@@ -978,7 +967,7 @@ Required next implementation batches:
   audit JSONL wiring, and strategy log tail wiring. `rustcta-control-api`
   already owns the generic, secret-free workspace/agents/strategies/processes,
   status/config, risk/fees/logs, events/audit, credential-status, and
-  supervisor-backed read models. The legacy binary still owns the large
+  supervisor-backed read models. The retired binary still owns the large
   web-console contract surface: legacy dashboard routes for exchanges, symbols,
   books, opportunities, trades, inventory, balance history, disabled state,
   dry-run plans, recorder/preflight/reconciliation/kill-switch summaries,
@@ -1038,13 +1027,13 @@ Scope:
 - Requires coordination:
   - web UI multi-strategy work, because another agent is actively changing the
     control panel and it shares `rustcta-control-api` route contracts
-  - control panel endpoint migration from legacy `src/bin/control_api.rs`,
+  - control panel endpoint migration from legacy `retired root bin directory/control_api.rs`,
     because static hosting and panel-facing DTOs must stay compatible with the
     web UI agent's current work; coordinate especially before moving scanner,
     hedge-policy, symbol-control, runtime-publisher, and spot/cross-arb
     dashboard routes
   - strategy runtime migration, because another agent is moving strategy logic
-    and live orchestration still depends on legacy `src/strategies/*` modules
+    and live orchestration still depends on legacy `retired strategy tree/*` modules
   - production event-ledger backend selection, because deployment requirements
     and mutation-path ownership are not final
 - Paused for this fast batch:

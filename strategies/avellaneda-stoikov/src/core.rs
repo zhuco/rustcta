@@ -76,7 +76,7 @@ pub struct AccountConfig {
     pub account_id: String,
     pub exchange: String,
     #[serde(default)]
-    pub api_key_env: Option<String>,
+    pub connection_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

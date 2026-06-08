@@ -28,7 +28,19 @@ with HMAC-SHA256 and hex encoded.
   `{pair}-orderbook`.
 - Private order/fill synchronization uses REST reconciliation.
 
+## Official Public WS Order Book Details
+
+Coincheck public WebSocket uses `wss://ws-api.coincheck.com` and subscribes with
+`{"type":"subscribe","channel":"btc_jpy-orderbook"}`. Official docs say public
+WS data is pushed approximately every 0.1 seconds when a trade occurs, and the
+order book channel sends order book differences. The reviewed docs do not expose
+a fixed depth parameter, sequence, or checksum; runtime should periodically
+resync from REST and apply stale-book checks.
+
 ## Unsupported Boundary
+
+Standard futures, perpetuals, and options are `交易所不支持合约` under the current
+official Exchange API scope.
 
 Private WebSocket, single order query, cancel-all, amend order, fees, lending,
 deposit, withdraw, bank transfer, margin, futures, and leverage are unsupported

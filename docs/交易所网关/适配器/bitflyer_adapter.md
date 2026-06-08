@@ -16,6 +16,10 @@ boundaries. Venue symbols are preserved as bitFlyer product codes, for example
 | Private WS | `child_order_events` subscribe spec with REST reconciliation fallback |
 | Fixtures | Offline parser, request-spec and signing vectors under `tests/fixtures/exchanges/bitflyer/` |
 
+## Public WebSocket Order Book
+
+Official Realtime API uses JSON-RPC 2.0 over `wss://ws.lightstream.bitflyer.com/json-rpc`. Order book data is split between `lightning_board_snapshot_{product_code}` and `lightning_board_{product_code}`. The official docs do not publish a fixed millisecond interval, depth parameter, checksum, or replayable sequence; after disconnect or suspected loss, rebuild from `GET /v1/getboard` or a fresh snapshot channel subscription.
+
 ## Market Boundary
 
 Spot products such as `BTC_JPY` are exposed as `MarketType::Spot`.
@@ -24,6 +28,11 @@ represented at the adapter boundary as `MarketType::Margin`. They are not
 advertised as standard `Futures` or `Perpetual` contracts because bitFlyer
 Lightning FX does not match the gateway's standard futures/perpetual contract
 model.
+
+Standard Futures/Perpetual is 项目未实现 / adapter-specific boundary, not
+`交易所不支持合约`: official bitFlyer docs state Crypto CFD succeeds Lightning
+FX with `market_type = FX`. A unified futures/perpetual mapping would need a
+separate contract-model decision.
 
 ## Safety Boundary
 

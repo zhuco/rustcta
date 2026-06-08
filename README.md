@@ -7,7 +7,8 @@ safety, arbitrage research, and controlled live operation.
 
 The repository is in the `industrial-workspace-migration` program. The target
 shape is a Cargo workspace with process-oriented app crates, reusable platform
-crates, strategy crates, and compatibility wrappers for legacy root binaries.
+crates, strategy crates, and strategy/runtime entrypoints outside the retired
+root package.
 
 Use these documents as the current source of truth:
 
@@ -20,10 +21,10 @@ Use these documents as the current source of truth:
 - `docs/industrial_cta_platform_architecture_assessment.md` for the target
   architecture
 
-The legacy root package `rustcta` is still present and still owns most concrete
-runtime behavior. New work should move toward the workspace boundaries below.
+The legacy root package `rustcta` and root `src/` tree are retired. New work
+must stay inside the workspace boundaries below.
 
-Current workspace version: `0.3.13`. This update expands the exchange gateway
+Current workspace version: `0.3.14`. This update expands the exchange gateway
 surface with additional adapter modules, endpoint mapping fixtures, signing and
 request-spec validation assets, and refreshed gateway example configs. See
 `docs/README.md`, `docs/交易所网关/总览/exchange_adapter_toolchain_completion_zh.md`, and
@@ -69,7 +70,7 @@ Per-exchange details live in `docs/交易所网关/适配器/<adapter>_adapter.m
 ## Repository Layout
 
 ```text
-apps/        process entrypoints: gateway, supervisor, control-api, cli, backtest
+apps/        process entrypoints: gateway, supervisor, control-api, cli
 crates/      reusable platform crates and API contracts
 strategies/  strategy wrapper crates and migrating strategy cores
 tools/       operator tools and migration inventory
@@ -113,19 +114,11 @@ cargo run -p rustcta-supervisor-app --bin rustcta-supervisor -- \
   --registry-path run/supervisor/registry.json
 ```
 
-Backtest app:
-
-```bash
-cargo run -p rustcta-backtest-app --bin rustcta-backtest -- --help
-cargo run -p rustcta-backtest-app --bin rustcta-backtest -- short-ladder-mtf-grid --help
-```
-
 Industrial CLI scaffold:
 
 ```bash
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- doctor
-cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration legacy-bin-plan --target tool-ops
-cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-legacy-bins --src-bin-dir src/bin
+cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- ledger validate --path logs/events.jsonl
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- ledger summary --path logs/events.jsonl --from-sequence 1
 cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- cross-arb preflight --help
@@ -134,43 +127,24 @@ cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- cross-arb prefli
 Operator tools:
 
 ```bash
-cargo run -p rustcta-tools-ops -- legacy-bin-plan
-cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+cargo run -p rustcta-tools-ops -- verify-retired-src
 cargo run -p rustcta-tools-ops -- symbols gateio-bitget-spot --help
 cargo run -p rustcta-tools-ops -- ws-proxy-probe --help
 ```
 
-### Legacy Compatibility Entrypoints
+### Retired Legacy Entrypoints
 
-The root `rustcta` binary remains the compatibility strategy launcher:
-
-```bash
-cargo run -- --strategy spot_spot_taker_arbitrage \
-  --config config/spot_spot_taker_arbitrage.yml
-```
-
-Preflight for the spot-spot runtime:
+The root package, root `src/` tree, and legacy root binaries are retired. Use
+workspace apps, strategy crates, supervisor specs, and `tools/ops` commands
+instead of root-package invocations.
 
 ```bash
-cargo run -- --strategy spot_spot_taker_arbitrage \
-  --config config/spot_spot_taker_arbitrage.yml \
-  --preflight
+cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-retired-src
+cargo run -p rustcta-tools-ops -- verify-retired-src
 ```
 
-Legacy root binaries remain available while they are being migrated:
-
-```bash
-cargo run --bin <legacy-bin> -- --help
-```
-
-Classify and audit those binaries with:
-
-```bash
-cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration legacy-bin-plan --target tool-ops
-cargo run -p rustcta-industrial-cli --bin rustcta-industrial -- migration verify-legacy-bins --src-bin-dir src/bin
-cargo run -p rustcta-tools-ops -- legacy-bin-plan
-cargo run -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
-```
+Adding new business implementation under root `src/` is blocked by the
+industrial boundary checks.
 
 ## Control Panel
 

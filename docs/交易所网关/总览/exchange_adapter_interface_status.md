@@ -8,25 +8,25 @@ Multi-exchange Spot arbitrage is supported through unified Spot clients and the
 `spot_spot_taker_arbitrage` runtime. USDT perpetual arbitrage remains on the
 execution gateway path used by `cross_exchange_arbitrage`.
 
-The old `src/exchanges/adapters/` compatibility directory has been removed.
+The old `retired exchange tree/adapters/` compatibility directory has been removed.
 
 ## Current Adapter Layout
 
 | Area | Path | Role |
 | --- | --- | --- |
-| Unified client contracts | `src/exchanges/unified.rs` | Spot/Perpetual client model, requests, responses, user stream events |
-| Venue modules | `src/exchanges/<exchange>/` | Exchange-specific Spot or legacy core clients |
-| Market adapters | `src/exchanges/market_adapters/` | Public perpetual market-data adapters |
-| Private perpetual protocols | `src/exchanges/private_perp/` | Shared private REST/WebSocket implementation for linear perpetual venues |
-| Trading adapters | `src/exchanges/trading_adapters/` | Bridge legacy/core clients into `TradingAdapter` |
-| Gateway registry | `src/exchanges/registry.rs` | Builds gateways, market adapters, trading adapters, auth, and position mode |
-| Legacy bridge | `src/exchanges/gateway_exchange.rs` | Wraps gateway adapters for code still requiring `core::exchange::Exchange` |
+| Unified client contracts | `retired exchange tree/unified.rs` | Spot/Perpetual client model, requests, responses, user stream events |
+| Venue modules | `retired exchange tree/<exchange>/` | Exchange-specific Spot or legacy core clients |
+| Market adapters | `retired exchange tree/market_adapters/` | Public perpetual market-data adapters |
+| Private perpetual protocols | `retired exchange tree/private_perp/` | Shared private REST/WebSocket implementation for linear perpetual venues |
+| Trading adapters | `retired exchange tree/trading_adapters/` | Bridge legacy/core clients into `TradingAdapter` |
+| Gateway registry | `retired exchange tree/registry.rs` | Builds gateways, market adapters, trading adapters, auth, and position mode |
+| Legacy bridge | `retired exchange tree/gateway_exchange.rs` | Wraps gateway adapters for code still requiring `core::exchange::Exchange` |
 
 ## Spot Support
 
 The Spot path is used by:
 
-- `src/strategies/spot_spot_taker_arbitrage/`
+- `retired strategy tree/spot_spot_taker_arbitrage/`
 - `src/scanner/five_exchange_spot.rs`
 - `src/control/spot_control/`
 - `src/execution/live_dry_run.rs`
@@ -55,7 +55,7 @@ REST symbol, book, account, position, order, and fill support in
 
 Removed:
 
-- old flat `src/exchanges/adapters/` modules
+- old flat `retired exchange tree/adapters/` modules
 - stale strategy references to deleted legacy strategy families
 - migration/remediation documents superseded by current architecture docs
 

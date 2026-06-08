@@ -28,7 +28,7 @@ Not supported as default behavior:
 ## Main Runtime
 
 ```text
-src/strategies/spot_spot_taker_arbitrage/
+retired strategy tree/spot_spot_taker_arbitrage/
   config.rs
   market_data.rs
   websocket_market_data.rs

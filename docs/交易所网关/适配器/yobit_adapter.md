@@ -25,7 +25,7 @@ Yobicode operations, Defi swap, and WebSocket runtime are deliberately kept
 | Spot | `Spot` | Public REST G1 for symbol rules and order book. |
 | Defi swap | n/a | Unsupported; not mapped to central limit order book semantics. |
 | Deposit/withdraw/Yobicode | n/a | Unsupported and out of gateway trading scope. |
-| Perpetual/futures | n/a | Unsupported; no stable official perpetual product scope verified for this adapter. |
+| Perpetual/futures | n/a | `交易所不支持合约`; P6 official verification found only spot/TAPI plus Defi swap/Yobicode surfaces. |
 | Testnet | n/a | Unsupported; no stable public sandbox host verified. |
 
 Default REST base URL: `https://yobit.net`
@@ -43,7 +43,7 @@ Default REST base URL: `https://yobit.net`
 | Open orders | `POST /tapi/ method=ActiveOrders` | Request-spec-only REST reconciliation candidate. |
 | Recent fills | `POST /tapi/ method=TradeHistory` | Request-spec-only REST reconciliation candidate. |
 | Batch place/cancel | Not verified | Unsupported. |
-| WebSocket | No official WS section verified | Public/private streams unsupported; REST reconciliation fallback documented for future private promotion. |
+| WebSocket | 交易所不支持公共 WS 行情 | 官方 API v2/v3/TAPI/Defi API 覆盖 REST market data 和交易接口，未见公共订单簿 WS；REST reconciliation fallback documented for future private promotion. |
 
 ## Authentication
 

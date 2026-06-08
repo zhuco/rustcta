@@ -9,6 +9,14 @@ fail() {
   exit 1
 }
 
+if [[ -d src ]]; then
+  fail "legacy root src/ directory has been retired; move active code into apps/, crates/, strategies/, or tools/"
+fi
+
+if grep -Eq '^\[package\]' Cargo.toml; then
+  fail "root Cargo.toml must remain a virtual workspace manifest without a legacy rustcta package"
+fi
+
 require_file_contains() {
   local file="$1"
   local needle="$2"
@@ -310,7 +318,7 @@ required_workflow_entries=(
   "cargo test -p rustcta-tools-ops"
   "cargo check -p rustcta-industrial-cli"
   "cargo test -p rustcta-industrial-cli"
-  "cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin"
+  "cargo run -q -p rustcta-tools-ops -- verify-retired-src"
   "cargo run -q -p rustcta-tools-ops -- probe ws-proxy --help"
   "cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor validate-registry --path /tmp/rustcta-missing-registry.json"
   "cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- supervisor readiness --spec-dir config/supervisor"
@@ -328,8 +336,7 @@ required_full_migration_workflow_entries=(
   "cargo test --all-features"
   "cargo clippy --all-targets --all-features"
   "scripts/check_industrial_boundaries.sh"
-  "cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin"
-  "cargo run -q -p rustcta-tools-ops -- legacy-bin-plan"
+  "cargo run -q -p rustcta-tools-ops -- verify-retired-src"
   "cd web-ui/dioxus"
   "cargo build --release"
 )
@@ -420,8 +427,8 @@ require_file_contains \
   "industrial CLI command tree doc must document offline preflight boundary"
 require_file_contains \
   docs/industrial_cli_command_tree.md \
-  "migration verify-legacy-bins" \
-  "industrial CLI command tree doc must document legacy bin classification checks"
+  "migration verify-retired-src" \
+  "industrial CLI command tree doc must document retired src checks"
 require_file_contains \
   apps/cli/tests/cli_contract_smoke.rs \
   "supervisor_readiness_should_report_checked_in_specs_in_run_order" \
@@ -484,7 +491,7 @@ require_file_contains \
   "spot_spot checked-in supervisor spec must point at live dry-run config"
 require_file_contains \
   config/supervisor/spot_spot_live_dry_run.spec.json \
-  '"strategy_kind": "spot_spot_taker_arbitrage"' \
+  '"strategy_kind": "spot_spot_arbitrage"' \
   "spot_spot checked-in supervisor spec must keep strategy kind"
 require_file_contains \
   config/supervisor/spot_spot_live_dry_run.spec.json \
@@ -504,6 +511,35 @@ for file in "${ownership_files[@]}"; do
   fi
 done
 
+full_migration_plan="docs/full_workspace_migration_execution_plan_zh.md"
+if [[ ! -f "$full_migration_plan" ]]; then
+  fail "missing full workspace migration execution plan: $full_migration_plan"
+fi
+
+require_file_contains \
+  "$full_migration_plan" \
+  "#### 任务 1 冻结结果" \
+  "task 1 inventory freeze must be recorded in the full migration plan"
+require_file_contains \
+  "$full_migration_plan" \
+  '当前冻结基线：`src/` 目录已从工作树移除' \
+  "task 1 plan must freeze the current src retirement baseline"
+require_file_contains \
+  "$full_migration_plan" \
+  "root \`Cargo.toml\` 已是 virtual" \
+  "task 1 plan must freeze the root virtual workspace manifest baseline"
+require_file_contains \
+  "$full_migration_plan" \
+  '### 16. 最终兼容清理与 legacy `src/` 删除' \
+  "task 16 final legacy src cleanup must be recorded in the full migration plan"
+require_file_contains \
+  "$full_migration_plan" \
+  "任务 2-15 文件所有权如下" \
+  "task 1 plan must assign file ownership for tasks 2-15"
+if rg -n '^\[\[bin\]\]|path[[:space:]]*=[[:space:]]*"src/' Cargo.toml; then
+  fail "root Cargo.toml must not expose root src binaries or legacy source paths"
+fi
+
 strategy_manifests=()
 for path in strategies/*/Cargo.toml; do
   if [[ -f "$path" ]]; then
@@ -512,11 +548,14 @@ for path in strategies/*/Cargo.toml; do
 done
 
 if ((${#strategy_manifests[@]})) \
-  && rg -n 'rustcta-exchange-(api|gateway)|rustcta-execution-router|rustcta-control-api|rustcta-core-compat|^[[:space:]]*rustcta[[:space:]]*=' "${strategy_manifests[@]}"; then
+  && rg -n 'rustcta-exchange-(api|gateway)|rustcta-execution-router|rustcta-control-api|^[[:space:]]*rustcta[[:space:]]*=' "${strategy_manifests[@]}"; then
   fail "strategy manifests must use the strategy SDK instead of gateway/router/control/compat or legacy root crates"
 fi
 
-if rg -n '^(use|extern crate)\s+rustcta_exchange_(api|gateway)|^(use|extern crate)\s+rustcta_execution_router|^(use|extern crate)\s+rustcta::|crate::exchanges::|src/exchanges/' strategies --glob '*.rs'; then
+root_crate_path_pattern="$(printf 'rustcta%s' '::')"
+retired_exchange_tree_pattern="$(printf 'src%s' '/exchanges')"
+
+if rg -n "^(use|extern crate)\s+rustcta_exchange_(api|gateway)|^(use|extern crate)\s+rustcta_execution_router|^(use|extern crate)\s+${root_crate_path_pattern}|crate::exchanges::|${retired_exchange_tree_pattern}/" strategies --glob '*.rs'; then
   fail "strategy crates must not depend on exchange APIs, concrete adapters, router internals, or the legacy root crate"
 fi
 
@@ -553,19 +592,7 @@ for path in crates/*/Cargo.toml apps/*/Cargo.toml strategies/*/Cargo.toml tools/
   fi
 done
 
-legacy_root_forbidden_manifests=()
-for path in "${industrial_manifests[@]}"; do
-  case "$path" in
-    crates/rustcta-backtest/Cargo.toml)
-      # Temporary backtest facade while src/backtest/* remains in the legacy
-      # root package. Retire this bridge as implementation modules move into
-      # crates/rustcta-backtest.
-      ;;
-    *)
-      legacy_root_forbidden_manifests+=("$path")
-      ;;
-  esac
-done
+legacy_root_forbidden_manifests=("${industrial_manifests[@]}")
 
 if ((${#legacy_root_forbidden_manifests[@]})) \
   && rg -n '^[[:space:]]*rustcta[[:space:]]*=|package[[:space:]]*=[[:space:]]*"rustcta"' "${legacy_root_forbidden_manifests[@]}"; then
@@ -578,7 +605,6 @@ for path in \
   strategies \
   web-ui \
   crates/rustcta-control-api \
-  crates/rustcta-core-compat \
   crates/rustcta-event-ledger \
   crates/rustcta-exchange-api \
   crates/rustcta-execution-api \
@@ -591,7 +617,7 @@ for path in \
   fi
 done
 
-forbidden_adapter_paths='rustcta::exchanges::[[:space:]]*(trading_adapters|mexc|coinex|gateio|bitget|binance|kucoin|okx|paper)\b|rustcta::exchanges::[[:space:]]*\{[^}]*\b(trading_adapters|mexc|coinex|gateio|bitget|binance|kucoin|okx|paper)\b|crate::exchanges::|super::exchanges::|src/exchanges/|rustcta_exchange_gateway::[[:space:]]*adapters\b|rustcta_exchange_gateway::[[:space:]]*\{[^}]*\badapters\b'
+forbidden_adapter_paths="${root_crate_path_pattern}exchanges::[[:space:]]*(trading_adapters|mexc|coinex|gateio|bitget|binance|kucoin|okx|paper)\b|${root_crate_path_pattern}exchanges::[[:space:]]*\{[^}]*\b(trading_adapters|mexc|coinex|gateio|bitget|binance|kucoin|okx|paper)\b|crate::exchanges::|super::exchanges::|${retired_exchange_tree_pattern}/|rustcta_exchange_gateway::[[:space:]]*adapters\b|rustcta_exchange_gateway::[[:space:]]*\{[^}]*\badapters\b"
 
 if ((${#adapter_boundary_targets[@]})) \
   && rg -n "$forbidden_adapter_paths" "${adapter_boundary_targets[@]}" \
@@ -652,25 +678,11 @@ if rg -n 'std::env::var|dotenv' strategies crates/rustcta-strategy-sdk crates/ru
 fi
 
 if [[ -e tools ]]; then
-  cargo run -q -p rustcta-tools-ops -- verify-legacy-bins --src-bin-dir src/bin
+  cargo run -q -p rustcta-tools-ops -- verify-retired-src
   cargo run -q -p rustcta-industrial-cli --bin rustcta-industrial -- \
-    migration verify-legacy-bins --src-bin-dir src/bin
+    migration verify-retired-src
 
-  legacy_bin_plan_json="$(mktemp)"
-  cargo run -q -p rustcta-tools-ops -- legacy-bin-plan > "$legacy_bin_plan_json"
-  if ! grep -Fq '"compatibility"' "$legacy_bin_plan_json" \
-    || ! grep -Fq '"new_command"' "$legacy_bin_plan_json" \
-    || ! grep -Fq '"retirement_milestone"' "$legacy_bin_plan_json" \
-    || ! grep -Fq '"keep_wrapper"' "$legacy_bin_plan_json" \
-    || ! grep -Fq '"warn"' "$legacy_bin_plan_json" \
-    || ! grep -Fq '"alias"' "$legacy_bin_plan_json" \
-    || ! grep -Fq '"remove_later"' "$legacy_bin_plan_json"; then
-    rm -f "$legacy_bin_plan_json"
-    fail "legacy bin migration plan must expose the compatibility retirement matrix"
-  fi
-  rm -f "$legacy_bin_plan_json"
-
-  if rg -n 'src/exchanges/|crate::exchanges::|rustcta_exchange_gateway::[[:space:]]*adapters\b|rustcta_exchange_gateway::[[:space:]]*\{[^}]*\badapters\b' \
+  if rg -n "${retired_exchange_tree_pattern}/|crate::exchanges::|rustcta_exchange_gateway::[[:space:]]*adapters\b|rustcta_exchange_gateway::[[:space:]]*\{[^}]*\badapters\b" \
     tools \
     --glob '*.rs' \
     --glob '*.toml' \
@@ -678,7 +690,7 @@ if [[ -e tools ]]; then
     fail "tools must not import concrete exchange adapter internals or gateway private adapters"
   fi
 
-  if rg -n '^(use|extern crate)[[:space:]]+rustcta::|rustcta::' \
+  if rg -n "^(use|extern crate)[[:space:]]+${root_crate_path_pattern}|${root_crate_path_pattern}" \
     tools \
     --glob '*.rs' \
     --glob '!**/target/**'; then

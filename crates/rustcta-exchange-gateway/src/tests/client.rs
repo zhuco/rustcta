@@ -150,3 +150,121 @@ async fn in_process_gateway_client_should_cover_read_write_and_public_stream_hel
         1
     );
 }
+
+#[tokio::test]
+async fn gateway_exchange_client_should_implement_exchange_api_trait() {
+    use rustcta_exchange_api::ExchangeClient as _;
+
+    let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+        "mock",
+        vec![exchange_id()],
+    ));
+    gateway
+        .insert_balance_snapshot(ExchangeBalance {
+            schema_version: SchemaVersion::current(),
+            tenant_id: tenant_id(),
+            account_id: account_id(),
+            exchange_id: exchange_id(),
+            market_type: MarketType::Spot,
+            balances: vec![AssetBalance::new("USDT", 100.0, 100.0, 0.0).expect("usdt balance")],
+            observed_at: Utc::now(),
+        })
+        .expect("seed balances");
+    let gateway_client = Arc::new(InProcessGatewayClient::new(gateway.clone()));
+    let exchange_client = GatewayExchangeClient::new(
+        gateway_client,
+        tenant_id(),
+        Some(account_id()),
+        exchange_id(),
+    );
+
+    let balances = exchange_client
+        .get_balances(BalancesRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("exchange-client-balances"),
+            exchange: exchange_id(),
+            market_type: Some(MarketType::Spot),
+            assets: vec!["USDT".to_string()],
+        })
+        .await
+        .expect("gateway exchange client balances");
+    assert_eq!(balances.balances.len(), 1);
+
+    let order = match place_order_request("exchange-client-place").payload {
+        GatewayRequestPayload::PlaceOrder(request) => request,
+        other => panic!("unexpected payload: {other:?}"),
+    };
+    let placed = exchange_client
+        .place_order(order)
+        .await
+        .expect("gateway exchange client place order");
+    assert_eq!(placed.order.client_order_id.as_deref(), Some("cli-1"));
+    assert_eq!(gateway.recorded_orders().expect("recorded orders").len(), 1);
+}
+
+#[tokio::test]
+async fn gateway_exchange_client_should_expose_account_control_provider_boundary() {
+    let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+        "mock",
+        vec![exchange_id()],
+    ));
+    let gateway_client = Arc::new(InProcessGatewayClient::new(gateway));
+    let exchange_client = GatewayExchangeClient::new(
+        gateway_client,
+        tenant_id(),
+        Some(account_id()),
+        exchange_id(),
+    );
+    let provider: &dyn rustcta_exchange_api::PerpAccountControlProvider = &exchange_client;
+
+    let capabilities = provider.account_control_capabilities();
+    assert_eq!(capabilities.exchange, exchange_id());
+    assert!(!capabilities.supports_leverage);
+    assert!(!capabilities.supports_position_mode_change);
+    assert!(!capabilities.supports_close_position);
+
+    let result = provider
+        .set_countdown_cancel_all(CountdownCancelAllRequest {
+            schema_version: EXCHANGE_API_SCHEMA_VERSION,
+            context: context("gateway-countdown-cancel-all"),
+            exchange: exchange_id(),
+            symbol: Some(symbol_scope()),
+            timeout_secs: 30,
+        })
+        .await;
+    assert!(matches!(
+        result,
+        Err(ExchangeApiError::Unsupported {
+            operation: "set_countdown_cancel_all"
+        })
+    ));
+}
+
+#[tokio::test]
+async fn in_process_gateway_client_should_route_account_control_payloads_as_unsupported() {
+    let gateway = Arc::new(MockExchangeGateway::with_exchanges(
+        "mock",
+        vec![exchange_id()],
+    ));
+    let client = InProcessGatewayClient::new(gateway);
+
+    let result = client
+        .set_leverage(
+            "client-set-leverage".to_string(),
+            tenant_id(),
+            Some(account_id()),
+            rustcta_exchange_api::SetLeverageRequest {
+                schema_version: EXCHANGE_API_SCHEMA_VERSION,
+                context: context("client-set-leverage"),
+                symbol: symbol_scope(),
+                leverage: 3,
+            },
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(GatewayError::UnsupportedOperation { operation })
+            if operation == "mock.set_leverage"
+    ));
+}

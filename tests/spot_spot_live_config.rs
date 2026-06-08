@@ -1,7 +1,7 @@
 #![allow(clippy::all)]
 use std::fs;
 
-use rustcta::strategies::spot_spot_taker_arbitrage::SpotSpotTakerArbitrageConfig;
+use rustcta_strategy_spot_spot_arbitrage::SpotSpotTakerArbitrageConfig;
 
 #[test]
 fn live_small_spot_config_should_run_manual_vsn_only() {

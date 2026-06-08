@@ -1,12 +1,23 @@
 use anyhow::Result;
 use axum::body::Body;
+use axum::extract::{Path as AxumPath, State};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::Json;
 use axum::Router;
-use rustcta_control_api::{router, ControlApiState};
+use chrono::Utc;
+use rustcta_control_api::{
+    router, ControlApiState, CreateStrategyRequest, StrategyProcessView, CONTROL_API_SCHEMA_VERSION,
+};
 use rustcta_event_ledger::JsonlLedger;
+use rustcta_supervisor::LifecycleCommandRecord;
+use serde_json::{json, Value};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8091";
 const DEFAULT_TENANT_ID: &str = "local";
@@ -18,6 +29,7 @@ const DEFAULT_STRATEGY_LOG_TAIL_BYTES: usize = 256 * 1024;
 pub struct ControlApiAppConfig {
     pub bind_addr: String,
     pub local_agent: Option<LocalAgentConfig>,
+    pub local_side_effects: Option<LocalSideEffectConfig>,
     pub legacy_snapshot_path: Option<PathBuf>,
     pub supervisor_registry_path: Option<PathBuf>,
     pub audit_ledger_path: Option<PathBuf>,
@@ -57,10 +69,17 @@ impl ControlApiAppConfig {
                 capabilities,
             }
         });
+        let local_side_effects = if local_agent.is_some() {
+            let config = LocalSideEffectConfig::from_env(&vars);
+            config.has_side_effect_path().then_some(config)
+        } else {
+            None
+        };
 
         Self {
             bind_addr,
             local_agent,
+            local_side_effects,
             legacy_snapshot_path: path_value(&vars, "RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH"),
             supervisor_registry_path: path_value(
                 &vars,
@@ -82,18 +101,7 @@ impl ControlApiAppConfig {
     }
 
     pub fn build_state(&self) -> Result<ControlApiState> {
-        let mut state = self
-            .legacy_snapshot_path
-            .as_ref()
-            .and_then(|path| {
-                let raw = std::fs::read_to_string(path).ok()?;
-                let snapshot = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
-                Some(
-                    ControlApiState::from_legacy_dashboard_snapshot(&snapshot)
-                        .with_legacy_dashboard_snapshot_path(path.clone()),
-                )
-            })
-            .unwrap_or_else(ControlApiState::empty_local);
+        let mut state = ControlApiState::empty_local();
         if let Some(path) = &self.legacy_snapshot_path {
             state = state.with_legacy_dashboard_snapshot_path(path.clone());
         }
@@ -128,15 +136,26 @@ impl ControlApiAppConfig {
 
     pub fn build_router(&self) -> Result<Router> {
         let state = self.build_state()?;
+        let mut api = router(state.clone());
+        if self.local_agent.is_some() {
+            api = api.merge(local_mutation_router(state.clone()));
+        }
+        if let (Some(agent), Some(side_effects)) = (&self.local_agent, &self.local_side_effects) {
+            api = api.merge(local_agent_router(LocalSideEffectState::new(
+                agent.clone(),
+                side_effects.clone(),
+                state,
+            )));
+        }
         let app = match &self.static_dir {
             Some(static_dir) => {
                 let static_dir = static_dir.clone();
-                router(state).fallback(move |uri: Uri| {
+                api.fallback(move |uri: Uri| {
                     let static_dir = static_dir.clone();
                     async move { serve_static_spa(uri, static_dir).await }
                 })
             }
-            None => router(state),
+            None => api,
         };
         Ok(app)
     }
@@ -147,6 +166,759 @@ pub struct LocalAgentConfig {
     pub agent_id: String,
     pub tenant_id: String,
     pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalSideEffectConfig {
+    pub strategy_config_path: Option<PathBuf>,
+    pub command_queue_path: Option<PathBuf>,
+    pub balance_history_path: Option<PathBuf>,
+    pub strategy_profit_history_path: Option<PathBuf>,
+    pub restart_script_path: Option<PathBuf>,
+}
+
+impl LocalSideEffectConfig {
+    fn from_env(vars: &std::collections::BTreeMap<String, String>) -> Self {
+        Self {
+            strategy_config_path: path_value(
+                vars,
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+            ),
+            command_queue_path: path_value(vars, "RUSTCTA_CONTROL_API_LOCAL_COMMAND_QUEUE_PATH"),
+            balance_history_path: path_value(
+                vars,
+                "RUSTCTA_CONTROL_API_LOCAL_BALANCE_HISTORY_PATH",
+            ),
+            strategy_profit_history_path: path_value(
+                vars,
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_PROFIT_HISTORY_PATH",
+            ),
+            restart_script_path: path_value(vars, "RUSTCTA_CONTROL_API_LOCAL_RESTART_SCRIPT_PATH"),
+        }
+    }
+
+    fn has_side_effect_path(&self) -> bool {
+        self.strategy_config_path.is_some()
+            || self.command_queue_path.is_some()
+            || self.balance_history_path.is_some()
+            || self.strategy_profit_history_path.is_some()
+            || self.restart_script_path.is_some()
+    }
+}
+
+#[derive(Clone)]
+struct LocalSideEffectState {
+    agent: LocalAgentConfig,
+    config: LocalSideEffectConfig,
+    control: ControlApiState,
+    audit: Arc<Mutex<Vec<Value>>>,
+}
+
+impl LocalSideEffectState {
+    fn new(
+        agent: LocalAgentConfig,
+        config: LocalSideEffectConfig,
+        control: ControlApiState,
+    ) -> Self {
+        Self {
+            agent,
+            config,
+            control,
+            audit: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+fn local_mutation_router(state: ControlApiState) -> Router {
+    Router::new()
+        .route("/api/strategies", post(local_create_strategy))
+        .route("/api/commands", post(local_command))
+        .route("/api/strategies/:id/command", post(local_strategy_command))
+        .with_state(state)
+}
+
+fn local_agent_router(state: LocalSideEffectState) -> Router {
+    Router::new()
+        .route("/api/local-agent/status", get(local_agent_status))
+        .route("/api/local-agent/audit", get(local_agent_audit))
+        .route(
+            "/api/local-agent/strategy-config",
+            get(local_agent_strategy_config_draft).post(local_agent_strategy_config),
+        )
+        .route("/api/local-agent/commands", post(local_agent_command))
+        .route(
+            "/api/local-agent/history/:kind/status",
+            get(local_agent_history_status),
+        )
+        .with_state(state)
+}
+
+async fn local_create_strategy(
+    State(state): State<ControlApiState>,
+    Json(request): Json<CreateStrategyRequest>,
+) -> (StatusCode, Json<Value>) {
+    if !state.audit_ledger_configured() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_ledger_not_configured",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    let (process, spec) = match request.into_process_and_spec(Utc::now()) {
+        Ok(value) => value,
+        Err(field) => {
+            return local_json_response(
+                StatusCode::BAD_REQUEST,
+                json!({
+                    "schema_version": CONTROL_API_SCHEMA_VERSION,
+                    "accepted": false,
+                    "status": "invalid_strategy_request",
+                    "field": field,
+                    "local_path_exposed": false,
+                }),
+            )
+        }
+    };
+
+    if state
+        .record_operator_audit(
+            "create_strategy",
+            "local-agent",
+            json!({
+                "strategy_id": process.strategy_id,
+                "strategy_kind": process.strategy_kind,
+                "would_submit_order": false,
+            }),
+        )
+        .await
+        .is_err()
+    {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    match state.create_strategy_with_spec(process, spec).await {
+        Ok(process) => {
+            local_json_response(StatusCode::OK, json!(StrategyProcessView::from(process)))
+        }
+        Err(_) => local_json_response(
+            StatusCode::CONFLICT,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "strategy_registry_update_failed",
+                "local_path_exposed": false,
+            }),
+        ),
+    }
+}
+
+async fn local_strategy_command(
+    State(state): State<ControlApiState>,
+    AxumPath(id): AxumPath<String>,
+    Json(mut command): Json<LifecycleCommandRecord>,
+) -> (StatusCode, Json<Value>) {
+    if command.strategy_id != id {
+        return local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "strategy_id_mismatch",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    if let Some(response) = validate_local_command_boundary(&state, &mut command).await {
+        return response;
+    }
+
+    if state.record_command(command.clone()).await.is_err() {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    match state.apply_strategy_command(command.clone()).await {
+        Ok((_, applied_to_runtime)) => local_json_response(
+            StatusCode::OK,
+            local_command_accepted_payload(&command, applied_to_runtime),
+        ),
+        Err(_) => local_json_response(
+            StatusCode::NOT_FOUND,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "strategy_not_found",
+                "command_id": command.command_id,
+                "local_path_exposed": false,
+            }),
+        ),
+    }
+}
+
+async fn local_command(
+    State(state): State<ControlApiState>,
+    Json(mut command): Json<LifecycleCommandRecord>,
+) -> (StatusCode, Json<Value>) {
+    if let Some(response) = validate_local_command_boundary(&state, &mut command).await {
+        return response;
+    }
+
+    if state.record_command(command.clone()).await.is_err() {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    local_json_response(
+        StatusCode::OK,
+        local_command_accepted_payload(&command, false),
+    )
+}
+
+async fn validate_local_command_boundary(
+    state: &ControlApiState,
+    command: &mut LifecycleCommandRecord,
+) -> Option<(StatusCode, Json<Value>)> {
+    if !state.audit_ledger_configured() {
+        return Some(local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "audit_ledger_not_configured",
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+    if command.validate().is_err() {
+        return Some(local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "schema_version": CONTROL_API_SCHEMA_VERSION,
+                "accepted": false,
+                "status": "invalid_command",
+                "local_path_exposed": false,
+            }),
+        ));
+    }
+    command.schema_version = CONTROL_API_SCHEMA_VERSION;
+    None
+}
+
+fn local_command_accepted_payload(
+    command: &LifecycleCommandRecord,
+    applied_to_runtime: bool,
+) -> Value {
+    json!({
+        "schema_version": CONTROL_API_SCHEMA_VERSION,
+        "accepted": true,
+        "command_id": command.command_id,
+        "strategy_id": command.strategy_id,
+        "would_submit_order": false,
+        "applied_to_runtime": applied_to_runtime,
+        "local_path_exposed": false,
+    })
+}
+
+async fn local_agent_status(State(state): State<LocalSideEffectState>) -> Json<Value> {
+    Json(json!({
+        "schema_version": 1,
+        "configured": true,
+        "agent_id": state.agent.agent_id,
+        "tenant_id": state.agent.tenant_id,
+        "capabilities": state.agent.capabilities,
+        "side_effects": {
+            "strategy_config_edit": local_file_status(state.config.strategy_config_path.as_ref()).await,
+            "command_queue": local_file_status(state.config.command_queue_path.as_ref()).await,
+            "balance_history": local_file_status(state.config.balance_history_path.as_ref()).await,
+            "strategy_profit_history": local_file_status(state.config.strategy_profit_history_path.as_ref()).await,
+            "restart_script": local_restart_script_status(state.config.restart_script_path.as_ref()).await,
+        },
+        "local_path_exposed": false,
+    }))
+}
+
+async fn local_agent_audit(State(state): State<LocalSideEffectState>) -> Json<Value> {
+    let events = state.audit.lock().await.clone();
+    Json(json!({
+        "schema_version": 1,
+        "status": "ok",
+        "events": events,
+        "local_path_exposed": false,
+    }))
+}
+
+async fn local_agent_strategy_config_draft(
+    State(state): State<LocalSideEffectState>,
+) -> (StatusCode, Json<Value>) {
+    let Some(path) = state.config.strategy_config_path.as_ref() else {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "configured": false,
+                "status": "strategy_config_not_configured",
+                "path": "local-agent:strategy-config",
+                "content": "",
+                "local_path_exposed": false,
+            }),
+        );
+    };
+
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) => local_json_response(
+            StatusCode::OK,
+            json!({
+                "schema_version": 1,
+                "configured": true,
+                "status": "ok",
+                "path": "local-agent:strategy-config",
+                "content": content,
+                "local_path_exposed": false,
+            }),
+        ),
+        Err(error) => local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "configured": true,
+                "status": "read_failed",
+                "read_error": local_io_error_kind(&error),
+                "path": "local-agent:strategy-config",
+                "content": "",
+                "local_path_exposed": false,
+            }),
+        ),
+    }
+}
+
+async fn local_agent_strategy_config(
+    State(state): State<LocalSideEffectState>,
+    Json(payload): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    let Some(path) = state.config.strategy_config_path.as_ref() else {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "strategy_config_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    };
+    let Some(content) = payload.get("content").and_then(Value::as_str) else {
+        return local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "missing_content",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    };
+    if serde_yaml::from_str::<serde_yaml::Value>(content).is_err() {
+        return local_json_response(
+            StatusCode::BAD_REQUEST,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "invalid_yaml",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    let strategy_id = payload
+        .get("strategy_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("default")
+        .to_string();
+    let restart_requested = payload
+        .get("restart")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    if !state.control.audit_ledger_configured() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "audit_ledger_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    if state
+        .control
+        .record_operator_audit(
+            "local_agent_strategy_config_edit",
+            state.agent.agent_id.clone(),
+            json!({
+                "operation_id": operation_id,
+                "strategy_id": strategy_id,
+                "restart_requested": restart_requested,
+                "restart_script_configured": state.config.restart_script_path.is_some(),
+                "would_submit_order": false,
+                "local_path_exposed": false,
+            }),
+        )
+        .await
+        .is_err()
+    {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    if atomic_write_local_file(path, content, &operation_id)
+        .await
+        .is_err()
+    {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "write_failed",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    let mut restart_queued = false;
+    if restart_requested {
+        let command = json!({
+            "schema_version": 1,
+            "operation_id": operation_id,
+            "command": "restart_strategy",
+            "strategy_id": strategy_id,
+            "source": "local_agent",
+            "accepted_at": Utc::now(),
+            "restart_script_configured": state.config.restart_script_path.is_some(),
+            "restart_script_executed": false,
+        });
+        restart_queued = append_local_jsonl(state.config.command_queue_path.as_ref(), &command)
+            .await
+            .is_ok();
+    }
+
+    let audit = json!({
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "action": "strategy_config_edit",
+        "accepted": true,
+        "status": "accepted",
+        "strategy_id": strategy_id,
+        "restart_requested": restart_requested,
+        "restart_queued": restart_queued,
+        "restart_script_configured": state.config.restart_script_path.is_some(),
+        "restart_script_executed": false,
+        "recorded_at": Utc::now(),
+        "local_path_exposed": false,
+    });
+    state.audit.lock().await.push(audit.clone());
+
+    local_json_response(
+        StatusCode::ACCEPTED,
+        json!({
+            "schema_version": 1,
+            "accepted": true,
+            "status": "accepted",
+            "operation_id": operation_id,
+            "audit": audit,
+            "restart": {
+                "requested": restart_requested,
+                "queued": restart_queued,
+                "restart_script_configured": state.config.restart_script_path.is_some(),
+                "restart_script_executed": false,
+            },
+            "local_path_exposed": false,
+        }),
+    )
+}
+
+async fn local_agent_command(
+    State(state): State<LocalSideEffectState>,
+    Json(payload): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    let operation_id = local_operation_id();
+    let command = json!({
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "command": payload.get("command").cloned().unwrap_or(Value::Null),
+        "payload": payload.get("payload").cloned().unwrap_or(Value::Null),
+        "source": "local_agent",
+        "accepted_at": Utc::now(),
+    });
+    if !state.control.audit_ledger_configured() {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "audit_ledger_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    if state
+        .control
+        .record_operator_audit(
+            "local_agent_command_queue_append",
+            state.agent.agent_id.clone(),
+            json!({
+                "operation_id": operation_id,
+                "command": command["command"],
+                "payload": command["payload"],
+                "would_submit_order": false,
+                "local_path_exposed": false,
+            }),
+        )
+        .await
+        .is_err()
+    {
+        return local_json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "audit_write_failed",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+    if append_local_jsonl(state.config.command_queue_path.as_ref(), &command)
+        .await
+        .is_err()
+    {
+        return local_json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({
+                "schema_version": 1,
+                "accepted": false,
+                "status": "command_queue_not_configured",
+                "operation_id": operation_id,
+                "local_path_exposed": false,
+            }),
+        );
+    }
+
+    let audit = json!({
+        "schema_version": 1,
+        "operation_id": operation_id,
+        "action": "command_queue_append",
+        "accepted": true,
+        "status": "accepted",
+        "recorded_at": Utc::now(),
+        "local_path_exposed": false,
+    });
+    state.audit.lock().await.push(audit.clone());
+
+    local_json_response(
+        StatusCode::ACCEPTED,
+        json!({
+            "schema_version": 1,
+            "accepted": true,
+            "status": "accepted",
+            "operation_id": operation_id,
+            "audit": audit,
+            "local_path_exposed": false,
+        }),
+    )
+}
+
+async fn local_agent_history_status(
+    State(state): State<LocalSideEffectState>,
+    AxumPath(kind): AxumPath<String>,
+) -> (StatusCode, Json<Value>) {
+    let path = match kind.as_str() {
+        "balance" => state.config.balance_history_path.as_ref(),
+        "strategy-profit" | "strategy_profit" => state.config.strategy_profit_history_path.as_ref(),
+        _ => {
+            return local_json_response(
+                StatusCode::NOT_FOUND,
+                json!({
+                    "schema_version": 1,
+                    "status": "unknown_history_kind",
+                    "local_path_exposed": false,
+                }),
+            )
+        }
+    };
+    let status = local_history_file_status(path).await;
+    local_json_response(
+        StatusCode::OK,
+        json!({
+            "schema_version": 1,
+            "kind": kind,
+            "status": status,
+            "local_path_exposed": false,
+        }),
+    )
+}
+
+fn local_json_response(status: StatusCode, value: Value) -> (StatusCode, Json<Value>) {
+    (status, Json(value))
+}
+
+async fn local_file_status(path: Option<&PathBuf>) -> Value {
+    let Some(path) = path else {
+        return json!({
+            "configured": false,
+            "exists": false,
+            "readable": false,
+        });
+    };
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) => {
+            let readable = metadata.is_file() && tokio::fs::File::open(path).await.is_ok();
+            json!({
+                "configured": true,
+                "exists": true,
+                "readable": readable,
+            })
+        }
+        Err(error) => json!({
+            "configured": true,
+            "exists": false,
+            "readable": false,
+            "read_error": local_io_error_kind(&error),
+        }),
+    }
+}
+
+async fn local_restart_script_status(path: Option<&PathBuf>) -> Value {
+    let mut status = local_file_status(path).await;
+    if let Some(object) = status.as_object_mut() {
+        object.insert("execution_allowed".to_string(), Value::Bool(false));
+    }
+    status
+}
+
+async fn local_history_file_status(path: Option<&PathBuf>) -> Value {
+    let Some(path) = path else {
+        return json!({
+            "configured": false,
+            "exists": false,
+            "readable": false,
+            "record_count": 0,
+        });
+    };
+    match tokio::fs::read_to_string(path).await {
+        Ok(raw) => json!({
+            "configured": true,
+            "exists": true,
+            "readable": true,
+            "record_count": raw.lines().filter(|line| !line.trim().is_empty()).count(),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({
+            "configured": true,
+            "exists": false,
+            "readable": false,
+            "record_count": 0,
+            "read_error": "not_found",
+        }),
+        Err(error) => json!({
+            "configured": true,
+            "exists": true,
+            "readable": false,
+            "record_count": 0,
+            "read_error": local_io_error_kind(&error),
+        }),
+    }
+}
+
+async fn atomic_write_local_file(
+    path: &Path,
+    content: &str,
+    operation_id: &str,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("strategy-config");
+    let temp_path = path.with_file_name(format!(".{file_name}.{operation_id}.tmp"));
+    tokio::fs::write(&temp_path, content).await?;
+    tokio::fs::rename(temp_path, path).await
+}
+
+async fn append_local_jsonl(path: Option<&PathBuf>, value: &Value) -> std::io::Result<()> {
+    let path = path.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await?;
+    file.write_all(value.to_string().as_bytes()).await?;
+    file.write_all(b"\n").await
+}
+
+fn local_io_error_kind(error: &std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "not_found",
+        std::io::ErrorKind::PermissionDenied => "permission_denied",
+        std::io::ErrorKind::InvalidData => "invalid_data",
+        _ => "io_error",
+    }
+}
+
+fn local_operation_id() -> String {
+    format!(
+        "local-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_micros()
+    )
 }
 
 fn path_value(vars: &std::collections::BTreeMap<String, String>, name: &str) -> Option<PathBuf> {
@@ -288,6 +1060,7 @@ mod tests {
                 ],
             })
         );
+        assert!(config.local_side_effects.is_none());
         assert_eq!(
             config.legacy_snapshot_path,
             Some(PathBuf::from("/tmp/dashboard_snapshot.json"))
@@ -323,12 +1096,386 @@ mod tests {
 
         assert_eq!(config.bind_addr, DEFAULT_BIND_ADDR);
         assert!(config.local_agent.is_none());
+        assert!(config.local_side_effects.is_none());
         assert!(config.static_dir.is_none());
         assert!(config.strategy_log_tail_lines.is_none());
         assert_eq!(
             config.supervisor_registry_path,
             Some(PathBuf::from(DEFAULT_SUPERVISOR_REGISTRY_PATH))
         );
+    }
+
+    #[test]
+    fn config_should_parse_local_agent_side_effect_boundary() {
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+                "/tmp/strategy.yml",
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_COMMAND_QUEUE_PATH",
+                "/tmp/commands.jsonl",
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_BALANCE_HISTORY_PATH",
+                "/tmp/balance.jsonl",
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_PROFIT_HISTORY_PATH",
+                "/tmp/profit.jsonl",
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_RESTART_SCRIPT_PATH",
+                "/tmp/restart.sh",
+            ),
+        ]);
+
+        assert_eq!(
+            config.local_side_effects,
+            Some(LocalSideEffectConfig {
+                strategy_config_path: Some(PathBuf::from("/tmp/strategy.yml")),
+                command_queue_path: Some(PathBuf::from("/tmp/commands.jsonl")),
+                balance_history_path: Some(PathBuf::from("/tmp/balance.jsonl")),
+                strategy_profit_history_path: Some(PathBuf::from("/tmp/profit.jsonl")),
+                restart_script_path: Some(PathBuf::from("/tmp/restart.sh")),
+            })
+        );
+    }
+
+    #[test]
+    fn config_should_ignore_side_effect_paths_without_local_agent_identity() {
+        let config = ControlApiAppConfig::from_env_iter([(
+            "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+            "/tmp/strategy.yml",
+        )]);
+
+        assert!(config.local_agent.is_none());
+        assert!(config.local_side_effects.is_none());
+    }
+
+    #[tokio::test]
+    async fn local_agent_routes_should_report_status_without_raw_paths() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-local-status-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let strategy_path = temp_dir.join("strategy.yml");
+        let balance_path = temp_dir.join("balance.jsonl");
+        let restart_path = temp_dir.join("restart.sh");
+        std::fs::write(&strategy_path, "mode: simulation\n").unwrap();
+        std::fs::write(&balance_path, "{\"asset\":\"USDT\"}\n").unwrap();
+        std::fs::write(&restart_path, "#!/bin/sh\nexit 1\n").unwrap();
+
+        let strategy_path_text = strategy_path.to_string_lossy().to_string();
+        let balance_path_text = balance_path.to_string_lossy().to_string();
+        let restart_path_text = restart_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            ("RUSTCTA_CONTROL_API_TENANT_ID", "tenant-a"),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+                strategy_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_BALANCE_HISTORY_PATH",
+                balance_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_RESTART_SCRIPT_PATH",
+                restart_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/local-agent/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let raw = std::str::from_utf8(&body).unwrap();
+        assert!(!raw.contains(temp_dir.to_string_lossy().as_ref()));
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["agent_id"], "agent-a");
+        assert_eq!(value["tenant_id"], "tenant-a");
+        assert_eq!(value["local_path_exposed"], false);
+        assert_eq!(
+            value["side_effects"]["strategy_config_edit"]["configured"],
+            true
+        );
+        assert_eq!(
+            value["side_effects"]["strategy_config_edit"]["readable"],
+            true
+        );
+        assert_eq!(
+            value["side_effects"]["restart_script"]["execution_allowed"],
+            false
+        );
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_agent_config_update_should_save_and_queue_restart_without_running_script() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-local-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let strategy_path = temp_dir.join("strategy.yml");
+        let command_path = temp_dir.join("commands.jsonl");
+        let audit_path = temp_dir.join("audit.jsonl");
+        let restart_path = temp_dir.join("restart.sh");
+        let marker_path = temp_dir.join("restart-marker");
+        std::fs::write(&strategy_path, "mode: old\n").unwrap();
+        std::fs::write(
+            &restart_path,
+            format!("#!/bin/sh\ntouch {}\n", marker_path.to_string_lossy()),
+        )
+        .unwrap();
+
+        let strategy_path_text = strategy_path.to_string_lossy().to_string();
+        let command_path_text = command_path.to_string_lossy().to_string();
+        let audit_path_text = audit_path.to_string_lossy().to_string();
+        let restart_path_text = restart_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH",
+                audit_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_STRATEGY_CONFIG_PATH",
+                strategy_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_COMMAND_QUEUE_PATH",
+                command_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_LOCAL_RESTART_SCRIPT_PATH",
+                restart_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/local-agent/strategy-config")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "strategy_id": "cross_arb_live",
+                            "content": "mode: simulation\n",
+                            "restart": true
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let raw = std::str::from_utf8(&body).unwrap();
+        assert!(!raw.contains(temp_dir.to_string_lossy().as_ref()));
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["accepted"], true);
+        assert_eq!(value["status"], "accepted");
+        assert_eq!(value["restart"]["queued"], true);
+        assert_eq!(value["restart"]["restart_script_executed"], false);
+        assert_eq!(value["local_path_exposed"], false);
+
+        assert_eq!(
+            std::fs::read_to_string(&strategy_path).unwrap(),
+            "mode: simulation\n"
+        );
+        let command_log = std::fs::read_to_string(&command_path).unwrap();
+        assert!(command_log.contains("\"command\":\"restart_strategy\""));
+        assert!(command_log.contains("\"strategy_id\":\"cross_arb_live\""));
+        assert!(command_log.contains("\"restart_script_executed\":false"));
+        assert!(!marker_path.exists());
+        let ledger_log = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(ledger_log.contains("local_agent_strategy_config_edit"));
+        assert!(ledger_log.contains("cross_arb_live"));
+        assert!(!ledger_log.contains("api_secret"));
+
+        let audit = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/local-agent/audit")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(audit.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(audit.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let raw = std::str::from_utf8(&body).unwrap();
+        assert!(!raw.contains(temp_dir.to_string_lossy().as_ref()));
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["events"][0]["accepted"], true);
+        assert_eq!(value["events"][0]["action"], "strategy_config_edit");
+        assert_eq!(value["events"][0]["restart_script_executed"], false);
+
+        std::fs::remove_dir_all(temp_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn local_agent_strategy_mutations_should_require_and_write_audit_ledger() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rustcta-control-api-local-strategy-mutation-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let registry_path = temp_dir.join("registry.json");
+        let audit_path = temp_dir.join("audit.jsonl");
+        let registry_path_text = registry_path.to_string_lossy().to_string();
+        let audit_path_text = audit_path.to_string_lossy().to_string();
+        let config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
+                registry_path_text.as_str(),
+            ),
+            (
+                "RUSTCTA_CONTROL_API_AUDIT_LEDGER_PATH",
+                audit_path_text.as_str(),
+            ),
+        ]);
+        let app = config.build_router().unwrap();
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/strategies")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "strategy_id": "spot-arb-a",
+                            "strategy_kind": "spot_spot_arbitrage",
+                            "tenant_id": "local",
+                            "config_path": "config/spot.yml",
+                            "command": "sh",
+                            "args": ["-c", "true"],
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(create.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["strategy_id"], "spot-arb-a");
+        assert_eq!(value["status"], "Stopped");
+        assert!(value.get("log_path").is_none());
+
+        let registry = std::fs::read_to_string(&registry_path).unwrap();
+        assert!(registry.contains("spot-arb-a"));
+        let ledger = std::fs::read_to_string(&audit_path).unwrap();
+        assert!(ledger.contains("create_strategy"));
+        assert!(ledger.contains("spot-arb-a"));
+        assert!(!ledger.contains("api_secret"));
+
+        let command = rustcta_supervisor::LifecycleCommandRecord {
+            schema_version: rustcta_supervisor::SUPERVISOR_SCHEMA_VERSION,
+            command_id: "cmd-heartbeat".to_string(),
+            strategy_id: "spot-arb-a".to_string(),
+            run_id: None,
+            command: rustcta_supervisor::LifecycleCommand::Heartbeat,
+            requested_by: Some("web".to_string()),
+            idempotency_key: "idem-heartbeat".to_string(),
+            requested_at: Utc::now(),
+        };
+        let accepted = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/commands")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_vec(&command).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(accepted.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(accepted.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["accepted"], true);
+        assert_eq!(value["applied_to_runtime"], false);
+
+        let events = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/events")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(events.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(events.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["commands"].as_array().unwrap().len(), 1);
+        assert_eq!(value["ledger_events"].as_array().unwrap().len(), 2);
+
+        let no_ledger_config = ControlApiAppConfig::from_env_iter([
+            ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
+            (
+                "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
+                registry_path_text.as_str(),
+            ),
+        ]);
+        let no_ledger_app = no_ledger_config.build_router().unwrap();
+        let rejected = no_ledger_app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/strategies")
+                    .header(axum::http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "strategy_id": "spot-arb-b",
+                            "strategy_kind": "spot_spot_arbitrage",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        std::fs::remove_dir_all(temp_dir).ok();
     }
 
     #[tokio::test]
@@ -339,7 +1486,6 @@ mod tests {
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let registry_path = temp_dir.join("registry.json");
-        let snapshot_path = temp_dir.join("dashboard_snapshot.json");
         std::fs::write(
             &registry_path,
             serde_json::json!({
@@ -385,56 +1531,13 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        std::fs::write(
-            &snapshot_path,
-            serde_json::json!({
-                "live_trading_enabled": true,
-                "risk_events": [],
-                "spot_symbol_rules": [
-                    {
-                        "exchange": "binance",
-                        "symbol": "BTC/USDT"
-                    }
-                ],
-                "spot_control": {
-                    "symbols": [
-                        {
-                            "symbol": "BTC/USDT",
-                            "enabled": true
-                        }
-                    ]
-                },
-                "five_exchange_scanner": {
-                    "symbol_coverage": [
-                        {
-                            "exchange": "binance",
-                            "symbols": ["BTC/USDT"]
-                        }
-                    ],
-                    "recommendations": [
-                        {
-                            "symbol": "BTC/USDT",
-                            "action": "enable"
-                        }
-                    ]
-                }
-            })
-            .to_string(),
-        )
-        .unwrap();
-
         let registry_path_text = registry_path.to_string_lossy().to_string();
-        let snapshot_path_text = snapshot_path.to_string_lossy().to_string();
         let config = ControlApiAppConfig::from_env_iter([
             ("RUSTCTA_CONTROL_API_AGENT_ID", "agent-a"),
             ("RUSTCTA_CONTROL_API_TENANT_ID", "tenant-a"),
             (
                 "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
                 registry_path_text.as_str(),
-            ),
-            (
-                "RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH",
-                snapshot_path_text.as_str(),
             ),
         ]);
         let app = config.build_router().unwrap();
@@ -456,6 +1559,28 @@ mod tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["agent_count"], 1);
+        assert_eq!(value["process_count"], 2);
+        assert_eq!(value["strategy_count"], 2);
+
+        let agents = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agents")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(agents.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(agents.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.as_array().unwrap().len(), 1);
+        assert_eq!(value[0]["agent_id"], "agent-a");
+        assert_eq!(value[0]["tenant_id"], "tenant-a");
+        assert_eq!(value[0]["status"], "connected");
 
         let strategies = app
             .clone()
@@ -497,6 +1622,66 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["run_id"], "local");
         assert_eq!(value["process_id"], 123);
+        assert!(value.get("log_path").is_none());
+
+        let processes = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/processes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(processes.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(processes.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.as_array().unwrap().len(), 2);
+        assert_eq!(value[0]["strategy_id"], "cross_arb_live");
+        assert!(value[0].get("log_path").is_none());
+
+        let gateway = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/gateway/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(gateway.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(gateway.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert!(value["gateway"].is_null());
+
+        let credentials = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/credentials/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(credentials.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(credentials.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["slots"].as_array().unwrap().len(), 0);
+        assert!(value.get("raw").is_none());
+        assert!(value.get("api_key").is_none());
+        assert!(value.get("api_secret").is_none());
+        assert!(value.get("secret").is_none());
 
         let symbols = app
             .oneshot(
@@ -512,11 +1697,14 @@ mod tests {
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value["symbol_rules"][0]["symbol"], "BTC/USDT");
-        assert_eq!(value["spot_control"]["symbols"][0]["enabled"], true);
+        assert_eq!(value["symbol_rules"].as_array().unwrap().len(), 0);
+        assert_eq!(value["spot_control"].as_object().unwrap().len(), 0);
         assert_eq!(
-            value["scanner"]["symbol_coverage"][0]["symbols"][0],
-            "BTC/USDT"
+            value["scanner"]["symbol_coverage"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
         );
 
         std::fs::remove_dir_all(temp_dir).ok();
@@ -529,18 +1717,12 @@ mod tests {
             std::process::id()
         ));
         std::fs::create_dir_all(&temp_dir).unwrap();
-        let snapshot_path = temp_dir.join("missing-dashboard.json");
         let registry_path = temp_dir.join("missing-registry.json");
         let log_path = temp_dir.join("missing-strategy.log");
 
-        let snapshot_path_text = snapshot_path.to_string_lossy().to_string();
         let registry_path_text = registry_path.to_string_lossy().to_string();
         let log_path_text = log_path.to_string_lossy().to_string();
         let config = ControlApiAppConfig::from_env_iter([
-            (
-                "RUSTCTA_CONTROL_API_LEGACY_SNAPSHOT_PATH",
-                snapshot_path_text.as_str(),
-            ),
             (
                 "RUSTCTA_CONTROL_API_SUPERVISOR_REGISTRY_PATH",
                 registry_path_text.as_str(),

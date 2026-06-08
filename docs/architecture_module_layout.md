@@ -7,7 +7,7 @@ removal.
 ## Workspace Layout
 
 ```text
-apps/        thin process entrypoints: gateway, supervisor, control-api, cli, backtest
+apps/        thin process entrypoints: gateway, supervisor, control-api, cli
 crates/      reusable platform crates and API contracts
 strategies/  independent strategy crates and adapter-free migrating cores
 tools/       operator, audit, migration, and diagnostic commands
@@ -43,8 +43,8 @@ src/
 
 The system supports two arbitrage families:
 
-- Spot-to-Spot arbitrage: `src/strategies/spot_spot_taker_arbitrage/`.
-- USDT perpetual cross-exchange arbitrage: `src/strategies/cross_exchange_arbitrage/`.
+- Spot-to-Spot arbitrage: `retired strategy tree/spot_spot_taker_arbitrage/`.
+- USDT perpetual cross-exchange arbitrage: `retired strategy tree/cross_exchange_arbitrage/`.
 
 These are separate paths. Spot arbitrage should not import perpetual-only
 position semantics, and perpetual arbitrage should not rely on Spot inventory
@@ -78,16 +78,16 @@ Rules:
 
 ## Exchange Modules
 
-The old flat `src/exchanges/adapters/` compatibility path has been removed.
+The old flat `retired exchange tree/adapters/` compatibility path has been removed.
 Production-facing exchange code now uses:
 
 ```text
-src/exchanges/<exchange>/      venue-specific Spot or core client
-src/exchanges/market_adapters/ public market-data adapters
-src/exchanges/private_perp/    shared private perpetual protocol support
-src/exchanges/trading_adapters/ legacy-to-execution trading bridge
-src/exchanges/registry.rs      gateway and adapter registration
-src/exchanges/unified.rs       unified Spot/Perpetual client contract
+retired exchange tree/<exchange>/      venue-specific Spot or core client
+retired exchange tree/market_adapters/ public market-data adapters
+retired exchange tree/private_perp/    shared private perpetual protocol support
+retired exchange tree/trading_adapters/ legacy-to-execution trading bridge
+retired exchange tree/registry.rs      gateway and adapter registration
+retired exchange tree/unified.rs       unified Spot/Perpetual client contract
 ```
 
 `GatewayExchange` remains only as a compatibility bridge for code that still

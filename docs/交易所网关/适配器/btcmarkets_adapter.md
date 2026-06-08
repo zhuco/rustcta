@@ -16,6 +16,22 @@ BTC Markets v3 private REST requests use timestamped HMAC-SHA512 request signing
 
 The adapter keeps the v3 endpoint path explicit (`/v3/...`) so older endpoint versions are not mixed into order or accounting calls.
 
+## Product-line boundary
+
+BTC Markets API v3 is treated as Spot-only for this adapter. Standard futures,
+perpetuals, and options are `交易所不支持合约` under the current official API
+scope.
+
+## Official Public WS Order Book Details
+
+The current official documentation entry is `https://docs.btcmarkets.net/`; the
+legacy official GitHub Wiki for WebSocket v2 says the endpoint is
+`wss://socket.btcmarkets.net/v2`. Public subscriptions use a JSON
+`messageType=subscribe` payload with `channels=["orderbook"]` and market ids
+such as `BTC-AUD`. The `orderbook` event is the latest book state with up to 50
+bids and 50 asks. Official WS v2 docs do not state a fixed order book interval
+or sequence/checksum; heartbeat is available every 5 seconds.
+
 ## Fiat and accounting boundary
 
 AUD is handled as a spot quote asset and as a read-only balance asset. The adapter does not implement:

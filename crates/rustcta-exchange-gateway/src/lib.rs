@@ -31,6 +31,7 @@
 )]
 
 mod adapters;
+mod admin_audit;
 mod batch;
 mod client;
 mod client_helpers;
@@ -82,8 +83,13 @@ pub use adapters::{
     WoofiproGatewayConfig, XtGatewayConfig, YobitGatewayConfig, ZaifGatewayConfig,
     ZebpayGatewayConfig, ZetaMarketsGatewayConfig,
 };
+pub use admin_audit::{
+    AdminAuditCheck, AdminAuditCheckKind, AdminAuditPlan, AdminAuditPlanner, AdminAuditSafety,
+};
 pub use batch::{BatchExecutionChunk, BatchExecutionPlan, BatchOperationKind, BatchPlanner};
-pub use client::{ExchangeGateway, GatewayClient, InProcessGatewayClient, LocalGateway};
+pub use client::{
+    ExchangeGateway, GatewayClient, GatewayExchangeClient, InProcessGatewayClient, LocalGateway,
+};
 pub use error::GatewayError;
 pub use http::gateway_router;
 pub use mock::MockExchangeGateway;

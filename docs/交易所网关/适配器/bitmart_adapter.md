@@ -24,6 +24,10 @@ Status: `rustcta-exchange-gateway` Spot + USDT perpetual REST adapter with offli
 | Batch cancel / cancel all | `POST /contract/private/cancel-orders`, `POST /spot/v3/cancel_orders` | Futures batch cancel is native. Cancel-all uses Spot cancel-all or futures symbol/all cancel semantics. |
 | Fills | `GET /spot/v2/trades`, `GET /contract/private/trades` | Used for REST reconciliation after private stream gaps. |
 
+## Public WebSocket Order Book
+
+Official Spot public WS supports BBO book ticker and depth feeds that should be structured before runtime use: `spot/depth/increase100` is the 100ms incremental 100-level feed, `spot/depth5`, `spot/depth20`, and `spot/depth50` are 500ms full-depth feeds, and book ticker pushes best bid/ask changes in real time. Incremental book messages carry `version`, `type=snapshot/update`, and `ms_t`; no checksum was found in the reviewed official docs, so stale-book protection needs version checks plus REST snapshot rebuild.
+
 ## Authentication
 
 Private REST uses `X-BM-KEY`, `X-BM-TIMESTAMP`, `X-BM-SIGN` and optional `X-BM-BROKER-ID`. The signing fixture covers HMAC-SHA256 over `timestamp#memo#body` for v3-style memo credentials.

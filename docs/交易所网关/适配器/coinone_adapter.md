@@ -9,6 +9,16 @@ Coinone is implemented as a Korea regional spot adapter scoped to KRW markets. T
 - Private REST: balances, trade fees, place order, quote market buy, cancel, cancel all, query order, open orders, and recent fills.
 - Private WebSocket: order/fill and balance/account subscriptions with Coinone payload signature headers.
 
+## Official Public WS Order Book Details
+
+Coinone public WebSocket uses `wss://stream.coinone.co.kr`. ORDERBOOK
+subscription payloads use `request_type=SUBSCRIBE`, `channel=ORDERBOOK`, and a
+topic with `quote_currency` and `target_currency`. Official docs say the server
+sends the last order book once on initial subscription and then sends updates
+when the order book changes. No fixed millisecond interval or configurable depth
+parameter is published. Messages include an order book `id`; a larger id is more
+recent, but no checksum is documented.
+
 ## Authentication Boundary
 
 Private REST/WS requires `COINONE_SPOT_ACCESS_TOKEN` and `COINONE_SPOT_SECRET_KEY` (or the non-spot-prefixed fallback names). Requests are signed by JSON-serializing the private payload, base64-encoding it into `X-COINONE-PAYLOAD`, then HMAC-SHA512 signing that encoded payload into `X-COINONE-SIGNATURE`.
@@ -16,6 +26,9 @@ Private REST/WS requires `COINONE_SPOT_ACCESS_TOKEN` and `COINONE_SPOT_SECRET_KE
 Only read-only and trade credential scopes are modeled. Transfer and withdraw scopes are intentionally not requested or surfaced.
 
 ## Unsupported Boundary
+
+Standard futures, perpetuals, and options are `交易所不支持合约` under the current
+official API v2/v2.1 scope.
 
 Payment, wallet withdrawal/deposit, deposit address, and fiat-transfer behavior is explicitly unsupported. The adapter should return `Unsupported` for those boundaries and should not route those endpoints through generic private REST helpers.
 

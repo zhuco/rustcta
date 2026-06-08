@@ -54,12 +54,16 @@ Implemented:
 
 Unsupported or deferred:
 
-- Margin and futures/perpetual trading, despite official endpoint families
+- Margin and futures/perpetual trading are `项目未实现`, because official Bequant v3 documents margin and futures endpoint families.
 - Quote-sized market orders
 - Amend order
 - Batch place and batch cancel-by-list
 - Transfers, withdrawals, subaccounts, custody, and wallet funding actions
 - Production private WebSocket runtime promotion without live-key validation
+
+## Official Product-Line Boundary
+
+官方核验见 [产品线官方核验 P5 区域现货 CEX 第二批](../产品线官方核验_P5_区域现货_CEX第二批.md)。Bequant 官方 v3 API 有 Spot、Margin、Futures account/order/position 以及 trading WebSocket 的 margin/futures 方法。当前 adapter 只声明 Spot，所以 Margin/Futures/Perpetual 必须写 `项目未实现`，不能写成 `交易所不支持合约`。
 
 ## Rate Limits
 

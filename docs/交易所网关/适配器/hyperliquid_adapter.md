@@ -7,8 +7,11 @@ Status date: 2026-06-08
 Adapter id: `hyperliquid`
 
 Product line: USDC-settled perpetuals on Hyperliquid. The gateway implements
-`MarketType::Perpetual` only. Spot, margin, options, transfers, withdrawals,
-subaccount transfers, and vault administration are out of runtime scope.
+`MarketType::Perpetual` only. Spot is 项目未实现 Spot, not
+`交易所不支持现货`: official Hyperliquid docs expose `spotMeta`/spot asset
+contexts and HIP-1 onchain spot order books. Margin, options, transfers,
+withdrawals, subaccount transfers, and vault administration are out of runtime
+scope.
 
 Official references:
 
@@ -37,6 +40,14 @@ Base URLs:
 | Batch place/cancel | multi-item `order` / `cancel` actions | Native, partial-failure semantics |
 | Public WS | `l2Book`, `trades`, `bbo`, `candle` | Subscription payloads and heartbeat helper |
 | Private WS | `orderUpdates`, `userFills`, `userEvents` | Subscription payloads and REST reconciliation fallback |
+
+Official public WS supports `l2Book` and `bbo`. REST `/info` `l2Book` provides
+the rebuild snapshot and is capped at 20 levels per side. The official docs do
+not publish a fixed millisecond interval, traditional sequence, or checksum for
+these feeds, so strategy/runtime code must use stale-book detection and REST
+resync. Current project support is native but the mapping still needs no-fixed
+ms, no-checksum, BBO/L2, and 20-level REST snapshot fields. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 ## Signing Boundary
 

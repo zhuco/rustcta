@@ -3,6 +3,10 @@
 Task 11 scope: `kucoin` is Spot-only. The adapter normalizes symbols to dashed
 uppercase venue symbols (`BTC/USDT` -> `BTC-USDT`) for REST and WebSocket specs.
 
+Futures are not implemented in this `kucoin` spot adapter, but they are not
+`交易所不支持合约`: KuCoin official docs expose Futures REST/WS and the project
+has a separate `kucoinfutures` adapter/profile for that API family.
+
 ## Coverage
 
 | Area | Status |

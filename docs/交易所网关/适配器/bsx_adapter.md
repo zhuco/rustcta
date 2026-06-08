@@ -7,6 +7,13 @@
 - Current capability: public REST `products` and order book snapshot; private REST/WS and order writes are request-spec-only or Unsupported.
 - Default trading posture: disabled. No live private write path is enabled.
 
+## Product Lines
+
+| Product | MarketType | Status |
+| --- | --- | --- |
+| Perpetual | `Perpetual` | Current adapter scope; public products and order-book snapshot are mapped. |
+| Spot | n/a | 项目未实现 Spot。BSX 官方有 spot/perpetuals exchange 线索，当前 `bsx` adapter 只接 Base perpetuals，不能写成交易所不支持。 |
+
 ## Official Materials
 
 | Area | URL | Notes |

@@ -7,13 +7,8 @@ use crate::api::{
 };
 use crate::api_keys::ApiKeysPanel;
 use crate::cross_arb::CrossArbPanel;
-use crate::dashboard_panels::{
-    BookPanel, ConfigPanel, DryRunPanel, ExchangePanel, InventoryPanel, LogsPanel, RiskPanel,
-    RuntimePublisherPanel, ScannerPanel, SymbolPanel,
-};
 use crate::funding_arb::FundingArbPanel;
 use crate::i18n::{command_label, s, t};
-use crate::overview::Overview;
 use crate::spot_arb::SpotArbPanel;
 use crate::storage::{
     load_active_view, load_language, load_token, save_active_view, save_language, save_token,
@@ -241,7 +236,6 @@ fn render_active_view(
         ControlPanelView::Workspace => {
             rsx! { StrategyWorkspacePanel { data, token, message, lang } }
         }
-        ControlPanelView::Overview => rsx! { Overview { data: data(), lang } },
         ControlPanelView::SpotArb => {
             let snapshot = data();
             rsx! {
@@ -314,55 +308,6 @@ fn render_active_view(
                 }
                 ControlActionPanel { lang }
             }
-        }
-        ControlPanelView::Exchanges => {
-            let snapshot = data();
-            rsx! {
-                ExchangePanel { exchanges: snapshot.exchanges, lang }
-                BookPanel { books: snapshot.books, lang }
-                InventoryPanel {
-                    inventory: snapshot.inventory,
-                    fees: snapshot.fees,
-                    disabled: snapshot.disabled,
-                    lang
-                }
-            }
-        }
-        ControlPanelView::Symbols => {
-            let snapshot = data();
-            rsx! {
-                SymbolPanel { symbols: snapshot.symbols, opportunities: snapshot.opportunities, lang }
-                ScannerPanel { scanner: snapshot.scanner, hedge_policy: snapshot.hedge_policy, lang }
-            }
-        }
-        ControlPanelView::Plans => {
-            rsx! { DryRunPanel { plans: data().dry_run_plans, lang } }
-        }
-        ControlPanelView::Risk => rsx! { RiskPanel { risk: data().risk, lang } },
-        ControlPanelView::Runtime => {
-            let snapshot = data();
-            rsx! {
-                RuntimePublisherPanel {
-                    runtime_publisher: snapshot.runtime_publisher,
-                    health: snapshot.health,
-                    audit: snapshot.control_audit,
-                    lang
-                }
-            }
-        }
-        ControlPanelView::Config => {
-            let snapshot = data();
-            rsx! {
-                ConfigPanel {
-                    config: snapshot.config,
-                    control_symbols: snapshot.control_symbols,
-                    lang
-                }
-            }
-        }
-        ControlPanelView::Logs => {
-            let snapshot = data();
-            rsx! { LogsPanel { logs: snapshot.logs, health: snapshot.health, lang } }
         }
     }
 }

@@ -111,3 +111,13 @@ Official WebSocket references used for this adapter revision:
 
 - BigONE Spot Pusher: <https://open.big.one/docs/spot/pusher/>
 - BigONE Contract Pusher: <https://open.big.one/docs/contract/pusher/>
+
+## Official WebSocket Order Book Detail
+
+Official Spot WS `subscribeMarketDepthRequest` sends an immediate snapshot and
+then incremental updates. `changeId` and `prevId` are sequential; gaps must
+trigger snapshot rebuild. The official docs do not provide a fixed millisecond
+interval or fixed depth parameter. JSON is supported and protobuf is documented
+as the lower-latency option. Mapping should add MarketDepth, snapshot/update,
+`changeId/prevId`, no fixed ms/depth, and REST snapshot fallback. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).

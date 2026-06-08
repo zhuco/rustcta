@@ -1,0 +1,347 @@
+priority,category,adapter,current_evidence,remaining_check,suggested_outcome,source_field
+P2,core_trading_official_check,aark,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,aftermath,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,apex,place_order=不支持; cancel_order=离线,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,ascendex,place_order=-; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,bingx,place_order=-; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,bitbns,place_order=-; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,bitkan,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,bitteam,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,bsx,place_order=离线; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,bybiteu,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,cex,place_order=不支持; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,cod3x,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,coinspot,place_order=运行; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,d8x,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,derive_chain_perps,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,dydx,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,equation,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,fmfwio,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,grvt,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,hibachi,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,hitbtc,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,hollaex,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,indodax,place_order=运行; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,latoken,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,lighter,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,mango_markets,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,modetrade,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,myokx,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,okxus,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,p2b,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,paymium,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,phemex,place_order=-; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,wavesexchange,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,weex,place_order=-; cancel_order=-,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,yobit,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,zebpay,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,core_trading_official_check,zeta_markets,place_order=不支持; cancel_order=不支持,查官方下单、撤单、订单状态、client order id、TIF、market/limit 支持。,官方支持则补 request spec/signing/parser；官方不支持则写交易所不支持对应写接口。,"place_order,cancel_order"
+P2,position_official_check,aark,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,aftermath,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,ascendex,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,bingx,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,bitkan,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,bsx,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,bybiteu,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,cod3x,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,coinbase,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,coinstore,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,d8x,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,derive_chain_perps,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,equation,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,grvt,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,hashkey_global,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,hibachi,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,huobi,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,kraken,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,lighter,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,mango_markets,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,modetrade,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,oxfun,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,phemex,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,toobit,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,weex,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,woo,contract=声明; positions=-,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P2,position_official_check,zeta_markets,contract=声明; positions=不支持,查官方仓位接口、保证金模式、持仓模式、position side。,官方支持则补 positions parser；官方不支持则写交易所不支持合约仓位接口。,get_positions
+P3,account_state_official_check,aark,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,aftermath,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,ascendex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,biconomy,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bingx,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bitbns,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bitfinex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bitkan,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bitmart,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bitteam,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bitunix,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bsx,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,bybiteu,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,cex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,cod3x,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,d8x,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,derive_chain_perps,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,digifinex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,equation,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,fmfwio,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,grvt,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,hashkey_global,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,hibachi,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,hitbtc,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,hollaex,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,latoken,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,lighter,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,mango_markets,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,modetrade,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,myokx,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,okxus,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,oxfun,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,p2b,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,pacifica,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,paradex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,paymium,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,phemex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,wavesexchange,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,weex,balances=-,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,yobit,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,zebpay,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,account_state_official_check,zeta_markets,balances=不支持,查官方余额/账户接口和只读 API key 权限。,官方支持则补余额 parser 和 read-only fixture；官方不支持则写交易所不支持余额接口。,get_balances
+P3,fee_official_check,aark,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,aftermath,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,alpaca,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,apex,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,ascendex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,biconomy,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bigone,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bingx,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bit2c,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitbns,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitfinex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitkan,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitmart,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitopro,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitso,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitteam,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bittrade,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bitunix,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bsx,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,btcbox,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,btcturk,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bybit,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bybiteu,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,bydfi,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,cex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,cod3x,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,coinbase,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,coincheck,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,coindcx,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,coinmetro,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,coinstore,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,d8x,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,delta,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,deribit,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,derive,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,derive_chain_perps,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,digifinex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,dydx,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,equation,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,fmfwio,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,foxbit,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,gemini,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,grvt,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,hashkey_global,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,hibachi,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,hitbtc,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,hollaex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,huobi,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,hyperliquid,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,indodax,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,krakenfutures,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,kucoin,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,latoken,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,lighter,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,mango_markets,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,mercado,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,modetrade,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,myokx,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,ndax,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,novadax,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,okxus,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,oxfun,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,p2b,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,pacifica,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,paradex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,paymium,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,phemex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,tapbit,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,tokocrypto,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,toobit,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,wavesexchange,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,weex,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,woo,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,woofipro,fees=不支持,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,yobit,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,zaif,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,zebpay,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,fee_official_check,zeta_markets,fees=-,查官方费率接口、maker/taker、VIP/market maker 口径。,官方支持则补 fee source；官方不支持则写默认费率/配置兜底策略。,get_fees
+P3,public_ws_official_detail_check,bsx,"public_ws=spec_only; ws_gap=缺推流间隔；缺档位; channels=book,public_orderbook_delta",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,btcturk,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,bybiteu,public_ws=spec_only; ws_gap=缺推流间隔; channels=orderbook.50,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,bydfi,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,coinstore,public_ws=parser_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,cointr,public_ws=declared; ws_gap=缺推流间隔；缺档位; channels=books5,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,cryptomus,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,d8x,"public_ws=spec_only; ws_gap=缺推流间隔；缺档位; channels=orderbook:{ticker_id},public_orderbook_delta",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,deepcoin,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,delta,public_ws=native; ws_gap=缺推流间隔; channels=l2_orderbook,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,digifinex,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,exmo,"public_ws=spec_only; ws_gap=缺推流间隔；缺档位; channels=spot/order_book_snapshots,spot/order_book_updates,spot/order_book_updates:{pair},subscribe_public_order_book_delta",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,fmfwio,public_ws=spec_only; ws_gap=缺订单簿channel; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,foxbit,"public_ws=payload_helper; ws_gap=缺推流间隔; channels=orderbook-100,orderbook-1000,orderbook-250,orderbook-500,public_orderbook_subscribe",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,gemini,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,grvt,"public_ws=parser_only; ws_gap=缺推流间隔；缺档位; channels={'book_snapshot': {'path': 'v1.book.s', 'support': 'parser_only', 'fixture': 'tests/fixtures/exchanges/grvt/ws/book_delta.json'}}",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,hashkey_global,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,hibachi,"public_ws=parser_only; ws_gap=缺推流间隔；缺档位; channels={'orderbook': {'channel': 'orderbook/{symbol}', 'support': 'payload_fixture_only'}, 'trades': {'channel': 'trades/{symbol}', 'support': 'payload_fixture_only'}}",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,hitbtc,public_ws=spec_only; ws_gap=缺订单簿channel; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,hollaex,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,krakenfutures,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,kucoinfutures,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,mango_markets,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,mercado,public_ws=payload_helper; ws_gap=缺推流间隔；缺档位; channels=orderbook,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,myokx,"public_ws=payload_spec; ws_gap=缺推流间隔；缺档位; channels=books,books5",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,ndax,public_ws=payload_helper; ws_gap=缺订单簿channel；缺推流间隔; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,novadax,public_ws=payload_helper; ws_gap=缺推流间隔；缺档位; channels=MARKET.{symbol}.DEPTH,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,okxus,public_ws=spec_only; ws_gap=缺推流间隔；缺档位; channels=books5,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,onetrading,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,oxfun,"public_ws=spec_only; ws_gap=缺推流间隔；缺档位; channels=depthUpdate,depthUpdate:<marketCode>,ws_depth_update",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,pacifica,"public_ws=spec_only; ws_gap=缺推流间隔; channels=bbo,book",查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,tapbit,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,tokocrypto,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,toobit,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,wavesexchange,public_ws=spec_only; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,weex,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,xt,public_ws=parser_only; ws_gap=缺订单簿channel；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P3,public_ws_official_detail_check,zaif,public_ws=native; ws_gap=缺订单簿channel；缺推流间隔；缺档位; channels=-,查官方公共订单簿 WS：订阅方式、推流间隔、档位，尤其 10ms/20ms L1/BBO；sequence/checksum、snapshot 重建。,官方支持则补 endpoint mapping/fixture；官方不支持则写交易所不支持公共 WS 行情。,ws_gap
+P4,advanced_trading_official_check,aark,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,aftermath,amend_order=不支持;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,alpaca,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,apex,amend_order=不支持;place_order_list=不支持;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,apollox_dex,amend_order=-;place_order_list=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_cancel_orders"
+P4,advanced_trading_official_check,arkham,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,ascendex,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,aster,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,backpack,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,bequant,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,biconomy,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bigone,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,binance,batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,binancecoinm,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,binanceus,amend_order=不支持;place_order_list=不支持;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bingx,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bit2c,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitbank,amend_order=-;place_order_list=-;batch_place_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,bitbns,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitfinex,amend_order=-;place_order_list=-;batch_place_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,bitflyer,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitget,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bithumb,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitkan,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitmart,amend_order=-;place_order_list=-;batch_place_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,bitmex,place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,place_order_list
+P4,advanced_trading_official_check,bitopro,amend_order=不支持;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,bitrue,amend_order=-;place_order_list=-;batch_place_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,bitso,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitstamp,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bitteam,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bittrade,amend_order=-;place_order_list=-;batch_place_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,bitunix,amend_order=-;place_order_list=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_cancel_orders"
+P4,advanced_trading_official_check,bitvavo,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,blockchaincom,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,blofin,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,bsx,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,btcbox,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,btcmarkets,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,btcturk,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bullish,place_order_list=不支持;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bybit,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bybiteu,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,bydfi,place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,place_order_list
+P4,advanced_trading_official_check,cex,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,cod3x,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinbase,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,coinbaseexchange,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coincheck,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coindcx,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,coinex,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinmate,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinmetro,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinone,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinsph,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinspot,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,coinstore,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,cointr,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,coinw,amend_order=-;place_order_list=-;batch_place_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,cryptomus,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,d8x,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,deepcoin,place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,place_order_list
+P4,advanced_trading_official_check,delta,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,deribit,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,derive,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,derive_chain_perps,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,digifinex,amend_order=-;place_order_list=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_cancel_orders"
+P4,advanced_trading_official_check,dydx,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,equation,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,exmo,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,fmfwio,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,foxbit,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,gateio,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,gemini,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,grvt,amend_order=不支持;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,hashkey_global,amend_order=-;place_order_list=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_cancel_orders"
+P4,advanced_trading_official_check,hibachi,amend_order=不支持;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,hitbtc,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,hollaex,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,htx,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,huobi,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,hyperliquid,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,independentreserve,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,indodax,amend_order=-;place_order_list=-;batch_place_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders"
+P4,advanced_trading_official_check,kraken,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,krakenfutures,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,kucoin,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,kucoinfutures,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,latoken,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,lbank,amend_order=不支持;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,lighter,amend_order=不支持;place_order_list=-;batch_place_orders=-;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,luno,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,mango_markets,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,mercado,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,mexc,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,modetrade,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,myokx,amend_order=不支持;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,ndax,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,novadax,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,okx,place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,okxus,amend_order=不支持;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,onetrading,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,orangex,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,oxfun,amend_order=-;place_order_list=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_cancel_orders"
+P4,advanced_trading_official_check,p2b,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,pacifica,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,paradex,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,paymium,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,phemex,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,poloniex,place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,place_order_list
+P4,advanced_trading_official_check,tapbit,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,tokocrypto,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,toobit,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,upbit,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,wavesexchange,amend_order=不支持;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,weex,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,whitebit,amend_order=不支持;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,woo,amend_order=-;place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list"
+P4,advanced_trading_official_check,woofipro,place_order_list=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,place_order_list
+P4,advanced_trading_official_check,xt,place_order_list=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,place_order_list
+P4,advanced_trading_official_check,yobit,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,zaif,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,zebpay,amend_order=-;place_order_list=-;batch_place_orders=-;batch_cancel_orders=-,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"
+P4,advanced_trading_official_check,zeta_markets,amend_order=-;place_order_list=-;batch_place_orders=不支持;batch_cancel_orders=不支持,查官方批量下单/批量撤单/改单/OCO/OTO 支持。,官方支持则补增强交易能力；官方不支持则写交易所不支持。,"amend_order,place_order_list,batch_place_orders,batch_cancel_orders"

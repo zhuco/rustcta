@@ -38,8 +38,18 @@ Upbit publishes endpoint-group rate policies and can apply account or region con
 - Private write REST: place order, quote market buy, cancel order request construction
 - Private WS: order/fill/balance subscription payloads and REST reconciliation fallback
 
+## Official Public WS Order Book Details
+
+Upbit official orderbook WebSocket uses region-specific public URLs such as
+`wss://sg-api.upbit.com/websocket/v1`. Subscription requests are JSON arrays with
+ticket/type/format objects. Orderbook unit count can be specified as
+`{code}.{count}` with supported counts 1, 5, 15, and 30; unsupported counts
+default to 30. Official docs do not state a fixed millisecond interval and do not
+publish a sequence/checksum for orderbook continuity.
+
 ## Unsupported Boundary
 
+- Futures, perpetuals, options, and standard contract trading: `交易所不支持合约` under the current official API reference scope.
 - Positions, leverage, margin mode, position mode: unsupported because Upbit Spot has no derivative position model.
 - Amend order: unsupported until a native endpoint is verified against the shared Spot amend contract.
 - Batch place/cancel and cancel-all: unsupported; no native atomic batch endpoint is claimed.

@@ -5,6 +5,7 @@ Status: Task 8 offline-verifiable adapter for Derive options/perp DeFi scope.
 ## Scope
 
 - Products: options and perpetuals.
+- Spot: 项目未实现 Spot。Derive 官方文档说明平台支持 spot trading，当前 `derive` adapter 只接 options/perpetuals。
 - JSON-RPC base URL: `https://api.derive.xyz`.
 - WebSocket URL: `wss://api.derive.xyz/ws`.
 - Public scope: instrument metadata, order book/ticker/trade channel payloads.
@@ -43,6 +44,14 @@ The runtime adapter advertises public REST and public WS specs. Private reads ar
 Options and perp metadata are adapter-specific in `tests/fixtures/exchanges/derive/instruments.json`; no shared trait was expanded.
 
 WebSocket fixtures cover subscribe, unsubscribe, heartbeat ping/pong, login/auth boundary, and private order event parser samples. Private stream disconnects require JSON-RPC REST reconciliation over balances, positions, open orders, and trade history before live promotion.
+
+Official public WS includes orderbook/ticker/trades channels at
+`wss://api.derive.xyz/ws`, but the reviewed public docs do not provide a fixed
+millisecond interval, fixed depth parameter, stable sequence field, or checksum
+for orderbook reconstruction. Current project support is native/spec-level; the
+mapping must explicitly record no fixed ms/depth/checksum and use JSON-RPC
+REST/reference orderbook snapshot as the rebuild path. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
 
 Unsupported or deferred:
 

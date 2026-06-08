@@ -70,6 +70,15 @@ Bullish WS uses JSON-RPC 2.0 command messages.
 - Private WS requires JWT-cookie authentication and is not promoted to runtime
   routing in this adapter.
 
+Official public order book topics are `l1Orderbook` and `l2Orderbook` on the
+multi-order-book WS endpoint. The feed is live/realtime but the official docs
+do not give a fixed millisecond interval or a fixed depth parameter. L1 docs
+show monotonically increasing `sequenceNumber`; out-of-sequence messages require
+disconnect/reconnect, and L2 hybrid book consumers should combine REST snapshot
+with WS updates. Mapping still needs L1/L2, sequence/reconnect and no-fixed-ms
+fields. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+
 ## Fixtures
 
 Fixtures live under `tests/fixtures/exchanges/bullish/`:

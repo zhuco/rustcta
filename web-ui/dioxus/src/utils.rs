@@ -2246,7 +2246,7 @@ pub(crate) fn pretty(value: &Value) -> String {
 }
 
 pub(crate) fn compact(value: &Value) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&display_value(value)).unwrap_or_else(|_| "{}".to_string())
 }
 
 fn display_compact(value: &Value) -> String {
@@ -2259,7 +2259,9 @@ fn display_value(value: &Value) -> Value {
         Value::Object(values) => {
             let mut output = Map::new();
             for (key, value) in values {
-                let value = if is_time_key(key) {
+                let value = if should_redact_display_key(key, values) {
+                    Value::String("[redacted]".to_string())
+                } else if is_time_key(key) {
                     format_beijing_time_value(value)
                         .map(Value::String)
                         .unwrap_or_else(|| display_value(value))
@@ -2272,6 +2274,40 @@ fn display_value(value: &Value) -> Value {
         }
         _ => value.clone(),
     }
+}
+
+fn should_redact_display_key(key: &str, values: &Map<String, Value>) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    matches!(
+        key.as_str(),
+        "api_key"
+            | "apikey"
+            | "api_secret"
+            | "apisecret"
+            | "secret"
+            | "passphrase"
+            | "password"
+            | "private_key"
+            | "authorization"
+            | "bearer_token"
+            | "auth_token"
+            | "access_token"
+            | "refresh_token"
+    ) || (key == "value" && object_is_sensitive_credential_field(values))
+}
+
+fn object_is_sensitive_credential_field(values: &Map<String, Value>) -> bool {
+    let Some(field) = values.get("field").and_then(Value::as_str) else {
+        return false;
+    };
+    let field = field.trim().to_ascii_lowercase();
+    field.contains("secret")
+        || field.contains("passphrase")
+        || field.contains("password")
+        || field.contains("private_key")
+        || field == "api_key"
+        || field == "key"
+        || field == "token"
 }
 
 fn log_timestamp_text(value: &Value) -> Option<String> {

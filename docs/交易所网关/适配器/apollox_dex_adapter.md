@@ -10,7 +10,7 @@ Adapter id: `apollox_dex`
 
 Out of scope:
 
-- ApolloX spot API family at `https://www.apollox.finance/api/v1`.
+- ApolloX spot API family at `https://www.apollox.finance/api/v1` is 项目未实现 Spot for this adapter, not `交易所不支持现货`.
 - APX V2 fully on-chain trading, wallet signing, gas, chain profiles and contract execution.
 - Broker SDK proxy/UI paths, deposits, withdrawals, transfers and custody operations.
 - Stable V1 testnet routing; no stable REST/WS testnet base is declared.
@@ -46,11 +46,19 @@ Private REST runtime remains disabled even if credentials are present. This avoi
 
 Public WS base is `wss://fstream.apollox.finance`. The adapter includes subscription payload fixtures for Binance-style streams such as `btcusdt@depth`. Runtime WS is disabled until snapshot/delta resync, 24-hour reconnect and stream limits are verified.
 
+Official APX/ApolloX Futures streams are Binance Futures style. bookTicker is
+real-time; partial and diff depth can be 100ms/250ms/500ms; partial depth
+supports 5/10/20 levels. Diff depth uses `U/u/pu` plus REST `lastUpdateId`
+snapshot replay; no checksum is documented. Mapping should add `@bookTicker`,
+`@depth20@100ms`, REST snapshot buffering and `pu` gap resync. Source batch:
+[WebSocket 官方核验 P6 补充交易所盘口细项](../WebSocket官方核验_P6_补充交易所盘口细项.md).
+
 Private WS uses listen keys from `POST|PUT|DELETE /fapi/v1/listenKey` in the docs, but runtime private streams remain unsupported and require REST reconciliation fallback.
 
 ## Capability Boundary
 
 - `MarketType::Perpetual` only.
+- Spot: 项目未实现 Spot；当前 `apollox_dex` 不接 ApolloX spot API family。
 - Public REST symbol rules and order book snapshot are enabled.
 - Private REST, private WS, batch, cancel-all and writes are request-spec only or `Unsupported`.
 - APX V2 on-chain trading is explicitly `Unsupported`.

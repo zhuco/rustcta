@@ -45,11 +45,10 @@ fn print_legacy_spec_should_generate_basic_fields() {
     assert_eq!(spec["tenant_id"], "local");
     assert_eq!(spec["strategy_kind"], "trend_report");
     assert_eq!(spec["command"], "cargo");
-    assert!(spec["args"]
-        .as_array()
-        .expect("args should be an array")
-        .iter()
-        .any(|arg| arg == "trend_report"));
+    let args = spec["args"].as_array().expect("args should be an array");
+    assert!(args.iter().any(|arg| arg == "rustcta-tools-ops"));
+    assert!(args.iter().any(|arg| arg == "reporter"));
+    assert!(args.iter().any(|arg| arg == "trend"));
 }
 
 #[test]
@@ -59,26 +58,44 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
             "cross_arb_live.spec.json",
             "cross_arb_live",
             "cross_exchange_arbitrage",
-            6,
+            10,
         ),
         (
             "funding_arb_live.spec.json",
             "funding_arb_live",
             "funding_arbitrage",
-            7,
+            10,
         ),
         (
             "spot_spot_live_dry_run.spec.json",
             "spot_spot_live_dry_run",
-            "spot_spot_taker_arbitrage",
-            8,
+            "spot_spot_arbitrage",
+            10,
         ),
-        ("trend_report.spec.json", "trend_report", "trend_report", 6),
+        ("trend_report.spec.json", "trend_report", "trend_report", 8),
         (
             "account_position_reporter.spec.json",
             "account_position_reporter",
             "account_position_report",
-            6,
+            11,
+        ),
+        (
+            "exchange_order_canary.spec.json",
+            "exchange_order_canary",
+            "exchange_order_canary",
+            8,
+        ),
+        (
+            "bitget_perp_order_canary.spec.json",
+            "bitget_perp_order_canary",
+            "bitget_perp_order_canary",
+            8,
+        ),
+        (
+            "bitget_spot_order_canary.spec.json",
+            "bitget_spot_order_canary",
+            "bitget_spot_order_canary",
+            8,
         ),
     ] {
         let spec_path = workspace_root().join("config/supervisor").join(spec_name);
@@ -106,12 +123,73 @@ fn validate_spec_should_accept_checked_in_small_runtime_specs() {
 
         let raw = std::fs::read_to_string(&spec_path).expect("checked-in spec should be readable");
         let spec: Value = serde_json::from_str(&raw).expect("checked-in spec should be json");
+        assert_root_free_supervisor_args(spec_name, spec["args"].as_array().expect("args array"));
         let config_path = spec["config_path"]
             .as_str()
             .expect("checked-in spec should contain config_path");
         assert!(
             workspace_root().join(config_path).exists(),
             "{spec_name} config_path should exist: {config_path}"
+        );
+    }
+}
+
+fn assert_root_free_supervisor_args(spec_name: &str, args: &[Value]) {
+    let arg_strings = args
+        .iter()
+        .map(|arg| arg.as_str().expect("supervisor arg should be a string"))
+        .collect::<Vec<_>>();
+    assert!(
+        arg_strings.contains(&"-p"),
+        "{spec_name} should select an explicit workspace package"
+    );
+    assert!(
+        !arg_strings.windows(2).any(|window| matches!(
+            window,
+            ["--bin", "rustcta"]
+                | ["--bin", "cross_arb_live"]
+                | ["--bin", "funding_arb_live"]
+                | ["--bin", "account_position_reporter"]
+                | ["--bin", "trend_report"]
+                | ["--bin", "exchange_order_canary"]
+                | ["--bin", "bitget_order_canary"]
+                | ["--bin", "bitget_perp_order_canary"]
+                | ["--bin", "bitget_spot_order_canary"]
+        )),
+        "{spec_name} should not launch a legacy root binary"
+    );
+
+    match spec_name {
+        "cross_arb_live.spec.json" => {
+            assert!(arg_strings.contains(&"rustcta-strategy-cross-exchange-arbitrage"));
+            assert!(arg_strings.contains(&"cross-exchange-arbitrage-runtime"));
+        }
+        "funding_arb_live.spec.json" => {
+            assert!(arg_strings.contains(&"rustcta-strategy-funding-arbitrage"));
+            assert!(arg_strings.contains(&"funding-arbitrage-runtime"));
+        }
+        "spot_spot_live_dry_run.spec.json" => {
+            assert!(arg_strings.contains(&"rustcta-strategy-spot-spot-arbitrage"));
+            assert!(arg_strings.contains(&"spot-spot-arbitrage-runtime"));
+        }
+        "trend_report.spec.json"
+        | "account_position_reporter.spec.json"
+        | "exchange_order_canary.spec.json"
+        | "bitget_perp_order_canary.spec.json"
+        | "bitget_spot_order_canary.spec.json" => {
+            assert!(arg_strings.contains(&"rustcta-tools-ops"));
+        }
+        _ => panic!("unexpected supervisor spec {spec_name}"),
+    }
+
+    if spec_name.contains("canary") {
+        assert!(arg_strings.contains(&"canary"));
+        assert!(
+            !arg_strings.iter().any(|arg| matches!(
+                *arg,
+                "--execute" | "--confirm-live-order" | "--confirm_cancel" | "--confirm_order"
+            )),
+            "{spec_name} should not enable live mutation confirmations by default"
         );
     }
 }
@@ -224,7 +302,7 @@ fn spot_spot_live_dry_run_config_should_remain_manual_until_spec_safety_is_tight
         std::fs::read_to_string(&spec_path).expect("spot_spot checked-in spec should be readable");
     let spec: Value = serde_json::from_str(&raw).expect("spot_spot checked-in spec should be json");
     assert_eq!(spec["strategy_id"], "spot_spot_live_dry_run");
-    assert_eq!(spec["strategy_kind"], "spot_spot_taker_arbitrage");
+    assert_eq!(spec["strategy_kind"], "spot_spot_arbitrage");
     assert_eq!(
         spec["config_path"],
         "config/spot_spot_arbitrage_live_dry_run_2ex_5symbols.yml"
@@ -234,8 +312,8 @@ fn spot_spot_live_dry_run_config_should_remain_manual_until_spec_safety_is_tight
             .as_array()
             .expect("spot_spot args should be an array")
             .iter()
-            .any(|arg| arg == "spot_spot_taker_arbitrage"),
-        "spot_spot checked-in spec should launch the explicit spot_spot strategy"
+            .any(|arg| arg == "spot-spot-arbitrage-runtime"),
+        "spot_spot checked-in spec should launch the root-free spot_spot runtime"
     );
 }
 

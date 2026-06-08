@@ -1,0 +1,18 @@
+[package]
+name = "rustcta-smart-money"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+rust_decimal = { version = "1.33", features = ["serde", "maths"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml = "0.9"
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true

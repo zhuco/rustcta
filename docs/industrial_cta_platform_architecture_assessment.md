@@ -47,8 +47,8 @@ pass, while feature migration can be validated crate by crate.
 
 The current repository already separates several critical concerns:
 
-- `src/exchanges/` contains venue-specific exchange code.
-- `src/exchanges/unified.rs` contains the unified Spot-oriented
+- `retired exchange tree/` contains venue-specific exchange code.
+- `retired exchange tree/unified.rs` contains the unified Spot-oriented
   `ExchangeClient` contract.
 - `src/execution/` contains order commands, execution routing, fee model,
   reconciliation, and live-dry-run planning.
@@ -56,7 +56,7 @@ The current repository already separates several critical concerns:
   state, audit, and snapshots.
 - `src/web/` contains sanitized read models.
 - `web-ui/dioxus/` is already separated from the strategy runtime.
-- `src/bin/control_api.rs` already serves the web panel and reads sanitized
+- `retired root bin directory/control_api.rs` already serves the web panel and reads sanitized
   snapshots.
 
 These are useful boundaries and should be preserved.
@@ -112,7 +112,7 @@ crates/
   rustcta-strategy-sdk/
   rustcta-supervisor/
   rustcta-control-api/
-  rustcta-core-compat/
+  retired-core-compat/
 
 strategies/
   spot-spot-arbitrage/
@@ -131,7 +131,7 @@ web-ui/
   dioxus/
 ```
 
-The old `src/` tree may remain temporarily through `rustcta-core-compat`, but it
+The old `src/` tree may remain temporarily through `retired-core-compat`, but it
 should stop being the architectural center.
 
 ## Required Domain Boundaries

@@ -12,6 +12,10 @@ support is deliberately limited to public market data:
 - Private REST, private WebSocket, fiat ledger, transfers, withdrawals,
   futures, perpetuals, margin, leverage, and batch order operations are
   `Unsupported` at runtime.
+- P6 official product-line verification found margin-enabled/lending/profit-loss
+  account fields; if the venue/account exposes those semantics they are
+  `项目未实现 Margin account semantics`. Standard futures/perpetual/options are
+  `交易所不支持合约`.
 
 ## Official Sources
 

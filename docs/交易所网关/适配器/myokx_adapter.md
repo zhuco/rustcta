@@ -40,13 +40,21 @@ are served as `ExchangeId("myokx")` without copying OKX request or parser code.
 ## Unsupported Boundary
 
 - Swaps, futures, options, margin, leverage, margin mode, position mode, and
-  position readback are unsupported for this profile.
+  position readback are unsupported in the current runtime for this profile.
 - Runtime private REST reads, runtime private REST writes, private WebSocket
   login/subscriptions, real order placement, real cancels, batch operations,
   transfers, withdrawals, and funding actions are unsupported.
 - The adapter does not read MyOKX credentials. Private request and WebSocket
   auth shapes are retained only as sanitized offline fixtures until EEA
   credential permissions and regional product scope are audited.
+
+## Official Product-Line Boundary
+
+P6 official verification uses `my.okx.com/docs-v5`: the regional OKX v5 docs
+include Spot/Margin, Swap, Futures, Options, Events, positions, leverage,
+funding, and open interest. These are `项目未实现` for this `myokx` profile or
+should be delegated to the main `okx` adapter after a regional scope audit; they
+must not be documented as `交易所不支持合约`.
 
 ## Endpoint Mapping
 

@@ -25,6 +25,11 @@ pub enum GatewayOperation {
     QueryOrder,
     GetOpenOrders,
     GetRecentFills,
+    GetSymbolAccountConfig,
+    SetLeverage,
+    SetPositionMode,
+    ClosePosition,
+    SetCountdownCancelAll,
     SubscribeBooks,
     SubscribePrivate,
 }
@@ -50,6 +55,11 @@ impl GatewayOperation {
             Self::QueryOrder => "query_order",
             Self::GetOpenOrders => "get_open_orders",
             Self::GetRecentFills => "get_recent_fills",
+            Self::GetSymbolAccountConfig => "get_symbol_account_config",
+            Self::SetLeverage => "set_leverage",
+            Self::SetPositionMode => "set_position_mode",
+            Self::ClosePosition => "close_position",
+            Self::SetCountdownCancelAll => "set_countdown_cancel_all",
             Self::SubscribeBooks => "subscribe_books",
             Self::SubscribePrivate => "subscribe_private",
         }
@@ -84,6 +94,13 @@ impl FromStr for GatewayOperation {
             "query_order" | "get_order" | "order" => Ok(Self::QueryOrder),
             "get_open_orders" | "open_orders" => Ok(Self::GetOpenOrders),
             "get_recent_fills" | "recent_fills" | "fills" => Ok(Self::GetRecentFills),
+            "get_symbol_account_config" | "symbol_account_config" => {
+                Ok(Self::GetSymbolAccountConfig)
+            }
+            "set_leverage" | "leverage" => Ok(Self::SetLeverage),
+            "set_position_mode" | "position_mode" => Ok(Self::SetPositionMode),
+            "close_position" => Ok(Self::ClosePosition),
+            "set_countdown_cancel_all" | "countdown_cancel_all" => Ok(Self::SetCountdownCancelAll),
             "subscribe_books" => Ok(Self::SubscribeBooks),
             "subscribe_private" | "private_stream" | "subscribe_private_stream" => {
                 Ok(Self::SubscribePrivate)

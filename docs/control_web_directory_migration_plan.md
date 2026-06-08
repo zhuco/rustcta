@@ -10,11 +10,11 @@ Operator workspace 的长期边界如下：
 - `apps/control-api/` 是控制 API 进程入口：负责读取环境、绑定监听地址、装配 state provider、静态资源服务和本地部署 glue。
 - `web-ui/dioxus/` 是唯一 Web panel UI：保留 Dioxus 组件、样式、i18n、本地 token 存储和 API client；它不拥有交易所、策略执行或密钥存储逻辑。
 - `src/web/` 暂时作为 legacy runtime monitoring/read-model 兼容层：继续给现有策略 runtime 生成 sanitized snapshot，直到策略 runtime 与 control API 契约完全解耦。
-- `src/bin/control_api.rs` 暂时作为 legacy local console 入口：冻结为兼容桥，逐步把可复用 API shape 下沉到 `crates/rustcta-control-api/`，把本地副作用留给 app/local-agent 边界。
+- `retired root bin directory/control_api.rs` 暂时作为 legacy local console 入口：冻结为兼容桥，逐步把可复用 API shape 下沉到 `crates/rustcta-control-api/`，把本地副作用留给 app/local-agent 边界。
 
 核心原则：
 
-- Control API 和 Web UI 不 import concrete exchange adapters，例如 `rustcta::exchanges::registry`、`binance`、`okx`、`gateio`、`bitget`、`mexc`、`coinex` 等。
+- Control API 和 Web UI 不 import concrete exchange adapters，例如 `legacy root crate path exchanges::registry`、`binance`、`okx`、`gateio`、`bitget`、`mexc`、`coinex` 等。
 - Control API 和 Web UI 不定义、保存或返回 raw secret shape，例如 `api_key`、`api_secret`、`secret`、`passphrase`、`authorization`。公开契约只能有 redacted credential status、credential slot id、health/error code。
 - SaaS 控制面只看多租户/多 agent 的状态和命令审计；交易所密钥、实际下单、adapter 实例化只在本地 agent/gateway/execution 边界。
 - Strategy-specific dashboard 可以作为 typed summary + versioned opaque detail 扩展，但 workspace shell、process control、risk/readiness/audit 必须是跨策略通用 shape。
@@ -40,11 +40,11 @@ Operator workspace 的长期边界如下：
 - 暂时保留 `src/web/`，只把它看作 legacy runtime snapshot producer。
 - 新 `crates/rustcta-control-api/` 不应直接复用 `src/web::DashboardReadModel` 作为长期 public contract；过渡期可以在 app/local adapter 层读取 JSON snapshot 并转换为新 DTO。
 
-### `src/bin/control_api.rs`
+### `retired root bin directory/control_api.rs`
 
 当前职责：
 
-- 作为本地 separated control panel 的 legacy binary，读取 snapshot、服务 `web-ui/dioxus/dist`、提供大量 `/api/*` 兼容端点。
+- 作为本地 separated control panel 的 retired binary，读取 snapshot、服务 `web-ui/dioxus/dist`、提供大量 `/api/*` 兼容端点。
 - 包含 dashboard read endpoints：`/api/status`、`/api/config`、`/api/exchanges`、`/api/books`、`/api/inventory`、`/api/risk`、`/api/spot-arb/dashboard`、`/api/cross-arb/dashboard` 等。
 - 包含 command endpoints：`/api/control/pause`、`/api/control/resume`、`/api/control/kill_switch`、exchange/symbol pause/resume/disable/cancel/liquidation 等。
 - 包含本地副作用：编辑 strategy YAML、执行 restart script、写 `control_commands.jsonl`、写 balance/profit history。
@@ -88,7 +88,7 @@ Operator workspace 的长期边界如下：
 
 - 这是目标 control API contract 的落点。
 - 下一步应继续扩展 route/model/service 模块，而不是继续把 logic 加到
-  `src/bin/control_api.rs`。
+  `retired root bin directory/control_api.rs`。
 
 ### `apps/control-api/`
 
@@ -382,7 +382,7 @@ UI 迁移方向：
 
 强制边界：
 
-- `crates/rustcta-control-api/` 不依赖 root `rustcta` crate，不依赖 `src/exchanges/*`，不调用 exchange registry。
+- `crates/rustcta-control-api/` 不依赖 root `rustcta` crate，不依赖 `retired exchange tree/*`，不调用 exchange registry。
 - `apps/control-api/` 不实例化 concrete exchange adapter；如果需要交易所状态，只读 `rustcta-exchange-gateway`、supervisor、event ledger 或 local agent provider。
 - `web-ui/dioxus/` 不 import Rust exchange crates，不定义 raw credential persistence，不在 local storage 保存 exchange secrets。
 - Public API response 不返回 raw secret-like fields。字段名也应避免 `api_key`、`api_secret`、`secret`、`passphrase`、`authorization`，除非是 HTTP auth 文档上下文。
@@ -393,7 +393,7 @@ UI 迁移方向：
 
 ```text
 scripts/check_industrial_boundaries.sh
-  - forbid `rustcta::exchanges` in crates/rustcta-control-api
+  - forbid `legacy root crate path exchanges` in crates/rustcta-control-api
   - forbid concrete exchange module names in crates/rustcta-control-api and web-ui/dioxus/src
   - forbid raw secret field names in public DTO files
   - forbid `exchange_registry::` outside gateway/local adapter paths
@@ -452,7 +452,7 @@ Deliverable:
 
 - 可与 UI typed client 并行，只要 route shape 先在文档/DTO 中冻结。
 
-### 任务 C：App wiring 与 legacy binary 分界
+### 任务 C：App wiring 与 retired binary 分界
 
 Scope:
 
@@ -465,11 +465,11 @@ Deliverable:
 
 - `apps/control-api` 成为新 control API 默认入口。
 - 静态资源服务、bind/env、snapshot source provider 放 app 层。
-- `src/bin/control_api.rs` 标记为 legacy compatibility path，脚本保留开关以便回退。
+- `retired root bin directory/control_api.rs` 标记为 legacy compatibility path，脚本保留开关以便回退。
 
 注意：
 
-- 不要把 `src/bin/control_api.rs` 的 exchange registry、API key env-store、strategy YAML parser 直接搬进 `crates/rustcta-control-api`。
+- 不要把 `retired root bin directory/control_api.rs` 的 exchange registry、API key env-store、strategy YAML parser 直接搬进 `crates/rustcta-control-api`。
 
 ### 任务 D：Legacy dashboard snapshot adapter
 
@@ -531,7 +531,7 @@ Deliverable:
 
 Scope:
 
-- `src/bin/control_api.rs` legacy `/api/exchange-api-keys` 保留但冻结。
+- `retired root bin directory/control_api.rs` legacy `/api/exchange-api-keys` 保留但冻结。
 - `crates/rustcta-control-api/src/models/credentials.rs`
 - `web-ui/dioxus/src/components.rs` 中 `ApiKeysPanel`
 - 后续 local agent/credential service 目录，具体目录另行确定。
@@ -551,7 +551,7 @@ Deliverable:
 
 Scope:
 
-- `src/bin/control_api.rs` legacy `/api/strategy-config` 保留。
+- `retired root bin directory/control_api.rs` legacy `/api/strategy-config` 保留。
 - `crates/rustcta-control-api/src/models/strategy.rs`
 - `web-ui/dioxus/src/components.rs` 中 `ConfigPanel`
 
@@ -588,16 +588,16 @@ Deliverable:
 
 1. 先冻结新 public route/DTO 名称：`workspace`、`agents`、`processes`、`strategies`、`gateway`、`commands`、`audit`、`credentials/status`。
 2. 拆 `crates/rustcta-control-api` 的 DTO 和 routes，让 `apps/control-api` 继续能启动。
-3. 加 boundary checks，防止 `src/bin/control_api.rs` 的 adapter/secret coupling 被搬进新 crate。
+3. 加 boundary checks，防止 `retired root bin directory/control_api.rs` 的 adapter/secret coupling 被搬进新 crate。
 4. 给 `apps/control-api` 加 legacy snapshot adapter，支持读取现有 `src/web` snapshot。
 5. Dioxus 改成 workspace shell + typed client，legacy panels 暂时挂在 strategy detail 下。
 6. credential/config 两块从 legacy local console 中剥离：新 API 只暴露 redacted status/schema/command，实际 secret/config write 交给 local agent。
-7. 当新 control API + Dioxus 覆盖主要操作路径后，脚本切默认入口到 `apps/control-api`，`src/bin/control_api.rs` 只保留回退窗口。
+7. 当新 control API + Dioxus 覆盖主要操作路径后，脚本切默认入口到 `apps/control-api`，`retired root bin directory/control_api.rs` 只保留回退窗口。
 
 ## 不在本轮做的事
 
 - 不开发新的交易所 API。
 - 不移动 concrete exchange adapter。
-- 不把 `src/bin/control_api.rs` 的全部逻辑机械拆进新 crate。
+- 不把 `retired root bin directory/control_api.rs` 的全部逻辑机械拆进新 crate。
 - 不删除 `src/web/`。
 - 不把 raw secret DTO 引入 `crates/rustcta-control-api` 或 `web-ui/dioxus`。

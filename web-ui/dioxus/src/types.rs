@@ -29,51 +29,27 @@ impl Language {
 pub(crate) enum ControlPanelView {
     #[default]
     Workspace,
-    Overview,
     SpotArb,
     CrossArb,
     FundingArb,
-    Exchanges,
-    Symbols,
-    Plans,
-    Risk,
-    Runtime,
-    Config,
-    Logs,
     ApiKeys,
 }
 
 impl ControlPanelView {
-    pub(crate) const ALL: [Self; 13] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::Workspace,
-        Self::Overview,
         Self::SpotArb,
         Self::CrossArb,
         Self::FundingArb,
-        Self::Exchanges,
-        Self::Symbols,
-        Self::Plans,
-        Self::Risk,
-        Self::Runtime,
-        Self::Config,
-        Self::Logs,
         Self::ApiKeys,
     ];
 
     pub(crate) fn nav_label_key(self) -> &'static str {
         match self {
             Self::Workspace => "nav_workspace",
-            Self::Overview => "nav_overview",
             Self::SpotArb => "nav_spot_arb",
             Self::CrossArb => "nav_cross_arb",
             Self::FundingArb => "nav_funding_arb",
-            Self::Exchanges => "nav_exchanges",
-            Self::Symbols => "nav_symbols",
-            Self::Plans => "nav_plans",
-            Self::Risk => "nav_risk",
-            Self::Runtime => "nav_runtime",
-            Self::Config => "nav_config",
-            Self::Logs => "nav_logs",
             Self::ApiKeys => "nav_api_keys",
         }
     }
@@ -81,17 +57,9 @@ impl ControlPanelView {
     pub(crate) fn route_id(self) -> &'static str {
         match self {
             Self::Workspace => "workspace",
-            Self::Overview => "overview",
             Self::SpotArb => "spot-arb",
             Self::CrossArb => "cross-arb",
             Self::FundingArb => "funding-arb",
-            Self::Exchanges => "exchanges",
-            Self::Symbols => "symbols",
-            Self::Plans => "plans",
-            Self::Risk => "risk",
-            Self::Runtime => "runtime",
-            Self::Config => "config",
-            Self::Logs => "logs",
             Self::ApiKeys => "api-keys",
         }
     }
@@ -99,18 +67,12 @@ impl ControlPanelView {
     pub(crate) fn from_route_id(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "workspace" => Some(Self::Workspace),
-            "overview" => Some(Self::Overview),
             "spot-arb" | "spot_arb" => Some(Self::SpotArb),
             "cross-arb" | "cross_arb" => Some(Self::CrossArb),
             "funding-arb" | "funding_arb" => Some(Self::FundingArb),
-            "exchanges" => Some(Self::Exchanges),
-            "symbols" => Some(Self::Symbols),
-            "plans" => Some(Self::Plans),
-            "risk" => Some(Self::Risk),
-            "runtime" => Some(Self::Runtime),
-            "config" => Some(Self::Config),
-            "logs" => Some(Self::Logs),
             "api-keys" | "api_keys" => Some(Self::ApiKeys),
+            "legacy" | "overview" | "exchanges" | "symbols" | "plans" | "risk" | "runtime"
+            | "config" | "logs" => Some(Self::Workspace),
             _ => None,
         }
     }
@@ -456,17 +418,20 @@ pub(crate) struct ExchangeCredentialAccountField {
 
 impl ExchangeCredentialAccountField {
     fn from_value(value: &Value, lang: Language) -> Self {
+        let name = text_at(value, "field", Language::En);
         let masked = text_at(value, "masked", lang);
         let plain_value = text_at(value, "value", lang);
         let display_value = if masked != "-" {
             masked
-        } else if plain_value != "-" {
+        } else if !credential_field_is_sensitive(&name) && plain_value != "-" {
             plain_value
+        } else if bool_at(value, "configured") {
+            "configured".to_string()
         } else {
             "-".to_string()
         };
         Self {
-            name: text_at(value, "field", Language::En),
+            name,
             label: text_at(value, "label", lang),
             required: bool_at(value, "required"),
             configured: bool_at(value, "configured"),
@@ -474,6 +439,17 @@ impl ExchangeCredentialAccountField {
             display_value,
         }
     }
+}
+
+fn credential_field_is_sensitive(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    name.contains("secret")
+        || name.contains("passphrase")
+        || name.contains("password")
+        || name.contains("private_key")
+        || name == "api_key"
+        || name == "key"
+        || name == "token"
 }
 
 impl ExchangeCredentialAccountRow {

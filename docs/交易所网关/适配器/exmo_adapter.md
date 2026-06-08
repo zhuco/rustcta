@@ -54,6 +54,8 @@ The machine-readable mapping is at `crates/rustcta-exchange-gateway/src/adapters
 
 The adapter does not expose margin, futures, perpetuals, positions, native batch place/cancel, cancel-all, amend, OCO/OTO order lists, EX-CODE, wallet withdrawal/deposit, transfers, or P2P flows. These are either outside the Spot gateway contract, require high-risk wallet permissions/support approval, or have no lossless shared mapping in EXMO Spot REST v1.1.
 
+官方核验见 [产品线官方核验 P6 剩余区域现货 CEX](../产品线官方核验_P6_剩余区域现货_CEX.md)。EXMO 官方资料确认 EXMO Margin 和 Margin API/费率资料，因此 Margin 写 `项目未实现 Margin`。官方 perpetual futures 资料当前写 active development，未见已上线标准 futures/perpetual API；当前标准 futures/perpetual/options 写 `交易所不支持合约`，上线后重核。
+
 `query_order` is intentionally documented as limited: EXMO Spot REST has `order_trades` for an order's deals but no general single-order status endpoint. Ambiguous states should reconcile through `get_open_orders`, `query_order`, and `get_recent_fills`.
 
 ## Reconciliation And Safety

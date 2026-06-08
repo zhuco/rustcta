@@ -22,6 +22,9 @@ Product line:
 
 - `MarketType::Spot` only in runtime.
 - FMFW.io documents margin and futures endpoints, but A-20 does not enable them because the task is an alias/profile audit and shared HitBTC-family core ownership belongs to parallel tasks.
+- Official product-line conclusion: Margin/Futures/Perpetual are `项目未实现`, not `交易所不支持合约`.
+
+官方核验见 [产品线官方核验 P6 剩余区域现货 CEX](../产品线官方核验_P6_剩余区域现货_CEX.md)。
 
 Authentication:
 

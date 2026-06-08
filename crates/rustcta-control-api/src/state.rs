@@ -62,6 +62,10 @@ impl ControlApiState {
         self
     }
 
+    pub fn audit_ledger_configured(&self) -> bool {
+        self.audit_ledger.is_some()
+    }
+
     pub fn with_legacy_dashboard_snapshot_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.legacy_dashboard_snapshot_path = Some(Arc::new(path.into()));
         self
@@ -129,12 +133,13 @@ impl ControlApiState {
             recent_opportunities: Default::default(),
             opportunities: Default::default(),
             symbols: Default::default(),
+            runtime_control: Default::default(),
             strategy_snapshots: Vec::new(),
         })
     }
 
     pub fn from_legacy_dashboard_snapshot(legacy: &serde_json::Value) -> Self {
-        Self::new(read_models::apply_legacy_dashboard_snapshot(
+        Self::new(read_models::apply_runtime_or_legacy_snapshot(
             Self::empty_local_snapshot(),
             legacy,
         ))
@@ -157,6 +162,7 @@ impl ControlApiState {
             recent_opportunities: Default::default(),
             opportunities: Default::default(),
             symbols: Default::default(),
+            runtime_control: Default::default(),
             strategy_snapshots: Vec::new(),
         }
     }
@@ -174,8 +180,8 @@ impl ControlApiState {
         }
         if let Some(path) = &self.legacy_dashboard_snapshot_path {
             if let Ok(raw) = tokio::fs::read_to_string(path.as_ref()).await {
-                if let Ok(legacy) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    return read_models::apply_legacy_dashboard_snapshot(snapshot, &legacy);
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    return read_models::apply_runtime_or_legacy_snapshot(snapshot, &value);
                 }
             }
         }
@@ -192,6 +198,20 @@ impl ControlApiState {
                 .await?;
         }
         self.commands.write().await.push(command);
+        Ok(())
+    }
+
+    pub async fn record_operator_audit(
+        &self,
+        action: impl Into<String>,
+        actor_id: impl Into<String>,
+        metadata: serde_json::Value,
+    ) -> Result<(), rustcta_event_ledger::LedgerError> {
+        if let Some(audit_ledger) = &self.audit_ledger {
+            audit_ledger
+                .append(operator_audit_event(action, actor_id, metadata))
+                .await?;
+        }
         Ok(())
     }
 
@@ -624,6 +644,23 @@ fn is_noisy_strategy_log_line(line: &str) -> bool {
         || trimmed.contains("keep-alive")
 }
 
+fn operator_audit_event(
+    action: impl Into<String>,
+    actor_id: impl Into<String>,
+    metadata: serde_json::Value,
+) -> LedgerEvent {
+    let now = Utc::now();
+    let tenant_id = TenantId::new("local").unwrap_or_else(|_| TenantId::unchecked("local"));
+    let mut record = AuditRecord::new(
+        EventIdentity::new(tenant_id, "rustcta-control-api", now),
+        AuditActor::new(AuditActorType::Operator, actor_id.into()),
+        action,
+        AuditOutcome::Accepted,
+    );
+    record.metadata = metadata;
+    LedgerEvent::audit(record)
+}
+
 fn operator_command_audit_event(command: &LifecycleCommandRecord) -> LedgerEvent {
     let tenant_id = TenantId::new("local").unwrap_or_else(|_| TenantId::unchecked("local"));
     let mut identity = EventIdentity::new(tenant_id, "rustcta-control-api", command.requested_at)
@@ -683,6 +720,7 @@ impl From<SupervisorSnapshot> for ControlApiStateSnapshot {
             recent_opportunities: Default::default(),
             opportunities: Default::default(),
             symbols: Default::default(),
+            runtime_control: Default::default(),
             strategy_snapshots: Vec::new(),
         }
     }

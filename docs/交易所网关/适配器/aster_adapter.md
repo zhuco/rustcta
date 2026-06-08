@@ -10,6 +10,7 @@ Status: Task 11 perpetual-only adapter for Aster DEX Futures V3. The adapter exp
 - Public WebSocket: `wss://fstream.asterdex.com/ws`
 - Private WebSocket: `wss://fstream.asterdex.com/ws`
 - Market types: `Perpetual`
+- Spot: 项目未实现 Spot。Aster 官方文档有 Spot API，当前 adapter 只接 Futures V3。
 - Symbols: Aster futures symbols are normalized without separators, for example `BTCUSDT`.
 - Signing: EIP-712 `AsterSignTransaction`, version `1`, chain id `1666`, zero verifying contract, `Message(string msg)`.
 
@@ -33,9 +34,20 @@ Machine-readable mapping:
 | Public WS | `depth`, `aggTrade`, `ticker`, `kline` streams | Payload helpers |
 | Private WS | `POST /fapi/v3/listenKey` then listen-key stream | Session spec helper |
 
+## Official WebSocket Order Book Detail
+
+Aster Futures public WS follows Binance-style streams. Official order book
+channels include bookTicker, partial depth, and diff depth. bookTicker is
+real-time; partial/diff depth can be 100ms, 250ms, or 500ms; partial depth
+supports 5/10/20 levels. Diff depth uses `U/u/pu` and REST snapshot
+`lastUpdateId` replay; if `pu` does not equal the previous `u`, the local book
+must be rebuilt. Current project support is declared/payload helper only, so
+mapping still needs interval, depth, channel and sequence fields. Source batch:
+[WebSocket 官方核验 P5 衍生品/链上盘口细项](../WebSocket官方核验_P5_衍生品链上盘口细项.md).
+
 ## Unsupported Boundaries
 
-- Spot, COIN-M delivery, options, transfers and wallet funding are outside this adapter.
+- Spot is 项目未实现 Spot for this adapter; COIN-M delivery, options, transfers and wallet funding are outside this adapter.
 - Quote-sized market orders, native order lists and amend are `Unsupported`.
 - No derivatives beyond Aster USDT perpetuals are exposed unless an official stable API is mapped later.
 
