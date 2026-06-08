@@ -127,11 +127,11 @@
 
 建议新增路径：
 
-- `format_schemas/exchange_endpoint_mapping.schema.json`
+- `crates/rustcta-exchange-gateway/schemas/exchange_endpoint_mapping.schema.json`
 - `crates/rustcta-exchange-gateway/src/adapters/<exchange>/endpoint_mapping.yaml`
 - `scripts/validate_exchange_endpoint_mapping.py`
 
-如果仓库暂时没有 `format_schemas/` 目录，本阶段创建该目录。
+如果仓库暂时没有 gateway schema 目录，本阶段创建该目录。
 
 endpoint mapping 最小字段：
 
@@ -685,7 +685,7 @@ cargo run -p rustcta-exchange-gateway --bin exchange_live_probe -- --read-only -
 | 编号 | 任务 | 主要写入边界 | 交付 | 依赖/协调 |
 | --- | --- | --- | --- | --- |
 | 1 | Capability v2 | `crates/rustcta-exchange-api/src/capabilities.rs`, `crates/rustcta-exchange-api/src/streams.rs`, `crates/rustcta-exchange-api/src/lib.rs` | `CapabilitySupport`、`BatchCapability`、`HistoryCapability`、`StreamRuntimeCapability`、`CredentialScope`；旧 bool 兼容；基础序列化测试 | 所有共享任务依赖此能力模型；先做最小可扩展结构，不一次性迁移 37 个 adapter |
-| 2 | Endpoint mapping schema 和 validator | `format_schemas/`, `scripts/validate_exchange_endpoint_mapping.py`, `crates/rustcta-exchange-gateway/src/adapters/binance/endpoint_mapping.yaml`, `.../okx/endpoint_mapping.yaml` | JSON schema、校验脚本、Binance/OKX 样例 mapping、README 说明 | 依赖 1 的 operation/capability 命名；不改其他 adapter |
+| 2 | Endpoint mapping schema 和 validator | `crates/rustcta-exchange-gateway/schemas/`, `scripts/validate_exchange_endpoint_mapping.py`, `crates/rustcta-exchange-gateway/src/adapters/binance/endpoint_mapping.yaml`, `.../okx/endpoint_mapping.yaml` | JSON schema、校验脚本、Binance/OKX 样例 mapping、README 说明 | 依赖 1 的 operation/capability 命名；不改其他 adapter |
 | 3 | Request-spec 和 signing harness | `crates/rustcta-exchange-gateway/src/request_spec.rs`, `crates/rustcta-exchange-gateway/src/signing_spec.rs`, `tests/fixtures/exchanges/binance/`, `tests/fixtures/exchanges/okx/` | 通用 request matcher、signing vector 格式、Binance/OKX 私有读写样例测试 | 依赖 2 的 endpoint mapping 字段；不要迁移其他 adapter |
 | 4 | 错误分类、限速和分页模型 | `crates/rustcta-exchange-api/src/error.rs`, `crates/rustcta-exchange-api/src/types.rs`, `crates/rustcta-exchange-gateway/src/error.rs`, `crates/rustcta-exchange-gateway/src/http.rs` | `ExchangeErrorKind`、`RateLimitPlan`、`RateLimitBucket`、`PageRequest`、`PageCursor`、基础测试 | 依赖 1；如需改现有错误 enum，保持 serde/backward compatibility |
 | 5 | WebSocket runtime 基础设施 | `crates/rustcta-exchange-gateway/src/streams.rs`, `crates/rustcta-exchange-api/src/streams.rs` | `StreamSession`、`SubscriptionRegistry`、`SubscriptionAck`、`UnsubscribeRequest`、`HeartbeatPolicy`、`AuthRenewalPolicy`、`ListenKeyLease`、runtime 测试 | 依赖 1；不要迁移具体 adapter，只提供通用 runtime 和测试 |

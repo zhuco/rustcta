@@ -143,7 +143,7 @@ names, safety assumptions, and workspace ownership are updated first.
 Endpoint mapping files live beside each gateway adapter as
 `crates/rustcta-exchange-gateway/src/adapters/<exchange>/endpoint_mapping.yaml`.
 They are validated by the shared schema in
-`format_schemas/exchange_endpoint_mapping.schema.json`. The default command
+`crates/rustcta-exchange-gateway/schemas/exchange_endpoint_mapping.schema.json`. The default command
 validates the Binance and OKX baseline mappings for the shared toolchain task;
 pass explicit paths to validate additional adapter mappings as they are migrated.
 

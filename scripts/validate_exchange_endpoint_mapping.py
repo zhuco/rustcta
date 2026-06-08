@@ -31,7 +31,10 @@ except ImportError as exc:  # pragma: no cover - environment diagnostic
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SCHEMA = REPO_ROOT / "format_schemas" / "exchange_endpoint_mapping.schema.json"
+DEFAULT_SCHEMA = (
+    REPO_ROOT
+    / "crates/rustcta-exchange-gateway/schemas/exchange_endpoint_mapping.schema.json"
+)
 ADAPTERS_DIR = REPO_ROOT / "crates/rustcta-exchange-gateway/src/adapters"
 
 PRIVATE_AUTH = {

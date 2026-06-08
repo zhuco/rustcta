@@ -166,7 +166,7 @@
 | --- | --- | --- | --- |
 | CCXT 对标审计脚本 | 手工统计 CCXT id、`has` 能力和本仓库 adapter 容易漏算 | `scripts/audit_ccxt_gap.{js,sh}` 输出 covered/missing/non-ccxt、产品线统计、method has 统计，并写入 markdown 片段 | P0 |
 | Adapter scaffold generator | 新交易所文件结构、config、signing、transport、parser、tests 重复创建 | `scripts/new_exchange_adapter` 生成目录、feature gate、registry stub、fixtures 目录、request-spec test stub | P0 |
-| Endpoint mapping schema | 每个交易所 REST/WS endpoint、权限、限速、产品线分散写在文档里 | `format_schemas/exchange_endpoint_mapping.schema.json`，包含 method/path/auth/weight/product/testnet/ws channel | P0 |
+| Endpoint mapping schema | 每个交易所 REST/WS endpoint、权限、限速、产品线分散写在文档里 | `crates/rustcta-exchange-gateway/schemas/exchange_endpoint_mapping.schema.json`，包含 method/path/auth/weight/product/testnet/ws channel | P0 |
 | Request-spec 测试框架 | 私有接口不能靠真实下单验证签名和请求体 | 通用 matcher 校验 method/path/query/body/header/signature/timestamp；fixture 中脱敏 key/secret | P0 |
 | Signing test vector harness | 各交易所 HMAC/RSA/Ed25519/JWT/API-key header 规则差异大 | 每个 signing.rs 必须有官方样例或本地固定样例，统一输出 canonical string 和 signature | P0 |
 | Symbol normalization registry | `BTC/USDT`、`BTCUSDT`、`XBTUSD`、`BTC-USDT-SWAP` 等映射重复写 | `SymbolRegistry` 支持 canonical、exchange symbol、market type、settle asset、contract size、alias | P0 |

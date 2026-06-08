@@ -24,7 +24,7 @@ config/      active runtime configs, exchange examples, and supervisor specs
 docs/        active architecture, operations, migration, and reference docs
 scripts/     local automation and validation helpers
 tests/       integration, fixture, regression, and live-readonly tests
-sql/         database seeds and analytics SQL
+data/sql/    database seeds and analytics SQL
 logs/        ignored local runtime logs and validation output
 ```
 
